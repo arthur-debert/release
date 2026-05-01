@@ -174,7 +174,10 @@ jobs:
             esac
           done
 
-          echo "matrix=$entries" >> "$GITHUB_OUTPUT"
+          # GITHUB_OUTPUT requires single-line key=value (or heredoc); compact
+          # the JSON so jq's pretty-print doesn't break the output writer.
+          compact=$(echo "$entries" | jq -c .)
+          echo "matrix=$compact" >> "$GITHUB_OUTPUT"
           echo "Computed matrix:"
           echo "$entries" | jq .
 
@@ -192,9 +195,9 @@ jobs:
           submodules: ${{ inputs.submodules }}
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - uses: ./.github/actions/setup-rust
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
 
-      - uses: ./.github/actions/prepare-release
+      - uses: arthur-debert/release/.github/actions/prepare-release@v1
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -209,7 +212,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: ./.github/actions/roll-changelog
+      - uses: arthur-debert/release/.github/actions/roll-changelog@v1
         id: notes
         with:
           version: ${{ needs.prepare.outputs.version }}
@@ -255,7 +258,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - uses: ./.github/actions/setup-rust
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
         with:
           targets: ${{ matrix.target }}
 
@@ -281,7 +284,7 @@ jobs:
       - name: Sign macOS binaries
         id: sign
         if: matrix.sign
-        uses: ./.github/actions/sign-mac
+        uses: arthur-debert/release/.github/actions/sign-mac@v1
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -427,7 +430,7 @@ jobs:
       - name: Build .deb
         if: matrix.deb_arch != '' && inputs.apt
         id: deb
-        uses: ./.github/actions/build-deb
+        uses: arthur-debert/release/.github/actions/build-deb@v1
         with:
           package: ${{ inputs.bin-name }}
           target: ${{ matrix.target }}
@@ -451,9 +454,9 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: ./.github/actions/setup-rust
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
 
-      - uses: ./.github/actions/publish-crate
+      - uses: arthur-debert/release/.github/actions/publish-crate@v1
         with:
           crates: ${{ inputs.crates }}
           token: ${{ secrets.CRATES_IO_KEY }}
@@ -481,7 +484,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: ./.github/actions/setup-rust
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
         if: steps.guard.outputs.skip != 'true'
 
       - name: Download tarballs
@@ -534,7 +537,7 @@ jobs:
           echo "urls<<EOF" >> "$GITHUB_OUTPUT"; echo "$urls" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
           echo "shas<<EOF" >> "$GITHUB_OUTPUT"; echo "$shas" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - uses: ./.github/actions/render-brew-formula
+      - uses: arthur-debert/release/.github/actions/render-brew-formula@v1
         if: steps.guard.outputs.skip != 'true'
         with:
           bin-name: ${{ inputs.bin-name }}
@@ -546,7 +549,7 @@ jobs:
           shas-json: ${{ steps.values.outputs.shas }}
           output-path: out/${{ inputs.bin-name }}.rb
 
-      - uses: ./.github/actions/push-brew-tap
+      - uses: arthur-debert/release/.github/actions/push-brew-tap@v1
         if: steps.guard.outputs.skip != 'true'
         with:
           tap-repo: ${{ inputs.brew-tap }}
