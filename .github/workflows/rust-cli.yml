@@ -207,18 +207,10 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Download release notes from prepare job
+        uses: actions/download-artifact@v4
         with:
-          ref: ${{ needs.prepare.outputs.release-sha }}
-          submodules: ${{ inputs.submodules }}
-
-      - uses: arthur-debert/release/.github/actions/roll-changelog@v1
-        id: notes
-        with:
-          version: ${{ needs.prepare.outputs.version }}
-          changelog-path: ${{ inputs.changelog-path }}
-          mode: extract
-          notes-path: release-notes.md
+          name: release-notes
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

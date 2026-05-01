@@ -212,3 +212,16 @@ runs:
         echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
         echo "sha=$SHA" >> "$GITHUB_OUTPUT"
         echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+    - name: Upload release notes for downstream jobs
+      # release-notes.md is written by the roll/extract step above. Upload
+      # so create-release (different job) can use it without re-deriving
+      # which is brittle: after roll, [Unreleased] is empty so the original
+      # "extract from [Unreleased]" pattern can't be reused for final
+      # releases.
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: release-notes.md
+        if-no-files-found: error
+        retention-days: 7
