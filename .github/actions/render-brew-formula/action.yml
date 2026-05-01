@@ -1,0 +1,89 @@
+name: 'Render Homebrew formula'
+description: 'Render the canonical brew formula template against per-target URLs/SHAs and project metadata'
+
+inputs:
+  bin-name:
+    description: 'Binary / formula name (e.g. dodot)'
+    required: true
+  version:
+    description: 'Version string (no leading v)'
+    required: true
+  desc:
+    description: 'Project description (will be normalized for brew style: strip article, strip period, ≤79 chars)'
+    required: true
+  license:
+    description: 'License identifier (e.g. MIT)'
+    required: true
+  homepage:
+    description: 'Project homepage URL'
+    required: true
+  urls-json:
+    description: 'JSON object: {"AARCH64_APPLE_DARWIN": "https://...", "X86_64_LINUX_GNU": "...", ...}'
+    required: true
+  shas-json:
+    description: 'JSON object: {"AARCH64_APPLE_DARWIN": "abc...", "X86_64_LINUX_GNU": "...", ...}'
+    required: true
+  output-path:
+    description: 'Where to write the rendered .rb file'
+    required: true
+  template-path:
+    description: 'Path to .rb.tmpl; defaults to canonical template (subdir tarball layout, mac arm64 + linux x86_64/arm64)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Render
+      shell: bash
+      env:
+        BIN_NAME: ${{ inputs.bin-name }}
+        VERSION: ${{ inputs.version }}
+        DESC: ${{ inputs.desc }}
+        LICENSE: ${{ inputs.license }}
+        HOMEPAGE: ${{ inputs.homepage }}
+        URLS_JSON: ${{ inputs.urls-json }}
+        SHAS_JSON: ${{ inputs.shas-json }}
+        OUTPUT_PATH: ${{ inputs.output-path }}
+        TEMPLATE_PATH: ${{ inputs.template-path }}
+      run: |
+        set -euo pipefail
+
+        # Derive Ruby class name: PascalCase from bin-name, splitting on - and _
+        CLASS_NAME=$(echo "$BIN_NAME" | awk -F'[-_]' '{
+          for(i=1;i<=NF;i++) printf "%s", toupper(substr($i,1,1)) tolower(substr($i,2))
+        }')
+
+        TMPL="${TEMPLATE_PATH:-${{ github.action_path }}/../../../templates/homebrew-formula.rb.tmpl}"
+        [ -f "$TMPL" ] || { echo "::error::Template not found: $TMPL"; exit 1; }
+
+        # Build env-var list for the Python renderer. URLS_JSON keys become
+        # URL_<KEY>; SHAS_JSON keys become SHA_<KEY>. Renderer ignores any
+        # placeholder it can't fill (the post-check fails on leftovers in
+        # the rendered output, which is what actually matters).
+        env_args=(
+          "CLASS_NAME=$CLASS_NAME"
+          "BIN_NAME=$BIN_NAME"
+          "VERSION=$VERSION"
+          "DESC=$DESC"
+          "LICENSE=$LICENSE"
+          "HOMEPAGE=$HOMEPAGE"
+        )
+        while IFS=$'\t' read -r key val; do
+          env_args+=("URL_$key=$val")
+        done < <(echo "$URLS_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value)"')
+        while IFS=$'\t' read -r key val; do
+          env_args+=("SHA_$key=$val")
+        done < <(echo "$SHAS_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value)"')
+
+        mkdir -p "$(dirname "$OUTPUT_PATH")"
+        env "${env_args[@]}" python3 \
+          "${{ github.action_path }}/../../../scripts/render-brew-formula.py" \
+          "$TMPL" "$OUTPUT_PATH"
+
+        echo "=== Rendered formula ==="
+        cat "$OUTPUT_PATH"
+
+    - name: Ruby syntax check
+      shell: bash
+      run: ruby -c "${{ inputs.output-path }}"

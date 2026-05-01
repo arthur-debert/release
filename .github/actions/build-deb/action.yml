@@ -1,0 +1,44 @@
+name: 'Build .deb package'
+description: 'Run cargo-deb against a pre-built release binary, collect the .deb path'
+
+inputs:
+  package:
+    description: 'Cargo package to build (e.g. dodot)'
+    required: true
+  target:
+    description: 'Rust target triple (e.g. x86_64-unknown-linux-gnu)'
+    required: true
+
+outputs:
+  deb-path:
+    description: 'Path to the produced .deb file'
+    value: ${{ steps.deb.outputs.path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install cargo-deb
+      # Guard against actions/cache restoring a prior cargo-deb binary —
+      # `cargo install` aborts with "binary cargo-deb already exists".
+      shell: bash
+      run: command -v cargo-deb >/dev/null 2>&1 || cargo install cargo-deb --locked
+
+    - name: Build .deb
+      id: deb
+      shell: bash
+      env:
+        PACKAGE: ${{ inputs.package }}
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        # cargo-deb derives the Debian Architecture: field from --target
+        # automatically. --no-build reuses the release binary built by an
+        # earlier step; --no-strip leaves debug info as-is (matches macOS
+        # / tarball binaries).
+        cargo deb -p "$PACKAGE" --target "$TARGET" --no-build --no-strip
+        DEB=$(ls "target/$TARGET/debian/"*.deb | head -1)
+        if [ -z "$DEB" ] || [ ! -f "$DEB" ]; then
+          echo "::error::No .deb produced under target/$TARGET/debian/"
+          exit 1
+        fi
+        echo "path=$DEB" >> "$GITHUB_OUTPUT"

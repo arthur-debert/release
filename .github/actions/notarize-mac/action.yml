@@ -1,0 +1,107 @@
+name: 'Notarize macOS artifact'
+description: 'Submit an artifact to Apple notary service, poll for status, optionally staple'
+
+inputs:
+  artifact-path:
+    description: 'Path to artifact (zip of binary, .dmg, .pkg, or .app). notarytool accepts these.'
+    required: true
+  asc-key-base64:
+    description: 'Base64-encoded App Store Connect API key (.p8 file). Empty → skip notarization.'
+    required: false
+    default: ''
+  asc-key-id:
+    description: 'App Store Connect API key ID (e.g. ABC1234DEF)'
+    required: false
+    default: ''
+  asc-issuer-id:
+    description: 'App Store Connect API issuer UUID'
+    required: false
+    default: ''
+  staple:
+    description: 'Run xcrun stapler after acceptance ("true" for .app/.dmg/.pkg; "false" for raw binaries)'
+    required: false
+    default: 'false'
+  timeout-minutes:
+    description: 'Max minutes to wait for Apple acceptance'
+    required: false
+    default: '60'
+
+outputs:
+  notarized:
+    description: '"true" if notarization succeeded, "false" if skipped or timed out'
+    value: ${{ steps.notarize.outputs.notarized }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Submit and poll
+      id: notarize
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.artifact-path }}
+        ASC_KEY_BASE64: ${{ inputs.asc-key-base64 }}
+        ASC_KEY_ID: ${{ inputs.asc-key-id }}
+        ASC_ISSUER_ID: ${{ inputs.asc-issuer-id }}
+        STAPLE: ${{ inputs.staple }}
+        TIMEOUT_MIN: ${{ inputs.timeout-minutes }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$ASC_KEY_BASE64" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ]; then
+          echo "::warning::No ASC API credentials configured — skipping notarization."
+          echo "notarized=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        [ -e "$ARTIFACT" ] || { echo "::error::artifact-path not found: $ARTIFACT"; exit 1; }
+
+        KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+        echo "$ASC_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+
+        echo "→ submitting $ARTIFACT to notary service"
+        RESULT=$(xcrun notarytool submit "$ARTIFACT" \
+          --key "$KEY_PATH" \
+          --key-id "$ASC_KEY_ID" \
+          --issuer "$ASC_ISSUER_ID" \
+          --output-format json \
+          --no-wait)
+        ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+        echo "submission-id=$ID"
+
+        # Poll: TIMEOUT_MIN minutes / 30s intervals.
+        MAX_POLLS=$((TIMEOUT_MIN * 2))
+        for i in $(seq 1 "$MAX_POLLS"); do
+          INFO=$(xcrun notarytool info "$ID" \
+            --key "$KEY_PATH" \
+            --key-id "$ASC_KEY_ID" \
+            --issuer "$ASC_ISSUER_ID" \
+            --output-format json 2>&1) || true
+          STATUS=$(echo "$INFO" | python3 -c \
+            "import sys,json; print(json.load(sys.stdin).get('status','Unknown'))" \
+            2>/dev/null || echo "Unknown")
+          echo "  [$i/$MAX_POLLS] status=$STATUS ($(date -u +%H:%M:%S))"
+          if [ "$STATUS" = "Accepted" ]; then
+            echo "✓ Notarization accepted"
+            if [ "$STAPLE" = "true" ]; then
+              echo "→ stapling $ARTIFACT"
+              xcrun stapler staple "$ARTIFACT" || \
+                echo "::warning::Staple failed (non-fatal — online Gatekeeper check still works)"
+            fi
+            rm -f "$KEY_PATH"
+            echo "notarized=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
+            xcrun notarytool log "$ID" \
+              --key "$KEY_PATH" \
+              --key-id "$ASC_KEY_ID" \
+              --issuer "$ASC_ISSUER_ID" 2>&1 || true
+            rm -f "$KEY_PATH"
+            echo "::error::Notarization $STATUS"
+            exit 1
+          fi
+          sleep 30
+        done
+
+        rm -f "$KEY_PATH"
+        echo "::warning::Notarization timed out after $TIMEOUT_MIN min — submission $ID last status: $STATUS. Binary is signed but Apple has not confirmed yet. Check status with: xcrun notarytool info $ID --key <p8> --key-id <id> --issuer <id>."
+        echo "notarized=false" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,10 @@
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Test fixture build outputs
+tests/fixtures/*/target/
+tests/fixtures/*/dist/
+tests/fixtures/*/Cargo.lock
+tests/fixtures/*/node_modules/

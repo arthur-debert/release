@@ -1,0 +1,19 @@
+name: 'Publish crate'
+description: 'Publish one workspace crate to crates.io with already-published tolerance'
+
+inputs:
+  crate:
+    description: 'Cargo package name to publish (must exist in `cargo metadata`)'
+    required: true
+  token:
+    description: 'crates.io API token (passed as CARGO_REGISTRY_TOKEN)'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Publish ${{ inputs.crate }}
+      shell: bash
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ inputs.token }}
+      run: bash "${{ github.action_path }}/../../../scripts/ci-publish-crate.sh" "${{ inputs.crate }}"

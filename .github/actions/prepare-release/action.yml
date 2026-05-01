@@ -1,0 +1,214 @@
+name: 'Prepare release'
+description: |
+  Validate a version, bump Cargo.toml(s) workspace-wide, roll the changelog,
+  commit + tag + push. Resume-on-failure: if the tag already exists at the
+  given version, skip the bump and emit the tag's SHA so downstream jobs can
+  re-run cleanly.
+
+inputs:
+  version:
+    description: 'Version to release (e.g. 0.18.0 or 1.0.0-rc.1)'
+    required: true
+  changelog-path:
+    description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section)'
+    required: false
+    default: 'CHANGELOG.md'
+
+outputs:
+  version:
+    description: 'Validated version (no leading v)'
+    value: ${{ steps.outputs.outputs.version }}
+  release-sha:
+    description: 'Commit SHA of the tag (for downstream jobs to checkout)'
+    value: ${{ steps.outputs.outputs.sha }}
+  prerelease:
+    description: '"true" if version contains a pre-release suffix'
+    value: ${{ steps.outputs.outputs.prerelease }}
+  notes-path:
+    description: 'Path to extracted release notes file'
+    value: 'release-notes.md'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate and detect resume case
+      id: detect
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+          echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: $NEW_VERSION)"
+          exit 1
+        fi
+
+        IS_PRERELEASE=false
+        if [[ "$NEW_VERSION" == *-* ]]; then
+          IS_PRERELEASE=true
+        fi
+        echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+        TAG="v$NEW_VERSION"
+        git fetch --tags origin >/dev/null 2>&1 || true
+
+        # Resume case: tag already exists. Validate that Cargo.toml at that
+        # commit matches NEW_VERSION (otherwise we'd be re-running against
+        # a different release accidentally).
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          TAG_SHA=$(git rev-list -n 1 "$TAG")
+
+          # Find any Cargo.toml at the tag with a literal `version = "..."`
+          # field. Skips workspace-only Cargo.tomls and `version.workspace = true`.
+          TAG_VERSION=""
+          for f in Cargo.toml crates/*/Cargo.toml; do
+            v=$(git show "$TAG:$f" 2>/dev/null | grep -E '^version = "[^"]+"' | head -1 | sed -E 's/^version = "([^"]+)"/\1/' || true)
+            if [ -n "$v" ]; then
+              TAG_VERSION="$v"
+              break
+            fi
+          done
+
+          if [ "$TAG_VERSION" = "$NEW_VERSION" ]; then
+            echo "tag $TAG already exists at $TAG_SHA (Cargo.toml=$TAG_VERSION) — resuming"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::tag $TAG exists but Cargo.toml at that commit is '$TAG_VERSION', not '$NEW_VERSION'"
+          exit 1
+        fi
+
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+
+    - name: Install cargo-edit
+      if: steps.detect.outputs.skip != 'true'
+      shell: bash
+      run: |
+        # cargo-edit's transitive deps require rust >= 1.89, which can be
+        # newer than the project's rust-toolchain.toml pin. Use stable for
+        # the install; the resulting `cargo set-version` is a standalone
+        # binary that doesn't go through the active toolchain.
+        if ! command -v cargo-set-version >/dev/null 2>&1; then
+          RUSTUP_TOOLCHAIN=stable cargo install cargo-edit --locked
+        fi
+
+    - name: Bump workspace versions
+      if: steps.detect.outputs.skip != 'true'
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        # set-version --workspace handles every workspace shape: single-crate,
+        # workspace.package + workspace.dependencies pins, per-crate versions.
+        # It also rewrites intra-workspace deps to point at the new version.
+        cargo set-version --workspace "$NEW_VERSION"
+        # Refresh Cargo.lock so the bumped versions appear there too. Use
+        # --workspace to scope to local crates and avoid pulling registry
+        # updates into the bump commit.
+        cargo update -w
+
+    - name: Roll changelog (final release only)
+      if: steps.detect.outputs.skip != 'true' && steps.detect.outputs.prerelease != 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          roll "$CHANGELOG" "$NEW_VERSION" release-notes.md
+
+    - name: Extract changelog notes (prerelease)
+      if: steps.detect.outputs.skip != 'true' && steps.detect.outputs.prerelease == 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+      run: |
+        # Prereleases share Unreleased entries with the final they lead to;
+        # extract for release notes but don't roll into a versioned section.
+        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          extract "$CHANGELOG" release-notes.md
+
+    - name: Commit, tag, push
+      id: push
+      if: steps.detect.outputs.skip != 'true'
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        CHANGELOG: ${{ inputs.changelog-path }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+      run: |
+        set -euo pipefail
+        TAG="v$NEW_VERSION"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        # Stage only the files cargo-edit + roll-changelog should have
+        # touched: every Cargo.toml under the workspace, Cargo.lock, and
+        # the changelog (when rolled).
+        git add Cargo.lock 2>/dev/null || true
+        find . -name Cargo.toml -not -path './target/*' -print0 | xargs -0 git add 2>/dev/null || true
+        if [ "$IS_PRERELEASE" != "true" ] && [ -f "$CHANGELOG" ]; then
+          git add "$CHANGELOG"
+        fi
+
+        if git diff --cached --quiet; then
+          echo "::error::No changes staged after version bump — was set-version a no-op? Cargo.toml may already be at $NEW_VERSION."
+          exit 1
+        fi
+
+        git commit -m "chore: Release $TAG"
+        git tag -a "$TAG" -m "Release $TAG"
+        git push origin HEAD
+        git push origin "$TAG"
+
+        SHA=$(git rev-parse HEAD)
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Extract notes for resume case
+      if: steps.detect.outputs.skip == 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+        NEW_VERSION: ${{ inputs.version }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+      run: |
+        # On resume, the tag's commit already has the rolled changelog.
+        # For prereleases, [Unreleased] is still populated; extract it.
+        # For final releases, the rolled section is `## [<version>]`; read it.
+        set -euo pipefail
+        if [ "$IS_PRERELEASE" = "true" ]; then
+          bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+            extract "$CHANGELOG" release-notes.md
+        else
+          # Read the already-rolled versioned section.
+          awk -v v="$NEW_VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' "$CHANGELOG" > release-notes.md
+          if ! grep -qE '\S' release-notes.md; then
+            echo "Release v$NEW_VERSION" > release-notes.md
+          fi
+        fi
+
+    - name: Emit outputs
+      id: outputs
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+        RESUME_SHA: ${{ steps.detect.outputs.sha }}
+        PUSH_SHA: ${{ steps.push.outputs.sha }}
+      run: |
+        SHA="${PUSH_SHA:-$RESUME_SHA}"
+        if [ -z "$SHA" ]; then
+          echo "::error::Internal: neither push.sha nor detect.sha is set"
+          exit 1
+        fi
+        echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"

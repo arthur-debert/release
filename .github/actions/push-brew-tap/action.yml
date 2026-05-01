@@ -1,0 +1,62 @@
+name: 'Push Homebrew formula to tap'
+description: 'Clone a Homebrew tap repo, copy a rendered formula into Formula/, commit, push'
+
+inputs:
+  tap-repo:
+    description: 'Tap repository in `owner/repo` form (e.g. arthur-debert/homebrew-tools)'
+    required: true
+  tap-token:
+    description: 'PAT with push access to the tap repo'
+    required: true
+  formula-name:
+    description: 'Formula filename without `.rb` (e.g. dodot)'
+    required: true
+  formula-path:
+    description: 'Path to the rendered .rb file in this workspace'
+    required: true
+  commit-message:
+    description: 'Commit message; defaults to `${formula-name} ${version}`'
+    required: false
+    default: ''
+  version:
+    description: 'Version string (used in default commit message)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        [ -f "${{ inputs.formula-path }}" ] || { echo "::error::formula-path not found: ${{ inputs.formula-path }}"; exit 1; }
+
+    - name: Checkout tap repo
+      uses: actions/checkout@v4
+      with:
+        repository: ${{ inputs.tap-repo }}
+        token: ${{ inputs.tap-token }}
+        path: .release-tap
+
+    - name: Commit and push
+      shell: bash
+      working-directory: .release-tap
+      env:
+        FORMULA_NAME: ${{ inputs.formula-name }}
+        FORMULA_PATH: ${{ inputs.formula-path }}
+        COMMIT_MSG: ${{ inputs.commit-message }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        mkdir -p Formula
+        cp "$GITHUB_WORKSPACE/$FORMULA_PATH" "Formula/${FORMULA_NAME}.rb"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add "Formula/${FORMULA_NAME}.rb"
+        if git diff --cached --quiet; then
+          echo "Formula unchanged — nothing to push."
+          exit 0
+        fi
+        msg="${COMMIT_MSG:-${FORMULA_NAME} ${VERSION}}"
+        git commit -m "$msg"
+        git push
