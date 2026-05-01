@@ -29,26 +29,16 @@ from pathlib import Path
 # literal and must therefore be escaped.
 RUBY_STRING_KEYS = {"DESC", "LICENSE", "HOMEPAGE"}
 
-# Values that, when present in the env, are passed through verbatim. URLs,
-# SHAs, class names, and bin names are all ASCII-safe by construction —
-# escaping them would only add noise to the generated formula.
-PASSTHROUGH_KEYS = [
+# Fixed passthrough keys (project metadata). URL_* and SHA_* keys are
+# discovered dynamically from the environment so the script doesn't need
+# updating when target triples change.
+PASSTHROUGH_FIXED_KEYS = [
     "CLASS_NAME",
     "VERSION",
     "BIN_NAME",
-    "URL_AARCH64_APPLE_DARWIN",
-    "URL_X86_64_APPLE_DARWIN",
-    "URL_X86_64_LINUX_GNU",
-    "URL_AARCH64_LINUX_GNU",
-    "URL_X86_64_UNKNOWN_LINUX_MUSL",
-    "URL_X86_64_PC_WINDOWS_MSVC",
-    "SHA_AARCH64_APPLE_DARWIN",
-    "SHA_X86_64_APPLE_DARWIN",
-    "SHA_X86_64_LINUX_GNU",
-    "SHA_AARCH64_LINUX_GNU",
-    "SHA_X86_64_UNKNOWN_LINUX_MUSL",
-    "SHA_X86_64_PC_WINDOWS_MSVC",
 ]
+
+PASSTHROUGH_DYNAMIC_PREFIXES = ("URL_", "SHA_")
 
 
 def ruby_double_quoted_escape(s: str) -> str:
@@ -106,10 +96,13 @@ def normalize_brew_desc(s: str) -> str:
 
 def build_replacements() -> dict[str, str]:
     replacements: dict[str, str] = {}
-    for key in PASSTHROUGH_KEYS:
+    for key in PASSTHROUGH_FIXED_KEYS:
         value = os.environ.get(key)
         if value is not None:
             replacements[key] = value
+    for env_key, env_val in os.environ.items():
+        if env_key.startswith(PASSTHROUGH_DYNAMIC_PREFIXES):
+            replacements[env_key] = env_val
     for key in RUBY_STRING_KEYS:
         raw = os.environ.get(key)
         if raw is not None:
@@ -133,7 +126,7 @@ def find_unsubstituted(rendered: str) -> list[str]:
     for line in rendered.splitlines():
         if line.lstrip().startswith("#"):
             continue
-        leftover.extend(re.findall(r"\{\{[A-Z_]+\}\}", line))
+        leftover.extend(re.findall(r"\{\{[A-Z0-9_]+\}\}", line))
     return leftover
 
 
