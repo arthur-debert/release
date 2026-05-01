@@ -523,7 +523,7 @@ jobs:
           shas='{}'
           for f in "${BIN_NAME}"-*.tar.gz "${BIN_NAME}"-*.zip; do
             [ -f "$f" ] || continue
-            triple="${f#${BIN_NAME}-}"
+            triple="${f#"${BIN_NAME}"-}"
             triple="${triple%.tar.gz}"
             triple="${triple%.zip}"
             key=$(echo "$triple" | tr 'a-z-' 'A-Z_')
