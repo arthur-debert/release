@@ -518,12 +518,22 @@ jobs:
           shas='{}'
           for f in "${BIN_NAME}"-*.tar.gz "${BIN_NAME}"-*.zip; do
             [ -f "$f" ] || continue
-            triple="${f#"${BIN_NAME}"-}"
-            triple="${triple%.tar.gz}"
-            triple="${triple%.zip}"
+            base="${f#"${BIN_NAME}"-}"
+            # Determine extension by suffix match — `${f##*.}` returns only
+            # the last segment ("gz" for "foo.tar.gz"), which would put
+            # `.gz` in the rendered URL.
+            if [[ "$base" == *.tar.gz ]]; then
+              triple="${base%.tar.gz}"
+              ext="tar.gz"
+            elif [[ "$base" == *.zip ]]; then
+              triple="${base%.zip}"
+              ext="zip"
+            else
+              continue
+            fi
             key=$(echo "$triple" | tr 'a-z-' 'A-Z_')
             sha=$(sha256sum "$f" | cut -d' ' -f1)
-            urls=$(echo "$urls" | jq --arg k "$key" --arg v "${URL_BASE}-${triple}.${f##*.}" '. + {($k): $v}')
+            urls=$(echo "$urls" | jq --arg k "$key" --arg v "${URL_BASE}-${triple}.${ext}" '. + {($k): $v}')
             shas=$(echo "$shas" | jq --arg k "$key" --arg v "$sha" '. + {($k): $v}')
           done
           echo "urls<<EOF" >> "$GITHUB_OUTPUT"; echo "$urls" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
