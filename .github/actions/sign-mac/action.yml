@@ -64,9 +64,11 @@ runs:
         fi
         echo "Found identity: $IDENTITY"
 
-        ENT_ARG=()
+        # Determine whether to pass --entitlements. Avoid bash 3.2 (macOS)
+        # tripping on `"${arr[@]}"` under `set -u` when arr is empty.
+        USE_ENT=false
         if [ -n "$ENTITLEMENTS" ] && [ -f "$ENTITLEMENTS" ]; then
-          ENT_ARG=(--entitlements "$ENTITLEMENTS")
+          USE_ENT=true
         fi
 
         # Sign each path. The caller supplies them in order (outer last for
@@ -76,8 +78,12 @@ runs:
           path=$(echo "$path" | xargs) # trim
           [ -e "$path" ] || { echo "::error::Path to sign not found: $path"; exit 1; }
           echo "→ signing $path"
-          codesign --force --sign "$IDENTITY" --options runtime --timestamp \
-            "${ENT_ARG[@]}" "$path"
+          if [ "$USE_ENT" = "true" ]; then
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp \
+              --entitlements "$ENTITLEMENTS" "$path"
+          else
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$path"
+          fi
           codesign --verify --strict "$path"
         done <<< "$PATHS"
 
