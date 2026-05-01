@@ -1,19 +1,38 @@
-name: 'Publish crate'
-description: 'Publish one workspace crate to crates.io with already-published tolerance'
+name: 'Publish crates'
+description: 'Publish workspace crates to crates.io in dep order, with already-published tolerance'
 
 inputs:
-  crate:
-    description: 'Cargo package name to publish (must exist in `cargo metadata`)'
+  crates:
+    description: 'Comma-separated crate names in topological dep order (e.g. "foo-lib,foo")'
     required: true
   token:
     description: 'crates.io API token (passed as CARGO_REGISTRY_TOKEN)'
     required: true
+  wait-seconds:
+    description: 'Seconds to sleep between publishes. Default 0; cargo 1.66+ waits for the sparse index natively, so an extra sleep is normally redundant. Bump only if a flake forces it.'
+    required: false
+    default: '0'
 
 runs:
   using: 'composite'
   steps:
-    - name: Publish ${{ inputs.crate }}
+    - name: Publish crates in order
       shell: bash
       env:
+        CRATES: ${{ inputs.crates }}
         CARGO_REGISTRY_TOKEN: ${{ inputs.token }}
-      run: bash "${{ github.action_path }}/../../../scripts/ci-publish-crate.sh" "${{ inputs.crate }}"
+        WAIT: ${{ inputs.wait-seconds }}
+      run: |
+        set -euo pipefail
+        first=true
+        IFS=',' read -ra LIST <<< "$CRATES"
+        for crate in "${LIST[@]}"; do
+          crate=$(echo "$crate" | xargs) # trim
+          [ -z "$crate" ] && continue
+          if [ "$first" != "true" ] && [ "$WAIT" -gt 0 ]; then
+            echo "→ sleeping ${WAIT}s before next publish"
+            sleep "$WAIT"
+          fi
+          first=false
+          bash "${{ github.action_path }}/../../../scripts/ci-publish-crate.sh" "$crate"
+        done
