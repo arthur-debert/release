@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Install a release PAT as the RELEASE_TOKEN secret across every repo onboarded
+# to the canonical main-branch-protection ruleset.
+#
+# Why: on user-owned repos (and on org repos without org-level GitHub Actions
+# integration), GITHUB_TOKEN cannot bypass branch rulesets — `Integration`
+# actor bypass is rejected and `RepositoryRole` bypass only matches human
+# collaborators, not the github-actions[bot]. A Personal Access Token
+# authenticates as the owner (admin), which DOES match the admin RepositoryRole
+# bypass, so release workflows that push the version bump to default succeed.
+#
+# Usage:
+#   install-release-token            # reads token from stdin
+#   pbpaste | install-release-token  # macOS clipboard
+#   install-release-token --owners arthur-debert,lex-fmt
+#
+# Discovery: queries every repo under the given owners for a ruleset named
+# "main-branch-protection". Same logic apply-ruleset uses to find onboarded
+# repos.
+
+set -euo pipefail
+
+owners="arthur-debert,lex-fmt"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --owners) owners=$2; shift 2 ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+if [ -t 0 ]; then
+  echo "error: pipe the PAT to stdin (e.g. pbpaste | $(basename "$0"))" >&2
+  exit 64
+fi
+
+token=$(cat | tr -d '\n\r ')
+if [ -z "$token" ]; then
+  echo "error: empty token on stdin" >&2
+  exit 64
+fi
+
+# Sanity-check the token by hitting /user with it.
+who=$(curl -fsSL -H "Authorization: Bearer $token" https://api.github.com/user --write-out '\n%{http_code}' 2>&1)
+code=$(printf '%s\n' "$who" | tail -1)
+login=$(printf '%s\n' "$who" | sed -n '$!p' | jq -r '.login // empty' 2>/dev/null)
+if [ "$code" != "200" ] || [ -z "$login" ]; then
+  echo "error: token authentication failed (http $code)" >&2
+  exit 1
+fi
+echo "token authenticates as: $login"
+
+echo "discovering onboarded repos in: $owners"
+repos=()
+for owner in $(echo "$owners" | tr ',' ' '); do
+  while read -r repo; do
+    # Tolerate per-repo 403s (legacy/private repos w/o rulesets feature) so
+    # discovery doesn't abort partway through.
+    rs=$(gh api "repos/$repo/rulesets" 2>/dev/null || echo '[]')
+    id=$(jq -r '.[]? | select(.name == "main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
+    [ -n "$id" ] && repos+=("$repo")
+  done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
+done
+
+if [ ${#repos[@]} -eq 0 ]; then
+  echo "no onboarded repos found under: $owners" >&2
+  exit 1
+fi
+
+echo "found ${#repos[@]} repo(s):"
+printf '  %s\n' "${repos[@]}"
+echo
+
+failed=0
+for repo in "${repos[@]}"; do
+  if printf '%s' "$token" | gh secret set RELEASE_TOKEN -R "$repo" 2>/dev/null; then
+    printf '  ok   %s\n' "$repo"
+  else
+    printf '  FAIL %s\n' "$repo"
+    failed=$((failed + 1))
+  fi
+done
+
+echo
+if [ "$failed" -gt 0 ]; then
+  echo "summary: ${#repos[@]} repos, $failed failures" >&2
+  exit 1
+fi
+echo "summary: ${#repos[@]} repos, all set"

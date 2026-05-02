@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Drop the canonical .github/ policy files into the current repo, based on
+# its detected stack.
+#
+# Usage:
+#   sweep-github-policy [--stack <stack>] [--force]
+#
+# - Auto-detects stack via detect-stack (override with --stack)
+# - For each template file: creates if missing; reports if already present
+#   with different content (use --force to overwrite)
+
+set -euo pipefail
+
+stack=""
+force=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --stack) stack=$2; shift 2 ;;
+    --force) force=1; shift ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+stack=${stack:-$(detect-stack)}
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+templates="$script_dir/../templates/$stack"
+[ -d "$templates" ] || { echo "no templates for stack '$stack' at $templates" >&2; exit 1; }
+
+echo "repo:  $(basename "$repo_root")"
+echo "stack: $stack"
+echo
+
+created=0
+updated=0
+skipped=0
+conflicts=0
+
+# Find all files in the template tree, relative to its root.
+while IFS= read -r src; do
+  rel=${src#"$templates/"}
+  dest=".github/$rel"
+  mkdir -p "$(dirname "$dest")"
+  if [ ! -e "$dest" ]; then
+    cp "$src" "$dest"
+    echo "  created  .github/$rel"
+    created=$((created + 1))
+  elif cmp -s "$src" "$dest"; then
+    echo "  ok       .github/$rel"
+    skipped=$((skipped + 1))
+  elif [ "$force" = 1 ]; then
+    cp "$src" "$dest"
+    echo "  updated  .github/$rel"
+    updated=$((updated + 1))
+  else
+    echo "  conflict .github/$rel (differs; --force to overwrite)"
+    conflicts=$((conflicts + 1))
+  fi
+done < <(find "$templates" -type f)
+
+echo
+printf 'summary: %d created, %d updated, %d ok, %d conflicts\n' \
+  "$created" "$updated" "$skipped" "$conflicts"
+
+[ "$conflicts" -eq 0 ]

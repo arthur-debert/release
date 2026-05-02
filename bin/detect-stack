@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Detect the project stack of a directory by inspecting its filesystem.
+# Prints one of: rust, electron, vsce-ext, nvim-plugin, tree-sitter,
+# static-site, brew-tap, github-action — or exits 1 if undetermined.
+#
+# Usage: detect-stack [<dir>]   (defaults to current dir)
+
+set -euo pipefail
+
+dir=${1:-.}
+cd "$dir"
+
+# brew tap
+if [ -d Formula ] || [ -d Casks ]; then
+  echo brew-tap; exit 0
+fi
+
+# tree-sitter grammar
+if [ -f grammar.js ]; then
+  echo tree-sitter; exit 0
+fi
+
+# rust
+if [ -f Cargo.toml ]; then
+  echo rust; exit 0
+fi
+
+# javascript-side
+if [ -f package.json ]; then
+  if grep -q '"electron-builder"' package.json 2>/dev/null || grep -q '"electron"' package.json 2>/dev/null; then
+    echo electron; exit 0
+  fi
+  if grep -q '"@vscode/vsce"' package.json 2>/dev/null || grep -q '"vsce"' package.json 2>/dev/null; then
+    echo vsce-ext; exit 0
+  fi
+fi
+
+# composite github action
+if [ -f action.yml ] || [ -f action.yaml ]; then
+  echo github-action; exit 0
+fi
+
+# nvim plugin
+if [ -d plugin ] && find . -maxdepth 3 -name '*.lua' -print -quit | grep -q .; then
+  echo nvim-plugin; exit 0
+fi
+
+# static site (mdbook or jekyll)
+if [ -f book.toml ] || [ -f _config.yml ]; then
+  echo static-site; exit 0
+fi
+
+echo "could not detect stack of $(pwd)" >&2
+exit 1
