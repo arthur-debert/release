@@ -1,0 +1,32 @@
+name: Copilot Review (reusable)
+
+# Reusable workflow that requests a Copilot review on a PR. Per-repo
+# callers trigger on pull_request events and pass the PR number.
+#
+# Uses `gh pr edit --add-reviewer @copilot` (GraphQL under the hood) — the
+# `requested_reviewers` REST POST with `reviewers[]=copilot-pull-request-reviewer[bot]`
+# silently no-ops (returns 200 but leaves `requested_reviewers: []`).
+
+on:
+  workflow_call:
+    inputs:
+      pr_number:
+        description: PR number to request a Copilot review on
+        required: true
+        type: number
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Request Copilot review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr edit ${{ inputs.pr_number }} \
+            --repo ${{ github.repository }} \
+            --add-reviewer @copilot
