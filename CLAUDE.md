@@ -11,13 +11,20 @@ constraints that apply when *working on this repo itself*.
 
 ## Repo shape
 
-- `.github/workflows/rust-cli.yml` — the only category workflow shipped today
+- `.github/workflows/rust-cli.yml`, `copilot-review.yml` — reusable workflows
 - `.github/actions/<name>/` — composite actions, atomic units shared across (future) workflows
-- `scripts/` — what composite actions exec
+- `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
+  - Policy/setup: `apply-ruleset`, `sweep-github-policy`, `install-release-{secrets,token}`, `enable-dependabot-security`, `detect-stack`
+  - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `gh-release-issue`
+- `scripts/` — what composite actions exec inside CI
 - `templates/` — render templates (e.g. Homebrew formula)
 - `tests/fixtures/` — synthetic projects per category, exercised by `_ci.yml`
 - `docs/` — consumer guide, secrets, breaking-changes log
 - `examples/` — paste-ready consumer release.yml files
+
+### `bin/` is on $PATH via dodot
+
+`~/h/dotfiles/release/bin/` is a real directory containing one symlink per script back to `~/h/release/bin/<script>`. dodot picks up that real directory through its `path` handler and prepends it to `$PATH` on shell init. **When you add a new script to `bin/`, also create the matching symlink in `~/h/dotfiles/release/bin/`** — otherwise the script exists but isn't reachable by name. (One-liner: `cd ~/h/dotfiles/release/bin && ln -s ~/h/release/bin/<script> <script>`.) The earlier `dotfiles/release/bin -> ~/h/release/bin` single-symlink layout silently routed through dodot's symlink handler instead of the path handler — broken; do not regress.
 
 ## Versioning contract — do not break
 

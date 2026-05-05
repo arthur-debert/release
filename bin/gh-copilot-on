@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Request a Copilot review on a PR.
+#
+# Usage:
+#   gh-copilot-on <pr-number>
+#
+# Uses `gh pr edit --add-reviewer @copilot` (GraphQL under the hood). The
+# previous `requested_reviewers` REST POST silently no-ops — it returns 200
+# but leaves `requested_reviewers` empty, which is why the per-repo
+# `copilot-review.yml` workflows could report SUCCESS while no review ever
+# arrived.
+#
+# Exit codes:
+#   0  — review requested
+#   64 — bad usage
+#
+# Example:
+#   gh-copilot-on 91
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+case "${1:-}" in
+  -h|--help) show_help; exit 0 ;;
+  '') show_help >&2; exit 64 ;;
+esac
+
+pr=$1
+[[ "$pr" =~ ^[0-9]+$ ]] || { echo "error: PR number must be numeric (got: $pr)" >&2; exit 64; }
+
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+gh pr edit "$pr" --repo "$repo" --add-reviewer @copilot >/dev/null
+echo "requested copilot review on $repo#$pr"

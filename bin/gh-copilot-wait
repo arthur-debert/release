@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Wait for Copilot to post a review on a PR.
+#
+# Usage:
+#   gh-copilot-wait <pr-number>
+#
+# Polls the PR's reviews API until a Copilot review is posted on the
+# current head SHA. The head-SHA filter is critical — submitted_at-based
+# filtering misses reviews that landed before the wait started.
+#
+# Cadence:
+#   7m initial sleep, then 2m polling, 30m hard cap.
+#
+# Exit codes:
+#   0  — review posted
+#   2  — timeout (30m elapsed without a review)
+#   64 — bad usage
+#
+# Example:
+#   gh-copilot-wait 91          # blocks foreground
+#   gh-copilot-wait 91 &        # background; check $? when it returns
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+case "${1:-}" in
+  -h|--help) show_help; exit 0 ;;
+  '') show_help >&2; exit 64 ;;
+esac
+
+pr=$1
+[[ "$pr" =~ ^[0-9]+$ ]] || { echo "error: PR number must be numeric (got: $pr)" >&2; exit 64; }
+
+start_epoch=$(date +%s)
+deadline=$((start_epoch + 30 * 60))
+
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+head_sha=$(gh pr view "$pr" --json headRefOid -q .headRefOid)
+
+# Match copilot reviews on the current PR head; tolerates the [bot] suffix
+# variant ("Copilot" vs "copilot-pull-request-reviewer[bot]") that GitHub
+# returns inconsistently across endpoints.
+review_count() {
+  gh api --paginate "repos/{owner}/{repo}/pulls/$pr/reviews" \
+    --jq "[.[] | select((.user.login | test(\"copilot\"; \"i\")) and .commit_id == \"$head_sha\")] | length"
+}
+
+elapsed_min() { echo $(( ($(date +%s) - start_epoch) / 60 )); }
+
+echo "waiting for copilot review on $repo#$pr (7m initial, 2m poll, 30m max)"
+sleep $((7 * 60))
+
+while [ "$(date +%s)" -lt "$deadline" ]; do
+  count=$(review_count)
+  if [ "${count:-0}" -gt 0 ]; then
+    echo "copilot review posted (after $(elapsed_min)m)"
+    exit 0
+  fi
+  remaining=$(( (deadline - $(date +%s)) / 60 ))
+  echo "no review yet ($(elapsed_min)m elapsed, ${remaining}m remaining); polling in 2m"
+  sleep $((2 * 60))
+done
+
+echo "timeout: no copilot review after 30m" >&2
+exit 2
