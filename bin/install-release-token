@@ -41,15 +41,39 @@ if [ -z "$token" ]; then
   exit 64
 fi
 
-# Sanity-check the token by hitting /user with it.
-who=$(curl -fsSL -H "Authorization: Bearer $token" https://api.github.com/user --write-out '\n%{http_code}' 2>&1)
-code=$(printf '%s\n' "$who" | tail -1)
-login=$(printf '%s\n' "$who" | sed -n '$!p' | jq -r '.login // empty' 2>/dev/null)
+# Sanity-check the token: hit /user, verify it auths, and verify it carries
+# the OAuth scopes the consumer workflows need (notably read:org for the
+# Copilot-review reusable workflow). The X-OAuth-Scopes response header is
+# the canonical source — fine-grained PATs omit it entirely, which is also
+# disqualifying because they can't grant read:org.
+required_scopes=(repo read:org)
+resp=$(curl -fsSL -D - -H "Authorization: Bearer $token" https://api.github.com/user --write-out '\nHTTP_CODE:%{http_code}\n' 2>&1)
+code=$(printf '%s\n' "$resp" | sed -n 's/^HTTP_CODE:\(.*\)$/\1/p' | tail -1)
+body=$(printf '%s\n' "$resp" | sed '/^HTTP_CODE:/d' | awk 'BEGIN{h=1} /^\r?$/{h=0;next} h==0{print}')
+scopes_hdr=$(printf '%s\n' "$resp" | grep -i '^x-oauth-scopes:' | head -1 | sed -E 's/^[^:]+: *//; s/[\r ]+$//')
+login=$(printf '%s\n' "$body" | jq -r '.login // empty' 2>/dev/null)
 if [ "$code" != "200" ] || [ -z "$login" ]; then
   echo "error: token authentication failed (http $code)" >&2
   exit 1
 fi
+if [ -z "$scopes_hdr" ]; then
+  echo "error: token has no OAuth scopes (likely a fine-grained PAT)." >&2
+  echo "       This script needs a classic PAT with: ${required_scopes[*]}" >&2
+  echo "       Create one at https://github.com/settings/tokens/new" >&2
+  exit 1
+fi
+missing=()
+for s in "${required_scopes[@]}"; do
+  printf '%s' "$scopes_hdr" | tr ',' '\n' | tr -d ' ' | grep -qx "$s" || missing+=("$s")
+done
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "error: token is missing required OAuth scope(s): ${missing[*]}" >&2
+  echo "       Token has: $scopes_hdr" >&2
+  echo "       Edit token scopes at https://github.com/settings/tokens" >&2
+  exit 1
+fi
 echo "token authenticates as: $login"
+echo "token scopes: $scopes_hdr"
 
 echo "discovering onboarded repos in: $owners"
 repos=()
