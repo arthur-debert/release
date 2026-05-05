@@ -24,7 +24,11 @@ constraints that apply when *working on this repo itself*.
 
 ### `bin/` is on $PATH via dodot
 
-`~/h/dotfiles/release/bin/` is a real directory containing one symlink per script back to `~/h/release/bin/<script>`. dodot picks up that real directory through its `path` handler and prepends it to `$PATH` on shell init. **When you add a new script to `bin/`, also create the matching symlink in `~/h/dotfiles/release/bin/`** — otherwise the script exists but isn't reachable by name. (One-liner: `cd ~/h/dotfiles/release/bin && ln -s ~/h/release/bin/<script> <script>`.) The earlier `dotfiles/release/bin -> ~/h/release/bin` single-symlink layout silently routed through dodot's symlink handler instead of the path handler — broken; do not regress.
+`~/h/dotfiles/release/profile.zsh` exports `~/h/release/bin` directly onto `$PATH`, sourced at login by dodot's shell handler. **Drop a new executable into `bin/`, mark it `+x`, and it's reachable by name in any new shell** — no per-script symlink mirror needed.
+
+Earlier attempts that *don't* work and shouldn't be reintroduced:
+- `dotfiles/release/bin -> ~/h/release/bin` (a top-level symlink): dodot routes top-level symlinks through the **symlink** handler, not the **path** handler, so the dir never lands on `$PATH`.
+- A real `dotfiles/release/bin/` of per-script symlinks: works (path handler kicks in) but creates a maintenance tax — every new script needs a matching symlink. The `profile.zsh` approach is strictly cleaner.
 
 ## Versioning contract — do not break
 
