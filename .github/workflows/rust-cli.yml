@@ -476,7 +476,12 @@ jobs:
 
   homebrew-formula:
     needs: [prepare, build-binaries]
-    if: always() && !failure() && !cancelled() && inputs.brew
+    # Skip prereleases: brew tap is the stable channel. Pushing an
+    # `rc.N` formula replaces the stable formula for `brew install`
+    # users with a non-stable build, which is almost never what we
+    # want. Consumers that publish only-rc / want-rc-on-brew can lift
+    # this gate via an input later if a real use case shows up.
+    if: always() && !failure() && !cancelled() && inputs.brew && needs.prepare.outputs.prerelease != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Check tap token

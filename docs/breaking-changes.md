@@ -9,6 +9,23 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.2.1 (2026-05-06) — fix: skip homebrew-formula on prereleases
+
+**Type:** PATCH (bug fix). The previous behavior pushed `vX.Y.Z-rc.N`
+formulas to the Homebrew tap, replacing the stable formula. `brew
+install <tap>/<formula>` users would silently end up on a prerelease
+build — almost always not what's wanted. Brew has no native expression
+for "this is a prerelease channel," so the right behavior is to skip
+the tap push entirely on prereleases and let the stable release rebuild
+the formula.
+
+Caught during the v1.2.0 canary verification on lex-fmt/lex#510 (the
+`v0.10.4-rc.1` test pushed an rc formula to `arthur-debert/homebrew-tools`
+that had to be manually reverted).
+
+If a consumer ever genuinely wants rc-to-brew, lift the gate via a new
+opt-in input — don't roll back this default.
+
 ## v1.2.0 (2026-05-06) — additive: WASM/npm publish slot
 
 **Type:** MINOR (additive, no consumer breakage). Existing callers
