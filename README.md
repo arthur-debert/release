@@ -80,10 +80,10 @@ Mechanism legend:
 
 Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` parenthetical context.
 
-| Stack          | format/lint     | unit tests | e2e             | build              | sign       | gh release        | pkg publish       | dist: brew       | dist: apt | security→patch |
-|----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|-------------------|------------------|-----------|----------------|
-| rust-lib       | W 📋            | W 📋       | —               | (cargo build)      | —          | (no binaries)     | A ✅ crates.io    | —                | —         | A 📋           |
-| rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io    | A ✅ shared tap  | A 📋      | A 📋           |
+| Stack          | format/lint     | unit tests | e2e             | build              | sign       | gh release        | pkg publish                          | dist: brew       | dist: apt | security→patch |
+|----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|--------------------------------------|------------------|-----------|----------------|
+| rust-lib       | W 📋            | W 📋       | —               | (cargo build)      | —          | (no binaries)     | A ✅ crates.io                       | —                | —         | A 📋           |
+| rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | W 📋            | W 📋       | W 📋 playwright | W 📋 builder       | A 📋 mac   | W 📋              | (auto-updater)    | (cask, future)   | —         | A 📋           |
 | vscode-ext     | W 📋            | W 📋       | W 📋 ext-host   | W 📋 vsce package  | —          | W 📋              | A 📋 marketplace  | —                | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
@@ -99,6 +99,13 @@ consumers what to expect when a row ships (mostly W = thin caller,
 W+A = thin caller plus stack-specific composite for sign/publish).
 `—` cells are deliberate — the role doesn't apply to that stack — so
 nobody goes looking for missing pieces.
+
+¹ **rust-cli + npm (wasm)** — opt-in slot for Rust workspaces with a
+wasm-bindgen crate consumed by JS/TS. Set `wasm-package: <member>` on
+the caller and the canonical pipeline builds via `wasm-pack` once,
+attaches `<member>-wasm.tar.gz` to the GH release, and `npm publish`es
+the same artifact (no second Rust install, shares the warm cache). See
+`docs/per-category/rust-cli.md` §WASM.
 
 ## Status & next-up
 

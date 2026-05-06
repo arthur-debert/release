@@ -83,6 +83,24 @@ on:
         required: false
         default: 'CHANGELOG.md'
 
+      wasm-package:
+        description: 'Workspace member with a wasm-bindgen crate to build via wasm-pack and publish to npm. Empty = no WASM build (default).'
+        type: string
+        required: false
+        default: ''
+
+      wasm-pack-target:
+        description: 'wasm-pack --target value: bundler|web|nodejs|no-modules. Only consulted when wasm-package is set.'
+        type: string
+        required: false
+        default: 'bundler'
+
+      wasm-npm-scope:
+        description: 'npm org scope (publishes as @<scope>/<wasm-package>). Empty = unscoped publish. Only consulted when wasm-package is set.'
+        type: string
+        required: false
+        default: ''
+
     secrets:
       RELEASE_TOKEN:
         description: 'PAT with repo scope for default-branch push (bypasses ruleset).'
@@ -100,6 +118,9 @@ on:
       CRATES_IO_KEY:
         required: false
       HOMEBREW_TAP_TOKEN:
+        required: false
+      NPM_TOKEN:
+        description: 'npm publish token. Only required when wasm-package is set.'
         required: false
 
 permissions:
@@ -559,3 +580,125 @@ jobs:
           formula-name: ${{ inputs.bin-name }}
           formula-path: out/${{ inputs.bin-name }}.rb
           version: ${{ needs.prepare.outputs.version }}
+
+  build-wasm:
+    # Build a wasm-bindgen workspace member via wasm-pack and attach the
+    # tarball to the GH release alongside native binaries. Downstream
+    # publish-npm pulls the same artifact instead of rebuilding.
+    needs: [prepare, create-release]
+    if: always() && !failure() && !cancelled() && inputs.wasm-package != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules }}
+
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: Build wasm package
+        id: build
+        shell: bash
+        env:
+          WASM_PACKAGE: ${{ inputs.wasm-package }}
+          WASM_TARGET: ${{ inputs.wasm-pack-target }}
+          WASM_SCOPE: ${{ inputs.wasm-npm-scope }}
+          TAG_VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Locate the workspace member's directory via cargo metadata so the
+          # consumer doesn't have to encode `crates/<name>/` in the input.
+          crate_path=$(cargo metadata --no-deps --format-version=1 \
+            | jq -er --arg n "$WASM_PACKAGE" \
+                '.packages[] | select(.name == $n) | .manifest_path' \
+            | xargs dirname)
+          echo "crate-path=$crate_path" >> "$GITHUB_OUTPUT"
+
+          # Scope is optional. wasm-pack rewrites package.json's name to
+          # @<scope>/<name> when --scope is passed; when unset, npm publishes
+          # the bare crate name.
+          scope_flag=()
+          [ -n "$WASM_SCOPE" ] && scope_flag=(--scope "$WASM_SCOPE")
+
+          wasm-pack build "$crate_path" \
+            --target "$WASM_TARGET" \
+            --out-dir pkg \
+            "${scope_flag[@]}"
+
+          # Paranoia guard: prepare just bumped Cargo.toml to TAG_VERSION,
+          # wasm-pack reads that, so package.json should match. If it
+          # doesn't, something upstream is wrong — fail loudly now rather
+          # than push a mismatched npm version.
+          pkg_version=$(jq -r .version "$crate_path/pkg/package.json")
+          if [ "$TAG_VERSION" != "$pkg_version" ]; then
+            echo "::error::Tag version ($TAG_VERSION) does not match wasm-pack package.json version ($pkg_version)"
+            exit 1
+          fi
+
+          # Tar the pkg/ dir as the GH release asset. Name mirrors native
+          # binary naming (no version in filename — version is in the tag).
+          tar -czf "${WASM_PACKAGE}-wasm.tar.gz" -C "$crate_path" pkg
+
+      - name: Upload wasm tarball to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          WASM_PACKAGE: ${{ inputs.wasm-package }}
+        run: |
+          gh release upload "v$VERSION" "${WASM_PACKAGE}-wasm.tar.gz" --clobber
+
+      - name: Upload wasm pkg as workflow artifact (consumed by publish-npm)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: ${{ steps.build.outputs.crate-path }}/pkg/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-npm:
+    # Publish the wasm-pack output to npm. Pulls the prebuilt pkg/ from
+    # the build-wasm artifact rather than reinstalling Rust + recompiling.
+    needs: [prepare, build-wasm]
+    if: always() && !failure() && !cancelled() && inputs.wasm-package != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check npm token
+        id: guard
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NPM_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN not configured — skipping npm publish. The wasm tarball is still attached to the GH release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download wasm pkg
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-pkg
+          path: pkg
+
+      - name: Publish to npm
+        if: steps.guard.outputs.skip != 'true'
+        working-directory: pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
