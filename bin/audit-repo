@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# Audit a single repo against the portfolio "good state" baseline.
+#
+# Usage:
+#   audit-repo                       # current git/gh repo
+#   audit-repo --repo owner/name
+#   audit-repo --json                # machine-readable
+#   audit-repo --quiet               # only print failing/warning rows
+#
+# Exit codes:
+#   0  — all checks pass
+#   1  — at least one check failed
+#   2  — at least one check warned (no fails)
+#   64 — bad usage
+#
+# Each check returns one of: PASS, FAIL, WARN, SKIP. Skips are for
+# checks that don't apply (e.g. private-module auth on a repo with no
+# go.mod). Warns are findings worth surfacing but not necessarily
+# blocking (e.g. dependabot.yml missing entirely vs. having an
+# off-policy ecosystem).
+#
+# Checks performed:
+#   1. ruleset           — main-branch-protection ruleset present
+#   2. release_token     — RELEASE_TOKEN secret set
+#   3. copilot_review    — .github/workflows/copilot-review.yml on default branch
+#   4. codeowners        — .github/CODEOWNERS on default branch
+#   5. dep_security      — Dependabot vulnerability-alerts enabled
+#   6. dep_policy        — .github/dependabot.yml respects portfolio policy
+#                          (no npm/cargo/pip/etc. ecosystem; github-actions only)
+#   7. ci_main_green     — most recent default-branch CI run succeeded
+#   8. private_mod_auth  — if go.mod has private arthur-debert/* deps, workflows
+#                          configure git insteadOf with RELEASE_TOKEN
+
+set -uo pipefail
+
+repo=""
+json_mode=0
+quiet=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --repo)   repo=$2; shift 2 ;;
+    --json)   json_mode=1; shift ;;
+    --quiet)  quiet=1; shift ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+if [ -z "$repo" ]; then
+  repo=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || {
+    echo "error: not in a gh-recognized repo and --repo not given" >&2
+    exit 64
+  }
+fi
+
+# Result accumulator: each row is "STATUS|name|message"
+results=()
+
+record() {
+  results+=("$1|$2|$3")
+}
+
+# --- Check 1: ruleset ---
+check_ruleset() {
+  local rs id
+  rs=$(gh api "repos/$repo/rulesets" 2>/dev/null) || { record FAIL ruleset "API error querying rulesets"; return; }
+  id=$(jq -r '.[]? | select(.name=="main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
+  if [ -n "$id" ]; then
+    record PASS ruleset "id=$id"
+  else
+    record FAIL ruleset "main-branch-protection ruleset not applied (run apply-ruleset)"
+  fi
+}
+
+# --- Check 2: RELEASE_TOKEN secret ---
+check_release_token() {
+  if gh secret list -R "$repo" 2>/dev/null | grep -qE '^RELEASE_TOKEN[[:space:]]'; then
+    record PASS release_token "set"
+  else
+    record FAIL release_token "RELEASE_TOKEN not set (run install-release-token)"
+  fi
+}
+
+# --- Check 3: copilot-review.yml workflow on default branch ---
+# Two sub-checks: file presence + pointer points at the working reusable
+# workflow (arthur-debert/release@v1, which uses RELEASE_TOKEN). The old
+# pointer (arthur-debert/gh-dagentic@main) silently no-ops because
+# GITHUB_TOKEN can't request Copilot reviews.
+check_copilot_review() {
+  local body
+  body=$(gh api "repos/$repo/contents/.github/workflows/copilot-review.yml" --jq .content 2>/dev/null \
+         | base64 -d 2>/dev/null) || true
+  if [ -z "$body" ]; then
+    record FAIL copilot_review ".github/workflows/copilot-review.yml missing on default branch"
+    return
+  fi
+  if printf '%s\n' "$body" | grep -q 'arthur-debert/release/.github/workflows/copilot-review.yml@'; then
+    record PASS copilot_review "present, points at release/@v1 (fixed)"
+  elif printf '%s\n' "$body" | grep -q 'arthur-debert/gh-dagentic/.github/workflows/copilot-review.yml@'; then
+    record FAIL copilot_review "present but points at gh-dagentic (broken — silently no-ops Copilot attach)"
+  else
+    record WARN copilot_review "present but unknown reusable-workflow pointer"
+  fi
+}
+
+# --- Check 4: CODEOWNERS on default branch ---
+check_codeowners() {
+  if gh api "repos/$repo/contents/.github/CODEOWNERS" >/dev/null 2>&1 \
+     || gh api "repos/$repo/contents/CODEOWNERS" >/dev/null 2>&1; then
+    record PASS codeowners "present"
+  else
+    record WARN codeowners "CODEOWNERS missing"
+  fi
+}
+
+# --- Check 5: Dependabot security alerts ---
+check_dep_security() {
+  local code
+  code=$(gh api -i "repos/$repo/vulnerability-alerts" 2>&1 | head -1 | awk '{print $2}')
+  if [ "$code" = "204" ]; then
+    record PASS dep_security "alerts enabled"
+  elif [ "$code" = "404" ]; then
+    record FAIL dep_security "alerts disabled (run enable-dependabot-security)"
+  else
+    record WARN dep_security "unexpected status $code"
+  fi
+}
+
+# --- Check 6: dependabot.yml policy compliance ---
+check_dep_policy() {
+  local content
+  content=$(gh api "repos/$repo/contents/.github/dependabot.yml" --jq .content 2>/dev/null | base64 -d 2>/dev/null) || true
+  if [ -z "$content" ]; then
+    record WARN dep_policy "no .github/dependabot.yml (won't get GH Actions freshness)"
+    return
+  fi
+  # Find ecosystems other than github-actions. Per portfolio policy, only
+  # github-actions freshness is allowed. App-dep ecosystems (npm, cargo,
+  # pip, gomod, etc.) violate the policy.
+  local off_policy
+  off_policy=$(printf '%s\n' "$content" | grep -E '^[[:space:]]*-[[:space:]]*package-ecosystem:' \
+               | grep -vE 'github-actions' | sed -E 's/.*package-ecosystem:[[:space:]]*//' \
+               | tr -d '"'"'" | sort -u | tr '\n' ',' | sed 's/,$//')
+  if [ -z "$off_policy" ]; then
+    record PASS dep_policy "github-actions only"
+  else
+    record FAIL dep_policy "off-policy ecosystems present: $off_policy"
+  fi
+}
+
+# --- Check 7: most-recent default-branch CI run was success ---
+check_ci_main_green() {
+  local default_branch latest
+  default_branch=$(gh api "repos/$repo" --jq .default_branch 2>/dev/null)
+  [ -z "$default_branch" ] && { record WARN ci_main_green "could not determine default branch"; return; }
+  # Look at non-copilot-review runs (those don't gate). Take the most recent
+  # push event on default branch.
+  latest=$(gh api "repos/$repo/actions/runs?branch=$default_branch&event=push&per_page=20" \
+           --jq '[.workflow_runs[] | select(.name != "Copilot Review")][0] | {conclusion, name, html_url}' 2>/dev/null)
+  if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+    record WARN ci_main_green "no push runs found on $default_branch"
+    return
+  fi
+  local conclusion name
+  conclusion=$(jq -r .conclusion <<<"$latest")
+  name=$(jq -r .name <<<"$latest")
+  case "$conclusion" in
+    success)   record PASS ci_main_green "latest '$name' run on $default_branch: success" ;;
+    failure)   record FAIL ci_main_green "latest '$name' run on $default_branch: failure (CI broken on main)" ;;
+    cancelled) record WARN ci_main_green "latest '$name' run on $default_branch: cancelled" ;;
+    *)         record WARN ci_main_green "latest '$name' run on $default_branch: $conclusion" ;;
+  esac
+}
+
+# --- Check 8: private go module auth in CI ---
+check_private_mod_auth() {
+  local gomod
+  gomod=$(gh api "repos/$repo/contents/go.mod" --jq .content 2>/dev/null | base64 -d 2>/dev/null) || true
+  if [ -z "$gomod" ]; then
+    record SKIP private_mod_auth "no go.mod"
+    return
+  fi
+  # Check whether go.mod requires arthur-debert/* deps that might be private.
+  # Skip the `module github.com/arthur-debert/X` line — that's the repo's own
+  # module declaration, not a dependency. Real deps appear inside `require (...)`
+  # blocks or single-line `require github.com/...` statements.
+  local refs
+  refs=$(printf '%s\n' "$gomod" | grep -vE '^\s*module\s+' \
+         | grep -E '^\s*(require\s+)?github\.com/arthur-debert/' | head -5)
+  if [ -z "$refs" ]; then
+    record SKIP private_mod_auth "no arthur-debert/* go deps"
+    return
+  fi
+  # Scan all workflow files on default branch for git insteadOf+RELEASE_TOKEN.
+  local files has_auth=0
+  files=$(gh api "repos/$repo/contents/.github/workflows" --jq '.[]?.name' 2>/dev/null) || true
+  for f in $files; do
+    [ "$f" = "copilot-review.yml" ] && continue
+    local body
+    body=$(gh api "repos/$repo/contents/.github/workflows/$f" --jq .content 2>/dev/null | base64 -d 2>/dev/null) || continue
+    if printf '%s\n' "$body" | grep -qE 'insteadOf.*github\.com' \
+       && printf '%s\n' "$body" | grep -q 'RELEASE_TOKEN'; then
+      has_auth=1
+      break
+    fi
+  done
+  if [ "$has_auth" = "1" ]; then
+    record PASS private_mod_auth "git insteadOf+RELEASE_TOKEN configured"
+  else
+    record FAIL private_mod_auth "arthur-debert/* deps in go.mod but no insteadOf+RELEASE_TOKEN in workflows"
+  fi
+}
+
+# Run all checks
+check_ruleset
+check_release_token
+check_copilot_review
+check_codeowners
+check_dep_security
+check_dep_policy
+check_ci_main_green
+check_private_mod_auth
+
+# --- Output ---
+if [ "$json_mode" = "1" ]; then
+  printf '{"repo":"%s","checks":[' "$repo"
+  first=1
+  for r in "${results[@]}"; do
+    IFS='|' read -r status name msg <<<"$r"
+    [ "$first" = 0 ] && printf ','
+    first=0
+    printf '{"name":"%s","status":"%s","message":"%s"}' \
+      "$name" "$status" "$(printf '%s' "$msg" | sed 's/"/\\"/g')"
+  done
+  printf ']}\n'
+else
+  printf '%s\n' "$repo"
+  for r in "${results[@]}"; do
+    IFS='|' read -r status name msg <<<"$r"
+    if [ "$quiet" = "1" ] && [ "$status" = "PASS" ]; then continue; fi
+    if [ "$quiet" = "1" ] && [ "$status" = "SKIP" ]; then continue; fi
+    printf '  [%-4s] %-20s %s\n' "$status" "$name" "$msg"
+  done
+fi
+
+# Exit code
+fails=0
+warns=0
+for r in "${results[@]}"; do
+  IFS='|' read -r status _ _ <<<"$r"
+  case "$status" in
+    FAIL) fails=$((fails+1)) ;;
+    WARN) warns=$((warns+1)) ;;
+  esac
+done
+
+if [ "$fails" -gt 0 ]; then exit 1; fi
+if [ "$warns" -gt 0 ]; then exit 2; fi
+exit 0
