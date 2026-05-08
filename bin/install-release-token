@@ -97,18 +97,38 @@ printf '  %s\n' "${repos[@]}"
 echo
 
 failed=0
+verified_ok=0
+verified_missing=0
 for repo in "${repos[@]}"; do
-  if printf '%s' "$token" | gh secret set RELEASE_TOKEN -R "$repo" 2>/dev/null; then
-    printf '  ok   %s\n' "$repo"
-  else
-    printf '  FAIL %s\n' "$repo"
+  # Capture stderr so failures are visible — past versions silently
+  # swallowed errors and reported success even when the secret didn't
+  # land, which led to "install-release-token said ok but the secret
+  # isn't there" debugging cycles.
+  set_err=$(printf '%s' "$token" | gh secret set RELEASE_TOKEN -R "$repo" 2>&1 1>/dev/null)
+  set_rc=$?
+  if [ "$set_rc" -ne 0 ]; then
+    printf '  FAIL %s — gh secret set: %s\n' "$repo" "$set_err" >&2
     failed=$((failed + 1))
+    continue
+  fi
+
+  # Verify by re-listing — gh secret set returns 0 but doesn't
+  # always actually persist (e.g. write race, CI-hash mismatch).
+  if gh secret list -R "$repo" 2>/dev/null | grep -qE '^RELEASE_TOKEN[[:space:]]'; then
+    printf '  ok   %s\n' "$repo"
+    verified_ok=$((verified_ok + 1))
+  else
+    printf '  FAIL %s — secret set returned 0 but RELEASE_TOKEN absent on re-list\n' "$repo" >&2
+    failed=$((failed + 1))
+    verified_missing=$((verified_missing + 1))
   fi
 done
 
 echo
+echo "summary: ${#repos[@]} repos, $verified_ok verified set, $failed failure(s)"
+if [ "$verified_missing" -gt 0 ]; then
+  echo "  — $verified_missing repo(s) returned success but secret didn't persist; investigate auth/permissions" >&2
+fi
 if [ "$failed" -gt 0 ]; then
-  echo "summary: ${#repos[@]} repos, $failed failures" >&2
   exit 1
 fi
-echo "summary: ${#repos[@]} repos, all set"
