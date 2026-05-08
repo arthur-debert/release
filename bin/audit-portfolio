@@ -36,7 +36,26 @@ done
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 audit_repo="$script_dir/audit-repo"
+exclude_file="$script_dir/../audit-exclude.yml"
 [ -x "$audit_repo" ] || { echo "error: $audit_repo not found or not executable" >&2; exit 1; }
+
+# Build exclude set from audit-exclude.yml (lines like "  - repo: owner/name").
+declare -a excluded_repos
+if [ -f "$exclude_file" ]; then
+  while IFS= read -r line; do
+    excluded_repos+=("$line")
+  done < <(grep -E '^[[:space:]]*-[[:space:]]+repo:' "$exclude_file" \
+           | sed -E 's/^[[:space:]]*-[[:space:]]+repo:[[:space:]]*//; s/[[:space:]]*$//')
+fi
+
+is_excluded() {
+  local needle=$1
+  local x
+  for x in "${excluded_repos[@]}"; do
+    [ "$x" = "$needle" ] && return 0
+  done
+  return 1
+}
 
 # Discover repos
 repos=()
@@ -48,7 +67,12 @@ else
     while read -r r; do
       rs=$(gh api "repos/$r/rulesets" 2>/dev/null || echo '[]')
       id=$(jq -r '.[]? | select(.name=="main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
-      [ -n "$id" ] && repos+=("$r")
+      [ -n "$id" ] || continue
+      if is_excluded "$r"; then
+        [ "$json_mode" = "0" ] && echo "  skipping excluded: $r" >&2
+        continue
+      fi
+      repos+=("$r")
     done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
   done
 fi
