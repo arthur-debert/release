@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# Audit every onboarded repo across arthur-debert and lex-fmt against the
+# portfolio "good state" baseline. Auto-discovers repos via the
+# main-branch-protection ruleset (same logic as install-release-token).
+#
+# Usage:
+#   audit-portfolio                              # auto-discover, table output
+#   audit-portfolio --owners arthur-debert
+#   audit-portfolio --repos arthur-debert/dodot,lex-fmt/lex
+#   audit-portfolio --json                       # one JSON object per line
+#   audit-portfolio --only-failing               # hide all-green repos in table
+#
+# Exit codes:
+#   0  — every audited repo all-green
+#   1  — at least one repo has FAIL
+#   2  — at least one repo has WARN (no FAILs)
+#   64 — bad usage
+
+set -uo pipefail
+
+owners="arthur-debert,lex-fmt"
+explicit_repos=""
+json_mode=0
+only_failing=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --owners)       owners=$2; shift 2 ;;
+    --repos)        explicit_repos=$2; shift 2 ;;
+    --json)         json_mode=1; shift ;;
+    --only-failing) only_failing=1; shift ;;
+    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+audit_repo="$script_dir/audit-repo"
+[ -x "$audit_repo" ] || { echo "error: $audit_repo not found or not executable" >&2; exit 1; }
+
+# Discover repos
+repos=()
+if [ -n "$explicit_repos" ]; then
+  IFS=',' read -ra repos <<< "$explicit_repos"
+else
+  [ "$json_mode" = "0" ] && echo "discovering onboarded repos in: $owners" >&2
+  for owner in $(echo "$owners" | tr ',' ' '); do
+    while read -r r; do
+      rs=$(gh api "repos/$r/rulesets" 2>/dev/null || echo '[]')
+      id=$(jq -r '.[]? | select(.name=="main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
+      [ -n "$id" ] && repos+=("$r")
+    done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
+  done
+fi
+
+if [ ${#repos[@]} -eq 0 ]; then
+  echo "no onboarded repos found" >&2
+  exit 1
+fi
+
+[ "$json_mode" = "0" ] && echo "auditing ${#repos[@]} repo(s)..." >&2
+
+# Run audit-repo for each, capture status counts
+declare -a summary_rows
+declare -a detail_repos
+total_fails=0
+total_warns=0
+
+for r in "${repos[@]}"; do
+  if [ "$json_mode" = "1" ]; then
+    "$audit_repo" --repo "$r" --json
+    continue
+  fi
+
+  out=$("$audit_repo" --repo "$r" 2>&1)
+  ec=$?
+  fails=$(printf '%s\n' "$out" | grep -cE '^\s*\[FAIL\]')
+  warns=$(printf '%s\n' "$out" | grep -cE '^\s*\[WARN\]')
+  summary_rows+=("$ec|$fails|$warns|$r")
+  if [ "$fails" -gt 0 ] || [ "$warns" -gt 0 ]; then
+    detail_repos+=("$r")
+  fi
+  total_fails=$((total_fails + fails))
+  total_warns=$((total_warns + warns))
+done
+
+if [ "$json_mode" = "1" ]; then
+  exit 0
+fi
+
+# --- Table summary ---
+echo
+printf '%-40s %5s %5s %s\n' "REPO" "FAIL" "WARN" "STATUS"
+printf '%-40s %5s %5s %s\n' "----" "----" "----" "------"
+for row in "${summary_rows[@]}"; do
+  IFS='|' read -r ec fails warns r <<<"$row"
+  if [ "$only_failing" = "1" ] && [ "$fails" = "0" ] && [ "$warns" = "0" ]; then
+    continue
+  fi
+  case "$ec" in
+    0) status="green" ;;
+    1) status="FAIL" ;;
+    2) status="warn" ;;
+    *) status="?($ec)" ;;
+  esac
+  printf '%-40s %5s %5s %s\n' "$r" "$fails" "$warns" "$status"
+done
+
+# --- Detail view: re-invoke audit-repo --quiet for problem repos ---
+if [ "${#detail_repos[@]}" -gt 0 ]; then
+  echo
+  echo "=== details for repos with failures or warnings ==="
+  for r in "${detail_repos[@]}"; do
+    echo
+    "$audit_repo" --repo "$r" --quiet
+  done
+fi
+
+# --- Summary line ---
+printf 'summary: %d repo(s), %d failure(s), %d warning(s)\n' "${#repos[@]}" "$total_fails" "$total_warns"
+
+if [ "$total_fails" -gt 0 ]; then exit 1; fi
+if [ "$total_warns" -gt 0 ]; then exit 2; fi
+exit 0
