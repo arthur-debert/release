@@ -181,9 +181,13 @@ check_private_mod_auth() {
     record SKIP private_mod_auth "no go.mod"
     return
   fi
-  # Check whether go.mod references arthur-debert/* deps that might be private.
+  # Check whether go.mod requires arthur-debert/* deps that might be private.
+  # Skip the `module github.com/arthur-debert/X` line — that's the repo's own
+  # module declaration, not a dependency. Real deps appear inside `require (...)`
+  # blocks or single-line `require github.com/...` statements.
   local refs
-  refs=$(printf '%s\n' "$gomod" | grep -E 'github\.com/arthur-debert/' | head -5)
+  refs=$(printf '%s\n' "$gomod" | grep -vE '^\s*module\s+' \
+         | grep -E '^\s*(require\s+)?github\.com/arthur-debert/' | head -5)
   if [ -z "$refs" ]; then
     record SKIP private_mod_auth "no arthur-debert/* go deps"
     return
