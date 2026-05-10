@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# Close Dependabot PRs whose ecosystem is no longer enabled in the
+# target repo's dependabot.yml.
+#
+# Why: when a repo's dependabot.yml drops an ecosystem (e.g. switching
+# from full freshness to github-actions-only per portfolio policy),
+# Dependabot stops opening *new* PRs for that ecosystem but does not
+# close the ones it already opened. They linger as policy-violating
+# noise.
+#
+# This sweep:
+#   1. discovers onboarded repos (same logic as audit-portfolio)
+#   2. for each, reads dependabot.yml to get the allowed ecosystem set
+#   3. lists open Dependabot PRs and identifies each PR's ecosystem
+#      from its branch name (`dependabot/<ecosystem-slug>/...`)
+#   4. closes any PR whose ecosystem is not in the allowed set, with
+#      a policy-pointer comment
+#
+# Usage:
+#   sweep-stale-dependabot-prs                          # all onboarded
+#   sweep-stale-dependabot-prs --repos owner/repo,...   # specific
+#   sweep-stale-dependabot-prs --dry-run                # just report
+#
+# Exit codes:
+#   0  — sweep complete (zero or more PRs closed)
+#   1  — at least one close failed
+#   64 — bad usage
+
+set -uo pipefail
+
+owners="arthur-debert,lex-fmt"
+explicit_repos=""
+dry_run=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --owners)  owners=$2; shift 2 ;;
+    --repos)   explicit_repos=$2; shift 2 ;;
+    --dry-run) dry_run=1; shift ;;
+    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exclude_file="$script_dir/../audit-exclude.yml"
+
+declare -a excluded_repos
+if [ -f "$exclude_file" ]; then
+  while IFS= read -r line; do
+    excluded_repos+=("$line")
+  done < <(grep -E '^[[:space:]]*-[[:space:]]+repo:' "$exclude_file" \
+           | sed -E 's/^[[:space:]]*-[[:space:]]+repo:[[:space:]]*//; s/[[:space:]]*$//')
+fi
+
+is_excluded() {
+  local needle=$1 x
+  for x in "${excluded_repos[@]}"; do
+    [ "$x" = "$needle" ] && return 0
+  done
+  return 1
+}
+
+# Map a dependabot.yml `package-ecosystem` value to the branch slug
+# Dependabot uses (`dependabot/<slug>/...`).
+ecosystem_to_branch_slug() {
+  case "$1" in
+    npm)            echo "npm_and_yarn" ;;
+    github-actions) echo "github_actions" ;;
+    *)              echo "$1" ;;
+  esac
+}
+
+# Discover repos
+repos=()
+if [ -n "$explicit_repos" ]; then
+  IFS=',' read -ra repos <<< "$explicit_repos"
+else
+  echo "discovering onboarded repos in: $owners" >&2
+  for owner in $(echo "$owners" | tr ',' ' '); do
+    while read -r r; do
+      rs=$(gh api "repos/$r/rulesets" 2>/dev/null || echo '[]')
+      id=$(jq -r '.[]? | select(.name=="main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
+      [ -n "$id" ] || continue
+      if is_excluded "$r"; then
+        echo "  skipping excluded: $r" >&2
+        continue
+      fi
+      repos+=("$r")
+    done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
+  done
+fi
+
+closed_total=0
+failed_total=0
+
+policy_comment=$(cat <<'EOF'
+Closing per portfolio Dependabot policy (arthur-debert/release README §Dependabot policy): app-dependency freshness is deliberately disabled portfolio-wide; only github-actions freshness and security updates are automated. Security exposure for app deps is covered by Dependabot security updates (enabled via the GitHub API toggle, not dependabot.yml).
+
+This PR predates the dependabot.yml config change that dropped the ecosystem — Dependabot doesn't close existing PRs when its config changes. Auto-closed by `bin/sweep-stale-dependabot-prs`.
+EOF
+)
+
+for repo in "${repos[@]}"; do
+  # Build allowed slug set from dependabot.yml.
+  allowed=()
+  body=$(gh api "repos/$repo/contents/.github/dependabot.yml" --jq .content 2>/dev/null \
+         | base64 -d 2>/dev/null) || true
+  if [ -n "$body" ]; then
+    while IFS= read -r eco; do
+      slug=$(ecosystem_to_branch_slug "$eco")
+      allowed+=("$slug")
+    done < <(printf '%s\n' "$body" | grep -E '^[[:space:]]*-[[:space:]]+package-ecosystem:' \
+             | sed -E 's/.*package-ecosystem:[[:space:]]*//' | tr -d '"'"'" )
+  fi
+
+  # List open Dependabot PRs.
+  prs=$(gh pr list --repo "$repo" --state open --author 'app/dependabot' --limit 100 \
+        --json number,title,headRefName 2>/dev/null) || prs='[]'
+  count=$(jq 'length' <<<"$prs")
+  [ "$count" = "0" ] && continue
+
+  echo "=== $repo (allowed: ${allowed[*]:-none}) ==="
+  echo "  $count open Dependabot PR(s)"
+
+  while IFS=$'\t' read -r num head_ref title; do
+    eco_slug=$(printf '%s\n' "$head_ref" | awk -F/ '{print $2}')
+    keep=0
+    for a in "${allowed[@]}"; do
+      [ "$a" = "$eco_slug" ] && keep=1 && break
+    done
+    if [ "$keep" = "1" ]; then
+      printf '    keep   #%s [%s] %s\n' "$num" "$eco_slug" "$title"
+      continue
+    fi
+    if [ "$dry_run" = "1" ]; then
+      printf '    CLOSE  #%s [%s] %s (dry-run)\n' "$num" "$eco_slug" "$title"
+      continue
+    fi
+    if gh pr close "$num" --repo "$repo" --delete-branch \
+         --comment "$policy_comment" >/dev/null 2>&1; then
+      printf '    closed #%s [%s] %s\n' "$num" "$eco_slug" "$title"
+      closed_total=$((closed_total + 1))
+    else
+      printf '    FAIL   #%s [%s] %s\n' "$num" "$eco_slug" "$title" >&2
+      failed_total=$((failed_total + 1))
+    fi
+  done < <(jq -r '.[] | [.number, .headRefName, .title] | @tsv' <<<"$prs")
+done
+
+echo
+echo "summary: closed $closed_total Dependabot PR(s), $failed_total failure(s)"
+[ "$failed_total" -gt 0 ] && exit 1
+exit 0
