@@ -1,7 +1,7 @@
 Phased Rollout:
 Path from where we are to the full agentic dev workflow
 
-Source location: arthur-debert/release, branch cloud, path docs/proposals/. Companion document: agentic-dev-workflow.lex captures the vision.
+Source location: arthur-debert/release, branch main, path docs/proposals/. Companion document: agentic-dev-workflow.lex captures the vision.
 
 1. Scope and shape
 

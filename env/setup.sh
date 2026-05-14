@@ -10,7 +10,7 @@
 # ------------
 #   1. Installs gh (GitHub CLI). Cloud sessions don't ship gh by default,
 #      and the pr-review-respond skill (plus any cross-repo work) needs it.
-#   2. Clones arthur-debert/release@cloud and:
+#   2. Clones arthur-debert/release@main and:
 #        - copies skills/* into ~/.claude/skills/
 #        - copies env/CLAUDE.md into ~/.claude/CLAUDE.md
 #      Both are read by Claude Code in cloud sessions at session start.
@@ -54,7 +54,7 @@
 #   Leave at the default "Trusted" — the apt mirrors and github.com are
 #   in the default allowlist, so this script works without any tweaks.
 
-set -e
+set -euo pipefail
 
 # --- 1. Install gh ---------------------------------------------------------
 

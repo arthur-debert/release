@@ -1,7 +1,7 @@
 Agentic Development Workflow:
 Vision, ideal flows, and topics to rethink
 
-Source location: arthur-debert/release, branch cloud, path docs/proposals/. Companion document: phased-rollout.lex captures the execution plan.
+Source location: arthur-debert/release, branch main, path docs/proposals/. Companion document: phased-rollout.lex captures the execution plan.
 
 1. Context
 
