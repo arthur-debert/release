@@ -123,6 +123,53 @@ Order is driven by: (a) is there a consumer blocked on it today,
 (b) does shipping the row unblock several at once. We complete one
 stack vertically (every column on a row) before starting the next.
 
+## Claude Code on the web (cloud session distribution)
+
+Separate from the CI infrastructure above, this repo also distributes
+**skills** and **user-level instructions** into Claude Code on the web
+sessions across the portfolio. Cloud sessions can't reach the local
+`bin/` scripts on `$PATH`, so the same portable pieces have to live
+here in a form a fresh cloud VM can clone.
+
+How it works:
+
+1. Once per Claude env (at [claude.ai/code](https://claude.ai/code) →
+   environment settings), paste [`env/setup.sh`](env/setup.sh) into
+   the **Setup script** field. The script installs `gh` and clones
+   this repo, then copies:
+   - `skills/*` → `~/.claude/skills/` (standalone skills, picked up by
+     Claude Code at session start; no plugin install / trust prompt)
+   - `env/CLAUDE.md` → `~/.claude/CLAUDE.md` (user-level instructions,
+     loaded into every cloud session)
+2. Add `GH_TOKEN=<fine-grained PAT>` in the env vars field, scoped
+   `Contents/Issues/Pull requests: Read and write` on the related-repo
+   group. `gh` reads it automatically.
+3. (Optional, recommended) Install the
+   [Claude GitHub App](https://github.com/apps/claude) on the
+   relevant orgs for **Auto-fix** to fire on review comments.
+
+Updates land by pushing here, bumping the `# version:` header in
+`env/setup.sh`, and re-pasting in the env UI. The version-header bump
+invalidates the cached snapshot; the next session re-clones.
+
+### Currently shipped skills
+
+- **`pr-review-respond`** — reply to and resolve PR review comments
+  using `gh` + `jq`. Cloud-native alternative to the local
+  `gh-pr-resolve-thread` script. Handles both Copilot and Gemini
+  reviews; encodes pushback patterns for the four recurring wrong
+  suggestions.
+- **`lex-primer`** — primer for writing and reading `.lex` documents
+  (Lex is not Markdown; the skill teaches the syntax).
+
+### Where this is heading
+
+See [`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex)
+for the broader workflow vision and
+[`docs/proposals/phased-rollout.lex`](docs/proposals/phased-rollout.lex)
+for the execution plan. Phase 1 (this work) unifies the local-only and
+cloud-distribution mechanisms under one main branch.
+
 ## Versioning
 
 | Bump | Trigger |
@@ -152,7 +199,13 @@ scripts/             # CI scripts exec'd by composite actions ("S")
 templates/           # files templated into consumers ("T") +
                      # render templates (e.g. Homebrew formula)
 tests/fixtures/      # tiny synthetic projects per category, exercised by _ci.yml
-docs/                # consumer guide, secrets, breaking-changes log
+skills/              # standalone Claude Code skills (one dir per skill,
+                     # name = dir; cloned into ~/.claude/skills/ in
+                     # cloud sessions by env/setup.sh)
+env/                 # cloud-session env helpers — setup.sh + CLAUDE.md
+                     # paste-into-Cloud-UI script + user-level prompt
+docs/                # consumer guide, secrets, breaking-changes log,
+                     # proposals/ for spec docs and rollout plans
 examples/            # paste-ready consumer release.yml files
 ```
 
@@ -166,3 +219,5 @@ re-discovery.
 - [Secrets and onboarding](docs/secrets.md)
 - [Per-category input shapes](docs/per-category/)
 - [Breaking changes log](docs/breaking-changes.md)
+- [Agentic dev-workflow vision](docs/proposals/agentic-dev-workflow.lex)
+- [Phased rollout plan](docs/proposals/phased-rollout.lex)
