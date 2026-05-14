@@ -78,19 +78,39 @@ Note: this fetches the first 100 review threads (GraphQL caps `first` at 100). P
 
 ### 2. Reply to a comment
 
+Use `jq` to build the JSON payload, pipe to `gh api --input -`. This is the only form that reliably handles arbitrary multi-line markdown (double quotes, backticks, dollar signs, code blocks) across shells:
+
 ```sh
 COMMENT_ID=<firstCommentId from step 1>
 
-gh api "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" \
-  -X POST -f body=@- <<'EOF'
+BODY=$(cat <<'EOF'
 Reply markdown here. Multiple lines fine.
 
 For rationale-style pushbacks, end with a searchable line so future passes can find it:
 Recording for future review passes: don't ask us to <X>.
 EOF
+)
+
+jq -n --arg body "$BODY" '{body: $body}' \
+  | gh api "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" \
+      -X POST --input -
 ```
 
-`-f body=@-` reads the field from stdin, so the heredoc body can contain any characters (double quotes, backticks, dollar signs, code blocks) without shell-quoting hazards. An empty body errors out. The endpoint **does** include `pull_number` in the path — that's the documented form for replies, even though comment IDs are repo-unique.
+Why this form and not `-f body=@-` with a heredoc: empirically, `gh api ... -f body=@- <<EOF ... EOF` can silently send the literal string `@-` as the body instead of reading from stdin (observed on `gh 2.x` across `bash` and `zsh` heredoc forms — the failure mode is silent because gh returns 201 created with body `"@-"`). The `jq | gh api --input -` form avoids the ambiguity by handing gh a fully-formed JSON request body.
+
+For scripted batch replies (e.g. processing N threads in a loop), the equivalent in Python is straightforward and avoids shell quoting entirely:
+
+```python
+import json, subprocess
+subprocess.run(
+    ["gh", "api", f"repos/{owner}/{name}/pulls/{pr}/comments/{cid}/replies",
+     "-X", "POST", "--input", "-"],
+    input=json.dumps({"body": reply_text}),
+    text=True, check=True,
+)
+```
+
+The endpoint **does** include `pull_number` in the path — that's the documented form for replies, even though comment IDs are repo-unique. An empty body errors out.
 
 ### 3. Resolve the thread
 
@@ -178,5 +198,6 @@ gh pr merge "$PR" --squash --delete-branch
 - **`line` is null for outdated/multi-line comments.** Fall back to `originalLine` (the step-1 query already does this).
 - **Already-resolved thread → mutation returns `isResolved: true`.** Safe to no-op; check `isResolved` upstream if you want to skip the call entirely.
 - **Empty reply body errors out.** Always send text.
+- **`-f body=@-` with a heredoc silently posts the literal string `@-`.** The reply endpoint returns 201 created and you only notice when you read the comment back. Use `jq -n --arg body "$BODY" '{body: $body}' | gh api ... --input -` instead (see §2 above). Same pattern needed for any `gh api` call passing arbitrary multi-line content.
 - **Copilot `requested_reviewers` REST add silently no-ops.** Use `gh pr edit --add-reviewer @copilot`.
 - **Don't `--admin` merge unprompted.** If the PR is blocked by an unrelated pre-existing CI failure, surface it and ask before bypassing.
