@@ -33,8 +33,9 @@ The skill auto-gathers from the current session:
 
 - **Consumer repo** — `gh repo view --json nameWithOwner -q .nameWithOwner`
 - **Branch** — `git branch --show-current`
+- **Commit SHA** — `git rev-parse --short HEAD` (short SHA at the time of report; matters because the branch tip moves as work continues)
 - **PR** (if the branch has one) — `gh pr list --head "$branch" --json number -q '.[0].number'`
-- **Recent workflow run** — for the component being reported, e.g. for `copilot-review` we look up the most recent `copilot-review.yml` run; URL goes into the issue body.
+- **Recent workflow run** — for the component being reported, filtered to the **current branch** so the URL points at the actual incident. We try both `.yml` and `.yaml` extensions and fall through gracefully if neither matches.
 
 You supply two strings:
 
@@ -50,15 +51,19 @@ Before filing, look for an existing open issue that describes the same problem. 
 ```sh
 set -euo pipefail
 
-COMPONENT="$1"   # e.g. "copilot-review"
-SYMPTOM="$2"     # e.g. "workflow runs SUCCESS but requested_reviewers stays empty"
+# Set these before running. The snippet doesn't take positional args (avoids
+# `set -u` aborting on bare $1 / $2 when an agent pastes it into a fresh shell).
+COMPONENT="copilot-review"   # one of the canonical buckets — see "Components" below
+SYMPTOM="workflow runs SUCCESS but requested_reviewers stays empty"
 
 # Pull the last 30 OPEN issues at release. The maintainer rarely lets the
 # backlog grow past that; if it does, expand --limit.
+# The component is double-quoted inside the search string so the bracketed
+# token is treated as a single search term even if it ever contained spaces.
 RECENT_ISSUES=$(gh issue list --repo arthur-debert/release \
   --state open --limit 30 \
   --json number,title,url,createdAt \
-  --search "[${COMPONENT}] in:title")
+  --search "\"[${COMPONENT}]\" in:title")
 
 echo "$RECENT_ISSUES" | jq -r '.[] | "  #\(.number) (\(.createdAt[:10]))  \(.title)"'
 ```
@@ -76,25 +81,38 @@ When in doubt, prefer commenting — it's easier to split a clustered issue than
 If you found a match in step 1, comment with the current incident's context:
 
 ```sh
-EXISTING_ISSUE_NUMBER=<N from step 1>
+set -euo pipefail
 
-# Auto-collect the consumer context (same as for new issues).
+EXISTING_ISSUE_NUMBER=42   # replace with the #N you matched in step 1
+
+# Auto-collect the consumer context. Same shape as for new issues.
 CONSUMER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 BRANCH=$(git branch --show-current 2>/dev/null || echo "(unknown)")
+COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "(unknown)")
 PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number // empty' 2>/dev/null || true)
 PR_URL=""
 [ -n "$PR_NUMBER" ] && PR_URL="https://github.com/$CONSUMER_REPO/pull/$PR_NUMBER"
 
+# Look up the most recent workflow run on THIS branch (not most-recent
+# anywhere), so the URL points at the actual incident. Try .yml first,
+# fall back to .yaml. `|| true` keeps the chain alive if neither exists.
+recent_run_for_workflow() {
+  local wf=$1
+  gh run list --workflow "$wf" --branch "$BRANCH" --limit 1 \
+    --json url -q '.[0].url // empty' 2>/dev/null || true
+}
 RECENT_RUN=""
 case "$COMPONENT" in
   copilot-review)
-    RECENT_RUN=$(gh run list --workflow copilot-review.yml --limit 1 --json url -q '.[0].url // empty' 2>/dev/null || true) ;;
+    RECENT_RUN=$(recent_run_for_workflow copilot-review.yml)
+    [ -z "$RECENT_RUN" ] && RECENT_RUN=$(recent_run_for_workflow copilot-review.yaml) ;;
   rust-cli-release)
-    RECENT_RUN=$(gh run list --workflow release.yml --limit 1 --json url -q '.[0].url // empty' 2>/dev/null || true) ;;
+    RECENT_RUN=$(recent_run_for_workflow release.yml)
+    [ -z "$RECENT_RUN" ] && RECENT_RUN=$(recent_run_for_workflow release.yaml) ;;
 esac
 
 BODY=$(cat <<EOF
-Also hit on **${CONSUMER_REPO}**, branch \`${BRANCH}\`.
+Also hit on **${CONSUMER_REPO}**, branch \`${BRANCH}\` @ \`${COMMIT_SHA}\`.
 
 ${PR_URL:+- PR: ${PR_URL}
 }${RECENT_RUN:+- Workflow run: ${RECENT_RUN}
@@ -121,16 +139,25 @@ set -euo pipefail
 
 CONSUMER_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 BRANCH=$(git branch --show-current 2>/dev/null || echo "(unknown)")
+COMMIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "(unknown)")
 PR_NUMBER=$(gh pr list --head "$BRANCH" --json number -q '.[0].number // empty' 2>/dev/null || true)
 PR_URL=""
 [ -n "$PR_NUMBER" ] && PR_URL="https://github.com/$CONSUMER_REPO/pull/$PR_NUMBER"
 
+# Branch-scoped recent run with .yml/.yaml fallback (see step 2a's helper).
+recent_run_for_workflow() {
+  local wf=$1
+  gh run list --workflow "$wf" --branch "$BRANCH" --limit 1 \
+    --json url -q '.[0].url // empty' 2>/dev/null || true
+}
 RECENT_RUN=""
 case "$COMPONENT" in
   copilot-review)
-    RECENT_RUN=$(gh run list --workflow copilot-review.yml --limit 1 --json url -q '.[0].url // empty' 2>/dev/null || true) ;;
+    RECENT_RUN=$(recent_run_for_workflow copilot-review.yml)
+    [ -z "$RECENT_RUN" ] && RECENT_RUN=$(recent_run_for_workflow copilot-review.yaml) ;;
   rust-cli-release)
-    RECENT_RUN=$(gh run list --workflow release.yml --limit 1 --json url -q '.[0].url // empty' 2>/dev/null || true) ;;
+    RECENT_RUN=$(recent_run_for_workflow release.yml)
+    [ -z "$RECENT_RUN" ] && RECENT_RUN=$(recent_run_for_workflow release.yaml) ;;
 esac
 
 TITLE="[${COMPONENT}] ${SYMPTOM}"
@@ -138,7 +165,7 @@ TITLE="[${COMPONENT}] ${SYMPTOM}"
 BODY=$(cat <<EOF
 **Component:** ${COMPONENT}
 **Reported from:** ${CONSUMER_REPO}
-**Branch:** \`${BRANCH}\`
+**Branch:** \`${BRANCH}\` @ \`${COMMIT_SHA}\`
 ${PR_URL:+**PR:** ${PR_URL}
 }${RECENT_RUN:+**Workflow run:** ${RECENT_RUN}
 }
@@ -194,7 +221,7 @@ These are the canonical buckets; the title prefix is what step 1's `--search` fi
 
 - **PAT scope is the first thing to verify if `gh api ... /issues` returns 403.** Cloud-env PATs are typically scoped to the related-repo group only; release isn't usually in that list at first. Add `arthur-debert/release` with `Issues: Read and write` to the PAT.
 - **Don't file the same issue from N consumer sessions in N minutes.** The dedupe search is best-effort — if you opened a session for arami-core and another for arami-app and hit the same infra bug in both, the second session may file before the first one's issue has propagated through GitHub search indexing (which can lag a minute or two). If you suspect that's happened, comment on whichever issue came in first and close the duplicate.
-- **`gh issue list --search` is best-effort substring matching.** It looks at title + body. If you want strict title-prefix matching, post-filter with jq: `--jq '.[] | select(.title | startswith("[${COMPONENT}]"))'`.
+- **`gh issue list --search` is best-effort substring matching.** It looks at title + body. If you want strict title-prefix matching, post-filter with jq, using double quotes so `$COMPONENT` actually expands: `--jq ".[] | select(.title | startswith(\"[${COMPONENT}]\"))"`.
 - **Non-infra escalation is the most common misuse.** If you're escalating a code-quality nit or a test failure specific to the PR you're working on, the right loop is the PR review thread, not this skill. The PR Body and `pr-review-respond`'s pushback patterns are where that conversation belongs.
 - **The body's `<...>` placeholders are real.** A filed issue with literal `<describe what you did>` text is a bug in the agent invoking the skill, not in the skill itself. Substitute meaningful text before the `jq | gh api` step.
 
