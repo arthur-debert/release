@@ -1,11 +1,11 @@
 ---
 name: gh-repo-setup
-description: "Bring a GitHub repo up to the canonical arthur-debert/* + lex-fmt/* release-loop setup: main-branch protection ruleset (PR required, linear history, required checks), per-stack policy files (CODEOWNERS, dependabot.yml, copilot-instructions.md, pull_request_template.md, workflows/copilot-review.yml). Self-contained — no `~/h/release/bin/` dependency. Idempotent: safe to re-run; reports `ok` for already-aligned items. Use when: onboarding a new repo, verifying an existing repo is still aligned, recovering from audit-repo drift, or when an agent reports missing branch-protection or copilot auto-trigger."
+description: "Bring a GitHub repo up to the canonical arthur-debert/* + lex-fmt/* release-loop setup: main-branch protection ruleset (PR required, linear history, required checks), per-stack policy files (CODEOWNERS, dependabot.yml, copilot-instructions.md, pull_request_template.md, workflows/copilot-review.yml). No PATH dependency on `~/h/release/bin/`; does clone the public `arthur-debert/release` repo at runtime to read the canonical templates. Idempotent for the policy sweep (re-runs report `ok` for unchanged files); ruleset application is a PUT-replace so it always reports `updated`, content-diff-aware `unchanged` is a known follow-up. Use when: onboarding a new repo, verifying an existing repo is still aligned, recovering from audit-repo drift, or when an agent reports missing branch-protection or copilot auto-trigger."
 ---
 
 # gh-repo-setup
 
-Portable equivalent of `release/bin/apply-ruleset` + `release/bin/sweep-github-policy` + `release/bin/detect-stack`. Brings a repo up to the canonical release-loop setup. Idempotent: re-running on an already-set-up repo reports `ok` for every file and `unchanged` for the ruleset.
+Portable equivalent of `release/bin/apply-ruleset` + `release/bin/sweep-github-policy` + `release/bin/detect-stack`. Brings a repo up to the canonical release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
 
 ## When to use
 
@@ -17,23 +17,30 @@ If you have `~/h/release/bin/` on `$PATH` (local Claude Code, dodot-set-up), pre
 
 ## Prerequisites
 
+- **Bash 4+** (the snippets use arrays, process substitution, and ANSI-C `$'...\n...'` quoting — not POSIX `sh` / `dash` compatible). Bash 4+ is what cloud Ubuntu and macOS-with-`brew install bash` provide.
 - `gh` CLI authenticated with `repo + read:org` scope on the target repo. In cloud sessions, the `GH_TOKEN` env var (set by your Claude env config) handles this — make sure the PAT covers the target repo with at minimum `Administration: write` (for ruleset application), `Contents: write` (for the policy-file PR), and `Pull requests: write`.
 - `jq` available (pre-installed in cloud sessions).
 - `yq` for parsing existing workflow files. Pre-installed in cloud; install locally with `brew install yq` if missing.
 - Network access to clone the public `arthur-debert/release` repo (no auth needed — it's public).
 
+Each numbered step below is meant to run as its own bash invocation (or one combined script). The blocks use `set -euo pipefail` and `exit 1` on fatal errors, so don't `source` them — invoke as `bash` (or copy into a single sectioned script).
+
 ## Setup
 
-Cache the release repo locally once per skill invocation. Subsequent steps read templates and ruleset JSON from this clone:
+Cache the release repo into a unique temp directory once per skill invocation. Subsequent steps read templates and ruleset JSON from this clone:
 
 ```sh
+set -euo pipefail
+
 TARGET_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 TARGET_ROOT=$(git rev-parse --show-toplevel)
-RELEASE_CLONE=/tmp/arthur-debert-release-setup
-rm -rf "$RELEASE_CLONE"
+RELEASE_CLONE=$(mktemp -d -t arthur-debert-release-setup.XXXXXX)
 git clone --depth 1 https://github.com/arthur-debert/release.git "$RELEASE_CLONE"
 echo "target: $TARGET_REPO at $TARGET_ROOT"
+echo "clone:  $RELEASE_CLONE"
 ```
+
+`mktemp -d` produces a unique path (avoids collisions if multiple invocations run concurrently) and lives outside any predictable location an attacker could target on a shared system.
 
 ## Step 1: detect stack
 
@@ -76,7 +83,15 @@ Applies `rulesets/main-protection.json.tmpl` from the cloned release repo, with 
 ### 2a. Auto-detect required checks
 
 ```sh
+set -euo pipefail
+
 # Collect workflows that trigger on pull_request (excluding copilot-review.yml).
+#
+# Note the `(.on // .true)` fallback: YAML 1.1 (and mikefarah/yq prior to recent
+# versions) parses the bareword key `on:` as the boolean true, so the resulting
+# JSON has `{"true": ...}` instead of `{"on": ...}`. Handling both shapes lets
+# this work across yq versions and across consumer repos whose `.yml`/`.yaml`
+# choice may affect parser behavior.
 PR_WORKFLOWS=()
 if [ -d "$TARGET_ROOT/.github/workflows" ]; then
   while IFS= read -r f; do
@@ -85,7 +100,7 @@ if [ -d "$TARGET_ROOT/.github/workflows" ]; then
       copilot-review.yml|copilot-review.yaml) continue ;;
     esac
     triggers=$(yq -o json . "$f" 2>/dev/null | jq -r '
-      .on as $on |
+      (.on // .true) as $on |
       if   ($on | type) == "string" then [$on]
       elif ($on | type) == "array"  then $on
       elif ($on | type) == "object" then ($on | keys)
@@ -98,10 +113,11 @@ if [ -d "$TARGET_ROOT/.github/workflows" ]; then
 fi
 
 # Get the actual check-run names from the latest default-branch run of each.
+# Paginate the workflows listing so repos with many workflows aren't truncated.
 DEFAULT_BRANCH=$(gh api "repos/$TARGET_REPO" --jq .default_branch)
 CHECKS=$(
   for path in "${PR_WORKFLOWS[@]}"; do
-    wid=$(gh api "repos/$TARGET_REPO/actions/workflows" \
+    wid=$(gh api --paginate "repos/$TARGET_REPO/actions/workflows" \
       --jq ".workflows[] | select(.path == \"$path\") | .id" 2>/dev/null)
     [ -n "$wid" ] && [ "$wid" != "null" ] || continue
     run_id=$(gh api "repos/$TARGET_REPO/actions/workflows/$wid/runs?branch=$DEFAULT_BRANCH&per_page=1" \
@@ -129,8 +145,10 @@ If `$CHECKS` is empty (no workflows yet), pass them manually — set `CHECKS=$'c
 ### 2b. Build the ruleset payload and apply
 
 ```sh
+set -euo pipefail
+
 TMPL="$RELEASE_CLONE/rulesets/main-protection.json.tmpl"
-[ -f "$TMPL" ] || { echo "ruleset template missing in clone — check the clone succeeded" >&2; return 1; }
+[ -f "$TMPL" ] || { echo "ruleset template missing in clone — check the clone succeeded" >&2; exit 1; }
 
 CHECKS_JSON=$(printf '%s\n' "$CHECKS" | jq -R 'select(. != "") | {context: .}' | jq -s .)
 
@@ -143,7 +161,8 @@ PAYLOAD=$(jq --argjson c "$CHECKS_JSON" '
 ' "$TMPL")
 
 RULESET_NAME=$(jq -r '.name' <<<"$PAYLOAD")
-EXISTING_ID=$(gh api "repos/$TARGET_REPO/rulesets" \
+# Paginate in case the repo has accumulated many rulesets.
+EXISTING_ID=$(gh api --paginate "repos/$TARGET_REPO/rulesets" \
   --jq ".[] | select(.name == \"$RULESET_NAME\") | .id" | head -1 || true)
 
 echo "ruleset: $RULESET_NAME (existing id: ${EXISTING_ID:-none})"
@@ -174,24 +193,35 @@ Templates live as a flat-ish tree under `release/templates/<stack>/`, but the de
 | `workflows/*` | `.github/workflows/*` | GitHub Actions location |
 | `scripts/*` | `scripts/*` (repo root) | Repo-local helpers, used by pre-commit hooks and CI |
 | `lefthook.yml` | `lefthook.yml` (repo root) | Tool config consumed by `lefthook install` at repo root |
-| Everything else at template root | `.github/<file>` | Standard GitHub policy files: `CODEOWNERS`, `dependabot.yml`, `copilot-instructions.md`, `pull_request_template.md` |
+| `CODEOWNERS`, `dependabot.yml`, `copilot-instructions.md`, `pull_request_template.md` | `.github/<file>` | Standard GitHub policy files |
 
-If you add a new file to a stack template, decide which row it falls into and add it to the `map_dest` function below.
+The mapping is **explicit by design**. If you add a new file to a stack template, `map_dest()` will error out with `no destination mapping for template path '<rel>'`, forcing a deliberate routing decision — `.gitignore`, `justfile`, `rustfmt.toml`, and similar belong at repo root, not under `.github/`, and we don't want a silent catch-all sending them to the wrong place.
 
 ```sh
+set -euo pipefail
+
 TEMPLATES="$RELEASE_CLONE/templates/$STACK"
-[ -d "$TEMPLATES" ] || { echo "no templates for stack '$STACK' at $TEMPLATES" >&2; return 1; }
+[ -d "$TEMPLATES" ] || { echo "no templates for stack '$STACK' at $TEMPLATES" >&2; exit 1; }
 
 FORCE=${FORCE:-0}   # set FORCE=1 if you want conflicts overwritten
 CREATED=0; UPDATED=0; SKIPPED=0; CONFLICTS=0
 
+# Enumerate explicitly. Any new template file whose path doesn't match a
+# documented mapping causes an error rather than a silent .github/ default —
+# the contributor adding the new file has to make a deliberate routing choice.
 map_dest() {
   local rel=$1
   case "$rel" in
-    workflows/*)   printf '.github/%s' "$rel" ;;
-    scripts/*)     printf '%s' "$rel" ;;
-    lefthook.yml)  printf '%s' "$rel" ;;
-    *)             printf '.github/%s' "$rel" ;;
+    workflows/*)                      printf '.github/%s' "$rel" ;;
+    scripts/*)                        printf '%s' "$rel" ;;
+    lefthook.yml)                     printf '%s' "$rel" ;;
+    CODEOWNERS                  | \
+    dependabot.yml              | \
+    copilot-instructions.md     | \
+    pull_request_template.md)         printf '.github/%s' "$rel" ;;
+    *)
+      echo "ERROR: no destination mapping for template path '$rel' — add it to map_dest()" >&2
+      exit 1 ;;
   esac
 }
 
@@ -254,6 +284,7 @@ A clean idempotent re-run reports `ok` for every file and either `updated` (PUT 
 ## Pitfalls
 
 - **`ruleset: updated` doesn't tell you whether the content actually changed.** The GH API's PUT-replace doesn't emit a diff; we report `updated` for any successful PUT. To detect actual drift, fetch the existing ruleset (`gh api "repos/$REPO/rulesets/$ID"`) and diff against `$PAYLOAD` before deciding to PUT. Skipped here for simplicity; add it if you want a "no change needed" report.
+- **YAML 1.1 `on:` boolean footgun.** GitHub Actions uses `on:` as the trigger key, but under YAML 1.1 (and older mikefarah/yq) the bareword `on` is parsed as the boolean literal `true`. So `yq -o json` may emit `{"true": ...}` instead of `{"on": ...}`. The check-detection jq uses `(.on // .true)` to handle both shapes. If you see `PR_WORKFLOWS` come back empty on a repo that definitely has PR-triggering workflows, this is the likely cause — check the `yq` output directly.
 - **`copilot-review.yml` is excluded from the required-checks detection** by filename. It's a side-effect workflow (requests Copilot), not a gate — listing it as required would make every PR block on it.
 - **No `--checks` override here yet.** If `detect_stack` succeeds but `$CHECKS` is empty (no PR-trigger workflows or no workflow runs), set `CHECKS=$'name1\nname2'` manually before step 2b.
 - **`.DS_Store` is skipped** in the policy sweep (macOS artifact in the templates).
