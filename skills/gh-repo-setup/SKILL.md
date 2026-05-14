@@ -1,0 +1,274 @@
+---
+name: gh-repo-setup
+description: "Bring a GitHub repo up to the canonical arthur-debert/* + lex-fmt/* release-loop setup: main-branch protection ruleset (PR required, linear history, required checks), per-stack policy files (CODEOWNERS, dependabot.yml, copilot-instructions.md, pull_request_template.md, workflows/copilot-review.yml). Self-contained — no `~/h/release/bin/` dependency. Idempotent: safe to re-run; reports `ok` for already-aligned items. Use when: onboarding a new repo, verifying an existing repo is still aligned, recovering from audit-repo drift, or when an agent reports missing branch-protection or copilot auto-trigger."
+---
+
+# gh-repo-setup
+
+Portable equivalent of `release/bin/apply-ruleset` + `release/bin/sweep-github-policy` + `release/bin/detect-stack`. Brings a repo up to the canonical release-loop setup. Idempotent: re-running on an already-set-up repo reports `ok` for every file and `unchanged` for the ruleset.
+
+## When to use
+
+- **Onboarding a new repo** to the arthur-debert/* or lex-fmt/* portfolio.
+- **Verifying alignment** — quick way to check whether a repo has drifted from canonical.
+- **Recovery** — when `audit-repo` reports a repo is missing pieces.
+
+If you have `~/h/release/bin/` on `$PATH` (local Claude Code, dodot-set-up), prefer the local scripts — they're the same logic but quicker to invoke. This skill exists for cloud sessions and any environment without that PATH.
+
+## Prerequisites
+
+- `gh` CLI authenticated with `repo + read:org` scope on the target repo. In cloud sessions, the `GH_TOKEN` env var (set by your Claude env config) handles this — make sure the PAT covers the target repo with at minimum `Administration: write` (for ruleset application), `Contents: write` (for the policy-file PR), and `Pull requests: write`.
+- `jq` available (pre-installed in cloud sessions).
+- `yq` for parsing existing workflow files. Pre-installed in cloud; install locally with `brew install yq` if missing.
+- Network access to clone the public `arthur-debert/release` repo (no auth needed — it's public).
+
+## Setup
+
+Cache the release repo locally once per skill invocation. Subsequent steps read templates and ruleset JSON from this clone:
+
+```sh
+TARGET_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+TARGET_ROOT=$(git rev-parse --show-toplevel)
+RELEASE_CLONE=/tmp/arthur-debert-release-setup
+rm -rf "$RELEASE_CLONE"
+git clone --depth 1 https://github.com/arthur-debert/release.git "$RELEASE_CLONE"
+echo "target: $TARGET_REPO at $TARGET_ROOT"
+```
+
+## Step 1: detect stack
+
+Inspects the target repo's filesystem to pick the right template set. Output: one of `rust`, `electron`, `vsce-ext`, `nvim-plugin`, `tree-sitter`, `static-site`, `brew-tap`, `github-action`. Exits non-zero if undetermined.
+
+```sh
+detect_stack() {
+  local dir=${1:-.}
+  cd "$dir"
+  if [ -d Formula ] || [ -d Casks ]; then echo brew-tap; return; fi
+  if [ -f grammar.js ]; then echo tree-sitter; return; fi
+  if [ -f Cargo.toml ]; then echo rust; return; fi
+  if [ -f package.json ]; then
+    if grep -q '"electron-builder"\|"electron"' package.json 2>/dev/null; then
+      echo electron; return
+    fi
+    if grep -q '"@vscode/vsce"\|"vsce"' package.json 2>/dev/null; then
+      echo vsce-ext; return
+    fi
+  fi
+  if [ -f action.yml ] || [ -f action.yaml ]; then echo github-action; return; fi
+  if [ -d plugin ] && find . -maxdepth 3 -name '*.lua' -print -quit | grep -q .; then
+    echo nvim-plugin; return
+  fi
+  if [ -f book.toml ] || [ -f _config.yml ]; then echo static-site; return; fi
+  echo "could not detect stack of $(pwd)" >&2
+  return 1
+}
+
+STACK=$(cd "$TARGET_ROOT" && detect_stack)
+echo "stack: $STACK"
+```
+
+If `detect_stack` errors out, the repo doesn't match any known pattern — either pass `STACK=<stack>` manually based on what you know about the project, or stop and ask the user.
+
+## Step 2: apply the main-branch protection ruleset
+
+Applies `rulesets/main-protection.json.tmpl` from the cloned release repo, with `required_status_checks` populated from the target's actual workflow runs (not just job IDs — this captures matrix expansion and `name:` overrides).
+
+### 2a. Auto-detect required checks
+
+```sh
+# Collect workflows that trigger on pull_request (excluding copilot-review.yml).
+PR_WORKFLOWS=()
+if [ -d "$TARGET_ROOT/.github/workflows" ]; then
+  while IFS= read -r f; do
+    base=$(basename "$f")
+    case "$base" in
+      copilot-review.yml|copilot-review.yaml) continue ;;
+    esac
+    triggers=$(yq -o json . "$f" 2>/dev/null | jq -r '
+      .on as $on |
+      if   ($on | type) == "string" then [$on]
+      elif ($on | type) == "array"  then $on
+      elif ($on | type) == "object" then ($on | keys)
+      else [] end | .[]
+    ' 2>/dev/null)
+    if echo "$triggers" | grep -qx pull_request; then
+      PR_WORKFLOWS+=(".github/workflows/$base")
+    fi
+  done < <(find "$TARGET_ROOT/.github/workflows" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \))
+fi
+
+# Get the actual check-run names from the latest default-branch run of each.
+DEFAULT_BRANCH=$(gh api "repos/$TARGET_REPO" --jq .default_branch)
+CHECKS=$(
+  for path in "${PR_WORKFLOWS[@]}"; do
+    wid=$(gh api "repos/$TARGET_REPO/actions/workflows" \
+      --jq ".workflows[] | select(.path == \"$path\") | .id" 2>/dev/null)
+    [ -n "$wid" ] && [ "$wid" != "null" ] || continue
+    run_id=$(gh api "repos/$TARGET_REPO/actions/workflows/$wid/runs?branch=$DEFAULT_BRANCH&per_page=1" \
+      --jq '.workflow_runs[0].id' 2>/dev/null)
+    [ -n "$run_id" ] && [ "$run_id" != "null" ] || continue
+    gh api --paginate "repos/$TARGET_REPO/actions/runs/$run_id/jobs" \
+      --jq '.jobs[].name' 2>/dev/null
+  done | sort -u
+)
+
+# Fallback: if no workflow runs exist (brand-new repo), use static job IDs from yq.
+if [ -z "$CHECKS" ]; then
+  CHECKS=$(
+    for path in "${PR_WORKFLOWS[@]}"; do
+      yq -r '.jobs | keys | .[]' "$TARGET_ROOT/$path" 2>/dev/null
+    done | sort -u
+  )
+fi
+
+echo "required checks: $(echo "$CHECKS" | paste -sd, -)"
+```
+
+If `$CHECKS` is empty (no workflows yet), pass them manually — set `CHECKS=$'check-one\ncheck-two'` (newline-separated) before step 2b.
+
+### 2b. Build the ruleset payload and apply
+
+```sh
+TMPL="$RELEASE_CLONE/rulesets/main-protection.json.tmpl"
+[ -f "$TMPL" ] || { echo "ruleset template missing in clone — check the clone succeeded" >&2; return 1; }
+
+CHECKS_JSON=$(printf '%s\n' "$CHECKS" | jq -R 'select(. != "") | {context: .}' | jq -s .)
+
+PAYLOAD=$(jq --argjson c "$CHECKS_JSON" '
+  .rules |= map(
+    if .type == "required_status_checks"
+    then .parameters.required_status_checks = $c
+    else . end
+  )
+' "$TMPL")
+
+RULESET_NAME=$(jq -r '.name' <<<"$PAYLOAD")
+EXISTING_ID=$(gh api "repos/$TARGET_REPO/rulesets" \
+  --jq ".[] | select(.name == \"$RULESET_NAME\") | .id" | head -1 || true)
+
+echo "ruleset: $RULESET_NAME (existing id: ${EXISTING_ID:-none})"
+
+if [ -n "$EXISTING_ID" ]; then
+  # Idempotent path — PUT replaces the existing ruleset with the payload.
+  # If the payload matches what's there, this is effectively a no-op.
+  jq . <<<"$PAYLOAD" | gh api -X PUT "repos/$TARGET_REPO/rulesets/$EXISTING_ID" --input - --silent
+  echo "ruleset: updated"
+else
+  jq . <<<"$PAYLOAD" | gh api -X POST "repos/$TARGET_REPO/rulesets" --input - --silent
+  echo "ruleset: created"
+fi
+```
+
+Dry-run mode: skip the final `gh api -X PUT/POST` block and just `echo "$PAYLOAD" | jq .` to inspect.
+
+## Step 3: sweep policy files
+
+For each template file under `$RELEASE_CLONE/templates/$STACK/`, drop it into the right place in the target repo. Compare before copying so we can report `ok`, `created`, `updated`, or `conflict`.
+
+### Destination mapping
+
+Templates live as a flat-ish tree under `release/templates/<stack>/`, but the destination in each consumer repo depends on the template's path:
+
+| Template path | Destination in consumer | Why |
+|---|---|---|
+| `workflows/*` | `.github/workflows/*` | GitHub Actions location |
+| `scripts/*` | `scripts/*` (repo root) | Repo-local helpers, used by pre-commit hooks and CI |
+| `lefthook.yml` | `lefthook.yml` (repo root) | Tool config consumed by `lefthook install` at repo root |
+| Everything else at template root | `.github/<file>` | Standard GitHub policy files: `CODEOWNERS`, `dependabot.yml`, `copilot-instructions.md`, `pull_request_template.md` |
+
+If you add a new file to a stack template, decide which row it falls into and add it to the `map_dest` function below.
+
+```sh
+TEMPLATES="$RELEASE_CLONE/templates/$STACK"
+[ -d "$TEMPLATES" ] || { echo "no templates for stack '$STACK' at $TEMPLATES" >&2; return 1; }
+
+FORCE=${FORCE:-0}   # set FORCE=1 if you want conflicts overwritten
+CREATED=0; UPDATED=0; SKIPPED=0; CONFLICTS=0
+
+map_dest() {
+  local rel=$1
+  case "$rel" in
+    workflows/*)   printf '.github/%s' "$rel" ;;
+    scripts/*)     printf '%s' "$rel" ;;
+    lefthook.yml)  printf '%s' "$rel" ;;
+    *)             printf '.github/%s' "$rel" ;;
+  esac
+}
+
+cd "$TARGET_ROOT"
+
+while IFS= read -r src; do
+  rel=${src#"$TEMPLATES/"}
+  case "$rel" in
+    .DS_Store) continue ;;
+  esac
+  dest=$(map_dest "$rel")
+  mkdir -p "$(dirname "$dest")"
+  if [ ! -e "$dest" ]; then
+    cp "$src" "$dest"
+    # Preserve executable bit on scripts/ entries.
+    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
+    echo "  created   $dest"
+    CREATED=$((CREATED + 1))
+  elif cmp -s "$src" "$dest"; then
+    echo "  ok        $dest"
+    SKIPPED=$((SKIPPED + 1))
+  elif [ "$FORCE" = 1 ]; then
+    cp "$src" "$dest"
+    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
+    echo "  updated   $dest"
+    UPDATED=$((UPDATED + 1))
+  else
+    echo "  conflict  $dest  (differs; set FORCE=1 to overwrite)"
+    CONFLICTS=$((CONFLICTS + 1))
+  fi
+done < <(find "$TEMPLATES" -type f)
+
+printf 'policy files: %d created, %d updated, %d ok, %d conflicts\n' \
+  "$CREATED" "$UPDATED" "$SKIPPED" "$CONFLICTS"
+```
+
+**Drift note for the local `bin/sweep-github-policy`:** at the time of writing, the bin/ version still hardcodes `dest=".github/$rel"` for *all* template files. That worked when templates only contained `.github/`-bound files, but became wrong when `scripts/` and `lefthook.yml` were added (PR #8). The skill above is the corrected logic; the bin/ version needs the same fix. Tracked as a follow-up issue.
+
+If any files were created or updated, the target repo now has uncommitted changes. Commit them on a branch and open a PR through the standard flow (`gh pr create` → Auto-fix → review → merge); the policy files are part of the repo's history once that PR merges.
+
+## Cleanup
+
+```sh
+rm -rf "$RELEASE_CLONE"
+```
+
+## Triage rules for the output
+
+The end-state of a successful invocation:
+
+| Outcome | Interpretation |
+|---|---|
+| `ruleset: updated` + all `ok` | Repo was already aligned. No-op confirmation. |
+| `ruleset: created` + all `created` | Brand-new onboarding. Commit the .github/ changes, open the PR, merge. |
+| `ruleset: updated` + mix of `created`/`ok` | Partial drift. Review the created files; commit the additions; investigate any items that were missing. |
+| Any `conflict` | The repo has a customized version of a canonical file. Either resolve manually, or re-run with `FORCE=1` to overwrite — but only after deciding the customization isn't worth keeping. |
+
+A clean idempotent re-run reports `ok` for every file and either `updated` (PUT replaced with same content) or `created` (new) for the ruleset. The `updated` line for an unchanged-content ruleset is not great UX — see Pitfalls.
+
+## Pitfalls
+
+- **`ruleset: updated` doesn't tell you whether the content actually changed.** The GH API's PUT-replace doesn't emit a diff; we report `updated` for any successful PUT. To detect actual drift, fetch the existing ruleset (`gh api "repos/$REPO/rulesets/$ID"`) and diff against `$PAYLOAD` before deciding to PUT. Skipped here for simplicity; add it if you want a "no change needed" report.
+- **`copilot-review.yml` is excluded from the required-checks detection** by filename. It's a side-effect workflow (requests Copilot), not a gate — listing it as required would make every PR block on it.
+- **No `--checks` override here yet.** If `detect_stack` succeeds but `$CHECKS` is empty (no PR-trigger workflows or no workflow runs), set `CHECKS=$'name1\nname2'` manually before step 2b.
+- **`.DS_Store` is skipped** in the policy sweep (macOS artifact in the templates).
+- **Conflicts require manual resolution by default.** The `FORCE=1` override exists but bypassing a conflict means the consumer's customization is gone. Only force after seeing what's different.
+- **Templates live under `release/templates/<stack>/`.** Only `rust/` exists today; per-stack templates for electron, vsce-ext, nvim-plugin, etc. are Phase 2 work. If `detect_stack` returns a stack that has no templates yet, step 3 errors out — that's the expected behavior until Phase 2 ships those templates.
+- **The skill clones the public release repo via HTTPS** without auth. If release ever becomes private, the clone needs `gh auth setup-git` or `git clone https://x-access-token:$GH_TOKEN@github.com/...` instead.
+
+## Related local-only scripts (not ported here)
+
+These remain `bin/` only because they touch multiple repos at once and aren't useful from inside a single repo's session:
+
+- `install-release-secrets` — propagate the canonical secrets set to every onboarded repo.
+- `install-release-token` — propagate `RELEASE_TOKEN` to every onboarded repo.
+- `enable-dependabot-security` — enable Dependabot vulnerability alerts portfolio-wide.
+- `audit-portfolio`, `audit-repo`, `audit-smoke-test` — read-only auditing.
+- `migrate-copilot-review`, `sweep-github-policy` (the local wrapper).
+
+If a cloud agent needs any of these, that's a signal to escalate via the `release-issue-relay` skill (Phase 1.3) rather than reimplementing them piecemeal.
