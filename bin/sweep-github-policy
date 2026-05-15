@@ -40,24 +40,50 @@ updated=0
 skipped=0
 conflicts=0
 
+# Map a template-relative path to its destination in the consumer repo.
+# Explicit by design: any new template path that doesn't match a documented
+# row produces an error rather than a silent .github/ default, so a future
+# contributor adding e.g. .gitignore or rustfmt.toml has to make a deliberate
+# routing decision. Mirror of the map_dest() in skills/gh-repo-setup/SKILL.md.
+map_dest() {
+  local rel=$1
+  case "$rel" in
+    workflows/*)                       printf '.github/%s' "$rel" ;;
+    scripts/*)                         printf '%s' "$rel" ;;
+    lefthook.yml)                      printf '%s' "$rel" ;;
+    CODEOWNERS                 | \
+    dependabot.yml             | \
+    copilot-instructions.md    | \
+    pull_request_template.md)          printf '.github/%s' "$rel" ;;
+    *)
+      echo "error: no destination mapping for template path '$rel' — add it to map_dest()" >&2
+      exit 1 ;;
+  esac
+}
+
 # Find all files in the template tree, relative to its root.
 while IFS= read -r src; do
   rel=${src#"$templates/"}
-  dest=".github/$rel"
+  # Skip .DS_Store and other macOS artifacts.
+  case "$rel" in .DS_Store) continue ;; esac
+  dest=$(map_dest "$rel")
   mkdir -p "$(dirname "$dest")"
   if [ ! -e "$dest" ]; then
     cp "$src" "$dest"
-    echo "  created  .github/$rel"
+    # Preserve executable bit on scripts/ entries.
+    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
+    echo "  created   $dest"
     created=$((created + 1))
   elif cmp -s "$src" "$dest"; then
-    echo "  ok       .github/$rel"
+    echo "  ok        $dest"
     skipped=$((skipped + 1))
   elif [ "$force" = 1 ]; then
     cp "$src" "$dest"
-    echo "  updated  .github/$rel"
+    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
+    echo "  updated   $dest"
     updated=$((updated + 1))
   else
-    echo "  conflict .github/$rel (differs; --force to overwrite)"
+    echo "  conflict  $dest (differs; --force to overwrite)"
     conflicts=$((conflicts + 1))
   fi
 done < <(find "$templates" -type f)
