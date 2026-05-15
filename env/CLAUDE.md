@@ -29,7 +29,7 @@ These are the rules of the road in Claude Code on the web that don't apply to lo
 ### Opening a PR
 
 - **First PR for a feature**: open it as draft from your session-assigned branch. Gemini auto-reviews drafts; **Copilot waits for ready** (the canonical `copilot-review.yml` has `if: github.event.pull_request.draft == false`, deliberately, so drafts don't accumulate bot noise on incomplete work).
-- **Immediately after `gh pr create`, enable Auto-fix on the PR.** Auto-fix is per-PR opt-in — without it, neither this session nor a future session gets webhook events for new review comments or CI failures. Toggle via the CI status bar in claude.ai/code, or tell Claude "auto-fix this PR." Requires the Claude GitHub App installed on the org (`arami`, `lex-fmt`, `arthur-debert`).
+- **Immediately after `gh pr create`, enable Auto-fix on the PR.** Auto-fix is per-PR opt-in — without it, neither this session nor a future session gets webhook events for new review comments or CI failures. Toggle via the CI status bar in claude.ai/code, or tell Claude "auto-fix this PR." Requires the Claude GitHub App installed on the org that owns the PR (e.g. for the current portfolio: `arthur-debert`, `lex-fmt`).
 - Flip the PR to **ready** when you want both reviewers; flipping fires the Copilot review trigger.
 
 ### Working on an existing PR (someone else's, or your own from another session)
@@ -43,7 +43,7 @@ The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR
 
 ### Addressing review comments
 
-Use the [`pr-review-respond`](./skills/pr-review-respond/SKILL.md) skill. Wait for both Gemini and Copilot reviews before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). On cloud, "wait for both" usually means "wait for Copilot once the PR is set to ready," since Gemini reviews drafts and Copilot doesn't.
+Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot reviews before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). On cloud, "wait for both" usually means "wait for Copilot once the PR is set to ready," since Gemini reviews drafts and Copilot doesn't.
 
 ## Available skills
 

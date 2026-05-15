@@ -176,11 +176,18 @@ gh pr edit "$PR" --add-reviewer @copilot
 In Claude Code on the web, your session is on an orchestrator-assigned branch (`claude/<task>-XXXXX`) and **cannot push fixups directly to an existing PR's feature branch** — the git-push auth is scoped to your session branch. The canonical workaround:
 
 1. Make the fix on your session branch.
-2. `gh pr create --base <feature-branch> --title "..."` — sub-PR targeting the original PR's feature branch (not main).
-3. Drive the sub-PR through review the same way (Auto-fix, Gemini, Copilot when ready).
+2. Open a draft sub-PR targeting the original PR's feature branch (not main). Gemini reviews drafts automatically; flip to ready when you want Copilot too. Use `--body` to name it as a stacked PR up-front so the human reviewer doesn't read it as a duplicate:
+   ```sh
+   FEATURE_BRANCH="<the original PR's branch — quoted defensively in case it contains a slash or colon>"
+   gh pr create --draft \
+     --base "$FEATURE_BRANCH" \
+     --title "fixup: address review on #<original-PR>" \
+     --body "Stacked sub-PR addressing review feedback on #<original-PR>. Squash-merge into \`$FEATURE_BRANCH\`; the original PR picks up the new commits automatically."
+   ```
+3. Drive the sub-PR through review the same way (enable Auto-fix on it, address Gemini, flip to ready, address Copilot, resolve).
 4. Squash-merge the sub-PR into the feature branch. The original PR picks up the new commits automatically.
 
-Name it as a stacked PR in the description so the human reviewer doesn't read it as a duplicate. To bypass the orchestrator entirely on a one-off, `/teleport` the session to local Claude Code and push directly. See env/CLAUDE.md (the user-level one installed by the env setup script) for the broader rules of the road.
+To bypass the orchestrator entirely on a one-off, `/teleport` the session to local Claude Code and push directly to the original branch. See `~/.claude/CLAUDE.md` (the user-level instructions installed by the env setup script) for the broader rules of the road.
 
 ## Stop at "ready to merge"
 
