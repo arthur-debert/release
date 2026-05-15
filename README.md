@@ -221,3 +221,5 @@ re-discovery.
 - [Breaking changes log](docs/breaking-changes.md)
 - [Agentic dev-workflow vision](docs/proposals/agentic-dev-workflow.lex)
 - [Phased rollout plan](docs/proposals/phased-rollout.lex)
+
+<!-- test: verify copilot-review-self.yml fires on draft PR open (delete this line + close PR after test) -->
