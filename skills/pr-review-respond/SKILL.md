@@ -171,6 +171,17 @@ gh pr edit "$PR" --add-reviewer @copilot
 
 (`requested_reviewers` REST POST silently no-ops for Copilot — must go through `gh pr edit`, which uses GraphQL with the bot's real node_id.)
 
+### In a cloud session: stacked sub-PR pattern
+
+In Claude Code on the web, your session is on an orchestrator-assigned branch (`claude/<task>-XXXXX`) and **cannot push fixups directly to an existing PR's feature branch** — the git-push auth is scoped to your session branch. The canonical workaround:
+
+1. Make the fix on your session branch.
+2. `gh pr create --base <feature-branch> --title "..."` — sub-PR targeting the original PR's feature branch (not main).
+3. Drive the sub-PR through review the same way (Auto-fix, Gemini, Copilot when ready).
+4. Squash-merge the sub-PR into the feature branch. The original PR picks up the new commits automatically.
+
+Name it as a stacked PR in the description so the human reviewer doesn't read it as a duplicate. To bypass the orchestrator entirely on a one-off, `/teleport` the session to local Claude Code and push directly. See env/CLAUDE.md (the user-level one installed by the env setup script) for the broader rules of the road.
+
 ## Stop at "ready to merge"
 
 When all addressed threads are resolved and checks are green, the comment-handling phase is done. Report status and stop. The user does the final read and merges.

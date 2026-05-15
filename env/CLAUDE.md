@@ -22,6 +22,29 @@ to the related-repo group). Use it for:
 Using `gh` for these operations is the documented route, not a security
 bypass.
 
+## Cloud-session PR flow specifics
+
+These are the rules of the road in Claude Code on the web that don't apply to local Claude Code (CLI / Desktop). Internalize them so the PR flow stays clean.
+
+### Opening a PR
+
+- **First PR for a feature**: open it as draft from your session-assigned branch. Gemini auto-reviews drafts; **Copilot waits for ready** (the canonical `copilot-review.yml` has `if: github.event.pull_request.draft == false`, deliberately, so drafts don't accumulate bot noise on incomplete work).
+- **Immediately after `gh pr create`, enable Auto-fix on the PR.** Auto-fix is per-PR opt-in — without it, neither this session nor a future session gets webhook events for new review comments or CI failures. Toggle via the CI status bar in claude.ai/code, or tell Claude "auto-fix this PR." Requires the Claude GitHub App installed on the org (`arami`, `lex-fmt`, `arthur-debert`).
+- Flip the PR to **ready** when you want both reviewers; flipping fires the Copilot review trigger.
+
+### Working on an existing PR (someone else's, or your own from another session)
+
+The cloud orchestrator scopes git-push auth to your session's assigned branch (named `claude/<task>-XXXXX`), so you usually **can't push fixups directly to the existing PR's feature branch**. Two patterns:
+
+1. **Stacked sub-PR (default in cloud).** Make your changes, push to your session branch, open a sub-PR targeting the *original PR's feature branch* (not main). Squash-merge the sub-PR into the feature branch; the original PR picks up the new commits automatically. This is the canonical cloud pattern when the agent can't push to the existing branch.
+2. **`/teleport` the session local.** If you need to push directly to the original branch (e.g. the stacked-PR overhead isn't worth it for a one-line fix), pull the cloud session down to local Claude Code via `/teleport`, push there, and the local push doesn't go through the cloud orchestrator's branch restriction.
+
+The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR description so the human reviewer doesn't think it's a duplicate.
+
+### Addressing review comments
+
+Use the [`pr-review-respond`](./skills/pr-review-respond/SKILL.md) skill. Wait for both Gemini and Copilot reviews before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). On cloud, "wait for both" usually means "wait for Copilot once the PR is set to ready," since Gemini reviews drafts and Copilot doesn't.
+
 ## Available skills
 
 `~/.claude/skills/pr-review-respond/SKILL.md` is the canonical flow for
