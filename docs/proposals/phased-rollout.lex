@@ -9,6 +9,51 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
 
     Reference to the vision: see agentic-dev-workflow.lex, especially section 5 (open questions and rethinking) which this rollout addresses.
 
+    1.1. Product groups (overlay on top of phases)
+
+        The phases below collectively deliver to the portfolio in five groups. Phases within a group must work back-to-back across all consumers before the next group begins; groups are sequential, phases within a group are mostly parallel-doable.
+
+        Group A: Foundation
+            Phases 0, 1, and the env-side half of phase 2.
+
+            Deliverables: env tools (gh, lefthook, stack-specific binaries like bats, vsce, ovsx, lua/luarocks/busted/vusted), auth (PATs scoped to include release with Issues: Read and write), session-start reading (user-level CLAUDE.md, ~/.claude/skills/ population, per-repo SessionStart hook + scripts/setup-dev-env.sh), the basic PR flow (review request, address, resolve, ready, merge).
+
+            Done when: a session in any consumer repo can drive a PR through the full review loop without local-only dependencies. The bones are proven.
+
+        Group B: Rollout-verify
+            An explicit pilot pass after Foundation, with no new phase work mixed in.
+
+            Constituent phases: the validation half of Phase 2 (per-repo SessionStart hooks + scripts/setup-dev-env.sh for each pilot consumer), plus the active-use half of Phase 4a (agents at consumer repos invoking release-issue-relay when they hit friction — the skill itself shipped in Phase 1.3 and lives in Group A, but its actual production use is what closes the loop).
+
+            Deliverables: spawn cloud sessions on a representative subset of consumer repos (at minimum: one rust-cli, one electron, one vsce-ext, one nvim, one zed); observe what breaks; close gaps by updating Foundation pieces. Each pilot lands a SessionStart hook PR encoding its discovered setup sequence (npm install, submodule init, language-specific deps, lefthook install). Use release-issue-relay to capture friction without losing context.
+
+            Done when: each onboarded stack has at least one consumer running end-to-end — task picked up from an issue, PR opened, reviewed by Copilot and Gemini, comments addressed, PR ready for human review, merged.
+
+            Why this group exists separately: the original phase ordering didn't make the verify-it-holds-together step explicit. Skipping it would mean shipping more phases on top of an unverified foundation; rolling out CI workflows or release pipelines before the Foundation is portfolio-tested would compound any defects.
+
+        Group C: CI workflows
+            Phase 3, test/lint/format reusable workflows per stack.
+
+            Deliverables: one reusable workflow per stack at release/.github/workflows/<stack>.yml for the test + lint + format step; consumers pin to @v1; one consumer per stack migrated as pilot. The audit tooling extends to detect workflow-file drift.
+
+            Done when: a test or lint fix at release propagates to all consumers on their next CI run, no per-repo edit needed.
+
+        Group D: Release workflows
+            Latter half of phase 3, release-action per stack.
+
+            Deliverables: per-stack release pipelines (rust-cli is shipped; rust-lib, electron-app, vsce-ext, nvim-plugin, tree-sitter, gh-action, mdbook-site, jekyll-site, brew-tap are planned per the main README's stack matrix); macOS signing and notarization for the relevant stacks; security → patch release glue.
+
+            Done when: a release on any consumer is a one-command operation, executed in CI, with the same shape across stacks.
+
+        Group E: Enhancements
+            Phases 4b and 5, plus future work.
+
+            Deliverables: PR review loop convergence heuristics (diff size shrinking round-over-round, reviewer-comment-count not increasing), scheduled portfolio audit routine, merge-strategy switch from squash to rebase, smarter triage in pr-review-respond.
+
+            Done when: the scheduled audit routine runs on cadence (weekly or twice-weekly) and produces actionable issues at release, the PR-review safety hatch uses diff-size-and-comment-count heuristics (not just the 5-round dumb cap), and merge default is rebase across the portfolio with the canonical pr-review-respond / gh-pr-review-loop skills updated to match.
+
+            Deferred because all of these are PR-localizable — they affect one PR at a time, can be iterated incrementally, and don't require coordinated cross-consumer rollout. The cost of doing them early is opportunity cost (Foundation/Verify/Workflows benefit the whole portfolio per fix; enhancements benefit one PR per fix); the cost of doing them late is small (the portfolio still works without them, just with rougher edges on individual PRs).
+
 2. Phase 0: Capture and baseline
 
     No code changes. Intent capture and bookmarking only.
@@ -134,19 +179,29 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
 
 9. Sequencing notes
 
-    9.1. What is parallel-doable
+    9.1. Group-level sequencing (the load-bearing constraint)
 
-        Phases 2, 3, and 4 are mostly independent of each other once Phase 1 lands. Phase 5 can happen alongside any of them. The sequencing in this document reflects priority and dependency-on-Phase-1, not strict ordering.
+        Groups (see §1.1) are sequential. A group must work back-to-back across all consumers before the next group begins:
 
-    9.2. What is strictly sequential
+            Foundation (A) → Rollout-verify (B) → CI workflows (C) → Release workflows (D) → Enhancements (E)
 
-        - Phase 0 → Phase 1: the unify needs the proposal as anchor
-        - Phase 1 → all subsequent phases: everything depends on the portable skills landing
-        - Within Phase 2: stack ordering can be revised based on real demand
+        The B → C transition is the most important to respect. Rolling out reusable CI workflows on top of an unverified foundation compounds any defect into N-consumer rework. Group B exists to surface defects before they compound.
+
+    9.2. Phase-level sequencing within a group
+
+        Within a group, phases are mostly parallel-doable. The strict dependencies are:
+
+            - Phase 0 → Phase 1: the unify step needs the proposal as anchor
+            - Phase 1 → all subsequent phases: everything depends on the portable skills landing
+            - Within Phase 2: stack ordering can be revised based on real demand
+
+        Group B (Rollout-verify) covers Phase 4a's active-use half and the validation half of Phase 2 — these are explicitly the "verify it holds together" steps, not new phase work.
+
+        Group E (Enhancements) is strictly the last group, but its constituent phases (4b audit routine, 5 merge strategy) can run in either order or in parallel.
 
     9.3. Pause-and-resume points
 
-        Each phase ends in a stable state. Pausing at any phase boundary does not leave the portfolio in a half-done state.
+        Each phase ends in a stable state. Pausing at any phase boundary does not leave the portfolio in a half-done state. Group boundaries are the natural "checkpoint" pause points — between A and B is the most valuable, since it's where the foundation gets stress-tested.
 
     9.4. The cloud-branch open question
 
@@ -155,4 +210,4 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
             - Delete cloud (simplest; main is the only branch)
             - Keep cloud as a stable channel: main churns with active work, cloud only updates on tagged releases, env setup scripts pin to cloud for stability
 
-        Deferred decision: Phase 1 keeps both branches alive; the choice is revisited at the start of Phase 2 with usage data from Phase 1.
+        Status as of Phase 1 completion: the cloud branch hasn't been deleted; env/setup.sh pins to main. The decision is no longer urgent — main works as the source, cloud is dormant but harmless. Revisit if a real stability-channel need emerges (e.g. when Group C/D ships breaking changes worth gating behind a slower release channel).
