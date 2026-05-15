@@ -30,7 +30,7 @@ These are the rules of the road in Claude Code on the web that don't apply to lo
 
 - **First PR for a feature**: open it as draft from your session-assigned branch. Both Gemini and Copilot auto-review drafts under the canonical policy (as of 2026-05-15 — `copilot-review.yml` fires on `pull_request: [opened]` regardless of `draft` state; previously Copilot waited for ready, but that produced an awkward "two state transitions per PR" pattern). Drafts get both bots' input; the Auto-fix loop addresses comments while the PR is still draft.
 - **Immediately after `gh pr create`, enable Auto-fix on the PR.** Auto-fix is per-PR opt-in — without it, neither this session nor a future session gets webhook events for new review comments or CI failures. Toggle via the CI status bar in claude.ai/code, or tell Claude "auto-fix this PR." Requires the Claude GitHub App installed on the org that owns the PR (e.g. for the current portfolio: `arthur-debert`, `lex-fmt`).
-- Flip the PR to **ready** when you want both reviewers; flipping fires the Copilot review trigger.
+- **Flip the PR to ready** when you're done iterating — both bots have already reviewed at open under the current policy, so `gh pr ready` is purely a state-transition signal to the user ("I'm done, please final-read and merge"). It does not re-trigger Copilot.
 
 ### Working on an existing PR (someone else's, or your own from another session)
 

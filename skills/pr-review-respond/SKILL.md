@@ -247,11 +247,12 @@ The flip-to-ready step is the **explicit cue for the user** that the agent is do
 ### Flip to ready
 
 ```sh
+set -euo pipefail
 gh pr ready "$PR"
-echo "PR flipped to ready — Copilot review will trigger via copilot-review.yml workflow"
+echo "PR flipped to ready — this is the agent's 'done' signal; no Copilot re-trigger under the current policy (Copilot already reviewed at open)"
 ```
 
-After flipping, wait briefly (the workflow takes ~7 min for Copilot to post), then loop back to step 1 of this skill to address whatever Copilot says. Once that round resolves with no new comments and CI stays green, you're done — leave for the user.
+Under the canonical `copilot-review.yml` policy (as of 2026-05-15), Copilot fired at PR `opened` regardless of draft state, so by the time you reach this flip-to-ready step both reviewers have already had their pass and you've addressed them. The flip is a clean state transition with no follow-up review round — you're done; the user does the final read and merges. If you genuinely want a fresh Copilot pass (e.g. because the changes since the first review are substantial), manually request via `gh pr edit "$PR" --add-reviewer @copilot` after the flip.
 
 ## When the user merges
 
