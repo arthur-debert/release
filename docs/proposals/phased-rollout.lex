@@ -23,7 +23,9 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
         Group B: Rollout-verify
             An explicit pilot pass after Foundation, with no new phase work mixed in.
 
-            Deliverables: spawn cloud sessions on a representative subset of consumer repos (at minimum: one rust-cli, one electron, one vsce-ext, one nvim, one zed); observe what breaks; close gaps by updating Foundation pieces. Use release-issue-relay to capture friction without losing context.
+            Constituent phases: the validation half of Phase 2 (per-repo SessionStart hooks + scripts/setup-dev-env.sh for each pilot consumer), plus the active-use half of Phase 4a (agents at consumer repos invoking release-issue-relay when they hit friction — the skill itself shipped in Phase 1.3 and lives in Group A, but its actual production use is what closes the loop).
+
+            Deliverables: spawn cloud sessions on a representative subset of consumer repos (at minimum: one rust-cli, one electron, one vsce-ext, one nvim, one zed); observe what breaks; close gaps by updating Foundation pieces. Each pilot lands a SessionStart hook PR encoding its discovered setup sequence (npm install, submodule init, language-specific deps, lefthook install). Use release-issue-relay to capture friction without losing context.
 
             Done when: each onboarded stack has at least one consumer running end-to-end — task picked up from an issue, PR opened, reviewed by Copilot and Gemini, comments addressed, PR ready for human review, merged.
 
@@ -47,6 +49,8 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
             Phases 4b and 5, plus future work.
 
             Deliverables: PR review loop convergence heuristics (diff size shrinking round-over-round, reviewer-comment-count not increasing), scheduled portfolio audit routine, merge-strategy switch from squash to rebase, smarter triage in pr-review-respond.
+
+            Done when: the scheduled audit routine runs on cadence (weekly or twice-weekly) and produces actionable issues at release, the PR-review safety hatch uses diff-size-and-comment-count heuristics (not just the 5-round dumb cap), and merge default is rebase across the portfolio with the canonical pr-review-respond / gh-pr-review-loop skills updated to match.
 
             Deferred because all of these are PR-localizable — they affect one PR at a time, can be iterated incrementally, and don't require coordinated cross-consumer rollout. The cost of doing them early is opportunity cost (Foundation/Verify/Workflows benefit the whole portfolio per fix; enhancements benefit one PR per fix); the cost of doing them late is small (the portfolio still works without them, just with rougher edges on individual PRs).
 
@@ -187,9 +191,11 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
 
         Within a group, phases are mostly parallel-doable. The strict dependencies are:
 
-            - Phase 0 → Phase 1: the unify needs the proposal as anchor
+            - Phase 0 → Phase 1: the unify step needs the proposal as anchor
             - Phase 1 → all subsequent phases: everything depends on the portable skills landing
             - Within Phase 2: stack ordering can be revised based on real demand
+
+        Group B (Rollout-verify) covers Phase 4a's active-use half and the validation half of Phase 2 — these are explicitly the "verify it holds together" steps, not new phase work.
 
         Group E (Enhancements) is strictly the last group, but its constituent phases (4b audit routine, 5 merge strategy) can run in either order or in parallel.
 
