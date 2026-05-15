@@ -35,7 +35,9 @@ Same regardless of stack. Mechanism in parentheses (legend below):
   history, no force-push, no delete (R, applied via `bin/apply-ruleset`,
   template at `rulesets/main-protection.json.tmpl`).
 - **Copilot review auto-trigger** — `.github/workflows/copilot-review.yml`
-  fires on `pull_request: [opened, ready_for_review]` (T).
+  fires on `pull_request: [opened]` and reviews drafts (T). Going draft
+  → ready does **not** re-trigger — Copilot already reviewed at open.
+  Validated end-to-end on this repo in [PR #24](https://github.com/arthur-debert/release/pull/24).
 - **Policy files** — CODEOWNERS, `pull_request_template.md`,
   `copilot-instructions.md` (T, swept in via `bin/sweep-github-policy`).
 - **Dependabot** — see policy below (T+R).
