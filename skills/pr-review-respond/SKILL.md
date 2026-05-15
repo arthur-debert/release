@@ -196,8 +196,12 @@ The most common drop-the-ball spot is right here — agent pushes the fixup, rep
 The fix: poll synchronously after every fixup push.
 
 ```sh
-# 1. Wait for CI to settle. Blocks until all checks complete (pass or fail).
+# 1. Wait for CI to settle. `gh pr checks --watch` blocks until all checks
+# complete, then exits 0 if all passed or non-zero if any failed. The exit
+# code IS the pass/fail signal — capture it instead of letting it abort a
+# `set -e` flow. Don't use `|| true` here: that would discard the signal.
 gh pr checks "$PR" --watch
+CHECKS_RC=$?
 ```
 
 `gh pr checks --watch` polls in this session. Don't rely on the Claude UI's "CI monitoring" feature — it has its own gh-auth setup that may report "CI checks unavailable" even when the agent's own `gh` works fine. Your `gh pr checks --watch` is the reliable signal.
@@ -205,8 +209,15 @@ gh pr checks "$PR" --watch
 When `--watch` returns, evaluate the PR's state and decide:
 
 ```sh
-STATE=$(gh pr view "$PR" --json isDraft,mergeStateStatus,mergeable,statusCheckRollup)
-echo "$STATE" | jq -r '"isDraft=\(.isDraft)  ms=\(.mergeStateStatus)  mergeable=\(.mergeable)"'
+# Pipe `gh pr view` straight into `jq` (intermediate-variable + echo is
+# lossy on weird whitespace / control chars).
+gh pr view "$PR" --json isDraft,mergeStateStatus,mergeable \
+  | jq -r '"isDraft=\(.isDraft)  ms=\(.mergeStateStatus)  mergeable=\(.mergeable)"'
+
+# Unresolved-thread count. Fetches first 100 threads, same cap as the
+# step-1 listing query — PRs with >100 threads are extremely rare in
+# this portfolio. If you ever hit one, paginate via `pageInfo.endCursor`
+# or rely on the step-1 listing's output to detect the overflow.
 UNRESOLVED=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f query='
   query($owner:String!,$name:String!,$pr:Int!){
     repository(owner:$owner,name:$name){pullRequest(number:$pr){
@@ -214,12 +225,12 @@ UNRESOLVED=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f que
   --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false)] | length')
 ```
 
-| Condition | Action |
+| Condition (read from `CHECKS_RC`, `UNRESOLVED`, the `gh pr view` output) | Action |
 |---|---|
-| Checks **failed** | Fix what failed, push, loop. Don't stop here. |
-| Checks green, **unresolved threads remain** | Triage and resolve them. Don't stop here. |
-| Checks green, 0 unresolved, **PR is draft** | **Flip to ready.** `gh pr ready "$PR"`. This triggers the canonical `copilot-review.yml` workflow (which is gated on `draft == false` by design — see `~/.claude/CLAUDE.md`); a Copilot review will arrive shortly. Loop back to triage when it does. |
-| Checks green, 0 unresolved, PR is ready, `mergeStateStatus=CLEAN`, `mergeable=MERGEABLE` | **Stop.** This is the explicit signal to the user that you're done. Report state, leave the PR for human final read. |
+| `CHECKS_RC` non-zero (any check failed) | Fix what failed, push, loop. Don't stop here. |
+| `CHECKS_RC=0`, `UNRESOLVED>0` | Triage and resolve them. Don't stop here. |
+| `CHECKS_RC=0`, `UNRESOLVED=0`, **`isDraft=true`** | **Flip to ready.** `gh pr ready "$PR"`. This triggers the canonical `copilot-review.yml` workflow (which is gated on `draft == false` by design — see `~/.claude/CLAUDE.md`); a Copilot review will arrive shortly. Loop back to triage when it does. |
+| `CHECKS_RC=0`, `UNRESOLVED=0`, `isDraft=false`, `mergeStateStatus=CLEAN`, `mergeable=MERGEABLE` | **Stop.** This is the explicit signal to the user that you're done. Report state, leave the PR for human final read. |
 
 The flip-to-ready step is the **explicit cue for the user** that the agent is done iterating. Without it, you leave the PR perpetually in draft and the user has to manually flip + check + merge. With it, the user sees "PR went from draft to ready, both bots have reviewed, all green" and reads-and-merges.
 
