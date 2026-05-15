@@ -200,8 +200,17 @@ The fix: poll synchronously after every fixup push.
 # complete, then exits 0 if all passed or non-zero if any failed. The exit
 # code IS the pass/fail signal — capture it instead of letting it abort a
 # `set -e` flow. Don't use `|| true` here: that would discard the signal.
-gh pr checks "$PR" --watch
+#
+# The `timeout 900` wrapper is a hard 15-minute cap. `gh pr checks --watch`
+# can hang in edge cases (some skipped/queued check states that don't fully
+# transition); the timeout prevents the agent from sitting on a stuck
+# subprocess indefinitely. Exit code 124 = timed out → treat as "check the
+# state manually" rather than "checks failed."
+timeout 900 gh pr checks "$PR" --watch
 CHECKS_RC=$?
+if [ "$CHECKS_RC" = "124" ]; then
+  echo "warning: gh pr checks --watch hit the 15-min timeout — falling back to manual state check" >&2
+fi
 ```
 
 `gh pr checks --watch` polls in this session. Don't rely on the Claude UI's "CI monitoring" feature — it has its own gh-auth setup that may report "CI checks unavailable" even when the agent's own `gh` works fine. Your `gh pr checks --watch` is the reliable signal.
@@ -227,9 +236,10 @@ UNRESOLVED=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f que
 
 | Condition (read from `CHECKS_RC`, `UNRESOLVED`, the `gh pr view` output) | Action |
 |---|---|
-| `CHECKS_RC` non-zero (any check failed) | Fix what failed, push, loop. Don't stop here. |
+| `CHECKS_RC=124` (timeout) | Don't decide automatically — inspect `gh pr checks "$PR"` manually. If checks are actually green, treat as `CHECKS_RC=0` and continue; if there's a stuck check, surface to the user. |
+| `CHECKS_RC` non-zero, not 124 (any check failed) | Fix what failed, push, loop. Don't stop here. |
 | `CHECKS_RC=0`, `UNRESOLVED>0` | Triage and resolve them. Don't stop here. |
-| `CHECKS_RC=0`, `UNRESOLVED=0`, **`isDraft=true`** | **Flip to ready.** `gh pr ready "$PR"`. This triggers the canonical `copilot-review.yml` workflow (which is gated on `draft == false` by design — see `~/.claude/CLAUDE.md`); a Copilot review will arrive shortly. Loop back to triage when it does. |
+| `CHECKS_RC=0`, `UNRESOLVED=0`, **`isDraft=true`** | **Flip to ready.** `gh pr ready "$PR"`. This is the agent's explicit cue to the user that iteration is done. Note: the canonical `copilot-review.yml` policy (as of 2026-05-15) fires Copilot at PR `opened` regardless of draft state and does **not** re-trigger on `ready_for_review`, so flipping to ready won't restart the review loop — Copilot already had its pass. If you still want a second pass (e.g. substantial changes since the first), manually request via `gh pr edit "$PR" --add-reviewer @copilot`. |
 | `CHECKS_RC=0`, `UNRESOLVED=0`, `isDraft=false`, `mergeStateStatus=CLEAN`, `mergeable=MERGEABLE` | **Stop.** This is the explicit signal to the user that you're done. Report state, leave the PR for human final read. |
 
 The flip-to-ready step is the **explicit cue for the user** that the agent is done iterating. Without it, you leave the PR perpetually in draft and the user has to manually flip + check + merge. With it, the user sees "PR went from draft to ready, both bots have reviewed, all green" and reads-and-merges.

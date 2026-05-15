@@ -1,0 +1,36 @@
+name: Copilot Review (self)
+
+# Self-applying caller for this repo's own PRs. Closes #15
+# (dogfood the canonical PR loop on release itself).
+#
+# Trigger policy (also the canonical policy in
+# templates/rust/workflows/copilot-review.yml, kept in lockstep):
+#   - `on: pull_request: types: [opened]` — fires once at PR creation,
+#     regardless of draft state. Drafts get Copilot too.
+#   - `ready_for_review` is intentionally NOT in the types list — going
+#     draft → ready does not re-trigger Copilot, since it already
+#     reviewed at open.
+#   - `head.repo.fork == false` still skips fork PRs (security: don't
+#     pass RELEASE_TOKEN to untrusted source).
+#
+# Uses the LOCAL reusable workflow (./.github/workflows/copilot-review.yml)
+# rather than `arthur-debert/release/.github/workflows/copilot-review.yml@v1`
+# to avoid the chicken-and-egg case where a v1 tag doesn't exist yet
+# during initial workflow development. Side benefit: this caller is also
+# a continuous smoke test of the reusable workflow on every release PR.
+
+on:
+  pull_request:
+    types: [opened]
+
+jobs:
+  request:
+    if: github.event.pull_request.head.repo.fork == false
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/copilot-review.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets:
+      gh_token: ${{ secrets.RELEASE_TOKEN }}

@@ -28,7 +28,7 @@ These are the rules of the road in Claude Code on the web that don't apply to lo
 
 ### Opening a PR
 
-- **First PR for a feature**: open it as draft from your session-assigned branch. Gemini auto-reviews drafts; **Copilot waits for ready** (the canonical `copilot-review.yml` has `if: github.event.pull_request.draft == false`, deliberately, so drafts don't accumulate bot noise on incomplete work).
+- **First PR for a feature**: open it as draft from your session-assigned branch. Both Gemini and Copilot auto-review drafts under the canonical policy (as of 2026-05-15 — `copilot-review.yml` fires on `pull_request: [opened]` regardless of `draft` state; previously Copilot waited for ready, but that produced an awkward "two state transitions per PR" pattern). Drafts get both bots' input; the Auto-fix loop addresses comments while the PR is still draft.
 - **Immediately after `gh pr create`, enable Auto-fix on the PR.** Auto-fix is per-PR opt-in — without it, neither this session nor a future session gets webhook events for new review comments or CI failures. Toggle via the CI status bar in claude.ai/code, or tell Claude "auto-fix this PR." Requires the Claude GitHub App installed on the org that owns the PR (e.g. for the current portfolio: `arthur-debert`, `lex-fmt`).
 - Flip the PR to **ready** when you want both reviewers; flipping fires the Copilot review trigger.
 
@@ -43,14 +43,14 @@ The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR
 
 ### Addressing review comments
 
-Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot reviews before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). On cloud, "wait for both" usually means "wait for Copilot once the PR is set to ready," since Gemini reviews drafts and Copilot doesn't.
+Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot's initial pass before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). Both reviewers fire at PR open under the current canonical policy, so the wait is "until both have posted reviews" — typically a few minutes for Gemini, ~7 min for Copilot.
 
 ### The PR state-transition the agent owns
 
 The agent — not the user — owns these state transitions:
 
 1. **`gh pr create --draft`** — at the start of a feature.
-2. **`gh pr ready`** — after addressing the first review pass (Gemini's, while draft) and CI is green. This triggers Copilot via the canonical workflow. **Without this step the loop doesn't close** — Copilot never reviews, the agent waits forever for a webhook that won't come, and the user has to manually flip every PR. The skill walks the agent through this; the principle to internalize is that `pr ready` is the agent's job, not the user's.
+2. **`gh pr ready`** — after addressing both reviewers' comments and CI is green. This is the agent's explicit signal to the user that iteration is done. Under the current canonical policy (since 2026-05-15) flipping to ready does **not** re-trigger Copilot — both reviewers fired at PR open while still draft. The flip is purely a state transition signaling "agent is done, user please review and merge." **Without this step the loop doesn't close** and the user has to manually flip every PR. The skill walks the agent through this; the principle is that `pr ready` is the agent's job, not the user's.
 3. **Stop and notify the user** — once both reviewers have weighed in, all threads are resolved, CI is green, and `mergeStateStatus=CLEAN`. The user does the final read and merges.
 
 Don't rely on the Claude UI's "CI monitoring" feature to drive these transitions — it has its own gh-auth setup that may report `CI checks unavailable` even when the agent's `gh` works fine. The agent should poll with `gh pr checks "$PR" --watch` directly.
