@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-14-1600-main   # bumps on every change so re-pasting is trivial
+# version: 2026-05-15-lefthook   # bumps on every change so re-pasting is trivial
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -71,6 +71,16 @@ else
   apt update || true
   apt install -y gh
   gh --version | head -1
+fi
+
+# Install lefthook globally. The binary is filesystem-root state, so it
+# belongs in env setup (cached in the snapshot, not re-installed per
+# session). `lefthook install` — which writes .git/hooks/pre-commit inside
+# the cloned repo — is per-session and belongs in a SessionStart hook in
+# each consumer repo.
+if ! command -v lefthook >/dev/null 2>&1; then
+  npm install -g lefthook
+  echo "installed lefthook: $(lefthook version)"
 fi
 
 # --- 2. Clone arthur-debert/release and install skills + CLAUDE.md --------
