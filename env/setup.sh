@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-15-pr-flow-guidance   # bumps on every change so re-pasting is trivial
+# version: 2026-05-15-flip-to-ready   # bumps on every change so re-pasting is trivial
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script

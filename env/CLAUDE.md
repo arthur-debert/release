@@ -45,6 +45,16 @@ The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR
 
 Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot reviews before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). On cloud, "wait for both" usually means "wait for Copilot once the PR is set to ready," since Gemini reviews drafts and Copilot doesn't.
 
+### The PR state-transition the agent owns
+
+The agent — not the user — owns these state transitions:
+
+1. **`gh pr create --draft`** — at the start of a feature.
+2. **`gh pr ready`** — after addressing the first review pass (Gemini's, while draft) and CI is green. This triggers Copilot via the canonical workflow. **Without this step the loop doesn't close** — Copilot never reviews, the agent waits forever for a webhook that won't come, and the user has to manually flip every PR. The skill walks the agent through this; the principle to internalize is that `pr ready` is the agent's job, not the user's.
+3. **Stop and notify the user** — once both reviewers have weighed in, all threads are resolved, CI is green, and `mergeStateStatus=CLEAN`. The user does the final read and merges.
+
+Don't rely on the Claude UI's "CI monitoring" feature to drive these transitions — it has its own gh-auth setup that may report `CI checks unavailable` even when the agent's `gh` works fine. The agent should poll with `gh pr checks "$PR" --watch` directly.
+
 ## Available skills
 
 `~/.claude/skills/pr-review-respond/SKILL.md` is the canonical flow for

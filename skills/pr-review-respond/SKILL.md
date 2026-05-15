@@ -189,20 +189,50 @@ In Claude Code on the web, your session is on an orchestrator-assigned branch (`
 
 To bypass the orchestrator entirely on a one-off, `/teleport` the session to local Claude Code and push directly to the original branch. See `~/.claude/CLAUDE.md` (the user-level instructions installed by the env setup script) for the broader rules of the road.
 
-## Stop at "ready to merge"
+## After the fixup push: wait, evaluate, flip-to-ready
 
-When all addressed threads are resolved and checks are green, the comment-handling phase is done. Report status and stop. The user does the final read and merges.
+The most common drop-the-ball spot is right here — agent pushes the fixup, reports "subscribed to CI events," and then nothing happens because Auto-fix's webhook subscription listens for **failures**, not **successes**. When CI flips green, the agent doesn't get woken up.
 
-```sh
-gh pr view "$PR" --json mergeStateStatus,mergeable
-# Ready when: mergeStateStatus=CLEAN, mergeable=MERGEABLE
-```
-
-Wait for checks before declaring done:
+The fix: poll synchronously after every fixup push.
 
 ```sh
+# 1. Wait for CI to settle. Blocks until all checks complete (pass or fail).
 gh pr checks "$PR" --watch
 ```
+
+`gh pr checks --watch` polls in this session. Don't rely on the Claude UI's "CI monitoring" feature — it has its own gh-auth setup that may report "CI checks unavailable" even when the agent's own `gh` works fine. Your `gh pr checks --watch` is the reliable signal.
+
+When `--watch` returns, evaluate the PR's state and decide:
+
+```sh
+STATE=$(gh pr view "$PR" --json isDraft,mergeStateStatus,mergeable,statusCheckRollup)
+echo "$STATE" | jq -r '"isDraft=\(.isDraft)  ms=\(.mergeStateStatus)  mergeable=\(.mergeable)"'
+UNRESOLVED=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f query='
+  query($owner:String!,$name:String!,$pr:Int!){
+    repository(owner:$owner,name:$name){pullRequest(number:$pr){
+      reviewThreads(first:100){nodes{isResolved}}}}}' \
+  --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved==false)] | length')
+```
+
+| Condition | Action |
+|---|---|
+| Checks **failed** | Fix what failed, push, loop. Don't stop here. |
+| Checks green, **unresolved threads remain** | Triage and resolve them. Don't stop here. |
+| Checks green, 0 unresolved, **PR is draft** | **Flip to ready.** `gh pr ready "$PR"`. This triggers the canonical `copilot-review.yml` workflow (which is gated on `draft == false` by design — see `~/.claude/CLAUDE.md`); a Copilot review will arrive shortly. Loop back to triage when it does. |
+| Checks green, 0 unresolved, PR is ready, `mergeStateStatus=CLEAN`, `mergeable=MERGEABLE` | **Stop.** This is the explicit signal to the user that you're done. Report state, leave the PR for human final read. |
+
+The flip-to-ready step is the **explicit cue for the user** that the agent is done iterating. Without it, you leave the PR perpetually in draft and the user has to manually flip + check + merge. With it, the user sees "PR went from draft to ready, both bots have reviewed, all green" and reads-and-merges.
+
+### Flip to ready
+
+```sh
+gh pr ready "$PR"
+echo "PR flipped to ready — Copilot review will trigger via copilot-review.yml workflow"
+```
+
+After flipping, wait briefly (the workflow takes ~7 min for Copilot to post), then loop back to step 1 of this skill to address whatever Copilot says. Once that round resolves with no new comments and CI stays green, you're done — leave for the user.
+
+## When the user merges
 
 Merge only on explicit authorization from the user ("merge it", "go ahead and merge", "merge when green"). Then:
 
