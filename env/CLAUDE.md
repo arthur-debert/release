@@ -55,6 +55,12 @@ The agent — not the user — owns these state transitions:
 
 Don't rely on the Claude UI's "CI monitoring" feature to drive these transitions — it has its own gh-auth setup that may report `CI checks unavailable` even when the agent's `gh` works fine. The agent should poll with `gh pr checks "$PR" --watch` directly.
 
+## Shell footguns in cloud sessions
+
+Recurring traps worth knowing so background watchers and long-running commands don't get stuck:
+
+- **`pgrep -f <pattern>` matches the pgrep process's own argv.** If you watch for `git commit -m` with `pgrep -f 'git commit -m'`, the watcher's command line literally contains that pattern, so it matches itself and loops forever. Fix: `pgrep -fa 'pat' | awk -v me=$$ '$1 != me'` (filter out the current shell's pid), or use a uniquely-named sentinel file the actual command will touch. Same trap applies to `pkill -f` and any other full-command-line matcher.
+
 ## Available skills
 
 `~/.claude/skills/pr-review-respond/SKILL.md` is the canonical flow for
