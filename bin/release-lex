@@ -241,9 +241,21 @@ release_one() {
   # rust-cli reusable workflow drives the tagging itself). The
   # orchestrator doesn't need to know which — it just calls the
   # primitive and watches whichever CI run gets triggered.
+  #
+  # `git reset --hard origin/main` (rather than `git pull --ff-only`)
+  # is deliberate: some repos' pre-commit hooks leave the working
+  # tree dirty after the commit step (e.g. tree-sitter-lex's hook
+  # regenerates `src/parser.c`, lexed's husky electron build touches
+  # build artifacts). A dirty tree fails `git pull --ff-only`. Reset
+  # is safe here because the bump we just made has already been
+  # admin-merged to origin/main, and any leftover working-tree state
+  # is regeneratable artefact, not work.
   git fetch origin
   git checkout main
-  git pull --ff-only
+  git reset --hard origin/main
+  if [ -f .gitmodules ]; then
+    git submodule update --init --recursive
+  fi
 
   local commit_sha
   commit_sha=$(git rev-parse HEAD)
