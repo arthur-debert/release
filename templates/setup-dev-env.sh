@@ -79,20 +79,36 @@ fi
 
 # Python / pip + venv. Triggered by any of the conventional manifests
 # (pyproject.toml, requirements.txt, setup.py) so legacy projects are
-# covered too. Only initialises if .venv missing — pip install is slower
-# than node/cargo and the guard wins more than it costs.
+# covered too.
+#
+# Run unconditionally on every session start — pip install is idempotent
+# (sub-second when the deps are already in place), and the alternative
+# (gating on `[ ! -d .venv ]`) means a half-installed .venv from a
+# previous run persists across sessions, and re-running the script can
+# never recover. mkdocs-lex's snapshot left .venv with only pip +
+# setuptools and tests then failed with ModuleNotFoundError — the guard
+# saw the directory, skipped reinstall, and nothing ever fixed it.
+#
+# Also: do NOT redirect install stderr to /dev/null. Swallowing the
+# message is what made the partial-venv state silent in the first place.
+# A loud warning to stderr surfaces real installation problems instead
+# of papering over them.
 if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
-   && [ ! -d .venv ] && command -v python3 >/dev/null 2>&1; then
-  python3 -m venv .venv
-  .venv/bin/pip install --upgrade pip --quiet || true
-  if [ -f pyproject.toml ]; then
-    .venv/bin/pip install -e '.[dev]' --quiet 2>/dev/null \
-      || .venv/bin/pip install -e . --quiet 2>/dev/null \
-      || true
-  elif [ -f requirements.txt ]; then
-    .venv/bin/pip install -r requirements.txt --quiet || true
-  elif [ -f setup.py ]; then
-    .venv/bin/pip install -e . --quiet || true
+   && command -v python3 >/dev/null 2>&1; then
+  [ -d .venv ] || python3 -m venv .venv
+  if [ -x .venv/bin/pip ]; then
+    .venv/bin/pip install --upgrade pip --quiet || true
+    if [ -f pyproject.toml ]; then
+      .venv/bin/pip install -e '.[dev]' --quiet \
+        || .venv/bin/pip install -e . --quiet \
+        || echo "warning: editable install failed — tests will not run" >&2
+    elif [ -f requirements.txt ]; then
+      .venv/bin/pip install -r requirements.txt --quiet \
+        || echo "warning: requirements install failed — tests will not run" >&2
+    elif [ -f setup.py ]; then
+      .venv/bin/pip install -e . --quiet \
+        || echo "warning: editable install failed — tests will not run" >&2
+    fi
   fi
 fi
 
