@@ -95,7 +95,17 @@ fi
 # of papering over them.
 if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
    && command -v python3 >/dev/null 2>&1; then
-  [ -d .venv ] || python3 -m venv .venv
+  # Gate venv creation on `.venv/bin/pip` being executable, not just
+  # `.venv/` existing. A previous run can leave the directory in place
+  # with pip missing (interrupted mid-snapshot, broken extraction);
+  # checking pip directly recovers from that. Warn loudly when the
+  # creation itself fails — otherwise the next gate silently skips all
+  # pip work and the agent debugs a missing-module mystery.
+  if [ ! -x .venv/bin/pip ]; then
+    if ! python3 -m venv .venv; then
+      echo "warning: python3 -m venv .venv failed — pip installs will be skipped" >&2
+    fi
+  fi
   if [ -x .venv/bin/pip ]; then
     .venv/bin/pip install --upgrade pip --quiet || true
     if [ -f pyproject.toml ]; then
