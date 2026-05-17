@@ -136,10 +136,18 @@ _nvim_ok() {
   command -v nvim >/dev/null 2>&1 || return 1
   local v major minor
   v=$(nvim --version 2>/dev/null | head -1 | sed -E 's/^NVIM v([0-9]+\.[0-9]+).*/\1/')
-  major=${v%%.*}
-  minor=${v##*.}
-  [ "${major}" -gt "${NVIM_MIN_MAJOR}" ] || \
-    { [ "${major}" -eq "${NVIM_MIN_MAJOR}" ] && [ "${minor}" -ge "${NVIM_MIN_MINOR}" ]; }
+  major="${v%%.*}"
+  minor="${v##*.}"
+  # Defensive: bail out if either component didn't parse as a number
+  # (e.g. an unusual nvim --version format).
+  case "${major}" in ''|*[!0-9]*) return 1 ;; esac
+  case "${minor}" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "${major}" -gt "${NVIM_MIN_MAJOR}" ] \
+     || { [ "${major}" -eq "${NVIM_MIN_MAJOR}" ] && [ "${minor}" -ge "${NVIM_MIN_MINOR}" ]; }; then
+    echo "nvim already installed: $(nvim --version | head -1)"
+    return 0
+  fi
+  return 1
 }
 if ! _nvim_ok; then
   case "$(uname -m)" in
@@ -179,7 +187,10 @@ fi
 # binary that does the import is env-level state.
 if ! command -v certutil >/dev/null 2>&1; then
   apt install -y libnss3-tools || echo "warning: libnss3-tools install failed" >&2
-  command -v certutil >/dev/null 2>&1 && echo "installed certutil: $(certutil -V 2>&1 | head -1)"
+  # certutil has no clean version probe (`certutil -V` is a verification
+  # subcommand that exits non-zero when invoked without args). Just
+  # confirm the binary is on PATH.
+  command -v certutil >/dev/null 2>&1 && echo "installed certutil ($(command -v certutil))"
 fi
 
 # uuid-runtime — provides `uuidgen`, used by padz live-tests.

@@ -63,7 +63,12 @@ if [ -f package.json ]; then
     # tooling (tree-sitter-cli, bats) and a committed lockfile would be
     # noise to bump. Without this branch, node_modules never gets
     # populated and any `npx <tool>` invocation fails.
-    npm install --no-audit --no-fund 2>/dev/null || npm install
+    #
+    # --no-package-lock matches the consumer's intent: they chose not
+    # to commit a lockfile, so we shouldn't generate one in their
+    # working tree just because we ran install.
+    npm install --no-audit --no-fund --no-package-lock 2>/dev/null \
+      || npm install --no-package-lock
   fi
 fi
 
@@ -105,12 +110,19 @@ fi
 # Fix: scan the system bundle for any cert whose subject matches
 # "Anthropic*sandbox-egress*" and import each as a trusted SSL root.
 # Idempotent — re-imports by nickname are no-ops once present. Gated on
-# `certutil` existing (installed by env/setup.sh as libnss3-tools, so
-# universally available in cloud sessions; absent locally, so this is
-# effectively cloud-only).
+# `certutil` AND `openssl` existing (the loop forks openssl to extract
+# each subject; both binaries are env-level state on cloud sessions but
+# may be absent locally).
+#
+# Fast-path: grep the bundle once for the Anthropic marker before doing
+# any per-cert work. On a non-cloud Linux box the bundle has no such
+# certs and the loop is gratuitous (forks openssl ~130×); skip it
+# entirely in that case.
 if [ "$(uname -s)" = "Linux" ] \
    && command -v certutil >/dev/null 2>&1 \
-   && [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+   && command -v openssl >/dev/null 2>&1 \
+   && [ -f /etc/ssl/certs/ca-certificates.crt ] \
+   && grep -q 'Anthropic' /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
   _nssdb="${HOME}/.pki/nssdb"
   mkdir -p "${_nssdb}"
   if [ ! -f "${_nssdb}/cert9.db" ]; then
