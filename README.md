@@ -140,6 +140,40 @@ Used today by `arami-core` (wasm consumed by `arami-app`) and
 `lex-fmt/lex` (`lex-wasm` member). See
 `docs/per-category/rust-cli.md` §WASM.
 
+## Composition principle
+
+Most repos have **two layers** of concerns: a stack-specific one (rust
+build/test/release, electron-app sign+publish, etc.) and a cross-
+cutting commons one (Markdown / YAML / shell lint, link-check, hook
+wiring). The portfolio handles each at the cheapest mechanism that
+fits.
+
+- **Stack-specific concerns** ship as reusable workflows (`W`) +
+  composite actions (`A`) here in `release/`, called by consumers via
+  thin `uses: arthur-debert/release/.github/workflows/<stack>.yml@v1`
+  blocks. Fix-once-propagate; consumers don't edit per-repo when a fix
+  lands here. Single source of truth.
+- **Cross-cutting commons concerns** ship in one of two forms:
+  - As a separate reusable CI workflow (e.g. `commons.yml` —
+    markdown / yaml / shell lint) that every consumer `uses:`-es
+    alongside its stack workflow. Same `W` mechanism, just a new row
+    that isn't "a stack."
+  - As **copy-once templates** under `templates/commons/` (e.g.
+    `lefthook.fragment.yaml`) when the file lives entirely in the
+    consumer's checkout and a thin-caller mechanism wouldn't make
+    sense. Drift is acceptable; re-copy when the upstream changes
+    meaningfully. The mkdocs deploy workflow is the same pattern.
+
+**Why not a fragment composer / template generator?** At our scale
+(~10 stacks, ~16 consumers, single-developer) the maintenance cost of
+a composition system (fragment ordering, merge correctness, generator
+debugging) exceeds the duplication it would eliminate. If we ever hit
+≥30 stacks or measurable drift incidents, the tool to reach for is
+[copier](https://copier.readthedocs.io) — purpose-built for
+template-with-resync — not ansible (which is fleet config, not
+template composition). Until then, documented copy-paste + reusable
+workflows cover ~80% of the benefit at ~5% of the cost.
+
 ## Status & next-up
 
 - ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
@@ -301,6 +335,11 @@ templates/
   .claude-settings.json       # SessionStart hook config; copied into each
                               # consumer's .claude/settings.json
   rust/                       # stack-specific policy files swept into consumers
+  commons/                    # cross-cutting copy-once snippets (markdown/
+                              # yaml/shell lefthook fragment, etc.) — paste
+                              # into the consumer's stack template, drift
+                              # acceptable. See "Composition principle"
+                              # section above.
   homebrew-formula.rb.tmpl    # render template
 tests/
   cloud-env-check/            # local Docker harness — approximates cloud
