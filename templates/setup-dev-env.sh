@@ -99,9 +99,14 @@ if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
   if [ -x .venv/bin/pip ]; then
     .venv/bin/pip install --upgrade pip --quiet || true
     if [ -f pyproject.toml ]; then
+      # No fallback to plain `.` — modern pip treats `[dev]` against a
+      # pyproject without that extra as a warn-and-continue (still
+      # installs base, exits 0). A genuine failure means a real dep
+      # can't resolve, and falling back to `.` would silently leave
+      # the venv with base installed but dev-extras (pytest etc)
+      # missing. Surface the failure instead.
       .venv/bin/pip install -e '.[dev]' --quiet \
-        || .venv/bin/pip install -e . --quiet \
-        || echo "warning: editable install failed — tests will not run" >&2
+        || echo "warning: editable install failed — tests will not run (see pip output above)" >&2
     elif [ -f requirements.txt ]; then
       .venv/bin/pip install -r requirements.txt --quiet \
         || echo "warning: requirements install failed — tests will not run" >&2
