@@ -85,9 +85,15 @@ Pre-installed by the env setup script — don't reinstall:
   `lefthook install` is per-repo)
 - **Shell tests:** `bats`
 - **VS Code extensions:** `vsce` (`@vscode/vsce`), `ovsx`
-- **Nvim plugins:** `lua5.4`, `luarocks`, `busted`, `vusted`, `nvim` (binary)
+- **Nvim plugins:** `lua5.4`, `luarocks`, `busted`, `vusted`, `luacheck`,
+  `nvim` ≥0.11 (binary; the apt package ships 0.9.5 which is too old for
+  current `nvim-lspconfig`)
 - **GUI tests:** `xvfb` binary (start `Xvfb :99 &` per-session in your
-  scripts/setup-dev-env.sh, then `export DISPLAY=:99`)
+  scripts/setup-dev-env.sh, then `export DISPLAY=:99`). `certutil`
+  (libnss3-tools) is also installed so the canonical setup-dev-env.sh
+  can import the sandbox-egress CA into the per-user Chromium NSS DB
+  (`~/.pki/nssdb`) — required for Electron / Playwright tests to load
+  HTTPS resources without `ERR_CERT_AUTHORITY_INVALID`.
 - **Tauri (GTK system libs):** `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
   `libsoup-3.0-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
   `libjavascriptcoregtk-4.1-dev`
