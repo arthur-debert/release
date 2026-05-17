@@ -100,6 +100,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | vscode-ext     | W 📋            | W 📋       | W 📋 ext-host   | W 📋 vsce package  | —          | W 📋              | A 📋 marketplace  | —                | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
+| python-pkg     | W 📋 ruff/black | W 📋 pytest| —               | W 📋 build (wheel) | —          | W 📋              | A 📋 PyPI         | —                | —         | A 📋           |
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W 📋 tag + v1     | A 📋 marketplace  | —                | —         | A 📋 (move v1) |
 | mdbook-site    | W 📋 link-check | —          | —               | W 📋 mdbook build  | —          | (pages deploy)    | —                 | —                | —         | —              |
 | jekyll-site    | W 📋            | —          | —               | W 📋 jekyll build  | —          | (pages deploy)    | —                 | —                | —         | —              |
@@ -112,11 +113,19 @@ W+A = thin caller plus stack-specific composite for sign/publish).
 `—` cells are deliberate — the role doesn't apply to that stack — so
 nobody goes looking for missing pieces.
 
+**Compiled artifacts** in the build/release columns can be native
+binaries, wasm, or both — declared per consumer via workflow inputs
+rather than being row-specific. Same pipeline shape; different
+attached artifacts and publish destinations. ¹ below is the canonical
+example.
+
 ¹ **rust-cli + npm (wasm)** — opt-in slot for Rust workspaces with a
 wasm-bindgen crate consumed by JS/TS. Set `wasm-package: <member>` on
 the caller and the canonical pipeline builds via `wasm-pack` once,
 attaches `<member>-wasm.tar.gz` to the GH release, and `npm publish`es
-the same artifact (no second Rust install, shares the warm cache). See
+the same artifact (no second Rust install, shares the warm cache).
+Used today by `arami-core` (wasm consumed by `arami-app`) and
+`lex-fmt/lex` (`lex-wasm` member). See
 `docs/per-category/rust-cli.md` §WASM.
 
 ## Status & next-up
@@ -135,8 +144,9 @@ the same artifact (no second Rust install, shares the warm cache). See
   Follow: `lightable/simple-gal-ui`.
 - 📋 then, in some order: rust-lib (clapfig, standout) · vscode-ext
   (lex-fmt/vscode) · nvim-plugin (lex-fmt/nvim) · tree-sitter
-  (lex-fmt/tree-sitter-lex) · gh-action (lightable/simple-gal-action) ·
-  mdbook-site (standout) · jekyll-site (lex-fmt/comms) · brew-tap
+  (lex-fmt/tree-sitter-lex) · python-pkg (lex-fmt/mkdocs-lex) ·
+  gh-action (lightable/simple-gal-action) · mdbook-site (standout) ·
+  jekyll-site (lex-fmt/comms) · brew-tap
   (arthur-debert/homebrew-tools).
 
 Order is driven by: (a) is there a consumer blocked on it today,
