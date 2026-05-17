@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+#
+# clone-lex-repos — bootstrap a workspace with every repo needed for a
+# coordinated lex-fmt release.
+#
+# Clones the 7 repos into <target-dir>/ side by side. Uses `gh repo clone`
+# (so it works in Claude Code Cloud and other gh-authenticated
+# environments where regular `git clone` is sandbox-restricted).
+# Already-cloned repos are skipped.
+#
+# Usage:
+#   clone-lex-repos [<target-dir>]      # defaults to current directory
+#
+# After cloning:
+#   release-lex <bump-kind> \
+#     --comms <target>/comms \
+#     --lex   <target>/lex \
+#     --tree-sitter <target>/tree-sitter-lex \
+#     --vscode <target>/vscode \
+#     --nvim   <target>/nvim \
+#     --lexed  <target>/lexed
+#
+# `arthur-debert/release` is included so `release-lex` itself is
+# available locally (handy for CI runs that don't have ~/h/release/bin
+# on PATH).
+set -euo pipefail
+
+TARGET="${1:-.}"
+mkdir -p "$TARGET"
+cd "$TARGET"
+
+REPOS=(
+  arthur-debert/release
+  lex-fmt/comms
+  lex-fmt/lex
+  lex-fmt/tree-sitter-lex
+  lex-fmt/vscode
+  lex-fmt/nvim
+  lex-fmt/lexed
+)
+
+for repo in "${REPOS[@]}"; do
+  dir="${repo#*/}"
+  if [ -d "$dir/.git" ]; then
+    echo "→ $dir exists, skipping"
+    continue
+  fi
+  echo "→ cloning $repo"
+  gh repo clone "$repo" "$dir" -- --recurse-submodules
+done
+
+echo
+echo "Done. Now:"
+echo "  cd $TARGET"
+echo "  release-lex patch \\"
+echo "    --comms comms --lex lex --tree-sitter tree-sitter-lex \\"
+echo "    --vscode vscode --nvim nvim --lexed lexed"

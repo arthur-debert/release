@@ -1,0 +1,275 @@
+#!/usr/bin/env bash
+#
+# release-lex — orchestrate a coordinated release across the lex-fmt
+# repo chain (comms → lex/tree-sitter-lex → vscode/nvim/lexed).
+#
+# Layer 1 of the cross-repo release automation (lex-fmt/lex#640).
+# Walks the dependency chain, calls each repo's `scripts/release/*`
+# primitives (Layer 0), and drives the actual git + GitHub state
+# transitions: branch, version bump, commit, PR, admin-merge, tag,
+# wait for release CI to finish before moving to dependents.
+#
+# Each repo provides three primitives under `scripts/release/`:
+#   get-current-version          — bare semver from this repo's manifest
+#   get-commits-since-release    — `<sha> <subject>` lines since latest tag
+#   update-release <new-version> — bumps manifest, deps, CHANGELOG; git-adds
+#
+# Usage:
+#   release-lex <bump-kind> \
+#     --comms <path> --lex <path> --tree-sitter <path> \
+#     --vscode <path> --nvim <path> --lexed <path> \
+#     [--dry-run] [--only <name>[,<name>...]]
+#
+# <bump-kind> is one of: patch | minor | major | <X.Y.Z>
+#   The literal version is applied as-is to every repo that has commits
+#   since its last release; bump-kinds (patch/minor/major) are computed
+#   per-repo from each repo's current version.
+#
+# --dry-run prints what the orchestrator would do without actually
+# committing, pushing, merging, tagging, or watching CI.
+#
+# --only restricts the walk to the named repos (still in dependency
+# order). Useful for cutting a single editor release without disturbing
+# the rest.
+#
+# Repo paths must point at clean working trees on `main` (or rebaseable
+# onto `main`); the orchestrator does `git fetch` + `git pull --ff-only`
+# before each repo's work.
+#
+# Exit codes:
+#   0  — all attempted releases cut successfully
+#   1  — at least one repo failed mid-flight (orchestrator stops there)
+#   64 — bad usage
+set -euo pipefail
+
+# ─── Helpers ─────────────────────────────────────────────────────────
+
+usage() {
+  cat <<'EOF'
+Usage:
+  release-lex <bump-kind> \
+    --comms <path> --lex <path> --tree-sitter <path> \
+    --vscode <path> --nvim <path> --lexed <path> \
+    [--dry-run] [--only <name>[,<name>...]]
+
+<bump-kind>:  patch | minor | major | <X.Y.Z>
+--dry-run:    print everything but make no real state changes
+--only:       restrict to a subset of repos (still dependency-ordered)
+EOF
+}
+
+github_slug_for() {
+  case "$1" in
+    comms)       echo lex-fmt/comms ;;
+    lex)         echo lex-fmt/lex ;;
+    tree-sitter) echo lex-fmt/tree-sitter-lex ;;
+    vscode)      echo lex-fmt/vscode ;;
+    nvim)        echo lex-fmt/nvim ;;
+    lexed)       echo lex-fmt/lexed ;;
+  esac
+}
+
+# compute_new_version <current> <bump-kind>
+# Returns the new semver string. <bump-kind> can be patch/minor/major or
+# an explicit X.Y.Z (returned as-is, minus any leading "v").
+compute_new_version() {
+  local current="${1#v}"
+  local bump="$2"
+  if [[ "$bump" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+    echo "${bump#v}"
+    return
+  fi
+  local major minor patch
+  IFS='.' read -r major minor patch <<< "$current"
+  case "$bump" in
+    patch) echo "$major.$minor.$((patch+1))" ;;
+    minor) echo "$major.$((minor+1)).0" ;;
+    major) echo "$((major+1)).0.0" ;;
+  esac
+}
+
+# run <cmd...>  —  echo + execute, OR echo only if --dry-run.
+run() {
+  echo "  \$ $*"
+  if [ "$DRY_RUN" = 0 ]; then
+    "$@"
+  fi
+}
+
+# ─── Argument parsing ────────────────────────────────────────────────
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 64
+fi
+
+BUMP_KIND="$1"; shift
+DRY_RUN=0
+ONLY=""
+declare -A REPOS
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --comms)       REPOS[comms]="$2"; shift 2 ;;
+    --lex)         REPOS[lex]="$2"; shift 2 ;;
+    --tree-sitter) REPOS[tree-sitter]="$2"; shift 2 ;;
+    --vscode)      REPOS[vscode]="$2"; shift 2 ;;
+    --nvim)        REPOS[nvim]="$2"; shift 2 ;;
+    --lexed)       REPOS[lexed]="$2"; shift 2 ;;
+    --dry-run)     DRY_RUN=1; shift ;;
+    --only)        ONLY="$2"; shift 2 ;;
+    *)             echo "release-lex: unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+case "$BUMP_KIND" in
+  patch|minor|major) ;;
+  *.*.*) ;;
+  *) echo "release-lex: bad bump-kind: $BUMP_KIND (want patch|minor|major|X.Y.Z)" >&2; exit 64 ;;
+esac
+
+if [ ${#REPOS[@]} -eq 0 ]; then
+  echo "release-lex: no repo paths supplied" >&2
+  exit 64
+fi
+
+# Walk order (dependency-respecting). Each repo is included only if its
+# path was supplied via flag.
+ORDER=(comms lex tree-sitter vscode nvim lexed)
+
+# Filter by --only if provided.
+ALLOWED=""
+if [ -n "$ONLY" ]; then
+  IFS=',' read -ra ALLOWED <<< "$ONLY"
+fi
+is_allowed() {
+  if [ -z "$ONLY" ]; then return 0; fi
+  local name="$1"
+  for a in "${ALLOWED[@]}"; do
+    if [ "$a" = "$name" ]; then return 0; fi
+  done
+  return 1
+}
+
+# Validate paths.
+for key in "${!REPOS[@]}"; do
+  path="${REPOS[$key]}"
+  if [ ! -d "$path" ]; then
+    echo "release-lex: not a directory: $path (for --$key)" >&2
+    exit 1
+  fi
+  if [ ! -x "$path/scripts/release/get-current-version" ]; then
+    echo "release-lex: $key at $path is missing scripts/release/ primitives" >&2
+    echo "  (Layer 0 must be merged in lex-fmt/$(github_slug_for "$key") first)" >&2
+    exit 1
+  fi
+done
+
+# ─── Per-repo release ────────────────────────────────────────────────
+
+release_one() {
+  local key="$1"
+  local path="${REPOS[$key]}"
+  local gh_repo
+  gh_repo=$(github_slug_for "$key")
+
+  echo
+  echo "═══ $key ($gh_repo) at $path ═══"
+
+  cd "$path"
+  run git fetch origin
+  run git checkout main
+  run git pull --ff-only
+  # Submodule init for consumers of comms (no-op if absent).
+  if [ -f .gitmodules ]; then
+    run git submodule update --init --recursive
+  fi
+
+  local commits
+  commits=$(./scripts/release/get-commits-since-release || true)
+  if [ -z "$commits" ]; then
+    echo "  ↳ no new commits since latest release tag; skipping $key"
+    return 0
+  fi
+  local count
+  count=$(echo "$commits" | grep -c .)
+  echo "  ↳ $count commit(s) since latest release"
+
+  local current new
+  current=$(./scripts/release/get-current-version)
+  new=$(compute_new_version "$current" "$BUMP_KIND")
+  echo "  ↳ version: $current → $new"
+
+  local branch="release/v$new"
+  run git checkout -b "$branch"
+  run ./scripts/release/update-release "$new"
+  run git commit -m "chore: release v$new"
+  run git push -u origin "$branch"
+  echo "  ↳ branch pushed: https://github.com/$gh_repo/tree/$branch"
+
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "  ↳ dry-run: skipping PR creation, admin-merge, tag, CI wait"
+    # Roll back the local branch so we don't accumulate dry-run state.
+    run git checkout main
+    run git branch -D "$branch"
+    return 0
+  fi
+
+  # Open PR + admin-merge. The ruleset on main blocks direct push, so
+  # PR is the only mechanism — but `--admin` bypasses the review
+  # requirements for this batch of automated releases.
+  local pr
+  pr=$(gh pr create --repo "$gh_repo" \
+                    --title "chore: release v$new" \
+                    --body "Cut by \`release-lex\` (Layer 1). Part of lex-fmt/lex#640." \
+       | grep -oE 'pull/[0-9]+' | grep -oE '[0-9]+$' || true)
+  if [ -z "$pr" ]; then
+    echo "  ✗ gh pr create did not return a PR number" >&2
+    return 1
+  fi
+  echo "  ↳ PR #$pr opened"
+  gh pr merge "$pr" --repo "$gh_repo" --squash --delete-branch --admin
+  echo "  ↳ PR #$pr admin-merged"
+
+  # Tag the merge commit on main and push the tag — this triggers the
+  # release workflow.
+  git fetch origin
+  git checkout main
+  git pull --ff-only
+  run git tag "v$new"
+  run git push origin "v$new"
+  echo "  ↳ tag v$new pushed"
+
+  # Wait for release CI. Give GH a moment to enqueue the tag-push run.
+  sleep 8
+  local run_id
+  run_id=$(gh run list --repo "$gh_repo" \
+                       --event=push \
+                       --limit 5 \
+                       --json databaseId,headBranch,workflowName \
+           | jq -r --arg ref "v$new" \
+                   '.[] | select(.headBranch == $ref) | .databaseId' \
+           | head -n1)
+  if [ -z "$run_id" ]; then
+    echo "  ✗ could not find release CI run for tag v$new" >&2
+    echo "    inspect manually: gh run list --repo $gh_repo" >&2
+    return 1
+  fi
+  echo "  ↳ watching release CI run $run_id..."
+  gh run watch "$run_id" --repo "$gh_repo" --exit-status
+  echo "  ✓ release CI complete for $key v$new"
+}
+
+# ─── Walk ────────────────────────────────────────────────────────────
+
+if [ "$DRY_RUN" = 1 ]; then
+  echo "release-lex: dry-run mode — no commits, pushes, merges, or tags will be made"
+fi
+
+for key in "${ORDER[@]}"; do
+  if [ -n "${REPOS[$key]:-}" ] && is_allowed "$key"; then
+    release_one "$key"
+  fi
+done
+
+echo
+echo "release-lex: all attempted releases complete."
