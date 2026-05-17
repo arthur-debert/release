@@ -40,12 +40,14 @@ mkdir -p "${LOG_DIR}"
 
 declare -a PASS=()
 declare -a FAIL=()
+SELECTED=0
 
 for entry in "${TARGETS[@]}"; do
   IFS='|' read -r repo branch test_cmd <<<"${entry}"
   if [ -n "${FILTER}" ] && [[ "${repo}" != *"${FILTER}"* ]]; then
     continue
   fi
+  SELECTED=$((SELECTED + 1))
   slug="${repo//\//__}"
   log="${LOG_DIR}/${slug}.log"
   echo "============================================================"
@@ -66,6 +68,10 @@ echo
 echo "============================================================"
 echo "SUMMARY"
 echo "============================================================"
+if [ "${SELECTED}" -eq 0 ]; then
+  echo "no targets matched filter '${FILTER}' — check the TARGETS list" >&2
+  exit 2
+fi
 echo "pass (${#PASS[@]}):"
 printf '  - %s\n' "${PASS[@]}"
 echo "fail (${#FAIL[@]}):"

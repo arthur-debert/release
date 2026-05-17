@@ -73,23 +73,43 @@ fi
 
 # --- Step 2: clone consumer repo -----------------------------------------
 # Do NOT echo the clone URL — it contains GH_TOKEN. Print the repo + branch
-# only; the token never appears in the log.
+# only; the token never appears in the log. Fail explicitly if the
+# requested branch does not exist (no silent fallback to the default
+# branch — testing the wrong revision is worse than failing loudly).
+# Once the clone succeeds, drop the credential from git remote.origin.url
+# and unset GH_TOKEN inside the container so subsequent steps
+# (setup-dev-env.sh, lefthook, tests) cannot exfiltrate it.
 step clone "git clone https://github.com/${REPO}.git --branch ${BRANCH}"
 mkdir -p /workspace
 cd /workspace
 CLONE_URL="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
-git clone --quiet "${CLONE_URL}" repo --branch "${BRANCH}" 2>/dev/null \
-  || git clone --quiet "${CLONE_URL}" repo
+if ! git clone --quiet "${CLONE_URL}" repo --branch "${BRANCH}" 2>/dev/null; then
+  fail clone
+fi
 unset CLONE_URL
 cd repo
-if [ "${BRANCH}" != "main" ]; then
-  git checkout "${BRANCH}" 2>/dev/null || true
-fi
+# Remove the token from the saved remote URL and from the process env so
+# nothing downstream can see it.
+git remote set-url origin "https://github.com/${REPO}.git"
+unset GH_TOKEN
 
 # --- Step 3: scripts/setup-dev-env.sh ------------------------------------
+# Run as a child process — sourcing the consumer's script would let any
+# `exit 0` in it terminate the harness. The downside is that exports
+# from the child (e.g. `export DISPLAY=:99` for the Xvfb wrapper) die
+# with the child. We mitigate the DISPLAY case below by reading what
+# the script may have written to ~/.bashrc — the canonical Xvfb extras
+# also persist DISPLAY there for interactive shells, so picking it up
+# here keeps lefthook + tests aligned with real cloud usage. Other
+# script-level exports (PATH additions, language-specific vars) won't
+# propagate; consumers that need those at lefthook/tests time should
+# set them in lefthook.yml or in the test command directly.
 if [ -f scripts/setup-dev-env.sh ]; then
   step dev-env "running scripts/setup-dev-env.sh"
   bash scripts/setup-dev-env.sh || fail dev-env
+  if grep -qs '^export DISPLAY=:99' "${HOME}/.bashrc" 2>/dev/null; then
+    export DISPLAY=:99
+  fi
 else
   step dev-env "(no scripts/setup-dev-env.sh — skipping)"
 fi
@@ -105,18 +125,22 @@ fi
 # --- Step 5: primary test command ----------------------------------------
 TEST_CMD_RESOLVED="${TEST_CMD}"
 if [ "${TEST_CMD_RESOLVED}" = "auto" ]; then
+  # No `|| true` suppressions — the whole point of the harness is to
+  # report the first failing step. If your repo's test command is
+  # noisy/flaky, pass an override (3rd arg to ./run.sh) rather than
+  # silencing failures here.
   if [ -f Cargo.toml ]; then
     TEST_CMD_RESOLVED="cargo test --no-run --locked"
   elif [ -f pnpm-lock.yaml ]; then
-    TEST_CMD_RESOLVED="pnpm -s test || true"
+    TEST_CMD_RESOLVED="pnpm -s test"
   elif [ -f yarn.lock ]; then
-    TEST_CMD_RESOLVED="yarn test || true"
+    TEST_CMD_RESOLVED="yarn test"
   elif [ -f package.json ]; then
-    TEST_CMD_RESOLVED="npm test || true"
+    TEST_CMD_RESOLVED="npm test"
   elif [ -f Gemfile ]; then
-    TEST_CMD_RESOLVED="bundle exec rake test || true"
+    TEST_CMD_RESOLVED="bundle exec rake test"
   elif [ -f pyproject.toml ]; then
-    TEST_CMD_RESOLVED="python3 -m pytest -q || true"
+    TEST_CMD_RESOLVED="python3 -m pytest -q"
   else
     TEST_CMD_RESOLVED=""
   fi

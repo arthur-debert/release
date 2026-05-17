@@ -3,7 +3,10 @@
 # the SessionStart hook in .claude/settings.json.
 #
 # Source of truth: arthur-debert/release templates/setup-dev-env.sh.
-# Re-sync via the gh-repo-setup skill (or by copying this file verbatim).
+# To re-sync, copy this file verbatim over the consumer's
+# scripts/setup-dev-env.sh. (The gh-repo-setup skill does not currently
+# route this top-level template; it only handles per-stack trees under
+# templates/<stack>/.)
 # Repos that need project-specific extras (Xvfb daemon, pinned-binary
 # fetch, extra rustup targets, etc.) append them below the marker at the
 # bottom — anything above it is rsync'd from the template.
@@ -62,14 +65,23 @@ if [ -f Gemfile ] && command -v bundle >/dev/null 2>&1; then
   bundle install --quiet || true
 fi
 
-# Python / pip + venv. Only initialise if .venv missing — pip install is
-# slower than node/cargo and the guard wins more than it costs.
-if [ -f pyproject.toml ] && [ ! -d .venv ] && command -v python3 >/dev/null 2>&1; then
+# Python / pip + venv. Triggered by any of the conventional manifests
+# (pyproject.toml, requirements.txt, setup.py) so legacy projects are
+# covered too. Only initialises if .venv missing — pip install is slower
+# than node/cargo and the guard wins more than it costs.
+if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
+   && [ ! -d .venv ] && command -v python3 >/dev/null 2>&1; then
   python3 -m venv .venv
   .venv/bin/pip install --upgrade pip --quiet || true
-  .venv/bin/pip install -e '.[dev]' --quiet 2>/dev/null \
-    || .venv/bin/pip install -e . --quiet 2>/dev/null \
-    || true
+  if [ -f pyproject.toml ]; then
+    .venv/bin/pip install -e '.[dev]' --quiet 2>/dev/null \
+      || .venv/bin/pip install -e . --quiet 2>/dev/null \
+      || true
+  elif [ -f requirements.txt ]; then
+    .venv/bin/pip install -r requirements.txt --quiet || true
+  elif [ -f setup.py ]; then
+    .venv/bin/pip install -e . --quiet || true
+  fi
 fi
 
 # --- 3. Pre-commit hook wiring -------------------------------------------
@@ -92,5 +104,6 @@ fi
 # in-place; consumers append project-specific steps BELOW this marker.
 # (See e.g. lex-fmt/lexed for an Xvfb start, lex-fmt/nvim for pinned-bin
 # fetches.)
-
-exit 0
+#
+# No trailing `exit 0` — bash exits 0 on EOF when `set -euo pipefail`
+# succeeded. Adding one here would make appended extras unreachable.

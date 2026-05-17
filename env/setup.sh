@@ -141,18 +141,15 @@ if ! command -v uuidgen >/dev/null 2>&1; then
 fi
 
 # Tauri / GTK system libs — required to compile Tauri apps from source.
-# Bundle install for the whole stack; pkg-config + dpkg-probe one of the
-# headers to skip when already present (saves ~30s on warm snapshots).
-if ! dpkg -s libgtk-3-dev >/dev/null 2>&1; then
-  apt install -y \
-    libgtk-3-dev \
-    libwebkit2gtk-4.1-dev \
-    libsoup-3.0-dev \
-    libayatana-appindicator3-dev \
-    librsvg2-dev \
-    libjavascriptcoregtk-4.1-dev \
-    || echo "warning: Tauri/GTK system libs install failed" >&2
-fi
+# `apt install` is already idempotent and fast when every package is in
+# place (~1s on a warm snapshot), so we don't try to short-circuit with
+# dpkg probes: a single-package guard would miss the case where one of
+# the six was installed manually but the others are absent.
+TAURI_PKGS="libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+  libayatana-appindicator3-dev librsvg2-dev libjavascriptcoregtk-4.1-dev"
+# shellcheck disable=SC2086  # intentional word-splitting of TAURI_PKGS
+apt install -y ${TAURI_PKGS} \
+  || echo "warning: Tauri/GTK system libs install failed" >&2
 
 # vsce + ovsx — VS Code extension packaging/publishing CLIs via npm
 if ! command -v vsce >/dev/null 2>&1; then
