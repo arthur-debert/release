@@ -124,6 +124,41 @@ if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
       .venv/bin/pip install -e . --quiet \
         || echo "warning: editable install failed — tests will not run" >&2
     fi
+
+    # Expose venv-installed CLIs on the agent's bare PATH.
+    #
+    # The cloud Bash tool runs non-interactive shells whose PATH is
+    # fixed at session start and does NOT include
+    # ${REPO_ROOT}/.venv/bin. ~/.bashrc returns early for non-
+    # interactive shells (`[ -z "$PS1" ] && return`), so PATH fixes
+    # there are unreachable. The agent's `subprocess.run(['mkdocs',
+    # …])` (or any test that shells out to a venv CLI) resolves the
+    # command against the agent's PATH and gets FileNotFoundError.
+    #
+    # Symlink every executable in .venv/bin (except the
+    # python/pip/activate family — those would shadow system commands
+    # or break venv internals) into ${HOME}/.local/bin/, which IS on
+    # the agent's PATH (it's where uv / pipx / similar Python tooling
+    # already drops entry points). Idempotent — `ln -sf` overwrites
+    # stale symlinks pointing into a previous session's path.
+    #
+    # Consumers that install ADDITIONAL CLIs from project-local extras
+    # (pinned-binary downloads from GitHub releases, etc) should drop
+    # them directly into ${HOME}/.local/bin rather than .venv/bin, so
+    # they're discoverable on the same PATH without needing a second
+    # symlink pass below the marker.
+    if [ -d .venv/bin ] && [ -d "${HOME}/.local/bin" ]; then
+      for _venv_bin in .venv/bin/*; do
+        [ -x "${_venv_bin}" ] || continue
+        _name=$(basename "${_venv_bin}")
+        case "${_name}" in
+          python|python[0-9]*|pip|pip[0-9]*|activate*|easy_install*|wheel|wheel[0-9]*)
+            continue
+            ;;
+        esac
+        ln -sf "${REPO_ROOT}/.venv/bin/${_name}" "${HOME}/.local/bin/${_name}"
+      done
+    fi
   fi
 fi
 
