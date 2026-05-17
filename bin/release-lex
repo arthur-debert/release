@@ -245,27 +245,28 @@ release_one() {
   git checkout main
   git pull --ff-only
 
-  local before_run_ts
-  before_run_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local commit_sha
+  commit_sha=$(git rev-parse HEAD)
   run ./scripts/release/trigger-release "$new"
   echo "  ↳ release triggered for v$new"
 
   # Find the release-CI run that just got triggered. Filter by
-  # createdAt > before_run_ts so we pick up the run regardless of
-  # whether the trigger was a tag push (headBranch = "v$new") or a
-  # workflow_dispatch (headBranch = "main"). Also restrict to the
-  # release.yml workflow to ignore unrelated CI noise (sandbox
-  # tests, rust CI, etc. that fire on the same push).
+  # commit SHA, which is consistent for both tag-push (tag points at
+  # HEAD) and workflow_dispatch (dispatched from main's HEAD) — no
+  # clock-skew sensitivity. Restrict to the release.yml workflow to
+  # ignore unrelated CI on the same push (sandbox tests, rust CI).
+  # `// empty` in jq so an empty match yields "" (not literal "null"),
+  # so the -z check works.
   sleep 8
   local run_id
   run_id=$(gh run list --repo "$gh_repo" \
                        --workflow=release.yml \
-                       --created=">$before_run_ts" \
-                       --limit 5 \
+                       --commit "$commit_sha" \
+                       --limit 1 \
                        --json databaseId \
-                       --jq '.[0].databaseId')
+                       --jq '.[0].databaseId // empty')
   if [ -z "$run_id" ]; then
-    echo "  ✗ could not find release CI run for v$new (created after $before_run_ts)" >&2
+    echo "  ✗ could not find release CI run for v$new (commit $commit_sha)" >&2
     echo "    inspect manually: gh run list --repo $gh_repo --workflow=release.yml" >&2
     return 1
   fi
