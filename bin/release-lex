@@ -157,11 +157,13 @@ for key in "${!REPOS[@]}"; do
     echo "release-lex: not a directory: $path (for --$key)" >&2
     exit 1
   fi
-  if [ ! -x "$path/scripts/release/get-current-version" ]; then
-    echo "release-lex: $key at $path is missing scripts/release/ primitives" >&2
-    echo "  (Layer 0 must be merged in lex-fmt/$(github_slug_for "$key") first)" >&2
-    exit 1
-  fi
+  for prim in get-current-version get-commits-since-release update-release trigger-release; do
+    if [ ! -x "$path/scripts/release/$prim" ]; then
+      echo "release-lex: $key at $path is missing scripts/release/$prim" >&2
+      echo "  (Layer 0 must be merged in lex-fmt/$(github_slug_for "$key") first)" >&2
+      exit 1
+    fi
+  done
 done
 
 # ─── Per-repo release ────────────────────────────────────────────────
@@ -230,28 +232,42 @@ release_one() {
   gh pr merge "$pr" --repo "$gh_repo" --squash --delete-branch --admin
   echo "  ↳ PR #$pr admin-merged"
 
-  # Tag the merge commit on main and push the tag — this triggers the
-  # release workflow.
+  # Fast-forward to the merge commit on main and delegate to the
+  # repo's own `trigger-release` primitive (Layer 0). Each repo owns
+  # its trigger strategy: most use tag-push (the primitive creates
+  # an annotated `vX.Y.Z` tag and pushes it; CI fires on
+  # `on: push: tags: [v*]`). lex uses workflow_dispatch (the primitive
+  # calls `gh workflow run release.yml -f version=...`; the canonical
+  # rust-cli reusable workflow drives the tagging itself). The
+  # orchestrator doesn't need to know which — it just calls the
+  # primitive and watches whichever CI run gets triggered.
   git fetch origin
   git checkout main
   git pull --ff-only
-  run git tag "v$new"
-  run git push origin "v$new"
-  echo "  ↳ tag v$new pushed"
 
-  # Wait for release CI. Give GH a moment to enqueue the tag-push run.
+  local commit_sha
+  commit_sha=$(git rev-parse HEAD)
+  run ./scripts/release/trigger-release "$new"
+  echo "  ↳ release triggered for v$new"
+
+  # Find the release-CI run that just got triggered. Filter by
+  # commit SHA, which is consistent for both tag-push (tag points at
+  # HEAD) and workflow_dispatch (dispatched from main's HEAD) — no
+  # clock-skew sensitivity. Restrict to the release.yml workflow to
+  # ignore unrelated CI on the same push (sandbox tests, rust CI).
+  # `// empty` in jq so an empty match yields "" (not literal "null"),
+  # so the -z check works.
   sleep 8
   local run_id
   run_id=$(gh run list --repo "$gh_repo" \
-                       --event=push \
-                       --limit 5 \
-                       --json databaseId,headBranch,workflowName \
-           | jq -r --arg ref "v$new" \
-                   '.[] | select(.headBranch == $ref) | .databaseId' \
-           | head -n1)
+                       --workflow=release.yml \
+                       --commit "$commit_sha" \
+                       --limit 1 \
+                       --json databaseId \
+                       --jq '.[0].databaseId // empty')
   if [ -z "$run_id" ]; then
-    echo "  ✗ could not find release CI run for tag v$new" >&2
-    echo "    inspect manually: gh run list --repo $gh_repo" >&2
+    echo "  ✗ could not find release CI run for v$new (commit $commit_sha)" >&2
+    echo "    inspect manually: gh run list --repo $gh_repo --workflow=release.yml" >&2
     return 1
   fi
   echo "  ↳ watching release CI run $run_id..."
