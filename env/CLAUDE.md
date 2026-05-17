@@ -85,7 +85,13 @@ Pre-installed by the env setup script — don't reinstall:
   `lefthook install` is per-repo)
 - **Shell tests:** `bats`
 - **VS Code extensions:** `vsce` (`@vscode/vsce`), `ovsx`
-- **Nvim plugins:** `lua5.4`, `luarocks`, `busted`, `vusted`
+- **Nvim plugins:** `lua5.4`, `luarocks`, `busted`, `vusted`, `nvim` (binary)
+- **GUI tests:** `xvfb` binary (start `Xvfb :99 &` per-session in your
+  scripts/setup-dev-env.sh, then `export DISPLAY=:99`)
+- **Tauri (GTK system libs):** `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
+  `libsoup-3.0-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
+  `libjavascriptcoregtk-4.1-dev`
+- **Misc:** `uuidgen` (via uuid-runtime)
 
 Plus what Anthropic ships by default: Node 20/21/22 + npm/yarn/pnpm/bun,
 Python 3.x + pip/poetry/uv, Ruby, PHP, Java 21, Go, Rust + cargo, C/C++
