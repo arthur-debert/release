@@ -102,8 +102,6 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
 | python-pkg     | W 📋 ruff/black | W 📋 pytest| —               | W 📋 build (wheel) | —          | W 📋              | A 📋 PyPI         | —                | —         | A 📋           |
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W 📋 tag + v1     | A 📋 marketplace  | —                | —         | A 📋 (move v1) |
-| mdbook-site    | W 📋 link-check | —          | —               | W 📋 mdbook build  | —          | (pages deploy)    | —                 | —                | —         | —              |
-| jekyll-site    | W 📋            | —          | —               | W 📋 jekyll build  | —          | (pages deploy)    | —                 | —                | —         | —              |
 | brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
 
 What the matrix tells you at a glance: rust-cli is the only fully
@@ -118,6 +116,20 @@ binaries, wasm, or both — declared per consumer via workflow inputs
 rather than being row-specific. Same pipeline shape; different
 attached artifacts and publish destinations. ¹ below is the canonical
 example.
+
+**Documentation deploy is a cross-cutting feature, not a stack row.**
+The portfolio standardised on **mkdocs** (with the lex-fmt/mkdocs-lex
+plugin for Lex-format docs) as the single documentation toolchain.
+Any consumer — regardless of its main-stack row — can adopt the
+canonical deploy workflow by copying
+[`lex-fmt/mkdocs-lex/docs/deployment/examples/docs.yml`](https://github.com/lex-fmt/mkdocs-lex/blob/main/docs/deployment/examples/docs.yml)
+into its `.github/workflows/`. The workflow is intentionally shipped
+as a **copy-once template**, not as a reusable `uses:` caller: it's
+short, stable, and barely customisable, so the indirection cost of a
+thin-caller mechanism outweighs its propagation benefit. Drift is
+acceptable; re-copy if the upstream changes meaningfully. The earlier
+`mdbook-site` and `jekyll-site` rows are retired — dodot/lex/standout
+mid-port from mdbook, comms moving from jekyll.
 
 ¹ **rust-cli + npm (wasm)** — opt-in slot for Rust workspaces with a
 wasm-bindgen crate consumed by JS/TS. Set `wasm-package: <member>` on
@@ -141,12 +153,11 @@ Used today by `arami-core` (wasm consumed by `arami-app`) and
   agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
   validates changes without burning a cloud session.
 - 📋 **electron-app** — next up. Pilot consumer: `lex-fmt/lexed`.
-  Follow: `lightable/simple-gal-ui`.
+  Follow: `arthur-debert/simple-gal-ui`.
 - 📋 then, in some order: rust-lib (clapfig, standout) · vscode-ext
   (lex-fmt/vscode) · nvim-plugin (lex-fmt/nvim) · tree-sitter
   (lex-fmt/tree-sitter-lex) · python-pkg (lex-fmt/mkdocs-lex) ·
-  gh-action (lightable/simple-gal-action) · mdbook-site (standout) ·
-  jekyll-site (lex-fmt/comms) · brew-tap
+  gh-action (arthur-debert/simple-gal-action) · brew-tap
   (arthur-debert/homebrew-tools).
 
 Order is driven by: (a) is there a consumer blocked on it today,
