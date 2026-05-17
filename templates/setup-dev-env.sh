@@ -124,6 +124,53 @@ if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
       .venv/bin/pip install -e . --quiet \
         || echo "warning: editable install failed — tests will not run" >&2
     fi
+
+    # Expose venv-installed CLIs on the agent's bare PATH.
+    #
+    # The cloud Bash tool runs non-interactive shells whose PATH is
+    # fixed at session start and does NOT include
+    # ${REPO_ROOT}/.venv/bin. ~/.bashrc returns early for non-
+    # interactive shells (`[ -z "$PS1" ] && return`), so PATH fixes
+    # there are unreachable. The agent's `subprocess.run(['mkdocs',
+    # …])` (or any test that shells out to a venv CLI) resolves the
+    # command against the agent's PATH and gets FileNotFoundError.
+    #
+    # Symlink every executable in .venv/bin (except the
+    # python/pip/activate family — those would shadow system commands
+    # or break venv internals) into ${HOME}/.local/bin/, which IS on
+    # the agent's PATH (it's where uv / pipx / similar Python tooling
+    # already drops entry points). Idempotent — `ln -sf` overwrites
+    # stale symlinks pointing into a previous session's path.
+    #
+    # Consumers that install ADDITIONAL CLIs from project-local extras
+    # (pinned-binary downloads from GitHub releases, etc) should drop
+    # them directly into ${HOME}/.local/bin rather than .venv/bin, so
+    # they're discoverable on the same PATH without needing a second
+    # symlink pass below the marker.
+    if [ -d .venv/bin ]; then
+      # Create ~/.local/bin if missing — env/setup.sh doesn't and Ubuntu
+      # cloud images don't ship it by default in fresh users. The
+      # directory is on the default PATH for any login that picks up
+      # ~/.profile, but we still need it to exist before we ln into it.
+      mkdir -p "${HOME}/.local/bin"
+      for _venv_bin in .venv/bin/*; do
+        # Require both regular file (after symlink resolution) AND
+        # executable bit. `-x` alone matches directories, which would
+        # produce a useless dangling symlink if the glob ever did.
+        [ -f "${_venv_bin}" ] && [ -x "${_venv_bin}" ] || continue
+        # Parameter expansion avoids forking basename per iteration.
+        _name="${_venv_bin##*/}"
+        case "${_name}" in
+          python|python[0-9]*|pip|pip[0-9]*|activate*|easy_install*|wheel|wheel[0-9]*)
+            continue
+            ;;
+        esac
+        # `--` defends against (pathological) filenames starting with -;
+        # `|| true` matches the script's best-effort policy — a single
+        # permission hiccup shouldn't abort the rest of session setup.
+        ln -sf -- "${REPO_ROOT}/.venv/bin/${_name}" "${HOME}/.local/bin/${_name}" || true
+      done
+    fi
   fi
 fi
 
