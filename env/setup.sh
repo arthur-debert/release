@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-15-pgrep-footgun   # bumps on every change so re-pasting is trivial
+# version: 2026-05-16-cross-repo-apt   # bumps on every change so re-pasting is trivial
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -103,12 +103,53 @@ fi
 #   ovsx            — Open VSX marketplace publisher (alternative to vsce publish)
 #   lua5.4 + luarocks   — Lua runtime + package manager (for nvim plugins)
 #   busted + vusted — Lua test runners (vusted = Neovim-headless wrapper around busted)
+#   neovim          — nvim binary (needed by lex-fmt/nvim and any consumer that
+#                     invokes nvim during tests; the snapshot ubuntu image
+#                     does not ship it by default)
+#   xvfb            — virtual framebuffer; binary is env-side, starting the
+#                     :99 daemon is per-repo in scripts/setup-dev-env.sh for
+#                     GUI-test consumers (lexed, arami-app, future Electron)
+#   uuid-runtime    — provides `uuidgen` (padz live-tests; cheap, ~30KB)
+#   Tauri/GTK system libs — required to build Tauri apps from source
+#                           (arami-core today; any future Tauri consumer)
 
 # bats — single-binary apt install
 if ! command -v bats >/dev/null 2>&1; then
   apt install -y bats || echo "warning: bats install failed" >&2
   command -v bats >/dev/null 2>&1 && echo "installed bats: $(bats --version | head -1)"
 fi
+
+# neovim — apt's `neovim` package
+if ! command -v nvim >/dev/null 2>&1; then
+  apt install -y neovim || echo "warning: neovim install failed" >&2
+  command -v nvim >/dev/null 2>&1 && echo "installed neovim: $(nvim --version | head -1)"
+fi
+
+# xvfb — virtual framebuffer for headless GUI-app tests. Consumers that
+# need a running display start `Xvfb :99` themselves (idempotent, in
+# their scripts/setup-dev-env.sh); this just ensures the binary is on
+# disk so that start step works.
+if ! command -v Xvfb >/dev/null 2>&1; then
+  apt install -y xvfb || echo "warning: xvfb install failed" >&2
+  command -v Xvfb >/dev/null 2>&1 && echo "installed xvfb: $(Xvfb -help 2>&1 | head -1)"
+fi
+
+# uuid-runtime — provides `uuidgen`, used by padz live-tests.
+if ! command -v uuidgen >/dev/null 2>&1; then
+  apt install -y uuid-runtime || echo "warning: uuid-runtime install failed" >&2
+  command -v uuidgen >/dev/null 2>&1 && echo "installed uuid-runtime: uuidgen $(uuidgen --version 2>&1 | head -1 || echo present)"
+fi
+
+# Tauri / GTK system libs — required to compile Tauri apps from source.
+# `apt install` is already idempotent and fast when every package is in
+# place (~1s on a warm snapshot), so we don't try to short-circuit with
+# dpkg probes: a single-package guard would miss the case where one of
+# the six was installed manually but the others are absent.
+TAURI_PKGS="libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
+  libayatana-appindicator3-dev librsvg2-dev libjavascriptcoregtk-4.1-dev"
+# shellcheck disable=SC2086  # intentional word-splitting of TAURI_PKGS
+apt install -y ${TAURI_PKGS} \
+  || echo "warning: Tauri/GTK system libs install failed" >&2
 
 # vsce + ovsx — VS Code extension packaging/publishing CLIs via npm
 if ! command -v vsce >/dev/null 2>&1; then
