@@ -147,16 +147,28 @@ if { [ -f pyproject.toml ] || [ -f requirements.txt ] || [ -f setup.py ]; } \
     # them directly into ${HOME}/.local/bin rather than .venv/bin, so
     # they're discoverable on the same PATH without needing a second
     # symlink pass below the marker.
-    if [ -d .venv/bin ] && [ -d "${HOME}/.local/bin" ]; then
+    if [ -d .venv/bin ]; then
+      # Create ~/.local/bin if missing — env/setup.sh doesn't and Ubuntu
+      # cloud images don't ship it by default in fresh users. The
+      # directory is on the default PATH for any login that picks up
+      # ~/.profile, but we still need it to exist before we ln into it.
+      mkdir -p "${HOME}/.local/bin"
       for _venv_bin in .venv/bin/*; do
-        [ -x "${_venv_bin}" ] || continue
-        _name=$(basename "${_venv_bin}")
+        # Require both regular file (after symlink resolution) AND
+        # executable bit. `-x` alone matches directories, which would
+        # produce a useless dangling symlink if the glob ever did.
+        [ -f "${_venv_bin}" ] && [ -x "${_venv_bin}" ] || continue
+        # Parameter expansion avoids forking basename per iteration.
+        _name="${_venv_bin##*/}"
         case "${_name}" in
           python|python[0-9]*|pip|pip[0-9]*|activate*|easy_install*|wheel|wheel[0-9]*)
             continue
             ;;
         esac
-        ln -sf "${REPO_ROOT}/.venv/bin/${_name}" "${HOME}/.local/bin/${_name}"
+        # `--` defends against (pathological) filenames starting with -;
+        # `|| true` matches the script's best-effort policy — a single
+        # permission hiccup shouldn't abort the rest of session setup.
+        ln -sf -- "${REPO_ROOT}/.venv/bin/${_name}" "${HOME}/.local/bin/${_name}" || true
       done
     fi
   fi
