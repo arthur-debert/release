@@ -110,3 +110,43 @@ filesystem-root state), add it there in a PR.
 
 Project-local dependencies belong in the consumer repo's
 `scripts/setup-dev-env.sh` (invoked by a SessionStart hook).
+
+## Exporting per-session env vars to the agent
+
+When a consumer's `scripts/setup-dev-env.sh` downloads a per-session
+resource (a pinned binary, a source tarball, a venv) that tests need to
+locate via env var (e.g. `LEX_TREESITTER_PATH=/tmp/tree-sitter-lex`),
+`export` from inside the script does NOT reach the Claude Code Bash
+tool's subshells — they are non-interactive, non-login, and inherit
+only what the hook process exports back to its parent (nothing).
+
+Two layers handle this. Use both:
+
+1. **`.claude/settings.json` `"env"` block** — the canonical Claude
+   Code mechanism for env vars. Propagates into every Bash tool
+   subshell the agent spawns. Example:
+   ```json
+   {
+     "env": {
+       "LEX_TREESITTER_PATH": "/tmp/tree-sitter-lex"
+     },
+     "hooks": { "SessionStart": [ ... ] }
+   }
+   ```
+2. **Append `export FOO=…` to `~/.bashrc` from `setup-dev-env.sh`** —
+   for humans who shell into the cloud container interactively. Use a
+   marker-guarded append so re-runs are idempotent:
+   ```bash
+   MARKER="# >>> <repo> setup-dev-env.sh >>>"
+   if ! grep -qF "${MARKER}" "${HOME}/.bashrc" 2>/dev/null; then
+     {
+       echo ""
+       echo "${MARKER}"
+       echo "export FOO=\"…\""
+       echo "# <<< <repo> setup-dev-env.sh <<<"
+     } >> "${HOME}/.bashrc"
+   fi
+   ```
+
+The agent shell and the human shell are different populations; pick
+both layers.

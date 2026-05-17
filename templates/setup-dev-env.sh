@@ -98,55 +98,81 @@ fi
 
 # --- 2.5. Chromium NSS DB cert import ------------------------------------
 # Cloud sessions route HTTPS through an "Anthropic sandbox-egress…CA"
-# proxy that re-signs every leaf cert. That CA ships in the system
-# OpenSSL bundle (/etc/ssl/certs/ca-certificates.crt), which is why
-# curl and Node succeed. But Chromium on Linux ignores the OpenSSL
-# bundle and reads its own NSS DB at ~/.pki/nssdb — without the CA
-# imported there, every HTTPS resource an Electron / Playwright test
-# loads is rejected with ERR_CERT_AUTHORITY_INVALID. The e2e harness's
-# runtime-error fixture surfaces that as a `console.error` and the test
-# auto-fails.
+# proxy that re-signs every leaf cert. Chromium on Linux ignores the
+# OpenSSL bundle and reads its own NSS DB at ~/.pki/nssdb — without
+# the CA imported there, every HTTPS resource an Electron / Playwright
+# test loads is rejected with ERR_CERT_AUTHORITY_INVALID. The e2e
+# harness's runtime-error fixture surfaces that as a `console.error`
+# and the test auto-fails.
 #
-# Fix: scan the system bundle for any cert whose subject matches
-# "Anthropic*sandbox-egress*" and import each as a trusted SSL root.
-# Idempotent — re-imports by nickname are no-ops once present. Gated on
-# `certutil` AND `openssl` existing (the loop forks openssl to extract
-# each subject; both binaries are env-level state on cloud sessions but
-# may be absent locally).
+# Cert layouts seen in the cloud env (probe both):
+#   (A) Historical (~pre-2026-05): the sandbox-egress CA was
+#       concatenated into the system bundle
+#       /etc/ssl/certs/ca-certificates.crt alongside public roots.
+#   (B) Current (2026-05+): the CA ships as standalone PEMs at
+#       /etc/ssl/certs/swp-ca-{production,staging}.pem; it is NOT
+#       written into the system bundle, so the old layout-A grep gate
+#       silently misses it and the NSS DB is never populated. `curl`
+#       and Node still work because they read the bundle directly via
+#       their own paths — only Chromium / Electron is affected.
 #
-# Fast-path: grep the bundle once for the Anthropic marker before doing
-# any per-cert work. On a non-cloud Linux box the bundle has no such
-# certs and the loop is gratuitous (forks openssl ~130×); skip it
-# entirely in that case.
+# Strategy: collect candidate PEMs from both layouts into a scratch
+# dir, then run the subject-match-and-import loop over the union.
+# Fast-path: skip everything if neither layout has any matching cert
+# (non-cloud Linux box). Idempotent — `certutil -L -n <nick>` short-
+# circuits the `-A` import once a cert is present.
+#
+# Gated on `certutil` AND `openssl` existing (the loop forks openssl
+# per cert to extract the subject); both are env-level state on cloud
+# sessions but may be absent locally.
 if [ "$(uname -s)" = "Linux" ] \
    && command -v certutil >/dev/null 2>&1 \
-   && command -v openssl >/dev/null 2>&1 \
-   && [ -f /etc/ssl/certs/ca-certificates.crt ] \
-   && grep -q 'Anthropic' /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
-  _nssdb="${HOME}/.pki/nssdb"
-  mkdir -p "${_nssdb}"
-  if [ ! -f "${_nssdb}/cert9.db" ]; then
-    certutil -d "sql:${_nssdb}" -N --empty-password >/dev/null 2>&1 || true
-  fi
+   && command -v openssl >/dev/null 2>&1; then
   _ca_tmp="$(mktemp -d)"
-  awk '
-    /-----BEGIN CERTIFICATE-----/ { n++; fn = sandbox_dir "/cert_" n ".pem"; in_cert = 1 }
-    in_cert                       { print > fn }
-    /-----END CERTIFICATE-----/   { in_cert = 0; close(fn) }
-  ' sandbox_dir="${_ca_tmp}" /etc/ssl/certs/ca-certificates.crt
-  for _pem in "${_ca_tmp}"/cert_*.pem; do
+  _found=0
+
+  # Layout A: split the system bundle into per-cert PEMs if it contains
+  # any Anthropic CA. Cheap grep gate avoids the awk fork on non-cloud
+  # Linux boxes (where the bundle has no matches).
+  if [ -f /etc/ssl/certs/ca-certificates.crt ] \
+     && grep -q 'Anthropic' /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
+    awk '
+      /-----BEGIN CERTIFICATE-----/ { n++; fn = sandbox_dir "/bundle_" n ".pem"; in_cert = 1 }
+      in_cert                       { print > fn }
+      /-----END CERTIFICATE-----/   { in_cert = 0; close(fn) }
+    ' sandbox_dir="${_ca_tmp}" /etc/ssl/certs/ca-certificates.crt
+    _found=1
+  fi
+
+  # Layout B: copy standalone swp-ca-*.pem files into the scratch dir.
+  # The glob may be unexpanded if no file matches; guard with -f.
+  for _pem in /etc/ssl/certs/swp-ca-*.pem; do
     [ -f "${_pem}" ] || continue
-    _subject="$(openssl x509 -in "${_pem}" -noout -subject 2>/dev/null || true)"
-    case "${_subject}" in
-      *Anthropic*sandbox-egress*)
-        _nick="$(printf '%s' "${_subject}" | sed -nE 's/.*CN *= *([^,]+).*/\1/p')"
-        [ -n "${_nick}" ] || continue
-        if ! certutil -d "sql:${_nssdb}" -L -n "${_nick}" >/dev/null 2>&1; then
-          certutil -d "sql:${_nssdb}" -A -t "C,," -n "${_nick}" -i "${_pem}" >/dev/null 2>&1 || true
-        fi
-        ;;
-    esac
+    cp "${_pem}" "${_ca_tmp}/$(basename "${_pem}")"
+    _found=1
   done
+
+  if [ "${_found}" = "1" ]; then
+    _nssdb="${HOME}/.pki/nssdb"
+    mkdir -p "${_nssdb}"
+    if [ ! -f "${_nssdb}/cert9.db" ]; then
+      certutil -d "sql:${_nssdb}" -N --empty-password >/dev/null 2>&1 || true
+    fi
+    for _pem in "${_ca_tmp}"/*.pem; do
+      [ -f "${_pem}" ] || continue
+      _subject="$(openssl x509 -in "${_pem}" -noout -subject 2>/dev/null || true)"
+      case "${_subject}" in
+        *Anthropic*sandbox-egress*)
+          _nick="$(printf '%s' "${_subject}" | sed -nE 's/.*CN *= *([^,]+).*/\1/p')"
+          [ -n "${_nick}" ] || continue
+          if ! certutil -d "sql:${_nssdb}" -L -n "${_nick}" >/dev/null 2>&1; then
+            certutil -d "sql:${_nssdb}" -A -t "C,," -n "${_nick}" -i "${_pem}" >/dev/null 2>&1 || true
+          fi
+          ;;
+      esac
+    done
+  fi
+
   rm -rf "${_ca_tmp}"
 fi
 
