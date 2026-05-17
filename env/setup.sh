@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-16-cross-repo-apt   # bumps on every change so re-pasting is trivial
+# version: 2026-05-17-round-2-fixes   # bumps on every change so re-pasting is trivial
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -101,14 +101,18 @@ fi
 #   bats            — shell test framework (rust-cli e2e + ad-hoc shell tests)
 #   @vscode/vsce    — VS Code extension packaging CLI
 #   ovsx            — Open VSX marketplace publisher (alternative to vsce publish)
-#   lua5.4 + luarocks   — Lua runtime + package manager (for nvim plugins)
-#   busted + vusted — Lua test runners (vusted = Neovim-headless wrapper around busted)
-#   neovim          — nvim binary (needed by lex-fmt/nvim and any consumer that
-#                     invokes nvim during tests; the snapshot ubuntu image
-#                     does not ship it by default)
+#   lua5.4 + luarocks       — Lua runtime + package manager (for nvim plugins)
+#   busted + vusted + luacheck — Lua test runners + lint (lex-fmt/nvim CI parity)
+#   neovim (≥0.11)  — Ubuntu apt ships 0.9.5 which is too old for current
+#                     nvim-lspconfig; we install the official stable tarball
+#                     from github.com/neovim/neovim/releases instead
 #   xvfb            — virtual framebuffer; binary is env-side, starting the
 #                     :99 daemon is per-repo in scripts/setup-dev-env.sh for
 #                     GUI-test consumers (lexed, arami-app, future Electron)
+#   libnss3-tools   — provides `certutil` so the canonical setup-dev-env.sh
+#                     can import the sandbox-egress CA into the per-user
+#                     Chromium NSS DB (needed by every Electron / Playwright
+#                     consumer; lexed surfaced this first)
 #   uuid-runtime    — provides `uuidgen` (padz live-tests; cheap, ~30KB)
 #   Tauri/GTK system libs — required to build Tauri apps from source
 #                           (arami-core today; any future Tauri consumer)
@@ -119,10 +123,43 @@ if ! command -v bats >/dev/null 2>&1; then
   command -v bats >/dev/null 2>&1 && echo "installed bats: $(bats --version | head -1)"
 fi
 
-# neovim — apt's `neovim` package
-if ! command -v nvim >/dev/null 2>&1; then
-  apt install -y neovim || echo "warning: neovim install failed" >&2
-  command -v nvim >/dev/null 2>&1 && echo "installed neovim: $(nvim --version | head -1)"
+# neovim ≥0.11 — the apt package on noble is 0.9.5, but the pinned
+# nvim-lspconfig in lex-fmt/nvim refuses to load on <0.11 ("nvim-lspconfig
+# support for Nvim 0.10 or older is deprecated"). On 0.9.5 the symptom is
+# silent: lazy.setup returns, plugins register, but require("lspconfig")
+# never succeeds and every LSP-attach test hangs. Fetch the official
+# stable tarball and overlay it under /usr/local. Idempotent — re-check
+# version before re-downloading.
+NVIM_MIN_MAJOR=0
+NVIM_MIN_MINOR=11
+_nvim_ok() {
+  command -v nvim >/dev/null 2>&1 || return 1
+  local v major minor
+  v=$(nvim --version 2>/dev/null | head -1 | sed -E 's/^NVIM v([0-9]+\.[0-9]+).*/\1/')
+  major=${v%%.*}
+  minor=${v##*.}
+  [ "${major}" -gt "${NVIM_MIN_MAJOR}" ] || \
+    { [ "${major}" -eq "${NVIM_MIN_MAJOR}" ] && [ "${minor}" -ge "${NVIM_MIN_MINOR}" ]; }
+}
+if ! _nvim_ok; then
+  case "$(uname -m)" in
+    x86_64|amd64) _nvim_arch=linux-x86_64 ;;
+    aarch64|arm64) _nvim_arch=linux-arm64 ;;
+    *) _nvim_arch="" ;;
+  esac
+  if [ -n "${_nvim_arch}" ]; then
+    _nvim_tmp=$(mktemp -d)
+    if curl -fsSL "https://github.com/neovim/neovim/releases/download/stable/nvim-${_nvim_arch}.tar.gz" \
+         -o "${_nvim_tmp}/nvim.tgz" && \
+       tar -xzf "${_nvim_tmp}/nvim.tgz" -C "${_nvim_tmp}" && \
+       cp -r "${_nvim_tmp}/nvim-${_nvim_arch}/." /usr/local/; then
+      hash -r 2>/dev/null || true
+      command -v nvim >/dev/null 2>&1 && echo "installed nvim: $(nvim --version | head -1)"
+    else
+      echo "warning: nvim stable install failed" >&2
+    fi
+    rm -rf "${_nvim_tmp}"
+  fi
 fi
 
 # xvfb — virtual framebuffer for headless GUI-app tests. Consumers that
@@ -132,6 +169,17 @@ fi
 if ! command -v Xvfb >/dev/null 2>&1; then
   apt install -y xvfb || echo "warning: xvfb install failed" >&2
   command -v Xvfb >/dev/null 2>&1 && echo "installed xvfb: $(Xvfb -help 2>&1 | head -1)"
+fi
+
+# libnss3-tools — provides `certutil`, used by the canonical
+# setup-dev-env.sh to import the sandbox-egress TLS-inspection CA into
+# ~/.pki/nssdb so Chromium / Electron renderers stop throwing
+# ERR_CERT_AUTHORITY_INVALID on HTTPS resources. The cert import is
+# per-user (lives in $HOME) so it has to happen at session start; the
+# binary that does the import is env-level state.
+if ! command -v certutil >/dev/null 2>&1; then
+  apt install -y libnss3-tools || echo "warning: libnss3-tools install failed" >&2
+  command -v certutil >/dev/null 2>&1 && echo "installed certutil: $(certutil -V 2>&1 | head -1)"
 fi
 
 # uuid-runtime — provides `uuidgen`, used by padz live-tests.
@@ -163,13 +211,23 @@ if ! command -v luarocks >/dev/null 2>&1; then
   command -v luarocks >/dev/null 2>&1 && echo "installed luarocks: $(luarocks --version | head -1)"
 fi
 
-# busted + vusted (luarocks install) — depend on luarocks being present
+# busted + vusted + luacheck (luarocks install) — depend on luarocks being
+# present. luacheck is the Lua linter that lex-fmt/nvim CI uses
+# (`luacheck lua/`); without it cloud sessions can't run the lint target.
 if command -v luarocks >/dev/null 2>&1; then
   if ! command -v busted >/dev/null 2>&1; then
     luarocks install --tree=/usr/local busted || echo "warning: busted install failed" >&2
   fi
   if ! command -v vusted >/dev/null 2>&1; then
     luarocks install --tree=/usr/local vusted || echo "warning: vusted install failed" >&2
+  fi
+  if ! command -v luacheck >/dev/null 2>&1; then
+    # NOT --quiet here: the egress policy 403s luarocks.org's manifest URL,
+    # luarocks transparently falls back to the moonrocks mirror and the
+    # install succeeds, but --quiet treats the manifest fetch as fatal
+    # and propagates a non-zero exit. Plain invocation reports the real
+    # outcome.
+    luarocks install --tree=/usr/local luacheck || echo "warning: luacheck install failed" >&2
   fi
 fi
 
