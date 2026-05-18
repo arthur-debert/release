@@ -9,6 +9,64 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.3.0 (2026-05-18) — additive: Wave 1 cross-repo plumbing + Wave 2 stack workflows
+
+**Type:** MINOR (additive, no consumer breakage). Existing `rust-cli`
+consumers see byte-identical behavior.
+
+### What's new
+
+**Wave 1 — cross-repo plumbing** (consumed by stack workflows, not by
+end consumers directly):
+
+- `docs/artifacts-schema.md` — canonical `artifacts.json` schema for
+  declaring releasable artifacts per repo (#59 / #62).
+- `bin/fetch-artifact` + `.github/actions/fetch-artifact` — resolve
+  `artifacts.json` entries to GH-release downloads with
+  `{arch}` → rust-target-triple substitution and `binary | tree`
+  type detection (#60 / #63).
+- `.github/workflows/cascade-handler.yml` — reusable workflow for
+  cross-repo `repository_dispatch upstream-released` cascades:
+  manifest-vs-tag drift via `max(manifest, latest_tag)`,
+  `UNRELEASED.md` seed, stale-release-branch cleanup,
+  shell-injection guard (#61 / #64).
+
+**Wave 2 — new stack workflows** (consumers can pin `@v1` and
+migrate):
+
+- `.github/workflows/electron-app.yml` (slice 1 + 1.5) — Electron
+  builds across mac/linux/windows, native CSC signing via
+  electron-builder, optional notarize override, smoke-test
+  convention hook, output-dir input (#43 / #65 / #66).
+- `.github/workflows/rust-lib.yml` — pure library crates (no CLI).
+  3 jobs: prepare + publish-crates + create-release. Strict subset
+  of rust-cli — use rust-cli if you publish both a binary and a
+  library crate (#44 / #74).
+- `.github/workflows/vscode-ext.yml` — VS Code extensions. Matrix
+  of platform-specific VSIXes, Marketplace + Open VSX publish,
+  prerelease threading, target whitelist, `scripts/pre-vsce-package.sh`
+  convention hook for native-binary fetching via `fetch-artifact`,
+  preflight secret validation, partial-release-prevention gating
+  on the GH release job (#45).
+- `.github/workflows/python-pkg.yml` — Python packages.
+  `uv build` → sdist + wheel; `uv publish` → PyPI (required) +
+  TestPyPI (opt-in). Awk-based pyproject.toml `[project].version`
+  bump (zero toolchain deps). Same preflight + gating as
+  vscode-ext. Optional `scripts/pre-build.sh` convention hook (#48).
+
+**Composite actions added** (called by the above workflows):
+
+- `prepare-release-npm` — `package.json`-rooted parallel of
+  `prepare-release` (used by electron-app, vscode-ext).
+- `prepare-release-python` — `pyproject.toml`-rooted parallel
+  (used by python-pkg).
+
+### Migration
+
+No action required for existing `rust-cli` consumers. New-stack
+consumers (lex-fmt/vscode, lex-fmt/mkdocs-lex, lexed) migrate per
+the relevant stack callout in `README.md`.
+
 ## v1.2.1 (2026-05-06) — fix: skip homebrew-formula on prereleases
 
 **Type:** PATCH (bug fix). The previous behavior pushed `vX.Y.Z-rc.N`
