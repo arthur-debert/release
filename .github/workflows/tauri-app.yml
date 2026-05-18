@@ -1,0 +1,644 @@
+name: tauri-app release
+
+# Reusable release workflow for Tauri 2.x desktop apps. Consumers
+# call this from their .github/workflows/release.yml as a thin
+# caller pinned at @v1. See README §Stack matrix row "tauri-app"
+# and tracking issue #72.
+#
+# Shape & scope (slice 1)
+# -----------------------
+# - Bump package.json + src-tauri/Cargo.toml + src-tauri/tauri.conf.json
+#   together (Tauri's three version files; all three need to stay in
+#   sync or `tauri build` warns/breaks).
+# - Build matrix: macos-latest, ubuntu-latest, windows-latest.
+#   Single target per platform; universal macOS binary deferred to
+#   slice 2.
+# - macOS code-signing via the Apple Developer p12 cert and
+#   identity (Tauri's canonical APPLE_* env vars — different names
+#   from electron-builder's CSC_LINK).
+# - Optional notarization (input + secret-presence gated).
+# - GH release with per-platform bundle assets attached.
+#
+# Out of scope (deferred slices)
+# ------------------------------
+# - Updater signing keys (TAURI_SIGNING_PRIVATE_KEY) → slice 2.
+# - Universal macOS binary (--target universal-apple-darwin) → slice 2.
+# - Auto-updater server config (latest.json on a release host) → slice 3.
+# - Linux .deb / .rpm / .AppImage signing → slice 3.
+#
+# Compared to the sibling electron-app stack
+# ------------------------------------------
+# Shares the per-platform-matrix shape, the preflight secret
+# validation, and the partial-release-prevention gating on the
+# release job. Differs on:
+# - `tauri build` (not electron-builder) — produces native Rust
+#   binaries via cargo + bundles via Tauri's bundler.
+# - Signing env-var names (APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY,
+#   not CSC_LINK / CSC_KEY_PASSWORD). Same underlying Apple
+#   toolchain; different bindings.
+# - Three version files (npm + Cargo + tauri.conf), not just one.
+#
+# Consumer convention hook
+# ------------------------
+# `scripts/build-tauri.sh` at the repo root, executed in place of a
+# raw `pnpm tauri build`. Use this when the build needs upstream
+# artifacts pre-fetched (e.g. arami-app pre-fetches its WASM
+# upstream before the bundle step). If the hook isn't present, the
+# workflow falls back to `pnpm tauri build` or `npm run tauri
+# build` based on lockfile detection.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 0.2.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`). Empty to skip.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      tauri-dir:
+        description: 'Path to the Tauri project root (where src-tauri/ lives). Override for monorepo layouts.'
+        type: string
+        required: false
+        default: '.'
+      bundle-targets-mac:
+        description: 'Tauri bundle targets for macOS (passed to `tauri build --bundles`). Empty = use tauri.conf.json setting.'
+        type: string
+        required: false
+        default: ''
+      bundle-targets-linux:
+        description: 'Tauri bundle targets for Linux. Empty = use tauri.conf.json setting.'
+        type: string
+        required: false
+        default: ''
+      bundle-targets-windows:
+        description: 'Tauri bundle targets for Windows. Empty = use tauri.conf.json setting.'
+        type: string
+        required: false
+        default: ''
+      build-mac:
+        description: 'Build the macOS bundle. Default true.'
+        type: boolean
+        required: false
+        default: true
+      build-linux:
+        description: 'Build the Linux bundle. Default true.'
+        type: boolean
+        required: false
+        default: true
+      build-windows:
+        description: 'Build the Windows bundle. Default true.'
+        type: boolean
+        required: false
+        default: true
+      notarize:
+        description: 'Submit the macOS bundle for Apple notarization. Default true when build-mac is true. Set to false for fast unsigned-dev builds.'
+        type: boolean
+        required: false
+        default: true
+      node-version:
+        description: 'Node.js version for the frontend build env.'
+        type: string
+        required: false
+        default: '20'
+      rust-toolchain:
+        description: 'Rust toolchain channel.'
+        type: string
+        required: false
+        default: 'stable'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push. Falls back to GITHUB_TOKEN.'
+        required: false
+      APPLE_CERTIFICATE:
+        description: 'Base64-encoded Apple Developer ID Application .p12 certificate. Required when build-mac is true.'
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        description: 'Password for the .p12 certificate. Required when build-mac is true.'
+        required: false
+      APPLE_SIGNING_IDENTITY:
+        description: 'Apple signing identity, e.g. "Developer ID Application: Your Name (TEAMID)". Required when build-mac is true.'
+        required: false
+      APPLE_ID:
+        description: 'Apple ID email for notarization. Required when notarize is true.'
+        required: false
+      APPLE_PASSWORD:
+        description: 'App-specific password for the Apple ID. Required when notarize is true.'
+        required: false
+      APPLE_TEAM_ID:
+        description: 'Apple Developer Team ID. Required when notarize is true.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 0. Preflight: validate Apple secrets before prepare bumps + tags.
+  # -------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_MAC: ${{ inputs.build-mac }}
+      NOTARIZE: ${{ inputs.notarize }}
+      APPLE_CERT_PRESENT: ${{ secrets.APPLE_CERTIFICATE != '' && 'yes' || 'no' }}
+      APPLE_CERT_PASS_PRESENT: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' && 'yes' || 'no' }}
+      APPLE_ID_PRESENT: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'yes' || 'no' }}
+      NOTARY_ID_PRESENT: ${{ secrets.APPLE_ID != '' && 'yes' || 'no' }}
+      NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
+      NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
+    steps:
+      - name: Validate Apple secrets
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "${BUILD_MAC}" = "true" ]; then
+            for v in APPLE_CERT_PRESENT APPLE_CERT_PASS_PRESENT APPLE_ID_PRESENT; do
+              if [ "${!v}" = "no" ]; then
+                name="${v%_PRESENT}"
+                echo "::error::build-mac=true but ${name} secret is missing"
+                fail=1
+              fi
+            done
+          fi
+          if [ "${BUILD_MAC}" = "true" ] && [ "${NOTARIZE}" = "true" ]; then
+            for v in NOTARY_ID_PRESENT NOTARY_PASS_PRESENT NOTARY_TEAM_PRESENT; do
+              if [ "${!v}" = "no" ]; then
+                # Map back to the actual secret name for the error msg.
+                case "${v}" in
+                  NOTARY_ID_PRESENT)   name="APPLE_ID" ;;
+                  NOTARY_PASS_PRESENT) name="APPLE_PASSWORD" ;;
+                  NOTARY_TEAM_PRESENT) name="APPLE_TEAM_ID" ;;
+                esac
+                echo "::error::notarize=true but ${name} secret is missing"
+                fail=1
+              fi
+            done
+          fi
+          exit "${fail}"
+
+  # -------------------------------------------------------------------
+  # 1. Prepare: bump all three version files (package.json,
+  #    src-tauri/Cargo.toml, src-tauri/tauri.conf.json), roll
+  #    CHANGELOG, commit + tag + push.
+  # -------------------------------------------------------------------
+  prepare:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - name: Validate + bump three version files
+        id: prep
+        shell: bash
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          CHANGELOG: ${{ inputs.changelog-path }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: ${NEW_VERSION})"
+            exit 1
+          fi
+
+          IS_PRERELEASE=false
+          if [[ "${NEW_VERSION}" == *-* ]]; then
+            IS_PRERELEASE=true
+          fi
+
+          # Sanity-check the three version files exist before we
+          # start mutating any of them. Partial bumps are worse than
+          # no bump.
+          pkg="${TAURI_DIR}/package.json"
+          cargo="${TAURI_DIR}/src-tauri/Cargo.toml"
+          tauri_conf="${TAURI_DIR}/src-tauri/tauri.conf.json"
+          for f in "${pkg}" "${cargo}" "${tauri_conf}"; do
+            if [ ! -f "${f}" ]; then
+              echo "::error::expected file not found: ${f}"
+              exit 1
+            fi
+          done
+
+          TAG="v${NEW_VERSION}"
+          git fetch --tags origin >/dev/null 2>&1 || true
+
+          # Resume case: tag already exists. Cross-check package.json
+          # matches (the canonical version source) and resume.
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-list -n 1 "${TAG}")
+            TAG_VERSION="$(git show "${TAG}:${pkg}" 2>/dev/null | jq -r '.version // empty')"
+            if [ "${TAG_VERSION}" = "${NEW_VERSION}" ]; then
+              echo "tag ${TAG} already exists at ${TAG_SHA} (${pkg} matches) — resuming"
+              echo "release-sha=${TAG_SHA}" >> "${GITHUB_OUTPUT}"
+              # Re-extract release notes for the resume case
+              if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+                if [ "${IS_PRERELEASE}" = "true" ]; then
+                  awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
+                    "${CHANGELOG}" > release-notes.md
+                else
+                  awk -v v="${NEW_VERSION}" '$0 ~ "^## \\[" v "\\]"{c=1;next} c&&/^## \[/{exit} c{print}' \
+                    "${CHANGELOG}" > release-notes.md
+                fi
+                [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
+              else
+                echo "Release ${TAG}" > release-notes.md
+              fi
+              echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
+              echo "prerelease=${IS_PRERELEASE}" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            echo "::error::tag ${TAG} exists but ${pkg} at that commit is '${TAG_VERSION}', not '${NEW_VERSION}'"
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Bump package.json (jq for safety — preserves field order
+          # less faithfully than `npm version` but doesn't need a
+          # working npm install just for the bump).
+          jq --arg v "${NEW_VERSION}" '.version = $v' "${pkg}" > "${pkg}.tmp"
+          mv "${pkg}.tmp" "${pkg}"
+
+          # Bump src-tauri/Cargo.toml — scoped to the [package] table
+          # (Cargo files have other version = entries under [dependencies]).
+          # Reuses the same awk pattern as prepare-release-python's
+          # pyproject bump (single OR double quotes, indented or not,
+          # trailing comments preserved).
+          awk -v v="${NEW_VERSION}" '
+            BEGIN { q = "[\042\047]" }
+            {
+              sub(/\r$/, "")
+              if ($0 ~ /^[[:space:]]*\[/) {
+                h = $0
+                sub(/#.*/, "", h)
+                gsub(/[[:space:]]/, "", h)
+                in_pkg = (h == "[package]")
+                print
+                next
+              }
+              if (in_pkg && !bumped && $0 ~ ("^[[:space:]]*version[[:space:]]*=[[:space:]]*" q)) {
+                leading = $0
+                sub(/[^[:space:]].*/, "", leading)
+                trailing = ""
+                if (match($0, /[[:space:]]+#.*$/)) {
+                  trailing = substr($0, RSTART, RLENGTH)
+                }
+                print leading "version = \"" v "\"" trailing
+                bumped = 1
+                next
+              }
+              print
+            }
+            END {
+              if (!bumped) {
+                print "::error::no [package].version in Cargo.toml" > "/dev/stderr"
+                exit 1
+              }
+            }
+          ' "${cargo}" > "${cargo}.tmp"
+          mv "${cargo}.tmp" "${cargo}"
+
+          # Bump src-tauri/tauri.conf.json — jq again. The `.version`
+          # field is optional in tauri.conf.json (defaults to
+          # package.json) — only bump it if present.
+          if [ "$(jq -r '.version // empty' "${tauri_conf}")" != "" ]; then
+            jq --arg v "${NEW_VERSION}" '.version = $v' "${tauri_conf}" > "${tauri_conf}.tmp"
+            mv "${tauri_conf}.tmp" "${tauri_conf}"
+          fi
+
+          # Roll changelog when present + extract notes.
+          if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+            awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
+              "${CHANGELOG}" > release-notes.md
+            if [ "${IS_PRERELEASE}" != "true" ]; then
+              today=$(date -u +%F)
+              replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
+              awk -v repl="${replacement}" '
+                /^## \[Unreleased\]/ { print repl; next } { print }
+              ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
+              mv "${CHANGELOG}.tmp" "${CHANGELOG}"
+              git add "${CHANGELOG}"
+            fi
+          else
+            echo "Release ${TAG}" > release-notes.md
+          fi
+          [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
+
+          # Stage all three version files (+ Cargo.lock if it exists
+          # and changed). The lockfile picks up new version automatically
+          # when cargo runs against the bumped Cargo.toml; commit any
+          # change to keep it consistent.
+          git add "${pkg}" "${cargo}" "${tauri_conf}"
+          for lock in pnpm-lock.yaml package-lock.json yarn.lock "${TAURI_DIR}/src-tauri/Cargo.lock"; do
+            [ -f "${lock}" ] && git diff --quiet -- "${lock}" || git add -- "${lock}" 2>/dev/null || true
+          done
+
+          if git diff --cached --quiet; then
+            echo "::error::no version-file changes after bump — was the version already at ${NEW_VERSION}?"
+            exit 1
+          fi
+
+          git commit -m "chore: Release ${TAG}"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin HEAD
+          git push origin "${TAG}"
+
+          {
+            echo "version=${NEW_VERSION}"
+            echo "prerelease=${IS_PRERELEASE}"
+            echo "release-sha=$(git rev-parse HEAD)"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 2. Build matrix — one bundle per platform. We compute the matrix
+  #    dynamically from the build-{mac,linux,windows} inputs so a
+  #    consumer can opt-out per-platform without unused matrix
+  #    entries cluttering the run.
+  # -------------------------------------------------------------------
+  build-matrix:
+    needs: prepare
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.matrix.outputs.targets }}
+    steps:
+      - name: Compute matrix
+        id: matrix
+        env:
+          BUILD_MAC: ${{ inputs.build-mac }}
+          BUILD_LINUX: ${{ inputs.build-linux }}
+          BUILD_WINDOWS: ${{ inputs.build-windows }}
+          BUNDLE_MAC: ${{ inputs.bundle-targets-mac }}
+          BUNDLE_LINUX: ${{ inputs.bundle-targets-linux }}
+          BUNDLE_WINDOWS: ${{ inputs.bundle-targets-windows }}
+        run: |
+          set -euo pipefail
+          json='[]'
+          if [ "${BUILD_MAC}" = "true" ]; then
+            json="$(jq -c \
+              --arg b "${BUNDLE_MAC}" \
+              '. + [{os:"macos-latest", platform:"mac", bundles:$b}]' \
+              <<<"${json}")"
+          fi
+          if [ "${BUILD_LINUX}" = "true" ]; then
+            json="$(jq -c \
+              --arg b "${BUNDLE_LINUX}" \
+              '. + [{os:"ubuntu-latest", platform:"linux", bundles:$b}]' \
+              <<<"${json}")"
+          fi
+          if [ "${BUILD_WINDOWS}" = "true" ]; then
+            json="$(jq -c \
+              --arg b "${BUNDLE_WINDOWS}" \
+              '. + [{os:"windows-latest", platform:"windows", bundles:$b}]' \
+              <<<"${json}")"
+          fi
+          if [ "$(jq 'length' <<<"${json}")" -eq 0 ]; then
+            echo "::error::all build-{mac,linux,windows} inputs are false — nothing to build"
+            exit 1
+          fi
+          echo "targets=${json}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    needs: [prepare, build-matrix]
+    strategy:
+      fail-fast: false
+      matrix:
+        t: ${{ fromJSON(needs.build-matrix.outputs.targets) }}
+    runs-on: ${{ matrix.t.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' && 'npm' || (hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || (hashFiles('yarn.lock') != '' && 'yarn' || '')) }}
+
+      - name: Install pnpm (when lockfile present)
+        if: hashFiles('pnpm-lock.yaml') != ''
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.rust-toolchain }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ inputs.tauri-dir }}/src-tauri
+
+      - name: Install Linux Tauri deps
+        if: matrix.t.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install JS deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          elif [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f yarn.lock ]; then
+            yarn install --frozen-lockfile
+          else
+            npm install
+          fi
+
+      # macOS code-signing setup. Tauri reads APPLE_SIGNING_IDENTITY
+      # to choose the identity and APPLE_CERTIFICATE +
+      # APPLE_CERTIFICATE_PASSWORD to install the cert into a
+      # temporary keychain Tauri sets up itself. We don't need to
+      # roll a keychain manually — Tauri does that during `tauri
+      # build`.
+      - name: Set Apple signing env (macOS)
+        if: matrix.t.platform == 'mac'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          {
+            echo "APPLE_CERTIFICATE=${APPLE_CERTIFICATE}"
+            echo "APPLE_CERTIFICATE_PASSWORD=${APPLE_CERTIFICATE_PASSWORD}"
+            echo "APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Set Apple notarization env (macOS)
+        if: matrix.t.platform == 'mac' && inputs.notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          {
+            echo "APPLE_ID=${APPLE_ID}"
+            echo "APPLE_PASSWORD=${APPLE_PASSWORD}"
+            echo "APPLE_TEAM_ID=${APPLE_TEAM_ID}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.t.bundles }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: |
+          set -euo pipefail
+          # Convention hook: if the consumer ships
+          # scripts/build-tauri.sh, run it (the consumer is
+          # responsible for invoking `tauri build` plus whatever
+          # pre-fetch steps it needs). Else fall back to a direct
+          # `tauri build`.
+          if [ -f scripts/build-tauri.sh ]; then
+            extra=()
+            if [ -n "${BUNDLES}" ]; then
+              # The hook may not honor this — but most builds will
+              # exec `tauri build "$@"` and pass args through.
+              extra=(--bundles "${BUNDLES}")
+            fi
+            bash scripts/build-tauri.sh "${extra[@]+"${extra[@]}"}"
+          else
+            cd "${TAURI_DIR}"
+            if [ -n "${BUNDLES}" ]; then
+              npx tauri build --bundles "${BUNDLES}"
+            else
+              npx tauri build
+            fi
+          fi
+
+      - name: Collect bundles
+        id: bundles
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          PLATFORM: ${{ matrix.t.platform }}
+        run: |
+          set -euo pipefail
+          # Tauri writes bundles to
+          # `<tauri-dir>/src-tauri/target/release/bundle/<format>/`.
+          # The exact subdirs vary per-platform; collect everything
+          # under bundle/ and let the upload step ship the lot.
+          bundle_root="${TAURI_DIR}/src-tauri/target/release/bundle"
+          if [ ! -d "${bundle_root}" ]; then
+            echo "::error::bundle root not found: ${bundle_root}"
+            exit 1
+          fi
+          out="${GITHUB_WORKSPACE}/bundle-${PLATFORM}"
+          mkdir -p "${out}"
+          # Copy distributable artifacts only — skip macOS `.app`
+          # source bundles, scripts, and intermediate files. Each
+          # platform's distributables:
+          #   mac:     .dmg, .app.tar.gz (for the updater)
+          #   linux:   .deb, .rpm, .AppImage
+          #   windows: .msi, .exe (NSIS)
+          shopt -s nullglob globstar
+          for f in "${bundle_root}"/**/*.dmg \
+                   "${bundle_root}"/**/*.app.tar.gz \
+                   "${bundle_root}"/**/*.deb \
+                   "${bundle_root}"/**/*.rpm \
+                   "${bundle_root}"/**/*.AppImage \
+                   "${bundle_root}"/**/*.msi \
+                   "${bundle_root}"/**/*.exe; do
+            cp "${f}" "${out}/"
+          done
+          shopt -u nullglob globstar
+          count=$(find "${out}" -maxdepth 1 -type f | wc -l | tr -d ' ')
+          echo "Collected ${count} artifacts:"
+          ls -la "${out}"
+          echo "dir=${out}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload platform bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.t.platform }}
+          path: ${{ steps.bundles.outputs.dir }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 3. GH release. Gated on build (success) — single matrix job's
+  #    failure fails the whole release (no partial bundles shipped).
+  # -------------------------------------------------------------------
+  release:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download all bundles
+        uses: actions/download-artifact@v4
+        with:
+          path: bundles
+          pattern: bundle-*
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          ls -la bundles/ || true
+          prerelease_flag=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} exists — updating notes and re-uploading bundles"
+            gh release edit "${TAG}" --notes-file release-notes.md
+            gh release upload "${TAG}" bundles/* --clobber
+          else
+            gh release create "${TAG}" \
+              ${prerelease_flag} \
+              --title "${TAG}" \
+              --notes-file release-notes.md \
+              bundles/*
+          fi
