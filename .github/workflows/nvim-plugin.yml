@@ -32,9 +32,6 @@ name: Neovim plugin release
 # deliberately do NOT run tests in the release path: provisioning
 # the lua toolchain on every release would be wasteful, and the
 # PR-gate has already caught any regressions before main lands.
-# For convention, consumers can ship `scripts/release-smoke.sh`
-# (e.g. `nvim --headless -c "set rtp+=. | luafile lua/<name>/init.lua" -c qa`)
-# and the workflow runs it pre-tag. Future work.
 
 on:
   workflow_call:
