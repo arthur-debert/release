@@ -1,0 +1,255 @@
+name: 'Prepare release (python)'
+description: |
+  Validate a version, bump `[project].version` in pyproject.toml, roll the
+  changelog, commit + tag + push. Parallel of `prepare-release` (Cargo) and
+  `prepare-release-npm` (package.json). Resume-on-failure: if the tag
+  already exists at the given version, skip the bump and emit the tag's
+  SHA so downstream jobs can re-run cleanly.
+
+  Version bump is awk-based and scoped to the `[project]` table so the
+  composite action has zero toolchain dependencies (no python, no uv).
+  pyproject.toml's `[project].version` field is universal under PEP 621.
+
+inputs:
+  version:
+    description: 'Version to release (e.g. 0.18.0 or 1.0.0-rc.1). No leading v.'
+    required: true
+  changelog-path:
+    description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section). Empty to skip changelog handling.'
+    required: false
+    default: 'CHANGELOG.md'
+  manifest-path:
+    description: 'Path to pyproject.toml. Override only for non-root or monorepo layouts.'
+    required: false
+    default: 'pyproject.toml'
+
+outputs:
+  version:
+    description: 'Validated version (no leading v).'
+    value: ${{ steps.outputs.outputs.version }}
+  release-sha:
+    description: 'Commit SHA of the tag (for downstream jobs to checkout).'
+    value: ${{ steps.outputs.outputs.sha }}
+  prerelease:
+    description: '"true" if version contains a pre-release suffix.'
+    value: ${{ steps.outputs.outputs.prerelease }}
+  notes-path:
+    description: 'Path to extracted release notes file.'
+    value: 'release-notes.md'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate and detect resume case
+      id: detect
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        MANIFEST: ${{ inputs.manifest-path }}
+      run: |
+        set -euo pipefail
+
+        if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+          echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: $NEW_VERSION)"
+          exit 1
+        fi
+
+        IS_PRERELEASE=false
+        if [[ "$NEW_VERSION" == *-* ]]; then
+          IS_PRERELEASE=true
+        fi
+        echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+        if [ ! -f "$MANIFEST" ]; then
+          echo "::error::manifest not found: $MANIFEST"
+          exit 1
+        fi
+
+        TAG="v$NEW_VERSION"
+        git fetch --tags origin >/dev/null 2>&1 || true
+
+        # Resume case: tag already exists. Validate the pyproject.toml at
+        # that commit matches NEW_VERSION (otherwise we'd be re-running
+        # against a different release accidentally).
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          TAG_SHA=$(git rev-list -n 1 "$TAG")
+          # awk: only the [project] table's version field — pyproject
+          # files have other `version = ` entries under [tool.*] sections
+          # that we must not pick up.
+          TAG_VERSION="$(git show "$TAG:$MANIFEST" 2>/dev/null | awk '
+            /^\[/ { in_project = ($0 == "[project]") }
+            in_project && /^version[[:space:]]*=/ {
+              gsub(/.*=[[:space:]]*"/, "")
+              gsub(/".*/, "")
+              print
+              exit
+            }')"
+          if [ "$TAG_VERSION" = "$NEW_VERSION" ]; then
+            echo "tag $TAG already exists at $TAG_SHA ($MANIFEST [project].version=$TAG_VERSION) — resuming"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::tag $TAG exists but $MANIFEST at that commit is '$TAG_VERSION', not '$NEW_VERSION'"
+          exit 1
+        fi
+
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+
+    - name: Bump pyproject.toml [project].version
+      if: steps.detect.outputs.skip != 'true'
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        MANIFEST: ${{ inputs.manifest-path }}
+      run: |
+        set -euo pipefail
+        # Scope strictly to the [project] table — pyproject often has
+        # other `version = ` keys (e.g. [tool.poetry], [tool.uv]).
+        # Track section header transitions and rewrite only inside
+        # [project].
+        awk -v v="$NEW_VERSION" '
+          /^\[/ {
+            in_project = ($0 == "[project]")
+            print
+            next
+          }
+          in_project && /^version[[:space:]]*=/ {
+            print "version = \"" v "\""
+            bumped = 1
+            next
+          }
+          { print }
+          END {
+            if (!bumped) {
+              print "::error::no [project].version field found in pyproject.toml" > "/dev/stderr"
+              exit 1
+            }
+          }
+        ' "$MANIFEST" > "$MANIFEST.tmp"
+        mv "$MANIFEST.tmp" "$MANIFEST"
+
+    - name: Roll changelog (final release only)
+      if: steps.detect.outputs.skip != 'true' && steps.detect.outputs.prerelease != 'true' && inputs.changelog-path != ''
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          roll "$CHANGELOG" "$NEW_VERSION" release-notes.md
+
+    - name: Extract changelog notes (prerelease)
+      if: steps.detect.outputs.skip != 'true' && steps.detect.outputs.prerelease == 'true' && inputs.changelog-path != ''
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+      run: |
+        # Prereleases share Unreleased entries with the final they lead to;
+        # extract for release notes but don't roll into a versioned section.
+        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          extract "$CHANGELOG" release-notes.md
+
+    - name: Default release notes if no changelog
+      if: steps.detect.outputs.skip != 'true' && inputs.changelog-path == ''
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+      run: echo "Release v$NEW_VERSION" > release-notes.md
+
+    - name: Commit, tag, push
+      id: push
+      if: steps.detect.outputs.skip != 'true'
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        CHANGELOG: ${{ inputs.changelog-path }}
+        MANIFEST: ${{ inputs.manifest-path }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+      run: |
+        set -euo pipefail
+        TAG="v$NEW_VERSION"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        # Stage manifest + uv lockfile if present + changelog (when
+        # rolled). uv.lock pins the project's own version, so it
+        # rolls with the bump. setup.py and poetry.lock stay untouched
+        # by an awk pyproject edit; add them only when modified by
+        # convention hooks (consumer side).
+        git add "$MANIFEST"
+        manifest_dir="$(dirname "$MANIFEST")"
+        for lock in uv.lock poetry.lock; do
+          [ -f "$lock" ] && git add -- "$lock" 2>/dev/null || true
+          if [ "$manifest_dir" != "." ] && [ -f "$manifest_dir/$lock" ]; then
+            git add -- "$manifest_dir/$lock" 2>/dev/null || true
+          fi
+        done
+        if [ "$IS_PRERELEASE" != "true" ] && [ -n "$CHANGELOG" ] && [ -f "$CHANGELOG" ]; then
+          git add "$CHANGELOG"
+        fi
+
+        if git diff --cached --quiet; then
+          echo "::error::No changes staged after version bump — was $MANIFEST already at $NEW_VERSION? (Did cascade-handler pre-bump without also re-pushing a tag?)"
+          exit 1
+        fi
+
+        git commit -m "chore: Release $TAG"
+        git tag -a "$TAG" -m "Release $TAG"
+        git push origin HEAD
+        git push origin "$TAG"
+
+        SHA=$(git rev-parse HEAD)
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Extract notes for resume case
+      if: steps.detect.outputs.skip == 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+        NEW_VERSION: ${{ inputs.version }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+      run: |
+        set -euo pipefail
+        if [ -z "$CHANGELOG" ] || [ ! -f "$CHANGELOG" ]; then
+          echo "Release v$NEW_VERSION" > release-notes.md
+        elif [ "$IS_PRERELEASE" = "true" ]; then
+          bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+            extract "$CHANGELOG" release-notes.md
+        else
+          awk -v v="$NEW_VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' "$CHANGELOG" > release-notes.md
+          if ! grep -qE '\S' release-notes.md; then
+            echo "Release v$NEW_VERSION" > release-notes.md
+          fi
+        fi
+
+    - name: Emit outputs
+      id: outputs
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+        RESUME_SHA: ${{ steps.detect.outputs.sha }}
+        PUSH_SHA: ${{ steps.push.outputs.sha }}
+      run: |
+        SHA="${PUSH_SHA:-$RESUME_SHA}"
+        if [ -z "$SHA" ]; then
+          echo "::error::Internal: neither push.sha nor detect.sha is set"
+          exit 1
+        fi
+        echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+    - name: Upload release notes for downstream jobs
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: release-notes.md
+        if-no-files-found: error
+        retention-days: 7

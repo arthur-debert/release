@@ -1,0 +1,305 @@
+name: Python pkg release
+
+# Reusable release workflow for Python packages (pure-python or
+# bdist_wheel). Consumers call this from their .github/workflows/
+# release.yml as a thin caller pinned to @v1. See README §Stack
+# matrix row "python-pkg" and tracking issue #48 for scope.
+#
+# What this does
+# --------------
+# 1. prepare    — bump pyproject.toml [project].version, roll
+#                 changelog, tag + push (via prepare-release-python).
+# 2. build      — uv build → dist/*.{tar.gz,whl}. uv ships its own
+#                 isolated build env; no virtualenv dance needed.
+#                 If consumer ships scripts/pre-build.sh (e.g.
+#                 codegen, asset bundle), it runs first.
+# 3. publish-pypi (default: true)         — uv publish → PyPI.
+# 4. publish-testpypi (default: false)    — uv publish → TestPyPI.
+#                 Useful for prereleases that you want to install
+#                 separately before promoting.
+# 5. release    — GH release with notes. Gated on publish jobs to
+#                 prevent partial-release windows (matches vscode-ext).
+#
+# Trigger
+# -------
+# `workflow_dispatch` with a `version` input — matches the cascade-
+# handler contract.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare PEP 440-compatible semver, e.g. 0.18.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      manifest-path:
+        description: 'Path to pyproject.toml. Override for monorepo / non-root layouts.'
+        type: string
+        required: false
+        default: 'pyproject.toml'
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog). Empty to skip.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+      publish-pypi:
+        description: 'Publish to PyPI. Default true.'
+        type: boolean
+        required: false
+        default: true
+      publish-testpypi:
+        description: 'Publish to TestPyPI. Default false — opt in per-release for staging prereleases.'
+        type: boolean
+        required: false
+        default: false
+      python-version:
+        description: 'Python version for the build env. uv resolves and downloads if not present.'
+        type: string
+        required: false
+        default: '3.12'
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push. Falls back to GITHUB_TOKEN.'
+        required: false
+      PYPI_TOKEN:
+        description: 'PyPI API token (scoped to the project, ideally). Required when publish-pypi=true.'
+        required: false
+      TESTPYPI_TOKEN:
+        description: 'TestPyPI API token. Required when publish-testpypi=true.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 0. Pre-flight: validate required publish tokens BEFORE prepare
+  #    bumps + tags + pushes. Without this, a missing PYPI_TOKEN would
+  #    strand a half-released tag (same trap vscode-ext fixed in #75).
+  # -------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      PYPI_PRESENT: ${{ secrets.PYPI_TOKEN != '' && 'yes' || 'no' }}
+      TESTPYPI_PRESENT: ${{ secrets.TESTPYPI_TOKEN != '' && 'yes' || 'no' }}
+    steps:
+      - name: Validate publish secrets
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "${{ inputs.publish-pypi }}" = "true" ] && [ "${PYPI_PRESENT}" = "no" ]; then
+            echo "::error::publish-pypi=true but PYPI_TOKEN secret is missing"
+            fail=1
+          fi
+          if [ "${{ inputs.publish-testpypi }}" = "true" ] && [ "${TESTPYPI_PRESENT}" = "no" ]; then
+            echo "::error::publish-testpypi=true but TESTPYPI_TOKEN secret is missing"
+            fail=1
+          fi
+          exit "${fail}"
+
+  # -------------------------------------------------------------------
+  # 1. Prepare: bump pyproject.toml, roll changelog, tag + push.
+  # -------------------------------------------------------------------
+  prepare:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - uses: arthur-debert/release/.github/actions/prepare-release-python@v1
+        id: prep
+        with:
+          version: ${{ inputs.version }}
+          manifest-path: ${{ inputs.manifest-path }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+  # -------------------------------------------------------------------
+  # 2. Build: uv build → sdist + wheel into dist/. Uploaded as artifact
+  #    for the publish jobs (single build, multi-target publish).
+  # -------------------------------------------------------------------
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install ${{ inputs.python-version }}
+
+      # Convention hook. Runs only when consumer ships
+      # scripts/pre-build.sh. Use cases: codegen, asset bundle prep,
+      # docs build that ends up shipped in the wheel.
+      - name: Pre-build hook (consumer)
+        if: hashFiles('scripts/pre-build.sh') != ''
+        shell: bash
+        env:
+          PROJECT_VERSION: ${{ needs.prepare.outputs.version }}
+        run: bash scripts/pre-build.sh
+
+      - name: Build sdist + wheel
+        shell: bash
+        env:
+          MANIFEST: ${{ inputs.manifest-path }}
+        run: |
+          set -euo pipefail
+          manifest_dir="$(dirname "${MANIFEST}")"
+          # uv build writes to <manifest_dir>/dist/ by default; pin
+          # output to <repo-root>/dist so downstream jobs have a
+          # stable path regardless of monorepo layout.
+          uv build --project "${manifest_dir}" --out-dir "${GITHUB_WORKSPACE}/dist"
+          ls -la "${GITHUB_WORKSPACE}/dist"
+
+      - name: Upload dist artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 3. Publish to PyPI. Opt-out via publish-pypi=false (e.g. for
+  #    TestPyPI-only dry runs).
+  # -------------------------------------------------------------------
+  publish-pypi:
+    needs: [prepare, build]
+    if: inputs.publish-pypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: false
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${UV_PUBLISH_TOKEN:-}" ]; then
+            echo "::error::publish-pypi=true but PYPI_TOKEN is empty at publish time"
+            exit 1
+          fi
+          # uv publish is idempotent against already-uploaded files —
+          # it returns success and a 'skipped: already exists' note for
+          # each file PyPI already has, so re-runs of a partially
+          # published release just no-op the existing files.
+          uv publish dist/*
+
+  # -------------------------------------------------------------------
+  # 4. Publish to TestPyPI. Opt-in. Most releases skip this — the
+  #    typical workflow is a prerelease to TestPyPI for smoke install,
+  #    then the final to PyPI.
+  # -------------------------------------------------------------------
+  publish-testpypi:
+    needs: [prepare, build]
+    if: inputs.publish-testpypi
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: false
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Publish to TestPyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.TESTPYPI_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${UV_PUBLISH_TOKEN:-}" ]; then
+            echo "::error::publish-testpypi=true but TESTPYPI_TOKEN is empty at publish time"
+            exit 1
+          fi
+          uv publish --publish-url https://test.pypi.org/legacy/ dist/*
+
+  # -------------------------------------------------------------------
+  # 5. GitHub release. Gated on publish jobs (success or intentionally
+  #    skipped) — matches vscode-ext to prevent a partial-release
+  #    window where the tag has GH assets but no PyPI artifact.
+  # -------------------------------------------------------------------
+  release:
+    needs: [prepare, build, publish-pypi, publish-testpypi]
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && needs.build.result == 'success'
+      && (needs.publish-pypi.result == 'success' || needs.publish-pypi.result == 'skipped')
+      && (needs.publish-testpypi.result == 'success' || needs.publish-testpypi.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-dist
+          path: dist
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          # Attach sdist + wheels as release assets so GH-release-
+          # only consumers (e.g. air-gapped installs) can fetch them
+          # without going through PyPI.
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} exists — updating notes and re-uploading assets."
+            gh release edit "${TAG}" --notes-file release-notes.md
+            gh release upload "${TAG}" dist/* --clobber
+          else
+            gh release create "${TAG}" \
+              ${prerelease_flag} \
+              --title "${TAG}" \
+              --notes-file release-notes.md \
+              dist/*
+          fi

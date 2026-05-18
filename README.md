@@ -101,7 +101,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
-| python-pkg     | W 📋 ruff/black | W 📋 pytest| —               | W 📋 build (wheel) | —          | W 📋              | A 📋 PyPI         | —                | —         | A 📋           |
+| python-pkg     | (consumer)      | (consumer) | —               | W ✅ uv build      | —          | W ✅              | W ✅ PyPI · W ✅ TestPyPI (opt-in) | —    | —         | A 📋           |
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W 📋 tag + v1     | A 📋 marketplace  | —                | —         | A 📋 (move v1) |
 | brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
 
@@ -196,6 +196,13 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   Open VSX publish via `ovsx`. Native-binary fetch happens via the
   `scripts/pre-vsce-package.sh` convention hook + the canonical
   `fetch-artifact` CLI.
+- 🚧 **python-pkg** — workflow shipped at `@v1`. Pilot consumer
+  (`lex-fmt/mkdocs-lex`) pending migration. `uv build` → sdist +
+  wheel, `uv publish` → PyPI (required) and TestPyPI (opt-in per
+  release). Version bump is awk-based against pyproject.toml
+  `[project].version` so the composite action has zero toolchain
+  deps. Optional `scripts/pre-build.sh` convention hook for
+  codegen / asset bundling before the wheel is sealed.
 - 🚧 **tauri-app** — new stack row. Pilot consumer:
   `arthur-debert/arami-app`. Will share ~70% of the electron-app
   shape (prepare-release-npm, smoke convention, GH release) with
