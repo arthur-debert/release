@@ -100,7 +100,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W ✅ tag + release | —                 | —                | —         | A 📋 (tag)     |
-| tree-sitter    | W 📋            | W ✅ corpus³| —               | W ✅ generate      | —          | W ✅              | W ✅ npm (opt-in) | —                | —         | A 📋           |
+| tree-sitter    | W 📋            | W ✅ corpus³| —               | W ✅ generate      | —          | W ✅              | W ✅ npm (opt-in) | —                | —         | A ✅           |
 | python-pkg     | (consumer)      | (consumer) | —               | W ✅ uv build      | —          | W ✅              | W ✅ PyPI · W ✅ TestPyPI (opt-in) | —    | —         | A 📋           |
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W ✅ tag + v1     | (tag-driven²)     | —                | —         | A 📋 (move v1) |
 | brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
@@ -261,17 +261,22 @@ All shipped stack workflows ship to `@v1` (floating major); see
   directory. Smoke testing deliberately deferred to a separate
   `nvim-plugin-test.yml` (PR-gate). Optional rockspec publish:
   future slice.
-- 🚧 **tree-sitter** — `@v1`. Pilot `lex-fmt/tree-sitter-lex`
-  migrated; first verification release (0.10.4) caught a
-  `setup-node` cache hard-fail (v1.6.1 fix), re-fire pending.
+- ✅ **tree-sitter** — `@v1`. Pilot `lex-fmt/tree-sitter-lex`
+  migrated + verified end-to-end (0.10.4 → tree-sitter.tar.gz
+  on the GH release, bundle layout matches the contract,
+  corpus-test gate held, downstream-notify fan-out fired
+  successfully to vscode + lexed). nvim handler workflow has
+  its own bug — tracked at
+  [lex-fmt/nvim#59](https://github.com/lex-fmt/nvim/issues/59).
   Build: `tree-sitter generate` + corpus tests (release-gating)
   + `tree-sitter build --wasm`, assemble `tree-sitter.tar.gz`
   containing the standard parser bundle (layout is contractual
   with downstream callers — see footnote ³). Optional npm
   publish (off by default; most parsers ship via tarball only).
   `scripts/bundle-extras.sh` convention hook. Downstream
-  `repository_dispatch` notifications are out of scope (live in
-  `cascade-handler.yml` + the caller).
+  `repository_dispatch` notifications are out of scope of this
+  workflow (live in `cascade-handler.yml` + the consumer's
+  thin caller).
 - 📋 **tauri-app** — not started. Pilot:
   `arthur-debert/arami-app`. Will share ~70% of the
   electron-app shape (prepare-release-npm, smoke convention, GH
