@@ -100,7 +100,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W ✅ tag + release | —                 | —                | —         | A 📋 (tag)     |
-| tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
+| tree-sitter    | W 📋            | W ✅ corpus³| —               | W ✅ generate      | —          | W ✅              | W ✅ npm (opt-in) | —                | —         | A 📋           |
 | python-pkg     | (consumer)      | (consumer) | —               | W ✅ uv build      | —          | W ✅              | W ✅ PyPI · W ✅ TestPyPI (opt-in) | —    | —         | A 📋           |
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W ✅ tag + v1     | (tag-driven²)     | —                | —         | A 📋 (move v1) |
 | brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
@@ -138,6 +138,13 @@ one-time repo-settings checkbox ("Publish this Action to the
 GitHub Marketplace") at first release creation. There is no
 publish API for CI to call — the `release` job creating a tag
 *is* the publish.
+
+³ **tree-sitter — corpus tests are release-gating.** The
+`tree-sitter test` step runs against the freshly generated parser
+(not the committed one), so a grammar.js change that breaks the
+corpus blocks the release before tag-push. Set
+`run-corpus-tests: false` only when the PR-time test workflow is
+authoritative and main is trusted green.
 
 ¹ **rust-cli + npm (wasm)** — opt-in slot for Rust workspaces with a
 wasm-bindgen crate consumed by JS/TS. Set `wasm-package: <member>` on
@@ -216,6 +223,20 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   Smoke test deliberately left out of the release path; lives in
   the separate `nvim-plugin-test.yml` (PR-gate). Optional
   rockspec publish: future slice.
+- 🚧 **tree-sitter** — workflow shipped on `main`; pin against
+  the next cut tag (planned v1.6.0). Pilot consumer:
+  `lex-fmt/tree-sitter-lex` pending migration. Build steps:
+  `tree-sitter generate` + corpus tests + `tree-sitter build --wasm`,
+  then assemble a `tree-sitter.tar.gz` containing the standard
+  parser bundle (`parser.c`, `scanner.{c,cc}`, headers, queries,
+  `<name>.wasm`, `grammar.js`, `tree-sitter.json`). The bundle
+  shape is a contract with downstream callers (e.g. vscode-ext's
+  `pre-vsce-package.sh` extracts specific files). Optional npm
+  publish (off by default — most parsers ship via GH release
+  tarball only). `scripts/bundle-extras.sh` convention hook for
+  consumer-specific extras (e.g. `shared/embedded-grammars.json`).
+  Downstream `repository_dispatch` notifications are deliberately
+  out of scope — they live in `cascade-handler.yml`.
 - ✅ **gh-action** — workflow shipped (pin against the next cut
   tag; bootstrap from `@main` for the first call). Reusable
   release pipeline for composite GitHub Actions and reusable
