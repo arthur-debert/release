@@ -99,7 +99,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
-| nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
+| nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W ✅ (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
 | python-pkg     | (consumer)      | (consumer) | —               | W ✅ uv build      | —          | W ✅              | W ✅ PyPI · W ✅ TestPyPI (opt-in) | —    | —         | A 📋           |
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W ✅ tag + v1     | (tag-driven²)     | —                | —         | A 📋 (move v1) |
@@ -204,6 +204,17 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   per-target VSIX matrix, `scripts/pre-vsce-package.sh` convention
   hook for native-binary fetching, `--pre-release` threading for
   `X.Y.Z-rc.N` semvers.
+- 🚧 **nvim-plugin** — workflow shipped at `@v1` (release path
+  only; lint/test workflows still 📋). Pilot consumer:
+  `lex-fmt/nvim` pending migration. Tag + GH release with
+  Keep-a-Changelog notes auto-rolled; no manifest bump (Neovim
+  plugins don't carry a version field — the tag IS the unit of
+  distribution, consumed directly by plugin managers like
+  lazy.nvim / vim-plug / packer / rocks.nvim). Sanity check
+  requires `lua/` or `plugin/` directory at the configured root.
+  Smoke test deliberately left out of the release path; lives in
+  the separate `nvim-plugin-test.yml` (PR-gate). Optional
+  rockspec publish: future slice.
 - ✅ **gh-action** — workflow shipped (pin against the next cut
   tag; bootstrap from `@main` for the first call). Reusable
   release pipeline for composite GitHub Actions and reusable

@@ -1,0 +1,228 @@
+name: Neovim plugin release
+
+# Reusable release workflow for Neovim plugins. Consumers call this
+# from their own .github/workflows/release.yml as a thin caller pinned
+# to @v1. See README §Stack matrix row "nvim-plugin" and tracking
+# issue #46.
+#
+# What's distinct about this stack
+# --------------------------------
+# - No package index. Plugin managers (lazy.nvim, vim-plug, packer,
+#   rocks.nvim, …) consume the plugin **directly from git tags**.
+#   The tag IS the release.
+# - No manifest version. Neovim plugins typically don't carry a
+#   version field anywhere — the source tree at a tag is the unit
+#   of distribution. (rockspec-based plugins exist but they're the
+#   minority; a future slice can add optional rockspec publish.)
+# - No build step. Plugins ship as Lua / Vimscript source.
+#
+# What it does
+# ------------
+# 1. prepare — validate semver, sanity-check this is a Neovim plugin
+#    (looks for `lua/` or `plugin/` directory at the configured
+#    root), roll Keep-a-Changelog `[Unreleased]` → `[X.Y.Z]` if
+#    present, commit + tag + push.
+# 2. release — create GH release with notes; prerelease flag when
+#    semver carries a suffix.
+#
+# Smoke testing
+# -------------
+# Test infrastructure (busted, vusted, luacheck, stylua) lives in
+# the separate `nvim-plugin-test.yml` workflow that gates PRs. We
+# deliberately do NOT run tests in the release path: provisioning
+# the lua toolchain on every release would be wasteful, and the
+# PR-gate has already caught any regressions before main lands.
+# For convention, consumers can ship `scripts/release-smoke.sh`
+# (e.g. `nvim --headless -c "set rtp+=. | luafile lua/<name>/init.lua" -c qa`)
+# and the workflow runs it pre-tag. Future work.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 0.11.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section). Empty to skip changelog handling.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      plugin-root:
+        description: 'Path to the plugin root directory (where `lua/` and/or `plugin/` live). Use for monorepo layouts that nest the plugin under a subdir. Defaults to repo root.'
+        type: string
+        required: false
+        default: '.'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push (bypasses ruleset). Falls back to GITHUB_TOKEN.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 1. Prepare: validate, sanity-check plugin layout, roll changelog,
+  #    tag + push.
+  # -------------------------------------------------------------------
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - name: Validate + detect resume
+        id: prep
+        shell: bash
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+          PLUGIN_ROOT: ${{ inputs.plugin-root }}
+          CHANGELOG: ${{ inputs.changelog-path }}
+        run: |
+          set -euo pipefail
+
+          if ! [[ "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: ${NEW_VERSION})"
+            exit 1
+          fi
+
+          IS_PRERELEASE=false
+          if [[ "${NEW_VERSION}" == *-* ]]; then
+            IS_PRERELEASE=true
+          fi
+
+          # Sanity check — refuse to release a repo that doesn't look
+          # like a Neovim plugin. The Neovim runtime path convention
+          # is that EITHER `lua/<name>/init.lua` OR `plugin/*.vim`
+          # (or `plugin/*.lua`) lives at the plugin root. Most modern
+          # plugins have both, some have just one. We accept either.
+          if [ ! -d "${PLUGIN_ROOT}/lua" ] && [ ! -d "${PLUGIN_ROOT}/plugin" ]; then
+            echo "::error::plugin root ${PLUGIN_ROOT} has no lua/ or plugin/ directory. Is this a Neovim plugin?"
+            exit 1
+          fi
+
+          TAG="v${NEW_VERSION}"
+          git fetch --tags origin >/dev/null 2>&1 || true
+
+          # Resume case: tag exists. No manifest to cross-check
+          # against (nvim plugins don't carry a version field).
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            TAG_SHA=$(git rev-list -n 1 "${TAG}")
+            echo "tag ${TAG} already exists at ${TAG_SHA} — resuming"
+
+            # Reconstruct release notes from the existing CHANGELOG
+            # entry so the release job has something to upload.
+            if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+              if [ "${IS_PRERELEASE}" = "true" ]; then
+                awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
+                  "${CHANGELOG}" > release-notes.md
+              else
+                awk -v v="${NEW_VERSION}" '$0 ~ "^## \\[" v "\\]"{c=1;next} c&&/^## \[/{exit} c{print}' \
+                  "${CHANGELOG}" > release-notes.md
+              fi
+              [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
+            else
+              echo "Release ${TAG}" > release-notes.md
+            fi
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            # Roll Keep-a-Changelog when present + extract notes.
+            # Prereleases extract without rolling — they share the
+            # [Unreleased] section with the final release.
+            if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+              awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
+                "${CHANGELOG}" > release-notes.md
+              if [ "${IS_PRERELEASE}" != "true" ]; then
+                today=$(date -u +%F)
+                replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
+                awk -v repl="${replacement}" '
+                  /^## \[Unreleased\]/ { print repl; next } { print }
+                ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
+                mv "${CHANGELOG}.tmp" "${CHANGELOG}"
+                git add "${CHANGELOG}"
+              fi
+            else
+              echo "Release ${TAG}" > release-notes.md
+            fi
+            [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
+
+            # No manifest to bump; just commit the rolled changelog
+            # (if any) and tag the HEAD.
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: Release ${TAG}"
+            fi
+            git tag -a "${TAG}" -m "Release ${TAG}"
+            git push origin HEAD
+            git push origin "${TAG}"
+            TAG_SHA=$(git rev-parse HEAD)
+          fi
+
+          {
+            echo "version=${NEW_VERSION}"
+            echo "prerelease=${IS_PRERELEASE}"
+            echo "release-sha=${TAG_SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload release notes
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 2. Create the GitHub release. Prerelease flag is set when semver
+  #    carries a suffix.
+  # -------------------------------------------------------------------
+  release:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} exists — updating notes."
+            gh release edit "${TAG}" --notes-file release-notes.md
+          else
+            gh release create "${TAG}" \
+              ${prerelease_flag} \
+              --title "${TAG}" \
+              --notes-file release-notes.md
+          fi
