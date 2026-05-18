@@ -1,0 +1,352 @@
+name: tree-sitter release
+
+# Reusable release workflow for tree-sitter grammar repos. Consumers
+# call this from their .github/workflows/release.yml as a thin caller
+# pinned at @v1. See README §Stack matrix row "tree-sitter" and
+# tracking issue #47.
+#
+# What this stack ships
+# ---------------------
+# - A `tree-sitter.tar.gz` artifact attached to the GH release,
+#   containing the canonical bundle layout downstream consumers
+#   (editors, syntax-highlighter libraries) extract from:
+#     <name>.wasm
+#     grammar.js
+#     package.json
+#     tree-sitter.json
+#     src/parser.c
+#     src/scanner.{c,cc}            (gated by existence)
+#     src/tree_sitter/parser.h
+#     src/tree_sitter/*.h           (alloc.h, array.h if generated)
+#     queries/*.scm
+#
+#   The shape of this bundle IS a contract with downstream callers
+#   that extract specific files from it (e.g. lex-fmt/vscode's
+#   pre-vsce-package.sh pulls `<name>.wasm` and `queries/`). Changes
+#   to the bundle layout are a MAJOR for this stack.
+#
+# - Optional npm publish — most tree-sitter parsers ship via the GH
+#   release tarball; npm publish is opt-in for repos that also want
+#   to be a `tree-sitter-<lang>` npm package.
+#
+# What's out of scope (deliberately)
+# ----------------------------------
+# - crates.io publish for tree-sitter bindings. Few parsers ship Rust
+#   bindings; add a future slice when first consumer needs it.
+# - Downstream `repository_dispatch upstream-released` notifications.
+#   Lives separately in cascade-handler.yml (Wave 1.3). Consumers
+#   that need cascade fan-out chain their thin caller's `release`
+#   job with a follow-up notify step (see lex-fmt/tree-sitter-lex
+#   release.yml for the canonical pattern).
+#
+# Convention hooks
+# ----------------
+# - `scripts/bundle-extras.sh` — runs AFTER the standard bundle is
+#   assembled in `dist/`, BEFORE the tarball is created. Use to add
+#   consumer-specific files (e.g. `shared/embedded-grammars.json`).
+#   Working dir at hook time is the repo root; the bundle is at
+#   `${GITHUB_WORKSPACE}/dist/`.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 0.11.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`). Empty to skip changelog handling.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      parser-name:
+        description: 'Bare parser name (used for the .wasm output filename, e.g. `lex` → `tree-sitter-lex.wasm`). Defaults to the value of `name` in package.json with the `tree-sitter-` prefix stripped.'
+        type: string
+        required: false
+        default: ''
+      publish-npm:
+        description: 'Publish the package to npm. Default false — most parsers ship via GH release tarball only.'
+        type: boolean
+        required: false
+        default: false
+      run-corpus-tests:
+        description: 'Run `tree-sitter test` as a pre-tag gate. Default true. Set false if the PR-time test workflow is authoritative and you trust main to be green.'
+        type: boolean
+        required: false
+        default: true
+      node-version:
+        description: 'Node.js version for the build env.'
+        type: string
+        required: false
+        default: '20'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push (bypasses ruleset). Falls back to GITHUB_TOKEN.'
+        required: false
+      NPM_TOKEN:
+        description: 'npm publish token. Required when publish-npm=true.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 0. Pre-flight: validate NPM_TOKEN if publish-npm=true.
+  # -------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      NPM_PRESENT: ${{ secrets.NPM_TOKEN != '' && 'yes' || 'no' }}
+      PUBLISH_NPM: ${{ inputs.publish-npm }}
+    steps:
+      - name: Validate publish secrets
+        run: |
+          set -euo pipefail
+          if [ "${PUBLISH_NPM}" = "true" ] && [ "${NPM_PRESENT}" = "no" ]; then
+            echo "::error::publish-npm=true but NPM_TOKEN secret is missing"
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------
+  # 1. Prepare: bump package.json, roll changelog, tag + push.
+  # -------------------------------------------------------------------
+  prepare:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+      parser-name: ${{ steps.meta.outputs.parser-name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - uses: arthur-debert/release/.github/actions/prepare-release-npm@v1
+        id: prep
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+      - name: Resolve parser name
+        id: meta
+        shell: bash
+        env:
+          INPUT_PARSER: ${{ inputs.parser-name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_PARSER}" ]; then
+            echo "parser-name=${INPUT_PARSER}" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # Derive from package.json — convention: package name is
+          # `tree-sitter-<lang>`, parser name is `<lang>`.
+          pkg_name="$(jq -r '.name // empty' package.json)"
+          if [ -z "${pkg_name}" ]; then
+            echo "::error::parser-name input is empty and package.json .name is missing"
+            exit 1
+          fi
+          parser="${pkg_name#tree-sitter-}"
+          echo "parser-name=${parser}" >> "${GITHUB_OUTPUT}"
+
+  # -------------------------------------------------------------------
+  # 2. Build the canonical tree-sitter bundle: regen parser, run
+  #    corpus tests, build WASM, assemble dist/, tar it up.
+  # -------------------------------------------------------------------
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      - name: Install deps
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Generate parser
+        run: npx tree-sitter generate
+
+      - name: Run corpus tests
+        if: inputs.run-corpus-tests
+        run: npx tree-sitter test
+
+      - name: Build WASM
+        run: npx tree-sitter build --wasm
+
+      - name: Assemble standard bundle
+        shell: bash
+        env:
+          PARSER: ${{ needs.prepare.outputs.parser-name }}
+        run: |
+          set -euo pipefail
+          dist="${GITHUB_WORKSPACE}/dist"
+          rm -rf "${dist}"
+          mkdir -p "${dist}/src/tree_sitter" "${dist}/queries"
+
+          # Core grammar metadata
+          cp grammar.js "${dist}/"
+          cp package.json "${dist}/"
+          [ -f tree-sitter.json ] && cp tree-sitter.json "${dist}/"
+
+          # Generated parser sources
+          cp src/parser.c "${dist}/src/"
+          for f in src/scanner.c src/scanner.cc; do
+            [ -f "${f}" ] && cp "${f}" "${dist}/src/"
+          done
+          # tree-sitter headers (parser.h is always present; alloc.h /
+          # array.h are emitted only by newer tree-sitter CLI versions)
+          for h in src/tree_sitter/parser.h src/tree_sitter/alloc.h src/tree_sitter/array.h; do
+            [ -f "${h}" ] && cp "${h}" "${dist}/src/tree_sitter/"
+          done
+
+          # Highlight + indent + locals + injections queries
+          if [ -d queries ]; then
+            cp queries/*.scm "${dist}/queries/" 2>/dev/null || true
+          fi
+
+          # WASM artifact at the bundle root
+          wasm="tree-sitter-${PARSER}.wasm"
+          if [ -f "${wasm}" ]; then
+            cp "${wasm}" "${dist}/"
+          else
+            echo "::warning::expected ${wasm} not produced by tree-sitter build --wasm"
+          fi
+
+      # Optional consumer extras. Hook runs at repo root; bundle is
+      # at ${GITHUB_WORKSPACE}/dist. Use to add files the standard
+      # layout doesn't carry (e.g. shared/embedded-grammars.json).
+      - name: Bundle-extras hook (consumer)
+        if: hashFiles('scripts/bundle-extras.sh') != ''
+        shell: bash
+        env:
+          BUNDLE_DIR: ${{ github.workspace }}/dist
+          PARSER: ${{ needs.prepare.outputs.parser-name }}
+        run: bash scripts/bundle-extras.sh
+
+      - name: Tar the bundle
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/dist"
+          tar -czf "${GITHUB_WORKSPACE}/tree-sitter.tar.gz" .
+          ls -la "${GITHUB_WORKSPACE}/tree-sitter.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tree-sitter-bundle
+          path: tree-sitter.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 3. Publish to npm. Opt-in.
+  # -------------------------------------------------------------------
+  publish-npm:
+    needs: [prepare, build]
+    if: inputs.publish-npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::publish-npm=true but NPM_TOKEN is empty at publish time"
+            exit 1
+          fi
+          # --provenance opt-in: requires id-token: write permission
+          # which we don't grant; plain publish. Idempotent against
+          # already-published versions: npm errors 403; we suppress
+          # for already-exists.
+          if ! npm publish --access public 2>&1 | tee npm-publish.log; then
+            if grep -q "You cannot publish over the previously published versions" npm-publish.log; then
+              echo "version already published — treating as success"
+              exit 0
+            fi
+            exit 1
+          fi
+
+  # -------------------------------------------------------------------
+  # 4. GH release. Gated on build + (if enabled) publish-npm. Same
+  #    partial-release-prevention pattern as vscode-ext / python-pkg.
+  # -------------------------------------------------------------------
+  release:
+    needs: [prepare, build, publish-npm]
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && needs.build.result == 'success'
+      && (needs.publish-npm.result == 'success' || needs.publish-npm.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: tree-sitter-bundle
+          path: .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} exists — updating notes + re-uploading bundle"
+            gh release edit "${TAG}" --notes-file release-notes.md
+            gh release upload "${TAG}" tree-sitter.tar.gz --clobber
+          else
+            gh release create "${TAG}" \
+              ${prerelease_flag} \
+              --title "${TAG}" \
+              --notes-file release-notes.md \
+              tree-sitter.tar.gz
+          fi
