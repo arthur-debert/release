@@ -132,7 +132,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          # Conditionally enable the npm cache only when a lockfile
+          # is present at the repo root. setup-node@v6 with
+          # `cache: 'npm'` hard-fails when no lockfile is found —
+          # but many tree-sitter grammar repos use `npm install`
+          # rather than `npm ci` and ship no lockfile. Letting
+          # cache fall through here costs ~10s of cold installs
+          # per job vs. blocking the release.
+          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock') != '' && 'npm' || '' }}
 
       - name: Install deps
         run: |
@@ -224,7 +231,14 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'npm'
+          # Conditionally enable the npm cache only when a lockfile
+          # is present at the repo root. setup-node@v6 with
+          # `cache: 'npm'` hard-fails when no lockfile is found —
+          # but many tree-sitter grammar repos use `npm install`
+          # rather than `npm ci` and ship no lockfile. Letting
+          # cache fall through here costs ~10s of cold installs
+          # per job vs. blocking the release.
+          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock') != '' && 'npm' || '' }}
 
       - name: Install deps
         run: |
