@@ -97,7 +97,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | rust-lib       | (consumer)      | (consumer) | —               | W ✅ via publish   | —          | W ✅ (notes)      | A ✅ crates.io                       | —                | —         | A 📋           |
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
-| tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
+| tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W ✅ tauri build   | W ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W ✅ tag + release | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W ✅ corpus³| —               | W ✅ generate      | —          | W ✅              | W ✅ npm (opt-in) | —                | —         | A ✅           |
@@ -277,11 +277,17 @@ All shipped stack workflows ship to `@v1` (floating major); see
   `repository_dispatch` notifications are out of scope of this
   workflow (live in `cascade-handler.yml` + the consumer's
   thin caller).
-- 📋 **tauri-app** — not started. Pilot:
-  `arthur-debert/arami-app`. Will share ~70% of the
-  electron-app shape (prepare-release-npm, smoke convention, GH
-  release) with its own build/sign toolchain (`tauri build`,
-  Tauri's `APPLE_*` env vars).
+- 🚧 **tauri-app** — `@v1` (slice 1). Pilot `arthur-debert/arami-app`
+  pending migration (Tauri scaffold landed via lex-fmt-side work
+  in #31/#37, Layer 0 release primitives in #36; thin caller
+  + `scripts/build-tauri.sh` wiring is the remaining step). Slice 1
+  scope: cross-platform `tauri build` (mac/linux/windows),
+  macOS code-signing + notarization via Tauri's `APPLE_*` env
+  vars, per-platform bundle artifacts on the GH release, version
+  sync across all three Tauri version files (`package.json`,
+  `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`). Deferred
+  slices: updater signing keys, universal macOS binary,
+  auto-updater server config, Linux package signing.
 - 📋 **brew-tap** — not started. Tricky scope — the tap is the
   destination of pushes from other repos, not a release target
   itself. Likely workflow scope: tap-side validation (formula
