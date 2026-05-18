@@ -1,0 +1,478 @@
+name: VS Code extension release
+
+# Reusable release workflow for VS Code extensions. Consumers call this
+# from their own .github/workflows/release.yml as a thin caller pinned
+# to @v1. See README §Stack matrix row "vscode-ext" and the per-stack
+# tracking issue #45.
+#
+# Slice 1 scope: per-target VSIX matrix (because extensions bundling
+# native binaries need one VSIX per platform-arch), VS Code Marketplace
+# publish via vsce, optional Open VSX publish via ovsx, GH release with
+# all VSIXes attached.
+#
+# Universal (no-target) extensions: pass `vsce-targets: ""` and the
+# matrix collapses to a single build job that emits one platform-
+# agnostic VSIX.
+#
+# Native-binary fetch hook (convention): if `scripts/pre-vsce-package.sh`
+# exists, it's invoked before `vsce package` on every matrix entry
+# with VSCE_TARGET (e.g. `darwin-arm64`), PLATFORM, ARCH, and
+# RUST_TARGET (mapped rust-target-triple, e.g.
+# `aarch64-apple-darwin`) exposed in the env. The script's job is to
+# fetch any native binaries the extension bundles into a known
+# location (typically `resources/`). The canonical fetch-artifact
+# CLI is on PATH (installed by env/setup.sh) for this purpose.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 0.10.2 — no leading v).'
+        type: string
+        required: true
+      vsce-targets:
+        description: |
+          Comma-separated VS Code target list (e.g.
+          `darwin-arm64,linux-x64,linux-arm64,win32-x64`). Each
+          becomes one matrix entry that runs on the matching OS
+          runner. Empty = single universal VSIX (no `--target` flag),
+          built on ubuntu-latest.
+
+          Valid values: see https://code.visualstudio.com/api/working-with-extensions/publishing-extension#platform-specific-extensions
+        type: string
+        required: false
+        default: ''
+      extension-name:
+        description: |
+          Used as the VSIX basename (e.g. `lex-vscode` → `lex-vscode-darwin-arm64.vsix`).
+          Empty = read from package.json `name`.
+        type: string
+        required: false
+        default: ''
+      publish-marketplace:
+        description: 'Publish to VS Code Marketplace via `vsce publish`. Requires VSCE_PAT secret.'
+        type: boolean
+        required: false
+        default: true
+      publish-openvsx:
+        description: 'Publish to Open VSX Registry via `ovsx publish`. Requires OVSX_PAT secret.'
+        type: boolean
+        required: false
+        default: false
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout (lex-fmt repos with comms submodule need this).'
+        type: boolean
+        required: false
+        default: false
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog format). Empty to skip changelog rolling — auto-emits "Release vX" as notes.'
+        type: string
+        required: false
+        default: ''
+      node-version:
+        description: 'Node.js version.'
+        type: string
+        required: false
+        default: '22.18.0'
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push. Falls back to GITHUB_TOKEN.'
+        required: false
+      VSCE_PAT:
+        description: 'VS Code Marketplace publisher token. Required when publish-marketplace is true.'
+        required: false
+      OVSX_PAT:
+        description: 'Open VSX Registry token. Required when publish-openvsx is true.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 0. Pre-flight: validate required secrets BEFORE prepare runs. Without
+  #    this, a caller that enables publish-marketplace=true but forgets
+  #    VSCE_PAT would land bump+tag+push+VSIX artifacts and only fail at
+  #    publish time — half a release on disk, none of it on the
+  #    Marketplace. Fail loudly upfront instead.
+  # -------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT_PRESENT: ${{ secrets.VSCE_PAT != '' && 'yes' || 'no' }}
+      OVSX_PAT_PRESENT: ${{ secrets.OVSX_PAT != '' && 'yes' || 'no' }}
+    steps:
+      - name: Validate publish secrets
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "${{ inputs.publish-marketplace }}" = "true" ] && [ "${VSCE_PAT_PRESENT}" = "no" ]; then
+            echo "::error::publish-marketplace=true but VSCE_PAT secret is missing"
+            fail=1
+          fi
+          if [ "${{ inputs.publish-openvsx }}" = "true" ] && [ "${OVSX_PAT_PRESENT}" = "no" ]; then
+            echo "::error::publish-openvsx=true but OVSX_PAT secret is missing"
+            fail=1
+          fi
+          exit "${fail}"
+
+  # -------------------------------------------------------------------
+  # 1. Prepare: bump package.json, roll changelog, commit + tag + push.
+  #    Also parses the vsce-targets input into a JSON matrix for the
+  #    build jobs.
+  # -------------------------------------------------------------------
+  prepare:
+    needs: preflight
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+      targets-json: ${{ steps.matrix.outputs.targets }}
+      extension-name: ${{ steps.meta.outputs.name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - uses: arthur-debert/release/.github/actions/prepare-release-npm@v1
+        id: prep
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+      - name: Resolve extension name
+        id: meta
+        env:
+          INPUT_NAME: ${{ inputs.extension-name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_NAME}" ]; then
+            echo "name=${INPUT_NAME}" >> "${GITHUB_OUTPUT}"
+          else
+            name="$(jq -r '.name // empty' package.json)"
+            if [ -z "${name}" ]; then
+              echo "::error::extension-name input is empty and package.json .name is missing"
+              exit 1
+            fi
+            echo "name=${name}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Parse vsce-targets matrix
+        id: matrix
+        env:
+          TARGETS: ${{ inputs.vsce-targets }}
+        run: |
+          set -euo pipefail
+          # vsce target → runner OS + arch metadata. Mapped here so the
+          # build matrix can pick the right runner and the pre-package
+          # hook can resolve a rust-target-triple for binary fetches.
+          if [ -z "${TARGETS}" ]; then
+            # Universal VSIX: single matrix entry, no --target flag.
+            echo "targets=$(jq -n '[{target:"",os:"ubuntu-latest",rust:"",platform:"any",arch:"any"}]' -c)" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # Whitelist every supported vsce target — silently
+          # defaulting unknowns to linux/ubuntu-latest (the previous
+          # `else` branch) made target-list typos invisible and would
+          # pass wrong RUST_TARGET to the pre-package hook. Fail-fast
+          # with the list of valid values instead.
+          valid='["darwin-arm64","darwin-x64","linux-x64","linux-arm64","linux-armhf","alpine-x64","alpine-arm64","win32-x64","win32-arm64","web"]'
+          json="$(echo "${TARGETS}" | jq -R -c --argjson valid "${valid}" '
+            split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(
+              . as $t |
+              if ($valid | index($t)) | not then
+                error("unsupported vsce target: \"" + $t + "\". Valid: " + ($valid | join(", ")))
+              else . end |
+              {
+                target: $t,
+                os:
+                  if $t | startswith("darwin-") then "macos-latest"
+                  elif $t | startswith("win32-") then "windows-latest"
+                  else "ubuntu-latest"     # linux-*, alpine-*, web
+                  end,
+                rust:
+                  if $t == "darwin-arm64" then "aarch64-apple-darwin"
+                  elif $t == "darwin-x64" then "x86_64-apple-darwin"
+                  elif $t == "linux-x64" then "x86_64-unknown-linux-gnu"
+                  elif $t == "linux-arm64" then "aarch64-unknown-linux-gnu"
+                  elif $t == "linux-armhf" then "armv7-unknown-linux-gnueabihf"
+                  elif $t == "alpine-x64" then "x86_64-unknown-linux-musl"
+                  elif $t == "alpine-arm64" then "aarch64-unknown-linux-musl"
+                  elif $t == "win32-x64" then "x86_64-pc-windows-msvc"
+                  elif $t == "win32-arm64" then "aarch64-pc-windows-msvc"
+                  else ""    # "web" has no native arch — hook should skip fetch
+                  end,
+                platform:
+                  if $t | startswith("darwin-") then "mac"
+                  elif $t | startswith("win32-") then "windows"
+                  elif $t == "web" then "web"
+                  else "linux"             # linux-*, alpine-*
+                  end,
+                arch: ($t | split("-") | .[-1])
+              }
+            )
+          ')"
+          echo "targets=${json}" >> "${GITHUB_OUTPUT}"
+
+  # -------------------------------------------------------------------
+  # 2. Build matrix — one VSIX per target. Each entry runs on the
+  #    matching OS, optionally invokes scripts/pre-vsce-package.sh
+  #    (e.g. for fetching native binaries), runs `vsce package`.
+  # -------------------------------------------------------------------
+  build:
+    needs: prepare
+    runs-on: ${{ matrix.t.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        t: ${{ fromJSON(needs.prepare.outputs.targets-json) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Make the canonical fetch-artifact CLI available on PATH so the
+      # pre-package hook can call it without each consumer reinventing
+      # the `gh release download` dance. Mirrors what env/setup.sh
+      # does in cloud sessions; here we install on the CI runner.
+      # Only installed when the hook is actually present (cheap noop
+      # otherwise).
+      - name: Install fetch-artifact CLI
+        if: hashFiles('scripts/pre-vsce-package.sh') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/fetch-artifact" \
+            https://raw.githubusercontent.com/arthur-debert/release/v1/bin/fetch-artifact
+          chmod +x "${tmp}/fetch-artifact"
+          # macOS/linux runners have /usr/local/bin on PATH; Windows
+          # runners get the script via $GITHUB_PATH which works on any
+          # shell.
+          install_dir="/usr/local/bin"
+          if [ ! -w "${install_dir}" ]; then
+            install_dir="${HOME}/.local/bin"
+            mkdir -p "${install_dir}"
+          fi
+          mv "${tmp}/fetch-artifact" "${install_dir}/fetch-artifact"
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          rm -rf "${tmp}"
+
+      # Convention hook. Runs only when consumer ships
+      # scripts/pre-vsce-package.sh. Use case: fetch native binaries
+      # for the target arch before vsce package bundles them.
+      #
+      # Env exposed:
+      #   VSCE_TARGET  e.g. darwin-arm64 (empty = universal)
+      #   PLATFORM     mac | linux | windows | web | any
+      #   ARCH         arm64 | x64 | armhf | any
+      #   RUST_TARGET  e.g. aarch64-apple-darwin (empty for web/universal)
+      #   GH_TOKEN     so `fetch-artifact` (which shells out to
+      #                `gh release download`) can authenticate
+      - name: Pre-package hook (consumer)
+        if: hashFiles('scripts/pre-vsce-package.sh') != ''
+        shell: bash
+        env:
+          VSCE_TARGET: ${{ matrix.t.target }}
+          PLATFORM: ${{ matrix.t.platform }}
+          ARCH: ${{ matrix.t.arch }}
+          RUST_TARGET: ${{ matrix.t.rust }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: bash scripts/pre-vsce-package.sh
+
+      - name: Package VSIX
+        id: pkg
+        shell: bash
+        env:
+          NAME: ${{ needs.prepare.outputs.extension-name }}
+          TARGET: ${{ matrix.t.target }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # Pass --pre-release to vsce when the semver carries a
+          # prerelease suffix (`1.2.3-rc.1`). Without this, the
+          # Marketplace classifies it as a stable release and
+          # subscribers on prerelease channels miss it.
+          pre_flag=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            pre_flag=(--pre-release)
+          fi
+          if [ -n "${TARGET}" ]; then
+            out="${NAME}-${TARGET}.vsix"
+            npx --yes @vscode/vsce package "${pre_flag[@]}" --target "${TARGET}" -o "${out}"
+          else
+            out="${NAME}.vsix"
+            npx --yes @vscode/vsce package "${pre_flag[@]}" -o "${out}"
+          fi
+          echo "vsix=${out}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.t.target || 'universal' }}
+          path: ${{ steps.pkg.outputs.vsix }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 3. Publish to VS Code Marketplace (one publish call per VSIX, since
+  #    platform-specific VSIXes are separate Marketplace artifacts).
+  # -------------------------------------------------------------------
+  publish-marketplace:
+    needs: [prepare, build]
+    if: inputs.publish-marketplace
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Publish each VSIX to VS Code Marketplace
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          # VSCE_PAT presence was validated in the preflight job; if
+          # we got here the secret is set, but defend in depth.
+          if [ -z "${VSCE_PAT:-}" ]; then
+            echo "::error::publish-marketplace=true but VSCE_PAT is empty at publish time"
+            exit 1
+          fi
+          shopt -s nullglob
+          vsixes=(artifacts/*.vsix)
+          shopt -u nullglob
+          if [ "${#vsixes[@]}" -eq 0 ]; then
+            echo "::error::no VSIX artifacts found"
+            exit 1
+          fi
+          # Match the package-side --pre-release flag so the publish
+          # call carries the same classification.
+          pre_flag=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            pre_flag=(--pre-release)
+          fi
+          for vsix in "${vsixes[@]}"; do
+            echo "→ publishing ${vsix}"
+            npx --yes @vscode/vsce publish "${pre_flag[@]}" --packagePath "${vsix}"
+          done
+
+  # -------------------------------------------------------------------
+  # 4. Publish to Open VSX Registry (opt-in via input).
+  # -------------------------------------------------------------------
+  publish-openvsx:
+    needs: [prepare, build]
+    if: inputs.publish-openvsx
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Publish each VSIX to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OVSX_PAT:-}" ]; then
+            echo "::error::publish-openvsx=true but OVSX_PAT is empty at publish time"
+            exit 1
+          fi
+          shopt -s nullglob
+          vsixes=(artifacts/*.vsix)
+          shopt -u nullglob
+          # ovsx publish accepts --pre-release on recent versions
+          # (≥0.10). Older versions ignore unknown flags rather than
+          # erroring, so this is safe.
+          pre_flag=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            pre_flag=(--pre-release)
+          fi
+          for vsix in "${vsixes[@]}"; do
+            echo "→ publishing ${vsix} to Open VSX"
+            npx --yes ovsx publish "${pre_flag[@]}" "${vsix}" -p "${OVSX_PAT}"
+          done
+
+  # -------------------------------------------------------------------
+  # 5. GitHub release with all VSIXes attached + changelog notes.
+  # -------------------------------------------------------------------
+  release:
+    # Gate the GH release on the enabled publish jobs succeeding (or
+    # being intentionally skipped). Without this, a Marketplace
+    # publish failure would still expose a public GH release with
+    # tag + VSIX assets but no Marketplace package — a partial
+    # release that's worse than no release.
+    needs: [prepare, build, publish-marketplace, publish-openvsx]
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && needs.build.result == 'success'
+      && (needs.publish-marketplace.result == 'success' || needs.publish-marketplace.result == 'skipped')
+      && (needs.publish-openvsx.result == 'success' || needs.publish-openvsx.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download all VSIXes
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: vsix-*
+          merge-multiple: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — uploading additional assets."
+            gh release upload "$TAG" artifacts/*.vsix --clobber
+          else
+            gh release create "$TAG" \
+              $prerelease_flag \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              artifacts/*.vsix
+          fi
