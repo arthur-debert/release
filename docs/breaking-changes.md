@@ -9,6 +9,21 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.3.2 (2026-05-18) — fix: vscode-ext bash-3.2 empty-array under set -u
+
+**Type:** PATCH. Caught on the second-attempt vscode pilot release
+run (lex-fmt/vscode 0.10.2) after v1.3.1 unblocked the matrix
+parse: macOS runners ship bash 3.2, which errors on
+`"${arr[@]}"` when `arr` is an empty array under `set -u`. Linux
+and Windows runners pass; only darwin builds (and any future
+macos publish step) hit this.
+
+Three sites in `vscode-ext.yml` — Package VSIX, Publish to
+Marketplace, Publish to Open VSX — built a `pre_flag` array
+guarding `--pre-release`. Switched all three to the canonical
+bash-3.2-safe idiom `${arr[@]+"${arr[@]}"}` (expands to nothing
+on empty/unset; to the elements otherwise).
+
 ## v1.3.1 (2026-05-18) — fix: vscode-ext jq parse + python-pkg uv-cache glob
 
 **Type:** PATCH. Two bugs caught on the first end-to-end pilot release
