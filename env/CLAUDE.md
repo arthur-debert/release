@@ -98,6 +98,14 @@ Pre-installed by the env setup script — don't reinstall:
   `libsoup-3.0-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
   `libjavascriptcoregtk-4.1-dev`
 - **Misc:** `uuidgen` (via uuid-runtime)
+- **Cross-repo artifact fetcher:** `fetch-artifact` (installed at
+  `/usr/local/bin/fetch-artifact`). Reads `./artifacts.json` (canonical
+  schema in `arthur-debert/release` `docs/artifacts-schema.md`) and
+  pulls pinned binaries / source trees from upstream GH releases.
+  `scripts/setup-dev-env.sh` in consumers that depend on cross-repo
+  artifacts should call this rather than hand-rolling a `gh release
+  download` block: `fetch-artifact lexd-lsp` is one line; the inline
+  version is ~30.
 
 Plus what Anthropic ships by default: Node 20/21/22 + npm/yarn/pnpm/bun,
 Python 3.x + pip/poetry/uv, Ruby, PHP, Java 21, Go, Rust + cargo, C/C++

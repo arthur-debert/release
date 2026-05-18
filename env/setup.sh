@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-17-round-2-fixes   # bumps on every change so re-pasting is trivial
+# version: 2026-05-18-fetch-artifact   # bumps on every change so re-pasting is trivial
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -275,6 +275,17 @@ if [ -f "$CLONE_DIR/env/CLAUDE.md" ]; then
   echo "wrote: ~/.claude/CLAUDE.md"
 else
   echo "warning: env/CLAUDE.md not found in clone — no user-level CLAUDE.md installed" >&2
+fi
+
+# Install bin/fetch-artifact onto /usr/local/bin so consumer
+# scripts/setup-dev-env.sh can call it without cloning release/. The
+# script reads ./artifacts.json (per docs/artifacts-schema.md) and
+# pulls pinned cross-repo artifacts from GH releases.
+if [ -f "$CLONE_DIR/bin/fetch-artifact" ]; then
+  install -m 0755 "$CLONE_DIR/bin/fetch-artifact" /usr/local/bin/fetch-artifact
+  echo "installed fetch-artifact: $(fetch-artifact --version)"
+else
+  echo "warning: bin/fetch-artifact not found in clone — consumers that depend on it will hand-roll the fetch" >&2
 fi
 
 # Cleanup the clone scratch dir so it doesn't end up in the snapshot.
