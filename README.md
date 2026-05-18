@@ -178,6 +178,10 @@ workflows cover ~80% of the benefit at ~5% of the cost.
 
 - ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
   (see `git tag` for the current pin).
+- 🚧 **electron-app** — slice 1 in flight (darwin-arm64 build + sign +
+  notarize + GH release; Linux opt-in, Windows opt-in). Pilot
+  consumer: `lex-fmt/lexed`. Auto-updater feed + e2e-in-CI ship in
+  follow-on slices. See #43.
 - ✅ **Cross-repo artifact fetcher** —
   [`bin/fetch-artifact`](bin/fetch-artifact) +
   [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
