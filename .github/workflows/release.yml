@@ -53,3 +53,8 @@ jobs:
       # body. Future work could add a custom format parser.
       changelog-path: ''
       advance-major: true
+    secrets:
+      # RELEASE_TOKEN unblocks the v1 force-push (the default branch
+      # is ruleset-protected; GITHUB_TOKEN can't bypass; RELEASE_TOKEN
+      # does). Without it the advance-major step's final push fails.
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
