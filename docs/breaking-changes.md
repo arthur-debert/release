@@ -9,6 +9,39 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.4.0 (2026-05-18) — additive: gh-action stack workflow
+
+**Type:** MINOR (new category workflow, no consumer breakage).
+
+### What's new
+
+`.github/workflows/gh-action.yml` — reusable release pipeline for
+composite GitHub Actions and reusable workflows housed in the same
+repo. The canonical consumer is `arthur-debert/release` itself.
+
+Jobs:
+- `prepare` — validate semver, sanity-check `action.yml` exists,
+  inline awk-based changelog roll (no need to vendor
+  `roll-changelog.sh` in caller repos), commit + tag + push.
+- `release` — GH release with notes; prerelease flag when semver
+  carries a suffix.
+- `advance-major` — force-update `v<MAJOR>` branch → new tag.
+  Skipped on prereleases so `X.Y.Z-rc.N` doesn't yank `v1`
+  forward.
+
+The dist channel for this stack IS the floating-major branch
+(`v1`, `v2`, …). GH Actions Marketplace lists from release tags
+via a one-time repo-settings checkbox; no publish API to call.
+
+Out of scope (deferred until first consumer needs it):
+- JS-action `dist/` build step + `package.json` version bump.
+  Pure-composite actions have no build, no manifest.
+
+### Migration
+
+No action required for existing consumers. New optional path for
+composite-action repos.
+
 ## v1.3.3 (2026-05-18) — fix: python-pkg switches publish from `uv publish` to `twine`
 
 **Type:** PATCH. Caught on the lex-fmt/mkdocs-lex pilot. `uv publish`
