@@ -278,10 +278,9 @@ All shipped stack workflows ship to `@v1` (floating major); see
   workflow (live in `cascade-handler.yml` + the consumer's
   thin caller).
 - 🚧 **tauri-app** — `@v1` (slice 1). Pilot `arthur-debert/arami-app`
-  pending migration (Tauri scaffold landed via lex-fmt-side work
-  in #31/#37, Layer 0 release primitives in #36; thin caller
-  + `scripts/build-tauri.sh` wiring is the remaining step). Slice 1
-  scope: cross-platform `tauri build` (mac/linux/windows),
+  pending migration (thin caller + `scripts/build-tauri.sh`
+  wiring is the remaining step). Slice 1 scope: cross-platform
+  `tauri build` (mac/linux/windows),
   macOS code-signing + notarization via Tauri's `APPLE_*` env
   vars, per-platform bundle artifacts on the GH release, version
   sync across all three Tauri version files (`package.json`,
