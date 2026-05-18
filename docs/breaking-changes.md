@@ -9,6 +9,25 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.3.3 (2026-05-18) — fix: python-pkg switches publish from `uv publish` to `twine`
+
+**Type:** PATCH. Caught on the lex-fmt/mkdocs-lex pilot. `uv publish`
+(as of uv 0.11.14) trips a `403 Forbidden — Invalid or non-existent
+authentication information` from PyPI **specifically in GitHub
+Actions runs**, with a known-good project-scoped token: local
+`uv publish` of the same CI-built dist files with the same token
+succeeded; the CI run 403'd. Could not isolate further without
+patching uv.
+
+`twine upload` is the decades-canonical PyPI upload tool — what
+the hand-rolled pre-migration workflow used. The new step invokes
+it via `uvx twine upload --skip-existing dist/*`, so no extra
+`setup-python` step is needed: uv's ephemeral tool env fetches
+twine on demand.
+
+`--skip-existing` preserves the resume-on-partial-publish behavior
+we relied on with `uv publish`'s implicit idempotence.
+
 ## v1.3.2 (2026-05-18) — fix: vscode-ext bash-3.2 empty-array under set -u
 
 **Type:** PATCH. Caught on the second-attempt vscode pilot release
