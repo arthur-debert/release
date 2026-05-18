@@ -327,9 +327,13 @@ jobs:
             mv "${tauri_conf}.tmp" "${tauri_conf}"
           fi
 
-          # Roll changelog when present + extract notes.
+          # Roll changelog when present + extract notes. The
+          # extraction uses `c{print}` (not `c&&/\S/`) so blank lines
+          # within the [Unreleased] section are preserved — matches
+          # the resume-path extraction above, so re-runs produce
+          # identical release notes.
           if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
-            awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
+            awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
               "${CHANGELOG}" > release-notes.md
             if [ "${IS_PRERELEASE}" != "true" ]; then
               today=$(date -u +%F)
@@ -345,13 +349,19 @@ jobs:
           fi
           [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
 
-          # Stage all three version files (+ Cargo.lock if it exists
-          # and changed). The lockfile picks up new version automatically
-          # when cargo runs against the bumped Cargo.toml; commit any
-          # change to keep it consistent.
+          # Stage all three version files (+ lockfiles if they exist
+          # and were touched). Cargo.lock picks up new version
+          # automatically when cargo runs against the bumped
+          # Cargo.toml; commit any change to keep it consistent.
+          # Use an explicit conditional rather than a chained
+          # `&& ... || ...` (which has surprising precedence —
+          # `cmd1 && cmd2 || cmd3` runs cmd3 whenever cmd1 OR cmd2
+          # fails, not just when cmd1 fails).
           git add "${pkg}" "${cargo}" "${tauri_conf}"
           for lock in pnpm-lock.yaml package-lock.json yarn.lock "${TAURI_DIR}/src-tauri/Cargo.lock"; do
-            [ -f "${lock}" ] && git diff --quiet -- "${lock}" || git add -- "${lock}" 2>/dev/null || true
+            if [ -f "${lock}" ] && ! git diff --quiet -- "${lock}"; then
+              git add -- "${lock}"
+            fi
           done
 
           if git diff --cached --quiet; then
@@ -439,16 +449,20 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: ${{ inputs.node-version }}
-          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' && 'npm' || (hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || (hashFiles('yarn.lock') != '' && 'yarn' || '')) }}
-
+      # pnpm/action-setup MUST run before setup-node, because
+      # setup-node@v6 with `cache: 'pnpm'` invokes `pnpm store path`
+      # at setup time to compute the cache key. Without pnpm on
+      # PATH, that call hard-fails before any later step runs.
       - name: Install pnpm (when lockfile present)
         if: hashFiles('pnpm-lock.yaml') != ''
         uses: pnpm/action-setup@v4
         with:
           run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' && 'npm' || (hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || (hashFiles('yarn.lock') != '' && 'yarn' || '')) }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -523,21 +537,26 @@ jobs:
           TAURI_DIR: ${{ inputs.tauri-dir }}
         run: |
           set -euo pipefail
-          # Convention hook: if the consumer ships
-          # scripts/build-tauri.sh, run it (the consumer is
-          # responsible for invoking `tauri build` plus whatever
-          # pre-fetch steps it needs). Else fall back to a direct
-          # `tauri build`.
-          if [ -f scripts/build-tauri.sh ]; then
+          # Both branches `cd "${TAURI_DIR}"` so the hook starts at
+          # the same CWD as the fallback — monorepo consumers don't
+          # have to guess where their hook runs. The hook receives
+          # the (now-resolved) TAURI_DIR via env if it needs to make
+          # decisions based on it.
+          cd "${TAURI_DIR}"
+          if [ -f "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" ]; then
+            # Convention hook: if the consumer ships
+            # scripts/build-tauri.sh (at repo root), run it. The
+            # consumer is responsible for invoking `tauri build`
+            # plus any pre-fetch steps (upstream WASM, codegen,
+            # etc.).
             extra=()
             if [ -n "${BUNDLES}" ]; then
               # The hook may not honor this — but most builds will
               # exec `tauri build "$@"` and pass args through.
               extra=(--bundles "${BUNDLES}")
             fi
-            bash scripts/build-tauri.sh "${extra[@]+"${extra[@]}"}"
+            bash "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" "${extra[@]+"${extra[@]}"}"
           else
-            cd "${TAURI_DIR}"
             if [ -n "${BUNDLES}" ]; then
               npx tauri build --bundles "${BUNDLES}"
             else
