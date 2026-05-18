@@ -98,7 +98,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
-| vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace + Open VSX | —      | —         | A 📋           |
+| vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
 | python-pkg     | W 📋 ruff/black | W 📋 pytest| —               | W 📋 build (wheel) | —          | W 📋              | A 📋 PyPI         | —                | —         | A 📋           |
@@ -189,7 +189,7 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   `lex-fmt/zed-lex` pending (needs `wasm32-wasip2` target — likely
   fits a future `rustup-targets` input on `rust-lib.yml` or a
   dedicated `zed-extension` micro-stack).
-- 🚧 **vscode-ext** — workflow shipped at `@v1`. Singleton consumer
+- 🚧 **vscode-ext** — workflow shipped at `@v1`. Pilot consumer
   (`lex-fmt/vscode`) pending migration. Supports per-target VSIX
   matrix (4 platform-specific VSIXes for native-binary-bundling
   extensions), VS Code Marketplace publish via `vsce`, optional

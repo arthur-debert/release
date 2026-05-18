@@ -91,11 +91,39 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------
+  # 0. Pre-flight: validate required secrets BEFORE prepare runs. Without
+  #    this, a caller that enables publish-marketplace=true but forgets
+  #    VSCE_PAT would land bump+tag+push+VSIX artifacts and only fail at
+  #    publish time — half a release on disk, none of it on the
+  #    Marketplace. Fail loudly upfront instead.
+  # -------------------------------------------------------------------
+  preflight:
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT_PRESENT: ${{ secrets.VSCE_PAT != '' && 'yes' || 'no' }}
+      OVSX_PAT_PRESENT: ${{ secrets.OVSX_PAT != '' && 'yes' || 'no' }}
+    steps:
+      - name: Validate publish secrets
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "${{ inputs.publish-marketplace }}" = "true" ] && [ "${VSCE_PAT_PRESENT}" = "no" ]; then
+            echo "::error::publish-marketplace=true but VSCE_PAT secret is missing"
+            fail=1
+          fi
+          if [ "${{ inputs.publish-openvsx }}" = "true" ] && [ "${OVSX_PAT_PRESENT}" = "no" ]; then
+            echo "::error::publish-openvsx=true but OVSX_PAT secret is missing"
+            fail=1
+          fi
+          exit "${fail}"
+
+  # -------------------------------------------------------------------
   # 1. Prepare: bump package.json, roll changelog, commit + tag + push.
   #    Also parses the vsce-targets input into a JSON matrix for the
   #    build jobs.
   # -------------------------------------------------------------------
   prepare:
+    needs: preflight
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.prep.outputs.version }}
@@ -148,18 +176,24 @@ jobs:
             echo "targets=$(jq -n '[{target:"",os:"ubuntu-latest",rust:"",platform:"any",arch:"any"}]' -c)" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          json="$(echo "${TARGETS}" | jq -R -c '
+          # Whitelist every supported vsce target — silently
+          # defaulting unknowns to linux/ubuntu-latest (the previous
+          # `else` branch) made target-list typos invisible and would
+          # pass wrong RUST_TARGET to the pre-package hook. Fail-fast
+          # with the list of valid values instead.
+          valid='["darwin-arm64","darwin-x64","linux-x64","linux-arm64","linux-armhf","alpine-x64","alpine-arm64","win32-x64","win32-arm64","web"]'
+          json="$(echo "${TARGETS}" | jq -R -c --argjson valid "${valid}" '
             split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(
               . as $t |
+              if ($valid | index($t)) | not then
+                error("unsupported vsce target: \"" + $t + "\". Valid: " + ($valid | join(", ")))
+              else . end |
               {
                 target: $t,
                 os:
                   if $t | startswith("darwin-") then "macos-latest"
                   elif $t | startswith("win32-") then "windows-latest"
-                  elif $t | startswith("linux-") then "ubuntu-latest"
-                  elif $t == "alpine-x64" then "ubuntu-latest"
-                  elif $t == "alpine-arm64" then "ubuntu-latest"
-                  else "ubuntu-latest"
+                  else "ubuntu-latest"     # linux-*, alpine-*, web
                   end,
                 rust:
                   if $t == "darwin-arm64" then "aarch64-apple-darwin"
@@ -171,12 +205,13 @@ jobs:
                   elif $t == "alpine-arm64" then "aarch64-unknown-linux-musl"
                   elif $t == "win32-x64" then "x86_64-pc-windows-msvc"
                   elif $t == "win32-arm64" then "aarch64-pc-windows-msvc"
-                  else ""
+                  else ""    # "web" has no native arch — hook should skip fetch
                   end,
                 platform:
                   if $t | startswith("darwin-") then "mac"
                   elif $t | startswith("win32-") then "windows"
-                  else "linux"
+                  elif $t == "web" then "web"
+                  else "linux"             # linux-*, alpine-*
                   end,
                 arch: ($t | split("-") | .[-1])
               }
@@ -210,15 +245,44 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # Make the canonical fetch-artifact CLI available on PATH so the
+      # pre-package hook can call it without each consumer reinventing
+      # the `gh release download` dance. Mirrors what env/setup.sh
+      # does in cloud sessions; here we install on the CI runner.
+      # Only installed when the hook is actually present (cheap noop
+      # otherwise).
+      - name: Install fetch-artifact CLI
+        if: hashFiles('scripts/pre-vsce-package.sh') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          curl -fsSL -o "${tmp}/fetch-artifact" \
+            https://raw.githubusercontent.com/arthur-debert/release/v1/bin/fetch-artifact
+          chmod +x "${tmp}/fetch-artifact"
+          # macOS/linux runners have /usr/local/bin on PATH; Windows
+          # runners get the script via $GITHUB_PATH which works on any
+          # shell.
+          install_dir="/usr/local/bin"
+          if [ ! -w "${install_dir}" ]; then
+            install_dir="${HOME}/.local/bin"
+            mkdir -p "${install_dir}"
+          fi
+          mv "${tmp}/fetch-artifact" "${install_dir}/fetch-artifact"
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          rm -rf "${tmp}"
+
       # Convention hook. Runs only when consumer ships
       # scripts/pre-vsce-package.sh. Use case: fetch native binaries
       # for the target arch before vsce package bundles them.
       #
       # Env exposed:
       #   VSCE_TARGET  e.g. darwin-arm64 (empty = universal)
-      #   PLATFORM     mac | linux | windows | any
+      #   PLATFORM     mac | linux | windows | web | any
       #   ARCH         arm64 | x64 | armhf | any
-      #   RUST_TARGET  e.g. aarch64-apple-darwin (empty if no mapping)
+      #   RUST_TARGET  e.g. aarch64-apple-darwin (empty for web/universal)
+      #   GH_TOKEN     so `fetch-artifact` (which shells out to
+      #                `gh release download`) can authenticate
       - name: Pre-package hook (consumer)
         if: hashFiles('scripts/pre-vsce-package.sh') != ''
         shell: bash
@@ -227,6 +291,7 @@ jobs:
           PLATFORM: ${{ matrix.t.platform }}
           ARCH: ${{ matrix.t.arch }}
           RUST_TARGET: ${{ matrix.t.rust }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash scripts/pre-vsce-package.sh
 
       - name: Package VSIX
@@ -235,14 +300,23 @@ jobs:
         env:
           NAME: ${{ needs.prepare.outputs.extension-name }}
           TARGET: ${{ matrix.t.target }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
+          # Pass --pre-release to vsce when the semver carries a
+          # prerelease suffix (`1.2.3-rc.1`). Without this, the
+          # Marketplace classifies it as a stable release and
+          # subscribers on prerelease channels miss it.
+          pre_flag=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            pre_flag=(--pre-release)
+          fi
           if [ -n "${TARGET}" ]; then
             out="${NAME}-${TARGET}.vsix"
-            npx --yes @vscode/vsce package --target "${TARGET}" -o "${out}"
+            npx --yes @vscode/vsce package "${pre_flag[@]}" --target "${TARGET}" -o "${out}"
           else
             out="${NAME}.vsix"
-            npx --yes @vscode/vsce package -o "${out}"
+            npx --yes @vscode/vsce package "${pre_flag[@]}" -o "${out}"
           fi
           echo "vsix=${out}" >> "${GITHUB_OUTPUT}"
 
@@ -276,10 +350,13 @@ jobs:
       - name: Publish each VSIX to VS Code Marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
+          # VSCE_PAT presence was validated in the preflight job; if
+          # we got here the secret is set, but defend in depth.
           if [ -z "${VSCE_PAT:-}" ]; then
-            echo "::error::publish-marketplace=true but VSCE_PAT secret is missing"
+            echo "::error::publish-marketplace=true but VSCE_PAT is empty at publish time"
             exit 1
           fi
           shopt -s nullglob
@@ -289,9 +366,15 @@ jobs:
             echo "::error::no VSIX artifacts found"
             exit 1
           fi
+          # Match the package-side --pre-release flag so the publish
+          # call carries the same classification.
+          pre_flag=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            pre_flag=(--pre-release)
+          fi
           for vsix in "${vsixes[@]}"; do
             echo "→ publishing ${vsix}"
-            npx --yes @vscode/vsce publish --packagePath "${vsix}"
+            npx --yes @vscode/vsce publish "${pre_flag[@]}" --packagePath "${vsix}"
           done
 
   # -------------------------------------------------------------------
@@ -315,25 +398,44 @@ jobs:
       - name: Publish each VSIX to Open VSX
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
           if [ -z "${OVSX_PAT:-}" ]; then
-            echo "::error::publish-openvsx=true but OVSX_PAT secret is missing"
+            echo "::error::publish-openvsx=true but OVSX_PAT is empty at publish time"
             exit 1
           fi
           shopt -s nullglob
           vsixes=(artifacts/*.vsix)
           shopt -u nullglob
+          # ovsx publish accepts --pre-release on recent versions
+          # (≥0.10). Older versions ignore unknown flags rather than
+          # erroring, so this is safe.
+          pre_flag=()
+          if [ "${PRERELEASE}" = "true" ]; then
+            pre_flag=(--pre-release)
+          fi
           for vsix in "${vsixes[@]}"; do
             echo "→ publishing ${vsix} to Open VSX"
-            npx --yes ovsx publish "${vsix}" -p "${OVSX_PAT}"
+            npx --yes ovsx publish "${pre_flag[@]}" "${vsix}" -p "${OVSX_PAT}"
           done
 
   # -------------------------------------------------------------------
   # 5. GitHub release with all VSIXes attached + changelog notes.
   # -------------------------------------------------------------------
   release:
-    needs: [prepare, build]
+    # Gate the GH release on the enabled publish jobs succeeding (or
+    # being intentionally skipped). Without this, a Marketplace
+    # publish failure would still expose a public GH release with
+    # tag + VSIX assets but no Marketplace package — a partial
+    # release that's worse than no release.
+    needs: [prepare, build, publish-marketplace, publish-openvsx]
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && needs.build.result == 'success'
+      && (needs.publish-marketplace.result == 'success' || needs.publish-marketplace.result == 'skipped')
+      && (needs.publish-openvsx.result == 'success' || needs.publish-openvsx.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
