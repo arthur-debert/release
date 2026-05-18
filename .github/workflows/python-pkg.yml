@@ -88,16 +88,28 @@ jobs:
     env:
       PYPI_PRESENT: ${{ secrets.PYPI_TOKEN != '' && 'yes' || 'no' }}
       TESTPYPI_PRESENT: ${{ secrets.TESTPYPI_TOKEN != '' && 'yes' || 'no' }}
+      PUBLISH_PYPI: ${{ inputs.publish-pypi }}
+      PUBLISH_TESTPYPI: ${{ inputs.publish-testpypi }}
     steps:
       - name: Validate publish secrets
         run: |
           set -euo pipefail
           fail=0
-          if [ "${{ inputs.publish-pypi }}" = "true" ] && [ "${PYPI_PRESENT}" = "no" ]; then
+          # Reject the no-publish-target case outright: a release that
+          # neither publishes to PyPI nor TestPyPI would still create
+          # a GH tag + assets via the release job, with no actual
+          # package on any index — a phantom release. PyPI is the
+          # canonical distribution channel for this stack; if both
+          # publish targets are off the caller likely has a config bug.
+          if [ "${PUBLISH_PYPI}" != "true" ] && [ "${PUBLISH_TESTPYPI}" != "true" ]; then
+            echo "::error::both publish-pypi=false and publish-testpypi=false — no publish target enabled. Set at least one to true, or don't invoke this workflow."
+            fail=1
+          fi
+          if [ "${PUBLISH_PYPI}" = "true" ] && [ "${PYPI_PRESENT}" = "no" ]; then
             echo "::error::publish-pypi=true but PYPI_TOKEN secret is missing"
             fail=1
           fi
-          if [ "${{ inputs.publish-testpypi }}" = "true" ] && [ "${TESTPYPI_PRESENT}" = "no" ]; then
+          if [ "${PUBLISH_TESTPYPI}" = "true" ] && [ "${TESTPYPI_PRESENT}" = "no" ]; then
             echo "::error::publish-testpypi=true but TESTPYPI_TOKEN secret is missing"
             fail=1
           fi
@@ -114,7 +126,7 @@ jobs:
       release-sha: ${{ steps.prep.outputs.release-sha }}
       prerelease: ${{ steps.prep.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -136,7 +148,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
@@ -147,7 +159,9 @@ jobs:
           enable-cache: true
 
       - name: Set up Python
-        run: uv python install ${{ inputs.python-version }}
+        env:
+          PYTHON_VERSION: ${{ inputs.python-version }}
+        run: uv python install "${PYTHON_VERSION}"
 
       # Convention hook. Runs only when consumer ships
       # scripts/pre-build.sh. Use cases: codegen, asset bundle prep,
@@ -165,7 +179,11 @@ jobs:
           MANIFEST: ${{ inputs.manifest-path }}
         run: |
           set -euo pipefail
-          manifest_dir="$(dirname "${MANIFEST}")"
+          # Resolve manifest_dir to an absolute path so the value is
+          # stable regardless of how the caller spelled the input
+          # (`pyproject.toml`, `./pyproject.toml`, `subdir/pyproject.toml`,
+          # or an absolute path). `cd … && pwd` normalizes all four.
+          manifest_dir="$(cd "$(dirname "${MANIFEST}")" && pwd)"
           # uv build writes to <manifest_dir>/dist/ by default; pin
           # output to <repo-root>/dist so downstream jobs have a
           # stable path regardless of monorepo layout.
@@ -262,7 +280,7 @@ jobs:
       && (needs.publish-testpypi.result == 'success' || needs.publish-testpypi.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
 

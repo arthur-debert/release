@@ -73,16 +73,30 @@ runs:
         # against a different release accidentally).
         if git rev-parse "$TAG" >/dev/null 2>&1; then
           TAG_SHA=$(git rev-list -n 1 "$TAG")
-          # awk: only the [project] table's version field — pyproject
-          # files have other `version = ` entries under [tool.*] sections
-          # that we must not pick up.
+          # Extract [project].version from the manifest at the tag. Must
+          # handle: single OR double-quoted strings (\042 = ", \047 = '),
+          # leading indentation, trailing inline comments on both the
+          # section header and the key line, and Windows CRLF endings.
+          # We restrict to the [project] table only — pyproject also has
+          # `version = ` keys under [tool.*] which we must not match.
           TAG_VERSION="$(git show "$TAG:$MANIFEST" 2>/dev/null | awk '
-            /^\[/ { in_project = ($0 == "[project]") }
-            in_project && /^version[[:space:]]*=/ {
-              gsub(/.*=[[:space:]]*"/, "")
-              gsub(/".*/, "")
-              print
-              exit
+            BEGIN { q = "[\042\047]" }
+            {
+              sub(/\r$/, "")
+              if ($0 ~ /^[[:space:]]*\[/) {
+                h = $0
+                sub(/#.*/, "", h)
+                gsub(/[[:space:]]/, "", h)
+                in_project = (h == "[project]")
+                next
+              }
+              if (in_project && $0 ~ ("^[[:space:]]*version[[:space:]]*=[[:space:]]*" q)) {
+                v = $0
+                sub("^[[:space:]]*version[[:space:]]*=[[:space:]]*" q, "", v)
+                sub(q ".*", "", v)
+                print v
+                exit
+              }
             }')"
           if [ "$TAG_VERSION" = "$NEW_VERSION" ]; then
             echo "tag $TAG already exists at $TAG_SHA ($MANIFEST [project].version=$TAG_VERSION) — resuming"
@@ -106,20 +120,40 @@ runs:
         set -euo pipefail
         # Scope strictly to the [project] table — pyproject often has
         # other `version = ` keys (e.g. [tool.poetry], [tool.uv]).
-        # Track section header transitions and rewrite only inside
-        # [project].
+        # Handles: single or double quotes, leading indentation,
+        # trailing inline comments on the section header AND on the
+        # key line, Windows CRLF endings (stripped on output → file
+        # normalizes to LF; intentional). The first match in
+        # [project] wins; duplicates (illegal TOML) leave subsequent
+        # entries untouched.
         awk -v v="$NEW_VERSION" '
-          /^\[/ {
-            in_project = ($0 == "[project]")
+          BEGIN { q = "[\042\047]" }
+          {
+            sub(/\r$/, "")
+            if ($0 ~ /^[[:space:]]*\[/) {
+              h = $0
+              sub(/#.*/, "", h)
+              gsub(/[[:space:]]/, "", h)
+              in_project = (h == "[project]")
+              print
+              next
+            }
+            if (in_project && !bumped && $0 ~ ("^[[:space:]]*version[[:space:]]*=[[:space:]]*" q)) {
+              # Preserve leading indentation + any trailing inline
+              # comment so consumers who format pyproject specifically
+              # (e.g. taplo with indent + comments) keep their style.
+              leading = $0
+              sub(/[^[:space:]].*/, "", leading)
+              trailing = ""
+              if (match($0, /[[:space:]]+#.*$/)) {
+                trailing = substr($0, RSTART, RLENGTH)
+              }
+              print leading "version = \"" v "\"" trailing
+              bumped = 1
+              next
+            }
             print
-            next
           }
-          in_project && /^version[[:space:]]*=/ {
-            print "version = \"" v "\""
-            bumped = 1
-            next
-          }
-          { print }
           END {
             if (!bumped) {
               print "::error::no [project].version field found in pyproject.toml" > "/dev/stderr"
