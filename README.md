@@ -189,20 +189,21 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   `lex-fmt/zed-lex` pending (needs `wasm32-wasip2` target — likely
   fits a future `rustup-targets` input on `rust-lib.yml` or a
   dedicated `zed-extension` micro-stack).
-- 🚧 **vscode-ext** — workflow shipped at `@v1`. Pilot consumer
-  (`lex-fmt/vscode`) pending migration. Supports per-target VSIX
-  matrix (4 platform-specific VSIXes for native-binary-bundling
-  extensions), VS Code Marketplace publish via `vsce`, optional
-  Open VSX publish via `ovsx`. Native-binary fetch happens via the
-  `scripts/pre-vsce-package.sh` convention hook + the canonical
-  `fetch-artifact` CLI.
-- 🚧 **python-pkg** — workflow shipped at `@v1`. Pilot consumer
-  (`lex-fmt/mkdocs-lex`) pending migration. `uv build` → sdist +
-  wheel, `uv publish` → PyPI (required) and TestPyPI (opt-in per
-  release). Version bump is awk-based against pyproject.toml
-  `[project].version` so the composite action has zero toolchain
-  deps. Optional `scripts/pre-build.sh` convention hook for
-  codegen / asset bundling before the wheel is sealed.
+- ✅ **vscode-ext** — workflow shipped at `@v1.3.2`. Pilot consumer
+  `lex-fmt/vscode` migrated + verified end-to-end (0.10.2 →
+  Marketplace + GH release, 4 platform VSIXes). Open VSX publish
+  off pending `OVSX_PAT` provisioning — flip
+  `publish-openvsx: true` in the caller when ready. Supports
+  per-target VSIX matrix, `scripts/pre-vsce-package.sh` convention
+  hook for native-binary fetching, `--pre-release` threading for
+  `X.Y.Z-rc.N` semvers.
+- ✅ **python-pkg** — workflow shipped at `@v1.3.3`. Pilot consumer
+  `lex-fmt/mkdocs-lex` migrated + verified end-to-end
+  (`mkdocs-lex-plugin` 0.2.1 → PyPI + GH release). `uv build` →
+  sdist + wheel; `uvx twine upload --skip-existing` → PyPI
+  (required) + TestPyPI (opt-in). Awk-based bump scoped strictly to
+  pyproject.toml `[project].version` (zero toolchain deps).
+  Optional `scripts/pre-build.sh` convention hook.
 - 🚧 **tauri-app** — new stack row. Pilot consumer:
   `arthur-debert/arami-app`. Will share ~70% of the electron-app
   shape (prepare-release-npm, smoke convention, GH release) with
