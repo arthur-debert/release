@@ -13,8 +13,8 @@ name: Python pkg release
 #                 isolated build env; no virtualenv dance needed.
 #                 If consumer ships scripts/pre-build.sh (e.g.
 #                 codegen, asset bundle), it runs first.
-# 3. publish-pypi (default: true)         — uv publish → PyPI.
-# 4. publish-testpypi (default: false)    — uv publish → TestPyPI.
+# 3. publish-pypi (default: true)         — `uvx twine upload` → PyPI.
+# 4. publish-testpypi (default: false)    — `uvx twine upload` → TestPyPI.
 #                 Useful for prereleases that you want to install
 #                 separately before promoting.
 # 5. release    — GH release with notes. Gated on publish jobs to
@@ -229,18 +229,25 @@ jobs:
 
       - name: Publish to PyPI
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -z "${UV_PUBLISH_TOKEN:-}" ]; then
+          if [ -z "${TWINE_PASSWORD:-}" ]; then
             echo "::error::publish-pypi=true but PYPI_TOKEN is empty at publish time"
             exit 1
           fi
-          # uv publish is idempotent against already-uploaded files —
-          # it returns success and a 'skipped: already exists' note for
-          # each file PyPI already has, so re-runs of a partially
-          # published release just no-op the existing files.
-          uv publish dist/*
+          # `uvx twine` invokes twine through uv's ephemeral tool env —
+          # no separate setup-python + pip install step needed. We use
+          # twine instead of `uv publish` because the latter (as of
+          # uv 0.11.14) trips a 403 from PyPI in GitHub Actions
+          # specifically: local `uv publish` with the same project-
+          # scoped token + same dist files succeeds, but the CI run
+          # 403s. twine has decades of provenance on this exact upload
+          # API and is what the prior hand-rolled workflow used.
+          # `--skip-existing` makes re-runs of a partially-published
+          # release idempotent.
+          uvx twine upload --skip-existing dist/*
 
   # -------------------------------------------------------------------
   # 4. Publish to TestPyPI. Opt-in. Most releases skip this — the
@@ -265,14 +272,18 @@ jobs:
 
       - name: Publish to TestPyPI
         env:
-          UV_PUBLISH_TOKEN: ${{ secrets.TESTPYPI_TOKEN }}
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.TESTPYPI_TOKEN }}
+          TWINE_REPOSITORY_URL: https://test.pypi.org/legacy/
         run: |
           set -euo pipefail
-          if [ -z "${UV_PUBLISH_TOKEN:-}" ]; then
+          if [ -z "${TWINE_PASSWORD:-}" ]; then
             echo "::error::publish-testpypi=true but TESTPYPI_TOKEN is empty at publish time"
             exit 1
           fi
-          uv publish --publish-url https://test.pypi.org/legacy/ dist/*
+          # See note on the PyPI publish step above for why we use
+          # `uvx twine` rather than `uv publish`.
+          uvx twine upload --skip-existing dist/*
 
   # -------------------------------------------------------------------
   # 5. GitHub release. Gated on publish jobs (success or intentionally
