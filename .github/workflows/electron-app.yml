@@ -62,6 +62,20 @@ on:
         type: string
         required: false
         default: ''
+      output-dir:
+        description: 'electron-builder `directories.output` (the dir produced artifacts land in). Default matches electron-builder''s default; lexed sets `release`.'
+        type: string
+        required: false
+        default: 'dist'
+      notarize:
+        description: |
+          Force enable/disable macOS notarization, overriding `build.mac.notarize`
+          in package.json via `-c.mac.notarize=<value>`. Default empty = respect
+          package.json. Set `true` to force notarization (requires
+          ASC_API_KEY_* secrets); `false` to force-skip.
+        type: string
+        required: false
+        default: ''
 
     secrets:
       RELEASE_TOKEN:
@@ -86,11 +100,15 @@ on:
 permissions:
   contents: write
 
-env:
-  # electron-builder writes per-target artifacts under `dist/`. Each
-  # build job uploads its artifacts; the release job downloads and
-  # uploads them to the GH release.
-  ELECTRON_BUILDER_OUT: dist
+# Note on customizing the build for sign-invalidating work (e.g. signing
+# helper bundles like .appex extensions that electron-builder doesn't
+# recurse into): do NOT do this in a post-build step in this workflow —
+# electron-builder signs AND notarizes inside the build step, and any
+# subsequent file modification invalidates the notarization, shipping a
+# broken artifact. Instead, use electron-builder's own `afterPack`
+# lifecycle hook (a JS function declared in package.json
+# `build.afterPack`), which runs BETWEEN pack and sign. That's the
+# canonical entry point for re-signing nested bundles.
 
 jobs:
   # -------------------------------------------------------------------
@@ -226,17 +244,71 @@ jobs:
             echo "::warning::No App Store Connect API key configured — electron-builder will skip notarization."
           fi
 
-      - name: Build (electron-builder, mac --${{ matrix.arch }})
+      - name: Validate notarize input
+        shell: bash
+        env:
+          NOTARIZE_OVERRIDE: ${{ inputs.notarize }}
+          ASC_KEY_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
         run: |
-          npm run build -- --mac --${{ matrix.arch }} --publish never
+          # Whitelist: true | false | empty. Anything else is a
+          # caller-side typo that electron-builder would silently
+          # accept or fail on confusingly — fail early instead.
+          case "${NOTARIZE_OVERRIDE}" in
+            ''|true|false) ;;
+            *)
+              echo "::error::inputs.notarize must be 'true', 'false', or empty (got: '${NOTARIZE_OVERRIDE}')"
+              exit 1
+              ;;
+          esac
+          # Fail fast when notarize is forced on without ASC secrets —
+          # otherwise the build runs, "notarization" silently no-ops,
+          # and the released DMG hits a bad-UX Gatekeeper prompt on
+          # user machines.
+          if [ "${NOTARIZE_OVERRIDE}" = "true" ] && [ "${ASC_KEY_PRESENT}" = "no" ]; then
+            echo "::error::inputs.notarize=true but ASC_API_KEY_BASE64 secret is missing. Either configure the ASC_API_KEY_* secrets on this repo or set notarize='' (respect package.json) / 'false'."
+            exit 1
+          fi
+
+      - name: Build (electron-builder, mac --${{ matrix.arch }})
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          NOTARIZE_OVERRIDE: ${{ inputs.notarize }}
+        run: |
+          args=(--mac "--${ARCH}" --publish never)
+          if [ -n "${NOTARIZE_OVERRIDE}" ]; then
+            args+=("-c.mac.notarize=${NOTARIZE_OVERRIDE}")
+          fi
+          npm run build -- "${args[@]}"
+
+      # Smoke test (convention): scripts/smoke.sh. Catches catastrophic
+      # build issues (wrong binary path, dylib missing, Windows path
+      # quirks, etc.) that no other test can — the only way to know
+      # the packaged build doesn't crash on launch is to launch it.
+      # PLATFORM/ARCH/PACKAGE_DIR env vars are exposed; consumer's
+      # script handles xvfb-run on linux, binary-path resolution per
+      # arch, etc.
+      #
+      # Smoke runs AFTER signing+notarization. Any modification to the
+      # artifact in this step would invalidate notarization — keep it
+      # read-only (launch the binary, check exit / output; don't
+      # rewrite files).
+      - name: Smoke test (mac)
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: mac
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/smoke.sh
 
       - name: Upload mac artifacts
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-mac-${{ matrix.arch }}
           path: |
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.dmg
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.dmg.blockmap
+            ${{ inputs.output-dir }}/*.dmg
+            ${{ inputs.output-dir }}/*.dmg.blockmap
           if-no-files-found: error
           retention-days: 7
 
@@ -268,6 +340,15 @@ jobs:
         run: |
           npm run build -- --linux --${{ matrix.arch }} --publish never
 
+      - name: Smoke test (linux)
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: linux
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/smoke.sh
+
       # AppImage is the canonical linux artifact for electron-app and
       # required for the release to be useful; .deb is optional (only
       # produced if the consumer's electron-builder config has the
@@ -279,7 +360,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-linux-${{ matrix.arch }}-appimage
-          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.AppImage
+          path: ${{ inputs.output-dir }}/*.AppImage
           if-no-files-found: error
           retention-days: 7
 
@@ -287,7 +368,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-linux-${{ matrix.arch }}-deb
-          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.deb
+          path: ${{ inputs.output-dir }}/*.deb
           if-no-files-found: ignore
           retention-days: 7
 
@@ -323,13 +404,22 @@ jobs:
           npm run build -- --win --${{ matrix.arch }} --publish never
         shell: bash
 
+      - name: Smoke test (windows)
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: windows
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/smoke.sh
+
       - name: Upload windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-win-${{ matrix.arch }}
           path: |
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.exe
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.exe.blockmap
+            ${{ inputs.output-dir }}/*.exe
+            ${{ inputs.output-dir }}/*.exe.blockmap
           if-no-files-found: error
           retention-days: 7
 
