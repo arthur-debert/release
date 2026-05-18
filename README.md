@@ -15,15 +15,15 @@ The scope includes:
 - The ability to run or update all these policies and settings idempotently (safe to re-run).
 - Common workflows / actions for CI test and checks, release, and distribution.
 
-## Properties 
+## Properties
 
   Two properties make the above work in practice:
 
-  - **Fix-once-propagate.** Consumers pin `@v1` (floating major), so a fix
+- **Fix-once-propagate.** Consumers pin `@v1` (floating major), so a fix
     here propagates to all of them on their next CI run. No per-repo edit.
     This is what makes the shared infrastructure pay for itself versus
     copy-pasted workflows.
-  - **Code + configuration, not just code.** Standardization covers two
+- **Code + configuration, not just code.** Standardization covers two
     surfaces: runtime code that executes in CI (workflows, actions,
     scripts), and configuration documents that live in each consumer
     (CODEOWNERS, dependabot.yml, branch-protection ruleset, agent
