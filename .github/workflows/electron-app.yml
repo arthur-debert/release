@@ -62,6 +62,20 @@ on:
         type: string
         required: false
         default: ''
+      output-dir:
+        description: 'electron-builder `directories.output` (the dir produced artifacts land in). Default matches electron-builder''s default; lexed sets `release`.'
+        type: string
+        required: false
+        default: 'dist'
+      notarize:
+        description: |
+          Force enable/disable macOS notarization, overriding `build.mac.notarize`
+          in package.json via `-c.mac.notarize=<value>`. Default empty = respect
+          package.json. Set `true` to force notarization (requires
+          ASC_API_KEY_* secrets); `false` to force-skip.
+        type: string
+        required: false
+        default: ''
 
     secrets:
       RELEASE_TOKEN:
@@ -87,10 +101,13 @@ permissions:
   contents: write
 
 env:
-  # electron-builder writes per-target artifacts under `dist/`. Each
-  # build job uploads its artifacts; the release job downloads and
-  # uploads them to the GH release.
-  ELECTRON_BUILDER_OUT: dist
+  # Output dir is parameterized via the `output-dir` input — defaults to
+  # electron-builder's own default (`dist`). lexed overrides to `release`
+  # via its `directories.output` config. See `inputs.output-dir`.
+  # (Job steps reference `${{ inputs.output-dir }}` directly; the env
+  # var here is kept only for back-compat if a future job needs a
+  # default fall-through.)
+  ELECTRON_BUILDER_OUT: ${{ inputs.output-dir || 'dist' }}
 
 jobs:
   # -------------------------------------------------------------------
@@ -227,16 +244,55 @@ jobs:
           fi
 
       - name: Build (electron-builder, mac --${{ matrix.arch }})
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          NOTARIZE_OVERRIDE: ${{ inputs.notarize }}
         run: |
-          npm run build -- --mac --${{ matrix.arch }} --publish never
+          args=(--mac "--${ARCH}" --publish never)
+          if [ -n "${NOTARIZE_OVERRIDE}" ]; then
+            args+=("-c.mac.notarize=${NOTARIZE_OVERRIDE}")
+          fi
+          npm run build -- "${args[@]}"
+
+      # Post-build hook (convention): scripts/post-build.sh. Use this
+      # for consumer-specific work electron-builder doesn't handle — the
+      # canonical example is re-signing helper bundles like a Quick Look
+      # appex that electron-builder doesn't recurse into. The script
+      # receives PLATFORM (mac|linux|windows), ARCH, and PACKAGE_DIR via
+      # env; consumer branches on PLATFORM as needed. Skipped silently
+      # when the file doesn't exist.
+      - name: Post-build hook (mac)
+        if: hashFiles('scripts/post-build.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: mac
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/post-build.sh
+
+      # Smoke test (convention): scripts/smoke.sh. Catches catastrophic
+      # build issues (wrong binary path, dylib missing, etc.) that no
+      # other test can — the only way to know the packaged build doesn't
+      # crash on launch is to launch it. PLATFORM/ARCH/PACKAGE_DIR env
+      # vars are exposed; consumer's script handles xvfb-run on linux,
+      # binary-path resolution per arch, etc.
+      - name: Smoke test (mac)
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: mac
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/smoke.sh
 
       - name: Upload mac artifacts
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-mac-${{ matrix.arch }}
           path: |
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.dmg
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.dmg.blockmap
+            ${{ inputs.output-dir }}/*.dmg
+            ${{ inputs.output-dir }}/*.dmg.blockmap
           if-no-files-found: error
           retention-days: 7
 
@@ -268,6 +324,24 @@ jobs:
         run: |
           npm run build -- --linux --${{ matrix.arch }} --publish never
 
+      - name: Post-build hook (linux)
+        if: hashFiles('scripts/post-build.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: linux
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/post-build.sh
+
+      - name: Smoke test (linux)
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: linux
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/smoke.sh
+
       # AppImage is the canonical linux artifact for electron-app and
       # required for the release to be useful; .deb is optional (only
       # produced if the consumer's electron-builder config has the
@@ -279,7 +353,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-linux-${{ matrix.arch }}-appimage
-          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.AppImage
+          path: ${{ inputs.output-dir }}/*.AppImage
           if-no-files-found: error
           retention-days: 7
 
@@ -287,7 +361,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-linux-${{ matrix.arch }}-deb
-          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.deb
+          path: ${{ inputs.output-dir }}/*.deb
           if-no-files-found: ignore
           retention-days: 7
 
@@ -323,13 +397,31 @@ jobs:
           npm run build -- --win --${{ matrix.arch }} --publish never
         shell: bash
 
+      - name: Post-build hook (windows)
+        if: hashFiles('scripts/post-build.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: windows
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/post-build.sh
+
+      - name: Smoke test (windows)
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: windows
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_DIR: ${{ inputs.output-dir }}
+        run: bash scripts/smoke.sh
+
       - name: Upload windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-win-${{ matrix.arch }}
           path: |
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.exe
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.exe.blockmap
+            ${{ inputs.output-dir }}/*.exe
+            ${{ inputs.output-dir }}/*.exe.blockmap
           if-no-files-found: error
           retention-days: 7
 
