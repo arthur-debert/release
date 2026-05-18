@@ -52,9 +52,16 @@ Usage:
     --vscode <path> --nvim <path> --lexed <path> \
     [--dry-run] [--only <name>[,<name>...]]
 
+  release-lex --status \
+    --comms <path> --lex <path> --tree-sitter <path> \
+    --vscode <path> --nvim <path> --lexed <path>
+
 <bump-kind>:  patch | minor | major | <X.Y.Z>
 --dry-run:    print everything but make no real state changes
 --only:       restrict to a subset of repos (still dependency-ordered)
+--status:     read-only — run should-release in each repo and print
+              a one-line answer per repo. Useful answer to "what
+              would cascade if I cut comms now?"
 EOF
 }
 
@@ -103,7 +110,17 @@ if [ $# -lt 1 ]; then
   exit 64
 fi
 
-BUMP_KIND="$1"; shift
+# Detect --status mode first — it's the only flag where BUMP_KIND is
+# optional. Otherwise BUMP_KIND is the first positional arg.
+STATUS_MODE=0
+if [ "$1" = "--status" ]; then
+  STATUS_MODE=1
+  BUMP_KIND="status"
+  shift
+else
+  BUMP_KIND="$1"; shift
+fi
+
 DRY_RUN=0
 ONLY=""
 declare -A REPOS
@@ -117,15 +134,18 @@ while [ $# -gt 0 ]; do
     --lexed)       REPOS[lexed]="$2"; shift 2 ;;
     --dry-run)     DRY_RUN=1; shift ;;
     --only)        ONLY="$2"; shift 2 ;;
+    --status)      STATUS_MODE=1; shift ;;
     *)             echo "release-lex: unknown arg: $1" >&2; exit 64 ;;
   esac
 done
 
-case "$BUMP_KIND" in
-  patch|minor|major) ;;
-  *.*.*) ;;
-  *) echo "release-lex: bad bump-kind: $BUMP_KIND (want patch|minor|major|X.Y.Z)" >&2; exit 64 ;;
-esac
+if [ "$STATUS_MODE" = 0 ]; then
+  case "$BUMP_KIND" in
+    patch|minor|major) ;;
+    *.*.*) ;;
+    *) echo "release-lex: bad bump-kind: $BUMP_KIND (want patch|minor|major|X.Y.Z)" >&2; exit 64 ;;
+  esac
+fi
 
 if [ ${#REPOS[@]} -eq 0 ]; then
   echo "release-lex: no repo paths supplied" >&2
@@ -286,6 +306,51 @@ release_one() {
   gh run watch "$run_id" --repo "$gh_repo" --exit-status
   echo "  ✓ release CI complete for $key v$new"
 }
+
+# ─── Status mode ─────────────────────────────────────────────────────
+
+# Read-only: for each repo, fetch its remote state, run
+# `should-release`, print one line per repo. Useful answer to "what
+# would cascade if I cut comms now?".
+status_one() {
+  local key="$1"
+  local path="${REPOS[$key]}"
+  local label
+  label=$(printf '%-18s' "$key")
+
+  (
+    cd "$path"
+    git fetch --quiet origin 2>/dev/null || true
+    if ! git -C . diff --quiet HEAD 2>/dev/null; then
+      :  # dirty tree — still useful, just note it
+    fi
+    local current
+    current=$(./scripts/release/get-current-version 2>/dev/null || echo "?")
+    set +e
+    local decision
+    decision=$(./scripts/release/should-release 2>&1)
+    local rc=$?
+    set -e
+    case "$rc" in
+      0) printf "%s v%-8s ⚠ %s\n" "$label" "$current" "$decision" ;;
+      1) printf "%s v%-8s ✓ %s\n" "$label" "$current" "$decision" ;;
+      *) printf "%s v%-8s ✗ should-release exited %s: %s\n" "$label" "$current" "$rc" "$decision" ;;
+    esac
+  )
+}
+
+if [ "$STATUS_MODE" = 1 ]; then
+  echo "Cascade status (read-only — runs should-release in each repo):"
+  echo
+  for key in "${ORDER[@]}"; do
+    if [ -n "${REPOS[$key]:-}" ]; then
+      status_one "$key"
+    fi
+  done
+  echo
+  echo "Legend: ✓ no release needed  ⚠ release would happen  ✗ error"
+  exit 0
+fi
 
 # ─── Walk ────────────────────────────────────────────────────────────
 
