@@ -16,7 +16,9 @@ via passing an empty value to an existing input).
 
 `gh-action.yml`'s `action-manifest` input still defaults to
 `action.yml` and still fails the prepare job if missing. New
-behavior: passing an empty string skips the sanity check entirely.
+behavior: passing an empty string skips **only the
+action-manifest existence check** (the semver-format validation
+and other prepare-job checks are unaffected).
 For multi-action repos that ship a bundle of composite actions
 (`.github/actions/<name>/action.yml`) and/or reusable workflows
 (`.github/workflows/<name>.yml`) but have no single `action.yml`
