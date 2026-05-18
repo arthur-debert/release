@@ -64,10 +64,18 @@ jobs:
   cascade:
     runs-on: ubuntu-latest
     steps:
+      # Shell-injection guard: never interpolate `client_payload.*`
+      # directly into a `run:` body — a compromised upstream could
+      # smuggle command substitutions. Always route through env.
+      # Gotcha #2 in docs/lex-release-cascade.md.
       - name: Announce trigger
+        env:
+          SOURCE: ${{ github.event.client_payload.source }}
+          UP_VER: ${{ github.event.client_payload.version }}
+          RUN_URL: ${{ github.event.client_payload.run_url }}
         run: |
-          echo "Triggered by upstream release: ${{ github.event.client_payload.source }}@${{ github.event.client_payload.version }}"
-          echo "Source run: ${{ github.event.client_payload.run_url }}"
+          echo "Triggered by upstream release: ${SOURCE}@${UP_VER}"
+          echo "Source run: ${RUN_URL}"
 
       - name: Checkout main
         uses: actions/checkout@v6
@@ -120,7 +128,24 @@ jobs:
           BUMP: ${{ inputs.bump-kind }}
         run: |
           set -e
-          current="$(./scripts/release/get-current-version)"
+          # Take max(manifest, latest GH release tag) before bumping —
+          # if past releases were cut without bumping the manifest, the
+          # naive (manifest + 1) may collide with an existing tag.
+          # Gotcha #7 in docs/lex-release-cascade.md (tree-sitter-lex
+          # hit this — package.json said 0.8.0 while the highest tag
+          # was v0.10.1; patch bumped to a long-since-released
+          # v0.8.1).
+          manifest_ver="$(./scripts/release/get-current-version)"
+          latest_tag="$(gh release list --limit 1 --json tagName \
+                          --jq '.[0].tagName // empty' \
+                        | sed 's/^v//')"
+          if [ -n "${latest_tag}" ]; then
+            # sort -V gives version-aware ordering for bare semver.
+            current="$(printf '%s\n%s\n' "${manifest_ver}" "${latest_tag}" \
+                       | sort -V | tail -1)"
+          else
+            current="${manifest_ver}"
+          fi
           IFS='.' read -r major minor patch <<< "$current"
           case "${BUMP}" in
             patch) new="$major.$minor.$((patch + 1))" ;;
@@ -128,9 +153,50 @@ jobs:
             major) new="$((major + 1)).0.0" ;;
             *) echo "::error::unknown bump-kind: ${BUMP}"; exit 1 ;;
           esac
-          echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "new=$new"          >> "$GITHUB_OUTPUT"
-          echo "Version: $current → $new (${BUMP})"
+          echo "manifest=${manifest_ver}" >> "$GITHUB_OUTPUT"
+          echo "current=${current}"       >> "$GITHUB_OUTPUT"
+          echo "new=${new}"               >> "$GITHUB_OUTPUT"
+          echo "Manifest=${manifest_ver}; latest tag=${latest_tag:-(none)}; using current=${current}; new=${new} (${BUMP})"
+
+      # Clean up any stale release branch / PR from a previous handler
+      # run that failed before admin-merge. Without this, a re-fired
+      # dispatch would die at `git push -u origin "$branch"` with a
+      # non-fast-forward error and the release would get stuck —
+      # contradicting the "failed pre-tag handlers can be re-fired
+      # cleanly" recovery contract in docs/lex-release-cascade.md.
+      - name: Clean up stale release branch
+        if: steps.decide.outputs.release == 'yes'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          NEW: ${{ steps.ver.outputs.new }}
+        run: |
+          set -e
+          branch="release/v$NEW"
+          stale_pr="$(gh pr list --head "$branch" --state open \
+                       --json number --jq '.[0].number // empty')"
+          if [ -n "$stale_pr" ]; then
+            echo "Closing stale PR #${stale_pr} for ${branch}"
+            gh pr close "$stale_pr" --delete-branch || true
+          elif git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Deleting stale remote branch ${branch} (no open PR)"
+            git push origin --delete "$branch" || true
+          fi
+
+      # Seed UNRELEASED.md before update-release runs — some repos'
+      # update-release hard-fails on an empty UNRELEASED.md (nvim is
+      # the canonical case), and cascade runs have no human-authored
+      # notes. Gotcha #10 in docs/lex-release-cascade.md.
+      - name: Seed UNRELEASED.md if empty
+        if: steps.decide.outputs.release == 'yes'
+        env:
+          SOURCE: ${{ github.event.client_payload.source }}
+          UP_VER: ${{ github.event.client_payload.version }}
+        run: |
+          set -e
+          if [ -f UNRELEASED.md ] && [ ! -s UNRELEASED.md ]; then
+            echo "- Triggered by upstream release of ${SOURCE}@${UP_VER}." > UNRELEASED.md
+            echo "Seeded empty UNRELEASED.md with cascade note."
+          fi
 
       - name: Branch + bump + commit
         if: steps.decide.outputs.release == 'yes'
@@ -187,4 +253,7 @@ jobs:
             git submodule update --init --recursive
           fi
           ./scripts/release/trigger-release "$NEW"
-          echo "Triggered release for v$NEW; tag-push will fan into release.yml."
+          # The primitive's mechanism varies (tag-push for most repos,
+          # workflow_dispatch for lex); log generically so the message
+          # isn't wrong for the lex-style case.
+          echo "Triggered release for v$NEW; release.yml will fire per this repo's configured trigger."

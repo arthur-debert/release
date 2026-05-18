@@ -221,10 +221,24 @@ Three pieces. None is hard individually; the order matters.
          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
    ```
 
-   The reusable workflow folds in every gotcha below (GH_TOKEN on every
-   primitive step, admin-merge, post-merge `git reset --hard`,
-   submodule restore, the works). New repos onboard without re-deriving
-   the gotcha list. See [`.github/workflows/cascade-handler.yml`](../.github/workflows/cascade-handler.yml).
+   The reusable workflow folds in every gotcha listed earlier
+   (GH_TOKEN on every primitive step, admin-merge, post-merge
+   `git reset --hard`, submodule restore, manifest-vs-tag drift guard,
+   stale-release-branch cleanup, UNRELEASED.md seed, shell-injection
+   guard on dispatch payload reads). New repos onboard without
+   re-deriving the gotcha list.
+
+   Optional inputs:
+
+   - `bump-kind` — `patch` (default) | `minor` | `major`.
+   - `git-author-name` — defaults to `release-bot`.
+   - `git-author-email` — defaults to `release-bot@users.noreply.github.com`.
+
+   Run lookups happen under the **caller's** filename
+   (`on-upstream-released.yml` by convention) — not under the reusable
+   workflow's filename. `gh run list --repo <repo>
+   --workflow=on-upstream-released.yml` is the canonical way to see
+   handler activity. See [`.github/workflows/cascade-handler.yml`](../.github/workflows/cascade-handler.yml).
 
    The older copy-per-repo `on-upstream-released.yml` shape (~120 lines)
    still works during the Wave-3 migration sweep but is being phased
