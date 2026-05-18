@@ -115,10 +115,50 @@ jobs:
           fi
 
   # -------------------------------------------------------------------
+  # 0.5. Corpus tests as a pre-tag gate. Runs BEFORE prepare so a
+  #      test failure doesn't leave a dangling pushed tag (prepare-
+  #      release-npm tags+pushes atomically; once that happens the
+  #      tag is on origin even if downstream jobs fail).
+  # -------------------------------------------------------------------
+  corpus-test:
+    needs: preflight
+    if: inputs.run-corpus-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      - name: Install deps
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Generate parser
+        run: npx tree-sitter generate
+
+      - name: Run corpus tests
+        run: npx tree-sitter test
+
+  # -------------------------------------------------------------------
   # 1. Prepare: bump package.json, roll changelog, tag + push.
+  #    Gated on corpus-test (success-or-skipped — skipped means
+  #    run-corpus-tests was false, an explicit caller opt-out).
   # -------------------------------------------------------------------
   prepare:
-    needs: preflight
+    needs: [preflight, corpus-test]
+    if: |
+      always()
+      && needs.preflight.result == 'success'
+      && (needs.corpus-test.result == 'success' || needs.corpus-test.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.prep.outputs.version }}
@@ -151,10 +191,18 @@ jobs:
             exit 0
           fi
           # Derive from package.json — convention: package name is
-          # `tree-sitter-<lang>`, parser name is `<lang>`.
+          # `tree-sitter-<lang>`, parser name is `<lang>`. Refuse to
+          # derive from a non-conforming name (e.g. `my-grammar`)
+          # because `tree-sitter build --wasm` produces
+          # `tree-sitter-<parser>.wasm` and a wrong parser name
+          # makes the bundle look empty.
           pkg_name="$(jq -r '.name // empty' package.json)"
           if [ -z "${pkg_name}" ]; then
             echo "::error::parser-name input is empty and package.json .name is missing"
+            exit 1
+          fi
+          if [[ "${pkg_name}" != tree-sitter-* ]]; then
+            echo "::error::cannot derive parser-name from package.json name '${pkg_name}' — it doesn't start with 'tree-sitter-'. Pass parser-name explicitly via the workflow input."
             exit 1
           fi
           parser="${pkg_name#tree-sitter-}"
@@ -189,9 +237,11 @@ jobs:
       - name: Generate parser
         run: npx tree-sitter generate
 
-      - name: Run corpus tests
-        if: inputs.run-corpus-tests
-        run: npx tree-sitter test
+      # Note: corpus tests run in the dedicated corpus-test job
+      # BEFORE prepare to avoid a dangling-tag-on-test-failure
+      # outcome. By the time build executes, tests are green
+      # (or run-corpus-tests was explicitly opted out at the
+      # caller).
 
       - name: Build WASM
         run: npx tree-sitter build --wasm
@@ -222,18 +272,33 @@ jobs:
             [ -f "${h}" ] && cp "${h}" "${dist}/src/tree_sitter/"
           done
 
-          # Highlight + indent + locals + injections queries
+          # Highlight + indent + locals + injections queries.
+          # Queries are part of the bundle contract — if queries/
+          # exists but contains no .scm files, something's wrong;
+          # fail loudly. (queries/ entirely absent is OK — some
+          # parsers ship without them.)
           if [ -d queries ]; then
-            cp queries/*.scm "${dist}/queries/" 2>/dev/null || true
+            shopt -s nullglob
+            scms=(queries/*.scm)
+            shopt -u nullglob
+            if [ "${#scms[@]}" -eq 0 ]; then
+              echo "::error::queries/ exists but contains no .scm files — bundle contract requires queries/*.scm when the directory is present"
+              exit 1
+            fi
+            cp "${scms[@]}" "${dist}/queries/"
           fi
 
-          # WASM artifact at the bundle root
+          # WASM artifact at the bundle root. Hard error if missing
+          # — downstream consumers (editors) extract this file by
+          # name from the bundle; silently shipping a tarball
+          # without it would break them at install time, not at
+          # release time, which is the worst possible failure mode.
           wasm="tree-sitter-${PARSER}.wasm"
-          if [ -f "${wasm}" ]; then
-            cp "${wasm}" "${dist}/"
-          else
-            echo "::warning::expected ${wasm} not produced by tree-sitter build --wasm"
+          if [ ! -f "${wasm}" ]; then
+            echo "::error::expected ${wasm} not produced by tree-sitter build --wasm"
+            exit 1
           fi
+          cp "${wasm}" "${dist}/"
 
       # Optional consumer extras. Hook runs at repo root; bundle is
       # at ${GITHUB_WORKSPACE}/dist. Use to add files the standard
@@ -250,8 +315,18 @@ jobs:
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}/dist"
-          tar -czf "${GITHUB_WORKSPACE}/tree-sitter.tar.gz" .
+          # tar from inside dist/ with the glob `* .[^.]*` (visible +
+          # hidden files at top level, excluding `.` and `..`) so
+          # entries have no `./` or `dist/` prefix. Downstream
+          # extractors that match exact paths (`tree-sitter-<parser>.wasm`,
+          # `queries/<name>.scm`) get the literal path with no surprises.
+          shopt -s nullglob dotglob
+          entries=(*)
+          shopt -u nullglob dotglob
+          tar -czf "${GITHUB_WORKSPACE}/tree-sitter.tar.gz" "${entries[@]}"
           ls -la "${GITHUB_WORKSPACE}/tree-sitter.tar.gz"
+          echo "Bundle contents:"
+          tar -tzf "${GITHUB_WORKSPACE}/tree-sitter.tar.gz"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -287,17 +362,28 @@ jobs:
             echo "::error::publish-npm=true but NPM_TOKEN is empty at publish time"
             exit 1
           fi
-          # --provenance opt-in: requires id-token: write permission
-          # which we don't grant; plain publish. Idempotent against
-          # already-published versions: npm errors 403; we suppress
-          # for already-exists.
-          if ! npm publish --access public 2>&1 | tee npm-publish.log; then
-            if grep -q "You cannot publish over the previously published versions" npm-publish.log; then
-              echo "version already published — treating as success"
-              exit 0
-            fi
-            exit 1
+
+          pkg_name="$(jq -r '.name' package.json)"
+          pkg_version="$(jq -r '.version' package.json)"
+
+          # Idempotency pre-check: ask the registry if this exact
+          # version is already published. If so, skip — avoids the
+          # fragile "grep the human-readable error string" pattern
+          # (npm error wording has shifted across versions).
+          # `npm view ... version` exits non-zero if not found; we
+          # accept that and proceed to publish.
+          existing="$(npm view "${pkg_name}@${pkg_version}" version 2>/dev/null || true)"
+          if [ "${existing}" = "${pkg_version}" ]; then
+            echo "${pkg_name}@${pkg_version} already published — skipping"
+            exit 0
           fi
+
+          # No --access flag: let package.json's publishConfig.access
+          # (if any) drive. Scoped packages without publishConfig
+          # default to restricted, which is the npm default — if a
+          # consumer wants public, they should set
+          # `"publishConfig": {"access": "public"}` in package.json.
+          npm publish
 
   # -------------------------------------------------------------------
   # 4. GH release. Gated on build + (if enabled) publish-npm. Same

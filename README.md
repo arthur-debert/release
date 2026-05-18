@@ -139,12 +139,36 @@ GitHub Marketplace") at first release creation. There is no
 publish API for CI to call — the `release` job creating a tag
 *is* the publish.
 
-³ **tree-sitter — corpus tests are release-gating.** The
-`tree-sitter test` step runs against the freshly generated parser
-(not the committed one), so a grammar.js change that breaks the
-corpus blocks the release before tag-push. Set
+³ **tree-sitter — corpus tests are release-gating.** Corpus tests
+run in a dedicated `corpus-test` job that gates the `prepare`
+job, so a `grammar.js` change that breaks the corpus blocks the
+tag-push entirely — failed releases leave no dangling tags. Set
 `run-corpus-tests: false` only when the PR-time test workflow is
 authoritative and main is trusted green.
+
+**tree-sitter bundle layout** (contractual with downstream
+consumers):
+
+```
+tree-sitter.tar.gz
+├── tree-sitter-<parser>.wasm  ← required
+├── grammar.js                 ← required
+├── package.json               ← required
+├── tree-sitter.json           ← optional (if present in repo)
+├── src/
+│   ├── parser.c               ← required, freshly generated
+│   ├── scanner.c | scanner.cc ← optional, gated by file existence
+│   └── tree_sitter/
+│       ├── parser.h           ← required
+│       ├── alloc.h            ← optional (newer CLI versions)
+│       └── array.h            ← optional (newer CLI versions)
+└── queries/
+    └── *.scm                  ← optional dir; if queries/ exists
+                                 it MUST contain at least one .scm
+```
+
+Plus anything `scripts/bundle-extras.sh` adds (e.g.
+`shared/embedded-grammars.json`).
 
 ¹ **rust-cli + npm (wasm)** — opt-in slot for Rust workspaces with a
 wasm-bindgen crate consumed by JS/TS. Set `wasm-package: <member>` on
