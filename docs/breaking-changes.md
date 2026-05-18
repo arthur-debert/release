@@ -9,6 +9,36 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.3.1 (2026-05-18) — fix: vscode-ext jq parse + python-pkg uv-cache glob
+
+**Type:** PATCH. Two bugs caught on the first end-to-end pilot release
+runs against `lex-fmt/vscode` and `lex-fmt/mkdocs-lex`. No consumer
+input changes; consumers tracking `@v1` re-run.
+
+### `vscode-ext.yml` — matrix jq parse failure
+
+The matrix-parse step's jq script used multi-line `if/elif/end` chains
+with `#` trailing comments. jq on the GH runner reported `unexpected
+if (Unix shell quoting issues?)` on each of the os/rust/platform
+blocks (could not reproduce locally — the comments interacted with
+the YAML+bash pipeline to leave the parser at `<top-level>` on the
+next `if`).
+
+Refactored to a plain lookup-table form (`$map[$t] // error(…)` then
+`+ {target, arch}`). Same output shape, no multi-line if/elif, no
+`#` comments inside the jq script.
+
+### `python-pkg.yml` — `setup-uv` hard-fail on missing lockfile
+
+`astral-sh/setup-uv@v3` with `enable-cache: true` errors hard when
+its default `cache-dependency-glob` (`**/uv.lock`) matches no files.
+mkdocs-lex is setuptools-backed and has no uv.lock — killed the
+build job before publish.
+
+Added a fall-through glob list: `**/uv.lock` first, then
+`**/pyproject.toml`. Either keys the cache; both-absent projects
+fall through cleanly.
+
 ## v1.3.0 (2026-05-18) — additive: Wave 1 cross-repo plumbing + Wave 2 stack workflows
 
 **Type:** MINOR (additive, no consumer breakage). Existing `rust-cli`
