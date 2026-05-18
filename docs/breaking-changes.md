@@ -9,6 +9,28 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.5.0 (2026-05-18) — additive: nvim-plugin stack workflow + dogfood release.yml
+
+**Type:** MINOR (new category workflow + new caller in this repo;
+no consumer breakage).
+
+### What's new
+
+- `.github/workflows/nvim-plugin.yml` — reusable release workflow
+  for Neovim plugins. Tag + GH release with Keep-a-Changelog
+  notes auto-rolled; no manifest bump (Neovim plugins are
+  tag-distributed and don't carry a version field). Sanity check
+  requires `lua/` or `plugin/` directory at the configured root.
+  Smoke testing deliberately deferred to a separate
+  `nvim-plugin-test.yml` (PR-gate, not release-gate). Pilot
+  consumer: `lex-fmt/nvim`.
+- `.github/workflows/release.yml` — dogfood. This repo cuts its
+  own tags via its own `gh-action.yml@v1` from this version on.
+
+### Migration
+
+No action required for existing consumers. New optional stack.
+
 ## v1.4.1 (2026-05-18) — fix: gh-action skip manifest check for multi-action repos
 
 **Type:** PATCH (input contract is unchanged; new behavior is opt-in
