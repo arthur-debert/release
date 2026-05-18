@@ -98,7 +98,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
-| vscode-ext     | W 📋            | W 📋       | W 📋 ext-host   | W 📋 vsce package  | —          | W 📋              | A 📋 marketplace  | —                | —         | A 📋           |
+| vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace + Open VSX | —      | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
 | python-pkg     | W 📋 ruff/black | W 📋 pytest| —               | W 📋 build (wheel) | —          | W 📋              | A 📋 PyPI         | —                | —         | A 📋           |
@@ -184,11 +184,18 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   (`arthur-debert/simple-gal-ui`) pending migration. Windows builds
   are opt-in and unsigned until slice 3; e2e/auto-updater are slice
   2. See #43 (closed for slice 1) + the follow-up issues.
-- 🚧 **rust-lib** — workflow shipped at `@v1`. Three pilot consumers
-  to migrate: `arthur-debert/clapfig` (next), `arthur-debert/standout`,
-  `lex-fmt/zed-lex`. Much smaller surface than rust-cli (no cross-
-  compile, no signing, no brew/apt, just crates.io publish + notes-
-  only GH release).
+- 🚧 **rust-lib** — workflow shipped at `@v1`. Consumers migrated:
+  `arthur-debert/clapfig` ✅, `arthur-debert/standout` ✅.
+  `lex-fmt/zed-lex` pending (needs `wasm32-wasip2` target — likely
+  fits a future `rustup-targets` input on `rust-lib.yml` or a
+  dedicated `zed-extension` micro-stack).
+- 🚧 **vscode-ext** — workflow shipped at `@v1`. Singleton consumer
+  (`lex-fmt/vscode`) pending migration. Supports per-target VSIX
+  matrix (4 platform-specific VSIXes for native-binary-bundling
+  extensions), VS Code Marketplace publish via `vsce`, optional
+  Open VSX publish via `ovsx`. Native-binary fetch happens via the
+  `scripts/pre-vsce-package.sh` convention hook + the canonical
+  `fetch-artifact` CLI.
 - 🚧 **tauri-app** — new stack row. Pilot consumer:
   `arthur-debert/arami-app`. Will share ~70% of the electron-app
   shape (prepare-release-npm, smoke convention, GH release) with
