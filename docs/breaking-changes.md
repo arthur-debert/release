@@ -9,6 +9,67 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.0 (2026-05-18) — additive: tauri-app stack workflow (slice 1)
+
+**Type:** MINOR (new category workflow; no consumer breakage).
+
+### What's new
+
+`.github/workflows/tauri-app.yml` — reusable release pipeline
+for Tauri 2.x desktop apps. Pilot consumer:
+`arthur-debert/arami-app`.
+
+### Slice 1 scope
+
+- Cross-platform `tauri build` matrix (macos-latest, ubuntu-
+  latest, windows-latest); each opt-out-able via boolean inputs.
+- Three-way version sync — `package.json` (jq), `src-tauri/
+  Cargo.toml` `[package].version` (awk, same pattern as
+  prepare-release-python), `src-tauri/tauri.conf.json` (jq;
+  optional field).
+- Optional `prep-script` input for consumer-specific bumps
+  (arami-app's `arami-core-deps.json` upstream pin; future
+  Tauri apps with submodules, codegen, additional configs).
+- macOS code-signing via Tauri's canonical `APPLE_CERTIFICATE`
+  + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`
+  (different bindings from electron-builder's `CSC_LINK`).
+- Optional notarization via `APPLE_ID` + `APPLE_PASSWORD` +
+  `APPLE_TEAM_ID` (gated by `notarize` input + secret presence).
+- Preflight job validates all required Apple secrets BEFORE
+  prepare bumps + tags.
+- Linux build job installs the Tauri 2.x apt deps (libwebkit2gtk-4.1-dev,
+  libgtk-3-dev, libsoup-3.0-dev, libayatana-appindicator3-dev,
+  librsvg2-dev, patchelf).
+- Bundle collection picks up the per-platform distributables
+  only (`.dmg`, `.app.tar.gz`, `.deb`, `.rpm`, `.AppImage`,
+  `.msi`, `.exe`) — skips raw `.app` source bundles and
+  intermediate build files.
+- `scripts/build-tauri.sh` convention hook with both branches
+  cd-ing to `TAURI_DIR` for monorepo-layout symmetry.
+- Auto-detects npm / pnpm / yarn via lockfile presence; pnpm
+  wired via pnpm/action-setup@v4 BEFORE setup-node (order
+  matters — setup-node's `cache: 'pnpm'` invokes `pnpm store
+  path` at setup time).
+
+### Dual-mode design (documented contract)
+
+- **Mode A** — Standalone. Workflow handles version bump + tag
+  + push + build + release. Fired via `gh workflow run
+  release.yml -f version=X.Y.Z`.
+- **Mode B** — Layer 0 + workflow (lex-fmt cascade pattern). A
+  Layer 0 primitive (`scripts/release/update-release`) bumps
+  consumer-specific files + tags + pushes locally; workflow
+  hits the resume path (tag already exists, package.json
+  matches), skips bump entirely, just builds + releases.
+
+### Out of scope (deferred slices)
+
+- Updater signing keys (`TAURI_SIGNING_PRIVATE_KEY`) → slice 2.
+- Universal macOS binary (`--target universal-apple-darwin`) →
+  slice 2.
+- Auto-updater server config (`latest.json` host) → slice 3.
+- Linux `.deb` / `.rpm` / `.AppImage` signing → slice 3.
+
 ## v1.6.1 (2026-05-18) — fix: tree-sitter setup-node cache optional
 
 **Type:** PATCH. `actions/setup-node@v6` with `cache: 'npm'`
