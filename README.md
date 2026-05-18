@@ -178,6 +178,12 @@ workflows cover ~80% of the benefit at ~5% of the cost.
 
 - ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
   (see `git tag` for the current pin).
+- 🚧 **electron-app** — slice 1 in flight (darwin-arm64 + linux-x64
+  build + electron-builder native signing/notarization on macOS + GH
+  release; Windows opt-in, produces unsigned binaries until slice 3).
+  Pilot consumer: `lex-fmt/lexed`. Followers: `arthur-debert/arami-app`,
+  `arthur-debert/simple-gal-ui`. Auto-updater feed + e2e-in-CI ship in
+  follow-on slices. See #43.
 - ✅ **Cross-repo artifact fetcher** —
   [`bin/fetch-artifact`](bin/fetch-artifact) +
   [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
@@ -196,8 +202,6 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   layouts), no-lockfile npm fallback, venv-CLI exposure on the
   agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
   validates changes without burning a cloud session.
-- 📋 **electron-app** — next up. Pilot consumer: `lex-fmt/lexed`.
-  Follow: `arthur-debert/simple-gal-ui`.
 - 📋 then, in some order: rust-lib (clapfig, standout) · vscode-ext
   (lex-fmt/vscode) · nvim-plugin (lex-fmt/nvim) · tree-sitter
   (lex-fmt/tree-sitter-lex) · python-pkg (lex-fmt/mkdocs-lex) ·

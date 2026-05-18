@@ -1,0 +1,415 @@
+name: Electron app release
+
+# Reusable release workflow for Electron apps (electron-builder).
+# Consumers call this from their own .github/workflows/release.yml as a
+# thin caller pinned to @v1. See README §Stack matrix row "electron-app"
+# and the per-stack tracking issue #43 for the column-by-column scope.
+#
+# Slice 1 of the electron-app rollout: darwin-arm64 + linux x86_64 build,
+# sign + notarize on darwin, GitHub release with .dmg + .AppImage
+# artifacts. Windows + auto-updater feed + e2e-in-CI ship in follow-on
+# slices.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.18.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      app-name:
+        description: 'electron-builder productName. Used for artifact naming when not derivable from package.json.'
+        type: string
+        required: false
+        default: ''
+      bundle-id:
+        description: 'macOS bundle identifier (e.g. com.lex-fmt.lexed). Required when signing is enabled (i.e. APPLE_CERTIFICATE_P12_BASE64 secret is set).'
+        type: string
+        required: false
+        default: ''
+      darwin-archs:
+        description: 'Comma-separated macOS archs. Default arm64 only (Intel deprecated portfolio-wide). Set "" to skip macOS.'
+        type: string
+        required: false
+        default: 'arm64'
+      linux-archs:
+        description: 'Comma-separated linux archs to package as AppImage. Set "" to skip linux.'
+        type: string
+        required: false
+        default: 'x64'
+      windows-archs:
+        description: 'Comma-separated windows archs (default empty; opt-in — Windows code-signing not yet integrated).'
+        type: string
+        required: false
+        default: ''
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout (lexed needs this for comms; most projects do not).'
+        type: boolean
+        required: false
+        default: false
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section). Empty to skip.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      node-version:
+        description: 'Node.js version (consumed by setup-node).'
+        type: string
+        required: false
+        default: '22'
+      entitlements:
+        description: 'Path to macOS entitlements .plist. Optional; electron-builder usually generates one. Override only when overriding electron-builder defaults.'
+        type: string
+        required: false
+        default: ''
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push (bypasses ruleset). Falls back to GITHUB_TOKEN if absent.'
+        required: false
+      APPLE_CERTIFICATE_P12_BASE64:
+        description: 'Base64 .p12 (Developer ID Application cert). Empty → signing skipped.'
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        description: 'Password for the .p12.'
+        required: false
+      ASC_API_KEY_BASE64:
+        description: 'Base64 App Store Connect API key (.p8). Empty → notarization skipped.'
+        required: false
+      ASC_API_KEY_ID:
+        description: 'App Store Connect API key ID.'
+        required: false
+      ASC_API_ISSUER_ID:
+        description: 'App Store Connect API issuer UUID.'
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  # electron-builder writes per-target artifacts under `dist/`. Each
+  # build job uploads its artifacts; the release job downloads and
+  # uploads them to the GH release.
+  ELECTRON_BUILDER_OUT: dist
+
+jobs:
+  # -------------------------------------------------------------------
+  # 1. Prepare: validate version, bump package.json, roll changelog,
+  #    commit + tag + push. Resume-safe if the tag already exists.
+  # -------------------------------------------------------------------
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+      darwin-archs-json: ${{ steps.matrices.outputs.darwin }}
+      linux-archs-json: ${{ steps.matrices.outputs.linux }}
+      windows-archs-json: ${{ steps.matrices.outputs.windows }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - name: Prepare release (npm)
+        id: prep
+        uses: arthur-debert/release/.github/actions/prepare-release-npm@v1
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+      - name: Parse arch matrices
+        id: matrices
+        env:
+          DARWIN_ARCHS: ${{ inputs.darwin-archs }}
+          LINUX_ARCHS: ${{ inputs.linux-archs }}
+          WINDOWS_ARCHS: ${{ inputs.windows-archs }}
+        run: |
+          # GH Actions expressions don't have a string-split function;
+          # do the comma→JSON-array conversion here and emit outputs the
+          # build jobs' `matrix:` reads via fromJSON.
+          to_json() {
+            if [ -z "$1" ]; then
+              echo '[]'
+            else
+              echo "$1" | jq -R -c 'split(",") | map(gsub("^\\s+|\\s+$"; ""))'
+            fi
+          }
+          {
+            echo "darwin=$(to_json "${DARWIN_ARCHS}")"
+            echo "linux=$(to_json "${LINUX_ARCHS}")"
+            echo "windows=$(to_json "${WINDOWS_ARCHS}")"
+          } >> "${GITHUB_OUTPUT}"
+
+  # -------------------------------------------------------------------
+  # 2. Build matrices — one job per OS. Each job sets up Node, runs
+  #    `npm ci && npm run build`, and uploads the dist/ artifacts.
+  # -------------------------------------------------------------------
+  build-mac:
+    needs: prepare
+    if: needs.prepare.outputs.darwin-archs-json != '[]'
+    runs-on: macos-14
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.prepare.outputs.darwin-archs-json) }}
+    steps:
+      - name: Checkout at release SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      # Use electron-builder's NATIVE signing + notarization flow rather
+      # than post-build sign-mac/notarize-mac. electron-builder produces
+      # the .dmg with the .app already embedded; signing the .app
+      # afterwards doesn't re-embed it, so a post-build sign-mac would
+      # leave the released DMG carrying an unsigned bundle and fail
+      # notarization/Gatekeeper. electron-builder's native pass signs
+      # the .app, embeds the signed bundle in the DMG, AND notarizes
+      # in one go when these env vars are set:
+      #
+      #   CSC_LINK              — path to .p12 cert (decoded from
+      #                           APPLE_CERTIFICATE_P12_BASE64)
+      #   CSC_KEY_PASSWORD      — password for the .p12
+      #   APPLE_API_KEY         — path to .p8 (decoded from
+      #                           ASC_API_KEY_BASE64)
+      #   APPLE_API_KEY_ID      — App Store Connect key ID
+      #   APPLE_API_KEY_ISSUER  — App Store Connect issuer UUID
+      #
+      # Missing vars → electron-builder skips signing/notarization with
+      # warnings on stderr (graceful degradation matching the rust-cli
+      # pipeline's behaviour).
+      - name: Decode signing/notarization credentials
+        env:
+          CSC_B64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          CSC_PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          ASC_KEY_B64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          creds_dir="${RUNNER_TEMP}/electron-creds"
+          mkdir -p "${creds_dir}"
+          chmod 700 "${creds_dir}"
+          if [ -n "${CSC_B64}" ] && [ -n "${CSC_PASS}" ]; then
+            echo "${CSC_B64}" | base64 -d > "${creds_dir}/csc.p12"
+            {
+              echo "CSC_LINK=${creds_dir}/csc.p12"
+              echo "CSC_KEY_PASSWORD=${CSC_PASS}"
+            } >> "${GITHUB_ENV}"
+            echo "macOS code-signing configured"
+          else
+            echo "::warning::No macOS signing cert configured — electron-builder will produce an unsigned bundle."
+          fi
+          if [ -n "${ASC_KEY_B64}" ] && [ -n "${ASC_KEY_ID}" ] && [ -n "${ASC_ISSUER}" ]; then
+            echo "${ASC_KEY_B64}" | base64 -d > "${creds_dir}/AuthKey.p8"
+            {
+              echo "APPLE_API_KEY=${creds_dir}/AuthKey.p8"
+              echo "APPLE_API_KEY_ID=${ASC_KEY_ID}"
+              echo "APPLE_API_KEY_ISSUER=${ASC_ISSUER}"
+            } >> "${GITHUB_ENV}"
+            echo "macOS notarization configured"
+          else
+            echo "::warning::No App Store Connect API key configured — electron-builder will skip notarization."
+          fi
+
+      - name: Build (electron-builder, mac --${{ matrix.arch }})
+        run: |
+          npm run build -- --mac --${{ matrix.arch }} --publish never
+
+      - name: Upload mac artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-mac-${{ matrix.arch }}
+          path: |
+            ${{ env.ELECTRON_BUILDER_OUT }}/*.dmg
+            ${{ env.ELECTRON_BUILDER_OUT }}/*.dmg.blockmap
+          if-no-files-found: error
+          retention-days: 7
+
+  build-linux:
+    needs: prepare
+    if: needs.prepare.outputs.linux-archs-json != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.prepare.outputs.linux-archs-json) }}
+    steps:
+      - name: Checkout at release SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (electron-builder, linux --${{ matrix.arch }})
+        run: |
+          npm run build -- --linux --${{ matrix.arch }} --publish never
+
+      # AppImage is the canonical linux artifact for electron-app and
+      # required for the release to be useful; .deb is optional (only
+      # produced if the consumer's electron-builder config has the
+      # `deb` target enabled). Split into two uploads so a missing
+      # AppImage fails the build instead of warn-and-continue (Copilot
+      # review on #65: warn would let the release job collect a
+      # half-built linux artifact set).
+      - name: Upload linux .AppImage (required)
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-linux-${{ matrix.arch }}-appimage
+          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload linux .deb (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-linux-${{ matrix.arch }}-deb
+          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.deb
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build-windows:
+    needs: prepare
+    if: needs.prepare.outputs.windows-archs-json != '[]'
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: ${{ fromJSON(needs.prepare.outputs.windows-archs-json) }}
+    steps:
+      - name: Checkout at release SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (electron-builder, win --${{ matrix.arch }})
+        # Windows code-signing not yet integrated in this workflow. The
+        # produced binary is unsigned — flag this in release notes for
+        # any consumer enabling windows-archs.
+        run: |
+          npm run build -- --win --${{ matrix.arch }} --publish never
+        shell: bash
+
+      - name: Upload windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-win-${{ matrix.arch }}
+          path: |
+            ${{ env.ELECTRON_BUILDER_OUT }}/*.exe
+            ${{ env.ELECTRON_BUILDER_OUT }}/*.exe.blockmap
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 3. Release: collect every build's artifacts, create the GH release.
+  # -------------------------------------------------------------------
+  release:
+    needs: [prepare, build-mac, build-linux, build-windows]
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && (needs.build-mac.result == 'success' || needs.build-mac.result == 'skipped')
+      && (needs.build-linux.result == 'success' || needs.build-linux.result == 'skipped')
+      && (needs.build-windows.result == 'success' || needs.build-windows.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout at release SHA
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: collected
+          # actions/download-artifact@v4 with `pattern` collects matching
+          # artifact names into subdirs under `path`. We flatten in the
+          # release step below.
+          pattern: electron-app-*
+          merge-multiple: true
+
+      - name: List collected artifacts
+        run: |
+          echo "=== collected artifacts ==="
+          ls -la collected/
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          # Resume-on-existing-release: if the release already exists for
+          # this tag, edit it (uploads new assets); else create it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — uploading additional assets."
+            gh release upload "$TAG" collected/* --clobber
+          else
+            gh release create "$TAG" \
+              $prerelease_flag \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              collected/*
+          fi
+
+  # -------------------------------------------------------------------
+  # 4. Notify downstreams. Fires repository_dispatch upstream-released
+  #    so any cascade-handler consumers react.
+  # -------------------------------------------------------------------
+  notify-downstreams:
+    needs: [prepare, release]
+    if: needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-op placeholder
+        # Per-consumer downstream lists are repo-specific (each consumer
+        # has its own `notify-downstreams` step in its release.yml that
+        # knows its direct consumers). The reusable workflow does NOT
+        # emit dispatches — that step lives in the caller, AFTER it calls
+        # this reusable workflow. Keeping this job as a future placeholder
+        # for a centralized notify mechanism if/when we add one.
+        run: echo "Release ${{ needs.prepare.outputs.version }} complete. Caller's own release.yml fires its notify-downstreams step (if any) after this workflow returns."
