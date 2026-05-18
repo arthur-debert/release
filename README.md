@@ -215,74 +215,72 @@ workflows cover ~80% of the benefit at ~5% of the cost.
 
 ## Status & next-up
 
-- ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
-  (see `git tag` for the current pin).
-- 🚧 **electron-app** — slice 1 + 1.5 shipped at `@v1`. First
-  consumer migrated: `lex-fmt/lexed`. Other electron consumer
-  (`arthur-debert/simple-gal-ui`) pending migration. Windows builds
-  are opt-in and unsigned until slice 3; e2e/auto-updater are slice
-  2. See #43 (closed for slice 1) + the follow-up issues.
-- 🚧 **rust-lib** — workflow shipped at `@v1`. Consumers migrated:
+All shipped stack workflows ship to `@v1` (floating major); see
+`docs/breaking-changes.md` for the per-tag history. Consumers pin
+`@v1` and never need to track individual minor/patch tags.
+
+- ✅ **rust-cli** — `@v1`. 6 consumers migrated.
+- 🚧 **electron-app** — `@v1`, slice 1 + 1.5. Consumers migrated:
+  `lex-fmt/lexed` ✅. `arthur-debert/simple-gal-ui` pending
+  migration. Windows builds opt-in and unsigned until slice 3;
+  e2e + auto-updater are slice 2. See #43 (closed for slice 1) +
+  follow-up issues.
+- 🚧 **rust-lib** — `@v1`. Consumers migrated:
   `arthur-debert/clapfig` ✅, `arthur-debert/standout` ✅.
   `lex-fmt/zed-lex` pending (needs `wasm32-wasip2` target — likely
-  fits a future `rustup-targets` input on `rust-lib.yml` or a
-  dedicated `zed-extension` micro-stack).
-- ✅ **vscode-ext** — workflow shipped at `@v1.3.2`. Pilot consumer
-  `lex-fmt/vscode` migrated + verified end-to-end (0.10.2 →
-  Marketplace + GH release, 4 platform VSIXes). Open VSX publish
-  off pending `OVSX_PAT` provisioning — flip
-  `publish-openvsx: true` in the caller when ready. Supports
-  per-target VSIX matrix, `scripts/pre-vsce-package.sh` convention
-  hook for native-binary fetching, `--pre-release` threading for
-  `X.Y.Z-rc.N` semvers.
-- 🚧 **nvim-plugin** — workflow shipped on `main` (release path
-  only; lint/test workflows still 📋); pin against the next cut
-  tag (planned v1.5.0). Pilot consumer: `lex-fmt/nvim` pending
-  migration. Tag + GH release with
-  Keep-a-Changelog notes auto-rolled; no manifest bump (Neovim
-  plugins don't carry a version field — the tag IS the unit of
-  distribution, consumed directly by plugin managers like
-  lazy.nvim / vim-plug / packer / rocks.nvim). Sanity check
-  requires `lua/` or `plugin/` directory at the configured root.
-  Smoke test deliberately left out of the release path; lives in
-  the separate `nvim-plugin-test.yml` (PR-gate). Optional
-  rockspec publish: future slice.
-- 🚧 **tree-sitter** — workflow shipped on `main`; pin against
-  the next cut tag (planned v1.6.0). Pilot consumer:
-  `lex-fmt/tree-sitter-lex` pending migration. Build steps:
-  `tree-sitter generate` + corpus tests + `tree-sitter build --wasm`,
-  then assemble a `tree-sitter.tar.gz` containing the standard
-  parser bundle (`parser.c`, `scanner.{c,cc}`, headers, queries,
-  `<name>.wasm`, `grammar.js`, `tree-sitter.json`). The bundle
-  shape is a contract with downstream callers (e.g. vscode-ext's
-  `pre-vsce-package.sh` extracts specific files). Optional npm
-  publish (off by default — most parsers ship via GH release
-  tarball only). `scripts/bundle-extras.sh` convention hook for
-  consumer-specific extras (e.g. `shared/embedded-grammars.json`).
-  Downstream `repository_dispatch` notifications are deliberately
-  out of scope — they live in `cascade-handler.yml`.
-- ✅ **gh-action** — workflow shipped (pin against the next cut
-  tag; bootstrap from `@main` for the first call). Reusable
-  release pipeline for composite GitHub Actions and reusable
-  workflows. Tag + GH release + automatic floating-major branch
-  advance (`v1`, `v2`, …) — the dist channel for this stack.
-  Marketplace listing happens automatically via release tags +
-  a one-time repo-settings checkbox; nothing for CI to do.
-  Canonical consumer: arthur-debert/release itself. JS-action
-  `dist/` build slice deliberately deferred until the first
-  JS-action consumer surfaces.
-- ✅ **python-pkg** — workflow shipped at `@v1.3.3`. Pilot consumer
-  `lex-fmt/mkdocs-lex` migrated + verified end-to-end
-  (`mkdocs-lex-plugin` 0.2.1 → PyPI + GH release). `uv build` →
-  sdist + wheel; `uvx twine upload --skip-existing` → PyPI
-  (required) + TestPyPI (opt-in). Awk-based bump scoped strictly to
-  pyproject.toml `[project].version` (zero toolchain deps).
-  Optional `scripts/pre-build.sh` convention hook.
-- 🚧 **tauri-app** — new stack row. Pilot consumer:
-  `arthur-debert/arami-app`. Will share ~70% of the electron-app
-  shape (prepare-release-npm, smoke convention, GH release) with
-  its own build / signing toolchain (`tauri build`, Tauri's
-  `APPLE_*` env vars).
+  fits a future `rustup-targets` input or a dedicated
+  `zed-extension` micro-stack).
+- ✅ **vscode-ext** — `@v1`. Pilot `lex-fmt/vscode` migrated +
+  verified end-to-end (0.10.2 → Marketplace + 4 platform VSIXes;
+  0.10.3 → Marketplace listing fix for the Eclipse namespace
+  claim). Open VSX publish currently off in the caller — pending
+  Eclipse Foundation approval of the `lex` namespace claim at
+  [EclipseFdn/open-vsx.org#10424](https://github.com/EclipseFdn/open-vsx.org/issues/10424).
+  Flip `publish-openvsx: true` in the caller once approved.
+  Supports per-target VSIX matrix,
+  `scripts/pre-vsce-package.sh` convention hook,
+  `--pre-release` threading.
+- ✅ **python-pkg** — `@v1`. Pilot `lex-fmt/mkdocs-lex`
+  migrated + verified end-to-end (`mkdocs-lex-plugin` 0.2.1 →
+  PyPI + GH release). `uv build` → sdist + wheel;
+  `uvx twine upload --skip-existing` → PyPI / TestPyPI.
+  Awk-based pyproject `[project].version` bump (zero toolchain
+  deps). Optional `scripts/pre-build.sh` hook.
+- ✅ **gh-action** — `@v1`. Canonical consumer = this repo
+  itself; dogfooded end-to-end via the v1.5.0 / v1.6.0 / v1.6.1
+  self-cuts. Tag + GH release + auto-advance of the floating-
+  major branch (`v1`, `v2`, …) — the dist channel for this
+  stack. GH Marketplace listing is tag-driven (one-time
+  repo-settings checkbox); nothing for CI to do. JS-action
+  `dist/` build slice deferred until the first JS-action
+  consumer surfaces.
+- ✅ **nvim-plugin** — `@v1`. Pilot `lex-fmt/nvim` pending
+  migration. Tag + GH release with auto-rolled Keep-a-Changelog
+  notes; no manifest bump (Neovim plugins are tag-distributed,
+  no version field). Sanity check requires `lua/` or `plugin/`
+  directory. Smoke testing deliberately deferred to a separate
+  `nvim-plugin-test.yml` (PR-gate). Optional rockspec publish:
+  future slice.
+- 🚧 **tree-sitter** — `@v1`. Pilot `lex-fmt/tree-sitter-lex`
+  migrated; first verification release (0.10.4) caught a
+  `setup-node` cache hard-fail (v1.6.1 fix), re-fire pending.
+  Build: `tree-sitter generate` + corpus tests (release-gating)
+  + `tree-sitter build --wasm`, assemble `tree-sitter.tar.gz`
+  containing the standard parser bundle (layout is contractual
+  with downstream callers — see footnote ³). Optional npm
+  publish (off by default; most parsers ship via tarball only).
+  `scripts/bundle-extras.sh` convention hook. Downstream
+  `repository_dispatch` notifications are out of scope (live in
+  `cascade-handler.yml` + the caller).
+- 📋 **tauri-app** — not started. Pilot:
+  `arthur-debert/arami-app`. Will share ~70% of the
+  electron-app shape (prepare-release-npm, smoke convention, GH
+  release) with its own build/sign toolchain (`tauri build`,
+  Tauri's `APPLE_*` env vars).
+- 📋 **brew-tap** — not started. Tricky scope — the tap is the
+  destination of pushes from other repos, not a release target
+  itself. Likely workflow scope: tap-side validation (formula
+  syntax, audit), stale-formula sweep, cross-formula CI.
 - ✅ **Cross-repo artifact fetcher** —
   [`bin/fetch-artifact`](bin/fetch-artifact) +
   [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
@@ -301,10 +299,12 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   layouts), no-lockfile npm fallback, venv-CLI exposure on the
   agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
   validates changes without burning a cloud session.
-- 📋 then, in some order: vscode-ext (lex-fmt/vscode) · nvim-plugin
-  (lex-fmt/nvim) · tree-sitter (lex-fmt/tree-sitter-lex) · python-pkg
-  (lex-fmt/mkdocs-lex) · gh-action (arthur-debert/simple-gal-action)
-  · brew-tap (arthur-debert/homebrew-tools).
+- 📋 next-up consumer migrations: `lex-fmt/nvim` (nvim-plugin),
+  `arthur-debert/simple-gal-ui` (electron-app),
+  `lex-fmt/zed-lex` (rust-lib + wasm32-wasip2),
+  `arami-app` (after tauri-app workflow ships),
+  `arthur-debert/simple-gal-action` (after gh-action JS-build
+  slice ships).
 
 Order is driven by: (a) is there a consumer blocked on it today,
 (b) does shipping the row unblock several at once. We complete one
