@@ -102,7 +102,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
 | python-pkg     | (consumer)      | (consumer) | —               | W ✅ uv build      | —          | W ✅              | W ✅ PyPI · W ✅ TestPyPI (opt-in) | —    | —         | A 📋           |
-| gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W 📋 tag + v1     | A 📋 marketplace  | —                | —         | A 📋 (move v1) |
+| gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W ✅ tag + v1     | (auto via tag)¹   | —                | —         | A 📋 (move v1) |
 | brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
 
 What the matrix tells you at a glance: rust-cli is the only fully
@@ -197,6 +197,16 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   per-target VSIX matrix, `scripts/pre-vsce-package.sh` convention
   hook for native-binary fetching, `--pre-release` threading for
   `X.Y.Z-rc.N` semvers.
+- 🚧 **gh-action** — workflow shipped at `@v1.4.0` (pending tag).
+  Reusable release pipeline for composite GitHub Actions and reusable
+  workflows. Tag + GH release + automatic floating-major branch
+  advance (`v1`, `v2`, …) — the dist channel for this stack.
+  Marketplace listing happens automatically via release tags +
+  a one-time repo-settings checkbox; nothing for CI to do.
+  Canonical consumer: arthur-debert/release itself (cuts its own
+  patch tags via this workflow once `@v1.4.0` ships). JS-action
+  `dist/` build slice deliberately deferred until the first
+  JS-action consumer surfaces.
 - ✅ **python-pkg** — workflow shipped at `@v1.3.3`. Pilot consumer
   `lex-fmt/mkdocs-lex` migrated + verified end-to-end
   (`mkdocs-lex-plugin` 0.2.1 → PyPI + GH release). `uv build` →
