@@ -46,6 +46,53 @@ name: tauri-app release
 # upstream before the bundle step). If the hook isn't present, the
 # workflow falls back to `pnpm tauri build` or `npm run tauri
 # build` based on lockfile detection.
+#
+# Optional `prep-script` input
+# ----------------------------
+# Consumers with extra version-bearing files beyond the canonical
+# three (package.json + Cargo.toml + tauri.conf.json) can provide a
+# `prep-script` input. The workflow execs it BEFORE the standard
+# three-file bump, in the prepare job, with `NEW_VERSION` in env.
+# The script is responsible for `git add`-ing its own mutations.
+# Use for: WASM-upstream pins, codegen output, additional config
+# files, submodule pointers. arami-app uses this for its
+# `arami-core-deps.json` (WASM upstream pin).
+#
+# CHANGELOG format contract
+# -------------------------
+# This workflow expects strict Keep-a-Changelog format:
+#
+#   ## [Unreleased]
+#   ## [X.Y.Z] - YYYY-MM-DD
+#
+# Same contract as `prepare-release-npm` / `prepare-release-python`
+# and what's used across python-pkg, vscode-ext, mkdocs-lex,
+# tree-sitter-lex. The `## [Unreleased]` → `## [<version>] - <date>`
+# rename happens automatically. If a consumer also has a Layer 0
+# `update-release` primitive (lex-fmt cascade pattern), that script
+# MUST match this format — competing renames (e.g. `## v<v> (<date>)`
+# vs `## [<v>] - <date>`) cause whichever runs second to silently
+# no-op or hard-fail on the missing `## [Unreleased]`.
+#
+# Dual-mode operation
+# -------------------
+# Mode A — Standalone. The workflow handles version bump + tag +
+#          push + build + release. Trigger: `gh workflow run
+#          release.yml -f version=X.Y.Z`. Used by consumers without
+#          their own release-orchestration scripts.
+#
+# Mode B — Layer 0 + workflow (lex-fmt cascade pattern). A Layer 0
+#          primitive (e.g. `scripts/release/update-release`) bumps
+#          consumer-specific files + tags + pushes LOCALLY. The
+#          workflow runs in CI, hits the resume path (tag already
+#          exists, package.json matches NEW_VERSION), skips the
+#          bump entirely, and just does build + release.
+#          Used by arami-app + lex-fmt cascade consumers.
+#
+# The resume path is not a "re-run on failure" fallback — it's the
+# explicit integration point with Layer 0 release primitives. In
+# Mode B, the workflow's prep-script + standard bumps are dead
+# code; only the resume branch executes.
 
 on:
   workflow_call:
@@ -114,6 +161,20 @@ on:
         type: boolean
         required: false
         default: false
+      prep-script:
+        description: |
+          Optional path (relative to repo root) to a consumer-supplied
+          prep script. Runs in the prepare job BEFORE the canonical
+          three-file version bump, with NEW_VERSION + TAURI_DIR in
+          env. The script is responsible for `git add`-ing its own
+          mutations. Use for consumer-specific bumps beyond the
+          canonical three files: upstream pins (e.g. arami-app's
+          arami-core-deps.json), codegen output, submodule pointers.
+          Not invoked in the resume path (when the tag already
+          exists).
+        type: string
+        required: false
+        default: ''
 
     secrets:
       RELEASE_TOKEN:
@@ -213,6 +274,7 @@ jobs:
           NEW_VERSION: ${{ inputs.version }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
           CHANGELOG: ${{ inputs.changelog-path }}
+          PREP_SCRIPT: ${{ inputs.prep-script }}
         run: |
           set -euo pipefail
 
@@ -273,6 +335,22 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Optional consumer prep-script. Runs BEFORE the canonical
+          # three-file bump. The script gets NEW_VERSION + TAURI_DIR
+          # via env (already exported above) and is responsible for
+          # `git add`-ing whatever it mutates — the final
+          # `git diff --cached --quiet` check at the end of this
+          # step will fail loudly if nothing got staged across the
+          # prep-script + the standard bumps combined.
+          if [ -n "${PREP_SCRIPT:-}" ]; then
+            if [ ! -f "${PREP_SCRIPT}" ]; then
+              echo "::error::prep-script not found: ${PREP_SCRIPT}"
+              exit 1
+            fi
+            echo "→ running consumer prep-script: ${PREP_SCRIPT}"
+            bash "${PREP_SCRIPT}"
+          fi
 
           # Bump package.json (jq for safety — preserves field order
           # less faithfully than `npm version` but doesn't need a
