@@ -204,7 +204,45 @@ These all appeared at least once during the cascade's first cut. Documented so f
 Three pieces. None is hard individually; the order matters.
 
 1. **Write the five `scripts/release/` primitives.** Each one is ~30-80 lines of bash. Copy a similar repo's implementation as a starting point. Test each in isolation.
-2. **Add `.github/workflows/on-upstream-released.yml`.** Copy from any existing repo. Update the doc header to mention this repo's specifics (release model, dep pins, manifest surface). Make sure `GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}` is on every step that runs primitives.
+2. **Add `.github/workflows/on-upstream-released.yml`.** Use the
+   reusable workflow (recommended) — a 6-line thin caller:
+
+   ```yaml
+   name: On upstream released
+
+   on:
+     repository_dispatch:
+       types: [upstream-released]
+
+   jobs:
+     cascade:
+       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v1
+       secrets:
+         RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+   ```
+
+   The reusable workflow folds in every gotcha listed earlier
+   (GH_TOKEN on every primitive step, admin-merge, post-merge
+   `git reset --hard`, submodule restore, manifest-vs-tag drift guard,
+   stale-release-branch cleanup, UNRELEASED.md seed, shell-injection
+   guard on dispatch payload reads). New repos onboard without
+   re-deriving the gotcha list.
+
+   Optional inputs:
+
+   - `bump-kind` — `patch` (default) | `minor` | `major`.
+   - `git-author-name` — defaults to `release-bot`.
+   - `git-author-email` — defaults to `release-bot@users.noreply.github.com`.
+
+   Run lookups happen under the **caller's** filename
+   (`on-upstream-released.yml` by convention) — not under the reusable
+   workflow's filename. `gh run list --repo <repo>
+   --workflow=on-upstream-released.yml` is the canonical way to see
+   handler activity. See [`.github/workflows/cascade-handler.yml`](../.github/workflows/cascade-handler.yml).
+
+   The older copy-per-repo `on-upstream-released.yml` shape (~120 lines)
+   still works during the Wave-3 migration sweep but is being phased
+   out.
 3. **Add `notify-downstreams` step to `.github/workflows/release.yml`.** Fires `repository_dispatch upstream-released` to the new repo's direct consumers (if any).
 
 Then add the repo to `release-lex`'s `ORDER` array and dep-chain validation. Done.
