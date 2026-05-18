@@ -94,7 +94,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 
 | Stack          | format/lint     | unit tests | e2e             | build              | sign       | gh release        | pkg publish                          | dist: brew       | dist: apt | security→patch |
 |----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|--------------------------------------|------------------|-----------|----------------|
-| rust-lib       | W 📋            | W 📋       | —               | (cargo build)      | —          | (no binaries)     | A ✅ crates.io                       | —                | —         | A 📋           |
+| rust-lib       | (consumer)      | (consumer) | —               | W ✅ via publish   | —          | W ✅ (notes)      | A ✅ crates.io                       | —                | —         | A 📋           |
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
@@ -179,17 +179,21 @@ workflows cover ~80% of the benefit at ~5% of the cost.
 
 - ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
   (see `git tag` for the current pin).
-- ✅ **electron-app** — slice 1 + 1.5 shipped at `@v1`. First
+- 🚧 **electron-app** — slice 1 + 1.5 shipped at `@v1`. First
   consumer migrated: `lex-fmt/lexed`. Other electron consumer
   (`arthur-debert/simple-gal-ui`) pending migration. Windows builds
   are opt-in and unsigned until slice 3; e2e/auto-updater are slice
   2. See #43 (closed for slice 1) + the follow-up issues.
-- 🚧 **tauri-app** — new stack row added. Pilot consumer:
-  `arthur-debert/arami-app` (originally listed as an electron-app
-  follower; clarified as Tauri during the lexed-pilot review). Will
-  share ~70% of the electron-app shape (prepare-release-npm,
-  smoke convention, GH release) with its own build / signing
-  toolchain (tauri build, Tauri's APPLE_* env vars).
+- 🚧 **rust-lib** — workflow shipped at `@v1`. Three pilot consumers
+  to migrate: `arthur-debert/clapfig` (next), `arthur-debert/standout`,
+  `lex-fmt/zed-lex`. Much smaller surface than rust-cli (no cross-
+  compile, no signing, no brew/apt, just crates.io publish + notes-
+  only GH release).
+- 🚧 **tauri-app** — new stack row. Pilot consumer:
+  `arthur-debert/arami-app`. Will share ~70% of the electron-app
+  shape (prepare-release-npm, smoke convention, GH release) with
+  its own build / signing toolchain (`tauri build`, Tauri's
+  `APPLE_*` env vars).
 - ✅ **Cross-repo artifact fetcher** —
   [`bin/fetch-artifact`](bin/fetch-artifact) +
   [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
@@ -208,8 +212,7 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   layouts), no-lockfile npm fallback, venv-CLI exposure on the
   agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
   validates changes without burning a cloud session.
-- 📋 then, in some order: rust-lib (clapfig, standout) · tauri-app
-  (arami-app) · vscode-ext (lex-fmt/vscode) · nvim-plugin
+- 📋 then, in some order: vscode-ext (lex-fmt/vscode) · nvim-plugin
   (lex-fmt/nvim) · tree-sitter (lex-fmt/tree-sitter-lex) · python-pkg
   (lex-fmt/mkdocs-lex) · gh-action (arthur-debert/simple-gal-action)
   · brew-tap (arthur-debert/homebrew-tools).
