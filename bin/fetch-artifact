@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+# fetch-artifact — install a pinned cross-repo artifact from a GH release.
+#
+# Reads artifacts.json (canonical schema; see docs/artifacts-schema.md)
+# and downloads the named artifact at the pinned version.
+#
+# Usage:
+#   fetch-artifact <name> [options]
+#
+# Options:
+#   --manifest <path>   Path to artifacts.json (default: ./artifacts.json)
+#   --target <dir>      Install dir (default: $HOME/.local/bin)
+#   --arch <triple>     Override host arch detection (e.g. for cross-fetch)
+#   --no-cache          Force re-download even if stamp matches
+#   -h | --help         Print this help and exit
+#
+# Behavior summary:
+#   - Reads pin entry for <name> from the manifest.
+#   - Resolves {arch} → host's rust-target-triple (see docs/artifacts-schema.md).
+#   - `gh release download` into a temp dir, extracts.
+#   - Resolves install shape: explicit `type: binary|tree` field wins; else
+#     auto-detect by looking for an executable file whose name matches <name>.
+#   - binary: move to <target>/<name>, chmod 0755, stamp <target>/.<name>.version
+#   - tree:   extract under <target>/<name>/, stamp <target>/<name>/.version
+#   - Idempotent: if stamp file matches manifest version, exit 0 with no work.
+#
+# Exit codes:
+#   0  installed (or already up-to-date)
+#   1  generic error (manifest missing, dep missing, etc.)
+#   2  artifact name not in manifest
+#   3  host arch unsupported by this artifact
+#   4  download or extract failed
+#
+# Source of truth: arthur-debert/release bin/fetch-artifact.
+
+set -euo pipefail
+
+VERSION="2026-05-18-v1"
+
+usage() {
+  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+err() { echo "fetch-artifact: error: $*" >&2; }
+warn() { echo "fetch-artifact: warning: $*" >&2; }
+
+# --- parse args -----------------------------------------------------------
+
+NAME=""
+MANIFEST=""
+TARGET=""
+ARCH_OVERRIDE=""
+NO_CACHE=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)       usage; exit 0 ;;
+    --version)       echo "fetch-artifact ${VERSION}"; exit 0 ;;
+    --manifest)      MANIFEST="$2"; shift 2 ;;
+    --target)        TARGET="$2"; shift 2 ;;
+    --arch)          ARCH_OVERRIDE="$2"; shift 2 ;;
+    --no-cache)      NO_CACHE=1; shift ;;
+    --)              shift; break ;;
+    -*)              err "unknown flag: $1"; exit 1 ;;
+    *)
+      if [ -z "${NAME}" ]; then
+        NAME="$1"
+        shift
+      else
+        err "unexpected positional argument: $1"
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+if [ -z "${NAME}" ]; then
+  err "missing required argument: <name>"
+  usage >&2
+  exit 1
+fi
+
+MANIFEST="${MANIFEST:-./artifacts.json}"
+TARGET="${TARGET:-${HOME}/.local/bin}"
+
+# --- deps -----------------------------------------------------------------
+
+for cmd in jq gh tar; do
+  command -v "${cmd}" >/dev/null 2>&1 || {
+    err "required command not found: ${cmd}"
+    exit 1
+  }
+done
+
+if [ ! -f "${MANIFEST}" ]; then
+  err "manifest not found: ${MANIFEST}"
+  exit 1
+fi
+
+# --- read manifest entry --------------------------------------------------
+
+if ! jq -e --arg n "${NAME}" '.[$n]' "${MANIFEST}" >/dev/null 2>&1; then
+  err "artifact \"${NAME}\" not in manifest ${MANIFEST}"
+  exit 2
+fi
+
+ENTRY="$(jq --arg n "${NAME}" '.[$n]' "${MANIFEST}")"
+VERSION_PIN="$(jq -r '.version' <<<"${ENTRY}")"
+REPO="$(jq -r '.repo' <<<"${ENTRY}")"
+ASSET_PATTERN="$(jq -r '.asset // ""' <<<"${ENTRY}")"
+TYPE_DECLARED="$(jq -r '.type // ""' <<<"${ENTRY}")"
+
+for field in VERSION_PIN REPO; do
+  v="$(eval echo "\${$field}")"
+  if [ -z "${v}" ] || [ "${v}" = "null" ]; then
+    err "${MANIFEST}:${NAME}: missing required field ${field,,}"
+    exit 1
+  fi
+done
+
+# --- arch resolution ------------------------------------------------------
+
+resolve_arch() {
+  if [ -n "${ARCH_OVERRIDE}" ]; then
+    echo "${ARCH_OVERRIDE}"
+    return 0
+  fi
+  local sys="$(uname -s)" mach="$(uname -m)"
+  case "${sys}:${mach}" in
+    Linux:x86_64)             echo "x86_64-unknown-linux-gnu" ;;
+    Linux:aarch64|Linux:arm64) echo "aarch64-unknown-linux-gnu" ;;
+    Darwin:x86_64)            echo "x86_64-apple-darwin" ;;
+    Darwin:arm64|Darwin:aarch64) echo "aarch64-apple-darwin" ;;
+    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64) echo "x86_64-pc-windows-msvc" ;;
+    MINGW*:aarch64|MSYS*:aarch64|CYGWIN*:aarch64) echo "aarch64-pc-windows-msvc" ;;
+    *)
+      err "unsupported host: ${sys} ${mach}"
+      exit 3
+      ;;
+  esac
+}
+
+ARCH="$(resolve_arch)"
+
+# --- compute asset name ---------------------------------------------------
+
+if [ -z "${ASSET_PATTERN}" ] || [ "${ASSET_PATTERN}" = "null" ]; then
+  ASSET_PATTERN="${NAME}-{arch}.tar.gz"
+fi
+ASSET="${ASSET_PATTERN//\{arch\}/${ARCH}}"
+
+# --- idempotency: stamp check --------------------------------------------
+#
+# Two stamp locations depending on declared/auto type. We optimistically
+# check both — whichever matches counts. If neither matches, we proceed to
+# download.
+
+STAMP_BIN="${TARGET}/.${NAME}.version"
+STAMP_TREE="${TARGET}/${NAME}/.version"
+
+if [ "${NO_CACHE}" -eq 0 ]; then
+  for stamp in "${STAMP_BIN}" "${STAMP_TREE}"; do
+    if [ -f "${stamp}" ] && [ "$(cat "${stamp}" 2>/dev/null)" = "${VERSION_PIN}" ]; then
+      echo "fetch-artifact: ${NAME} ${VERSION_PIN} already installed (${stamp})"
+      exit 0
+    fi
+  done
+fi
+
+# --- download -------------------------------------------------------------
+
+mkdir -p "${TARGET}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "${TMP}"' EXIT
+
+echo "fetch-artifact: downloading ${NAME} ${VERSION_PIN} (${REPO} → ${ASSET}) ..."
+if ! gh release download "${VERSION_PIN}" \
+       --repo "${REPO}" \
+       --pattern "${ASSET}" \
+       --dir "${TMP}" \
+       --clobber >/dev/null 2>&1; then
+  err "download failed: ${REPO}@${VERSION_PIN} pattern=${ASSET}"
+  exit 4
+fi
+
+ARCHIVE_PATH="${TMP}/${ASSET}"
+if [ ! -f "${ARCHIVE_PATH}" ]; then
+  # gh may strip the dir prefix or rename — fall back to the only file in TMP.
+  ARCHIVE_PATH="$(find "${TMP}" -maxdepth 1 -type f | head -1)"
+fi
+if [ ! -f "${ARCHIVE_PATH}" ]; then
+  err "expected archive missing after download: ${ASSET}"
+  exit 4
+fi
+
+# --- extract --------------------------------------------------------------
+
+EXTRACT="${TMP}/extract"
+mkdir -p "${EXTRACT}"
+case "${ARCHIVE_PATH}" in
+  *.tar.gz|*.tgz)
+    tar -xzf "${ARCHIVE_PATH}" -C "${EXTRACT}" || { err "tar extract failed"; exit 4; }
+    ;;
+  *.zip)
+    command -v unzip >/dev/null 2>&1 || { err "unzip needed for .zip archives"; exit 1; }
+    unzip -q "${ARCHIVE_PATH}" -d "${EXTRACT}" || { err "unzip failed"; exit 4; }
+    ;;
+  *)
+    err "unsupported archive type: ${ARCHIVE_PATH}"
+    exit 4
+    ;;
+esac
+
+# --- resolve install shape ------------------------------------------------
+
+TYPE="${TYPE_DECLARED}"
+if [ -z "${TYPE}" ] || [ "${TYPE}" = "null" ]; then
+  # Auto-detect: look for an executable file matching <name> anywhere in the
+  # extracted tree. Match → binary. Else → tree.
+  if find "${EXTRACT}" -type f -name "${NAME}" -perm -u+x 2>/dev/null | grep -q .; then
+    TYPE="binary"
+  else
+    TYPE="tree"
+  fi
+fi
+
+# --- install --------------------------------------------------------------
+
+case "${TYPE}" in
+  binary)
+    BIN_SRC="$(find "${EXTRACT}" -type f -name "${NAME}" -perm -u+x 2>/dev/null | head -1)"
+    if [ -z "${BIN_SRC}" ]; then
+      # Fall back to the first executable file in the archive (e.g. when the
+      # binary is named differently than the artifact key).
+      BIN_SRC="$(find "${EXTRACT}" -type f -perm -u+x 2>/dev/null | head -1)"
+    fi
+    if [ -z "${BIN_SRC}" ]; then
+      err "no executable file found in archive for binary install"
+      exit 4
+    fi
+    install -m 0755 "${BIN_SRC}" "${TARGET}/${NAME}"
+    echo "${VERSION_PIN}" > "${STAMP_BIN}"
+    echo "fetch-artifact: installed ${NAME} ${VERSION_PIN} → ${TARGET}/${NAME}"
+    ;;
+  tree)
+    DEST="${TARGET}/${NAME}"
+    rm -rf "${DEST}"
+    mkdir -p "${DEST}"
+    # Detect single-top-level-dir tarballs (the GH convention) and unwrap.
+    TOP_ENTRIES="$(find "${EXTRACT}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
+    SINGLE_TOP="$(find "${EXTRACT}" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    if [ "${TOP_ENTRIES}" = "1" ] && [ -n "${SINGLE_TOP}" ]; then
+      cp -R "${SINGLE_TOP}"/. "${DEST}/"
+    else
+      cp -R "${EXTRACT}"/. "${DEST}/"
+    fi
+    echo "${VERSION_PIN}" > "${STAMP_TREE}"
+    echo "fetch-artifact: installed ${NAME} ${VERSION_PIN} → ${DEST}/"
+    ;;
+  *)
+    err "unknown type: ${TYPE} (must be 'binary' or 'tree')"
+    exit 1
+    ;;
+esac

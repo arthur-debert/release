@@ -1,0 +1,102 @@
+name: fetch-artifact
+description: |
+  Install a pinned cross-repo artifact from a GH release. Reads the
+  canonical `artifacts.json` schema (see arthur-debert/release
+  docs/artifacts-schema.md). Idempotent — re-runs with the same pin
+  are no-ops via version-stamp files. Wraps the same `bin/fetch-artifact`
+  CLI used locally by `scripts/setup-dev-env.sh`, so CI and local paths
+  exercise identical code.
+
+inputs:
+  artifact:
+    description: Name of the artifact to fetch (must be a top-level key in the manifest).
+    required: true
+  manifest:
+    description: Path to artifacts.json relative to the consumer repo root.
+    required: false
+    default: artifacts.json
+  target:
+    description: Install directory. Default $HOME/.local/bin.
+    required: false
+    default: ""
+  arch:
+    description: Override host arch detection (rust-target-triple).
+    required: false
+    default: ""
+  no-cache:
+    description: Force re-download even if the version-stamp file matches.
+    required: false
+    default: "false"
+
+outputs:
+  installed-path:
+    description: Absolute path where the artifact was installed.
+    value: ${{ steps.fetch.outputs.installed-path }}
+  version:
+    description: Pinned version that was installed.
+    value: ${{ steps.fetch.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve target directory
+      id: target
+      shell: bash
+      env:
+        TARGET_IN: ${{ inputs.target }}
+      run: |
+        target="${TARGET_IN}"
+        if [ -z "${target}" ]; then
+          target="${HOME}/.local/bin"
+        fi
+        mkdir -p "${target}"
+        echo "target=${target}" >> "${GITHUB_OUTPUT}"
+
+    - name: fetch-artifact
+      id: fetch
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.artifact }}
+        MANIFEST: ${{ inputs.manifest }}
+        TARGET: ${{ steps.target.outputs.target }}
+        ARCH_IN: ${{ inputs.arch }}
+        NO_CACHE: ${{ inputs.no-cache }}
+        # GH_TOKEN must be set by the caller; this action does not read
+        # secrets directly (composite actions can't). Caller provides via:
+        #   env: { GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
+      run: |
+        set -euo pipefail
+        CLI="${{ github.action_path }}/../../../bin/fetch-artifact"
+        if [ ! -x "${CLI}" ]; then
+          echo "::error::bin/fetch-artifact missing or not executable at ${CLI}"
+          exit 1
+        fi
+
+        ARGS=("${ARTIFACT}" --manifest "${MANIFEST}" --target "${TARGET}")
+        if [ -n "${ARCH_IN}" ]; then
+          ARGS+=(--arch "${ARCH_IN}")
+        fi
+        if [ "${NO_CACHE}" = "true" ]; then
+          ARGS+=(--no-cache)
+        fi
+
+        "${CLI}" "${ARGS[@]}"
+
+        # Resolve installed path (binary vs tree) and emit outputs.
+        BIN_PATH="${TARGET}/${ARTIFACT}"
+        TREE_PATH="${TARGET}/${ARTIFACT}"
+        if [ -f "${BIN_PATH}" ] && [ -x "${BIN_PATH}" ]; then
+          INSTALLED="${BIN_PATH}"
+        elif [ -d "${TREE_PATH}" ]; then
+          INSTALLED="${TREE_PATH}"
+        else
+          INSTALLED=""
+        fi
+
+        # Read the version from whichever stamp was written.
+        VERSION="$(cat "${TARGET}/.${ARTIFACT}.version" 2>/dev/null \
+                   || cat "${TREE_PATH}/.version" 2>/dev/null \
+                   || echo "")"
+
+        echo "installed-path=${INSTALLED}" >> "${GITHUB_OUTPUT}"
+        echo "version=${VERSION}" >> "${GITHUB_OUTPUT}"

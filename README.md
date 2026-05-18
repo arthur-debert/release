@@ -178,6 +178,16 @@ workflows cover ~80% of the benefit at ~5% of the cost.
 
 - ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
   (see `git tag` for the current pin).
+- ✅ **Cross-repo artifact fetcher** —
+  [`bin/fetch-artifact`](bin/fetch-artifact) +
+  [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
+  read the canonical `artifacts.json` schema (see
+  [`docs/artifacts-schema.md`](docs/artifacts-schema.md)) and install
+  pinned cross-repo binaries / source trees from GH releases. Used by
+  `scripts/setup-dev-env.sh` locally and by stack reusable workflows
+  in CI — single implementation, single bug surface. Unblocks the
+  electron-app / vscode-ext / nvim-plugin / python-pkg stack rollouts
+  (they all consume upstream artifacts).
 - ✅ **Cloud-session bootstrap** — `env/setup.sh` + canonical
   `templates/setup-dev-env.sh` + `templates/.claude-settings.json`
   deployed to all 16 consumer repos. Five iteration rounds folded
