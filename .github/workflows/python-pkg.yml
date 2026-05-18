@@ -156,6 +156,15 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
+          # cache-dependency-glob defaults to **/uv.lock, and setup-uv@v3
+          # errors hard when the glob matches no files (e.g. setuptools-
+          # backed projects with no uv.lock). Provide both globs so
+          # either lockfile or pyproject keys the cache; first existing
+          # match wins. Cache fall-through on a fresh release run is
+          # cheap compared to a hard fail.
+          cache-dependency-glob: |
+            **/uv.lock
+            **/pyproject.toml
           enable-cache: true
 
       - name: Set up Python

@@ -176,46 +176,32 @@ jobs:
             echo "targets=$(jq -n '[{target:"",os:"ubuntu-latest",rust:"",platform:"any",arch:"any"}]' -c)" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
-          # Whitelist every supported vsce target — silently
-          # defaulting unknowns to linux/ubuntu-latest (the previous
-          # `else` branch) made target-list typos invisible and would
-          # pass wrong RUST_TARGET to the pre-package hook. Fail-fast
-          # with the list of valid values instead.
-          valid='["darwin-arm64","darwin-x64","linux-x64","linux-arm64","linux-armhf","alpine-x64","alpine-arm64","win32-x64","win32-arm64","web"]'
-          json="$(echo "${TARGETS}" | jq -R -c --argjson valid "${valid}" '
-            split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(
-              . as $t |
-              if ($valid | index($t)) | not then
-                error("unsupported vsce target: \"" + $t + "\". Valid: " + ($valid | join(", ")))
-              else . end |
-              {
-                target: $t,
-                os:
-                  if $t | startswith("darwin-") then "macos-latest"
-                  elif $t | startswith("win32-") then "windows-latest"
-                  else "ubuntu-latest"     # linux-*, alpine-*, web
-                  end,
-                rust:
-                  if $t == "darwin-arm64" then "aarch64-apple-darwin"
-                  elif $t == "darwin-x64" then "x86_64-apple-darwin"
-                  elif $t == "linux-x64" then "x86_64-unknown-linux-gnu"
-                  elif $t == "linux-arm64" then "aarch64-unknown-linux-gnu"
-                  elif $t == "linux-armhf" then "armv7-unknown-linux-gnueabihf"
-                  elif $t == "alpine-x64" then "x86_64-unknown-linux-musl"
-                  elif $t == "alpine-arm64" then "aarch64-unknown-linux-musl"
-                  elif $t == "win32-x64" then "x86_64-pc-windows-msvc"
-                  elif $t == "win32-arm64" then "aarch64-pc-windows-msvc"
-                  else ""    # "web" has no native arch — hook should skip fetch
-                  end,
-                platform:
-                  if $t | startswith("darwin-") then "mac"
-                  elif $t | startswith("win32-") then "windows"
-                  elif $t == "web" then "web"
-                  else "linux"             # linux-*, alpine-*
-                  end,
-                arch: ($t | split("-") | .[-1])
-              }
-            )
+          # Lookup-table form. The previous if/elif/end chain triggered
+          # a "Unix shell quoting issues?" jq parse error on GH runners
+          # (couldn't repro locally; the `# linux-*, alpine-*, web`
+          # comments interacted badly with the multi-line script and
+          # left the parser at <top-level> on the next `if`). Plain
+          # data-lookup is both more robust and easier to extend.
+          map='{
+            "darwin-arm64": {"os":"macos-latest","rust":"aarch64-apple-darwin","platform":"mac"},
+            "darwin-x64":   {"os":"macos-latest","rust":"x86_64-apple-darwin","platform":"mac"},
+            "linux-x64":    {"os":"ubuntu-latest","rust":"x86_64-unknown-linux-gnu","platform":"linux"},
+            "linux-arm64":  {"os":"ubuntu-latest","rust":"aarch64-unknown-linux-gnu","platform":"linux"},
+            "linux-armhf":  {"os":"ubuntu-latest","rust":"armv7-unknown-linux-gnueabihf","platform":"linux"},
+            "alpine-x64":   {"os":"ubuntu-latest","rust":"x86_64-unknown-linux-musl","platform":"linux"},
+            "alpine-arm64": {"os":"ubuntu-latest","rust":"aarch64-unknown-linux-musl","platform":"linux"},
+            "win32-x64":    {"os":"windows-latest","rust":"x86_64-pc-windows-msvc","platform":"windows"},
+            "win32-arm64":  {"os":"windows-latest","rust":"aarch64-pc-windows-msvc","platform":"windows"},
+            "web":          {"os":"ubuntu-latest","rust":"","platform":"web"}
+          }'
+          json="$(echo "${TARGETS}" | jq -R -c --argjson map "${map}" '
+            split(",")
+            | map(gsub("^\\s+|\\s+$"; ""))
+            | map(
+                . as $t
+                | ($map[$t] // error("unsupported vsce target: \"" + $t + "\". Valid: " + ($map | keys | join(", "))))
+                + {target: $t, arch: ($t | split("-") | .[-1])}
+              )
           ')"
           echo "targets=${json}" >> "${GITHUB_OUTPUT}"
 
