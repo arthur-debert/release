@@ -52,7 +52,7 @@ on:
         required: false
         default: 'CHANGELOG.md'
       action-manifest:
-        description: 'Path to action.yml / action.yaml at the action root. Verified to exist as a sanity check.'
+        description: 'Path to action.yml / action.yaml at the action root. Verified to exist as a sanity check. Pass an empty string to skip the check — useful for multi-action repos (e.g. arthur-debert/release itself, which ships many composite actions under .github/actions/<name>/action.yml plus reusable workflows under .github/workflows/, but has no single action.yml at the root).'
         type: string
         required: false
         default: 'action.yml'
@@ -115,17 +115,19 @@ jobs:
             IS_PRERELEASE=true
           fi
 
-          # Sanity check — refuse to release a repo with no action.yml.
-          # Without this we'd happily tag a non-action repo if the
-          # caller accidentally pointed `gh-action.yml@v1` at the wrong
-          # callee. Allow `.yaml` extension as a fallback (GH accepts
-          # both).
-          if [ ! -f "${MANIFEST}" ]; then
+          # Sanity check — refuse to release a repo with no action.yml,
+          # so a caller that accidentally points `gh-action.yml@v1` at
+          # the wrong callee fails loud and early. Allow `.yaml` as a
+          # fallback (GH accepts both). Empty MANIFEST disables the
+          # check entirely (for multi-action repos that ship a bundle
+          # of composite actions + reusable workflows but have no
+          # single action.yml at the root).
+          if [ -n "${MANIFEST}" ] && [ ! -f "${MANIFEST}" ]; then
             alt="${MANIFEST%.yml}.yaml"
             if [ "${MANIFEST}" != "${alt}" ] && [ -f "${alt}" ]; then
               MANIFEST="${alt}"
             else
-              echo "::error::action manifest not found: ${MANIFEST} (or ${alt}). Is this a GH Actions repo?"
+              echo "::error::action manifest not found: ${MANIFEST} (or ${alt}). Is this a GH Actions repo? Pass action-manifest: '' to skip this check for multi-action repos."
               exit 1
             fi
           fi

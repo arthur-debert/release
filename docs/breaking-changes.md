@@ -9,6 +9,20 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.4.1 (2026-05-18) — fix: gh-action skip manifest check for multi-action repos
+
+**Type:** PATCH (input contract is unchanged; new behavior is opt-in
+via passing an empty value to an existing input).
+
+`gh-action.yml`'s `action-manifest` input still defaults to
+`action.yml` and still fails the prepare job if missing. New
+behavior: passing an empty string skips the sanity check entirely.
+For multi-action repos that ship a bundle of composite actions
+(`.github/actions/<name>/action.yml`) and/or reusable workflows
+(`.github/workflows/<name>.yml`) but have no single `action.yml`
+at the repo root — `arthur-debert/release` itself being the
+motivating case.
+
 ## v1.4.0 (2026-05-18) — additive: gh-action stack workflow
 
 **Type:** MINOR (new category workflow, no consumer breakage).
