@@ -150,9 +150,17 @@ runs:
         # "version" field inside it. yarn.lock and pnpm-lock.yaml don't
         # carry the project's own version, so they stay unchanged — only
         # add them if `git status` reports a modification.
+        #
+        # In monorepo / non-root layouts, `npm version` updated the
+        # lockfile inside the manifest's directory; check both the repo
+        # root AND that directory so we don't lose the per-package lock.
         git add "$MANIFEST"
+        manifest_dir="$(dirname "$MANIFEST")"
         for lock in package-lock.json yarn.lock pnpm-lock.yaml; do
           [ -f "$lock" ] && git add -- "$lock" 2>/dev/null || true
+          if [ "$manifest_dir" != "." ] && [ -f "$manifest_dir/$lock" ]; then
+            git add -- "$manifest_dir/$lock" 2>/dev/null || true
+          fi
         done
         if [ "$IS_PRERELEASE" != "true" ] && [ -n "$CHANGELOG" ] && [ -f "$CHANGELOG" ]; then
           git add "$CHANGELOG"

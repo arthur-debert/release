@@ -172,41 +172,63 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Build (electron-builder, mac --${{ matrix.arch }})
+      # Use electron-builder's NATIVE signing + notarization flow rather
+      # than post-build sign-mac/notarize-mac. electron-builder produces
+      # the .dmg with the .app already embedded; signing the .app
+      # afterwards doesn't re-embed it, so a post-build sign-mac would
+      # leave the released DMG carrying an unsigned bundle and fail
+      # notarization/Gatekeeper. electron-builder's native pass signs
+      # the .app, embeds the signed bundle in the DMG, AND notarizes
+      # in one go when these env vars are set:
+      #
+      #   CSC_LINK              — path to .p12 cert (decoded from
+      #                           APPLE_CERTIFICATE_P12_BASE64)
+      #   CSC_KEY_PASSWORD      — password for the .p12
+      #   APPLE_API_KEY         — path to .p8 (decoded from
+      #                           ASC_API_KEY_BASE64)
+      #   APPLE_API_KEY_ID      — App Store Connect key ID
+      #   APPLE_API_KEY_ISSUER  — App Store Connect issuer UUID
+      #
+      # Missing vars → electron-builder skips signing/notarization with
+      # warnings on stderr (graceful degradation matching the rust-cli
+      # pipeline's behaviour).
+      - name: Decode signing/notarization credentials
         env:
-          # Skip electron-builder's own signing pass — we sign with the
-          # sign-mac composite action in the next step for consistency
-          # with the rust-cli pipeline.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_B64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          CSC_PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          ASC_KEY_B64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          creds_dir="${RUNNER_TEMP}/electron-creds"
+          mkdir -p "${creds_dir}"
+          chmod 700 "${creds_dir}"
+          if [ -n "${CSC_B64}" ] && [ -n "${CSC_PASS}" ]; then
+            echo "${CSC_B64}" | base64 -d > "${creds_dir}/csc.p12"
+            {
+              echo "CSC_LINK=${creds_dir}/csc.p12"
+              echo "CSC_KEY_PASSWORD=${CSC_PASS}"
+            } >> "${GITHUB_ENV}"
+            echo "macOS code-signing configured"
+          else
+            echo "::warning::No macOS signing cert configured — electron-builder will produce an unsigned bundle."
+          fi
+          if [ -n "${ASC_KEY_B64}" ] && [ -n "${ASC_KEY_ID}" ] && [ -n "${ASC_ISSUER}" ]; then
+            echo "${ASC_KEY_B64}" | base64 -d > "${creds_dir}/AuthKey.p8"
+            {
+              echo "APPLE_API_KEY=${creds_dir}/AuthKey.p8"
+              echo "APPLE_API_KEY_ID=${ASC_KEY_ID}"
+              echo "APPLE_API_KEY_ISSUER=${ASC_ISSUER}"
+            } >> "${GITHUB_ENV}"
+            echo "macOS notarization configured"
+          else
+            echo "::warning::No App Store Connect API key configured — electron-builder will skip notarization."
+          fi
+
+      - name: Build (electron-builder, mac --${{ matrix.arch }})
         run: |
           npm run build -- --mac --${{ matrix.arch }} --publish never
-
-      # No step-level secret guard needed: sign-mac and notarize-mac
-      # both gracefully skip when their secret inputs are empty (they
-      # emit a warning and exit 0). The matching `if:` on a step would
-      # need a prior decision step anyway because GH evaluates step-
-      # level `if:` before per-step env.
-      - name: Sign macOS .app + .dmg
-        uses: arthur-debert/release/.github/actions/sign-mac@v1
-        with:
-          cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          entitlements: ${{ inputs.entitlements }}
-          # Sign inner bundle paths first, then the .dmg. electron-
-          # builder puts the .app under dist/mac-<arch>/ and the .dmg
-          # at dist/*.dmg.
-          paths: |
-            ${{ env.ELECTRON_BUILDER_OUT }}/mac-${{ matrix.arch }}/*.app
-            ${{ env.ELECTRON_BUILDER_OUT }}/*-${{ inputs.version }}-${{ matrix.arch }}.dmg
-
-      - name: Notarize macOS .dmg
-        uses: arthur-debert/release/.github/actions/notarize-mac@v1
-        with:
-          artifact-path: ${{ env.ELECTRON_BUILDER_OUT }}/*-${{ inputs.version }}-${{ matrix.arch }}.dmg
-          asc-key-base64: ${{ secrets.ASC_API_KEY_BASE64 }}
-          asc-key-id: ${{ secrets.ASC_API_KEY_ID }}
-          asc-issuer-id: ${{ secrets.ASC_API_ISSUER_ID }}
-          staple: 'true'
 
       - name: Upload mac artifacts
         uses: actions/upload-artifact@v4
@@ -246,14 +268,27 @@ jobs:
         run: |
           npm run build -- --linux --${{ matrix.arch }} --publish never
 
-      - name: Upload linux artifacts
+      # AppImage is the canonical linux artifact for electron-app and
+      # required for the release to be useful; .deb is optional (only
+      # produced if the consumer's electron-builder config has the
+      # `deb` target enabled). Split into two uploads so a missing
+      # AppImage fails the build instead of warn-and-continue (Copilot
+      # review on #65: warn would let the release job collect a
+      # half-built linux artifact set).
+      - name: Upload linux .AppImage (required)
         uses: actions/upload-artifact@v4
         with:
-          name: electron-app-linux-${{ matrix.arch }}
-          path: |
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.AppImage
-            ${{ env.ELECTRON_BUILDER_OUT }}/*.deb
-          if-no-files-found: warn
+          name: electron-app-linux-${{ matrix.arch }}-appimage
+          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload linux .deb (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-linux-${{ matrix.arch }}-deb
+          path: ${{ env.ELECTRON_BUILDER_OUT }}/*.deb
+          if-no-files-found: ignore
           retention-days: 7
 
   build-windows:
