@@ -1,0 +1,55 @@
+name: Release
+
+# Thin caller of this repo's own gh-action.yml@v1.
+#
+# Yes, this repo cuts ITS OWN release tags via the canonical
+# gh-action.yml stack workflow. Chicken-and-egg note: the first
+# tag that included gh-action.yml had to be cut manually (v1.4.0);
+# every subsequent patch / minor / major cut can go through this
+# caller now.
+#
+# What `gh-action.yml@v1` gives us here:
+# - validate semver + ensure release-time invariants
+# - tag + push HEAD
+# - GH release with auto-extracted notes (we override with
+#   changelog-path: '' since docs/breaking-changes.md is NOT
+#   Keep-a-Changelog format)
+# - advance the `v1` floating branch → new tag (the canonical
+#   distribution mechanism for this repo)
+#
+# Manual fall-back: if this workflow ever can't run (org outage,
+# permissions change), the entire flow is still doable by hand:
+#   git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
+#   git branch -f v1 vX.Y.Z && git push origin v1 --force-with-lease
+#   gh release create vX.Y.Z --notes "..."
+# See docs/breaking-changes.md for the format of release-note
+# bodies we usually attach.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 1.4.2 or 2.0.0-rc.1). No leading v.'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: arthur-debert/release/.github/workflows/gh-action.yml@v1
+    with:
+      version: ${{ inputs.version }}
+      # Multi-action repo: many composite actions under
+      # .github/actions/<name>/action.yml + reusable workflows.
+      # No single root action.yml — skip the manifest check.
+      action-manifest: ''
+      # docs/breaking-changes.md uses per-version section headings
+      # (`## v1.X.Y (date) — desc`), not Keep-a-Changelog
+      # `## [Unreleased]`. The workflow's awk-based roll would
+      # produce wrong output against this format. Disable the
+      # changelog handling; fall back to default release-note
+      # body. Future work could add a custom format parser.
+      changelog-path: ''
+      advance-major: true
