@@ -9,6 +9,48 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.6.0 (2026-05-18) — additive: tree-sitter stack workflow
+
+**Type:** MINOR (new category workflow; no consumer breakage).
+
+### What's new
+
+`.github/workflows/tree-sitter.yml` — reusable release pipeline
+for tree-sitter grammar repos. Pilot consumer:
+`lex-fmt/tree-sitter-lex`.
+
+Pipeline:
+- `preflight` validates `NPM_TOKEN` if `publish-npm=true`.
+- `corpus-test` (gated by `run-corpus-tests`, default true) runs
+  `tree-sitter generate` + `tree-sitter test` BEFORE `prepare`.
+  A corpus failure thus blocks the tag-push entirely — no
+  dangling tags on test failure.
+- `prepare` (`prepare-release-npm`) bumps `package.json` + rolls
+  changelog + tag + push.
+- `build` re-generates the parser, builds WASM, assembles the
+  canonical bundle (`<name>.wasm`, `grammar.js`, `package.json`,
+  `tree-sitter.json`, `src/parser.c`, `src/scanner.{c,cc}`,
+  `src/tree_sitter/*.h`, `queries/*.scm`), runs optional
+  `scripts/bundle-extras.sh` hook, tars to `tree-sitter.tar.gz`.
+- `publish-npm` (opt-in, default false) — uses `npm view` pre-check
+  for idempotency, lets `package.json` `publishConfig.access`
+  drive (no hardcoded `--access`).
+- `release` — GH release with bundle attached; gated on
+  `publish-npm` success-or-skipped.
+
+### Bundle layout is a contract
+
+Downstream consumers (e.g. `lex-fmt/vscode`'s
+`pre-vsce-package.sh`) extract specific files from
+`tree-sitter.tar.gz` by literal path. Bundle-layout changes are
+MAJOR for this stack. Hard errors on missing WASM or empty
+`queries/` enforce the contract at release time, not at
+downstream-install time.
+
+### Migration
+
+No action required for existing consumers. New optional stack.
+
 ## v1.5.0 (2026-05-18) — additive: nvim-plugin stack workflow + dogfood release.yml
 
 **Type:** MINOR (new category workflow + new caller in this repo;
