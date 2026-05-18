@@ -96,7 +96,8 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 |----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|--------------------------------------|------------------|-----------|----------------|
 | rust-lib       | W 📋            | W 📋       | —               | (cargo build)      | —          | (no binaries)     | A ✅ crates.io                       | —                | —         | A 📋           |
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
-| electron-app   | W 📋            | W 📋       | W 📋 playwright | W 📋 builder       | A 📋 mac   | W 📋              | (auto-updater)    | (cask, future)   | —         | A 📋           |
+| electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
+| tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | W 📋            | W 📋       | W 📋 ext-host   | W 📋 vsce package  | —          | W 📋              | A 📋 marketplace  | —                | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W 📋 (tag only)   | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W 📋 corpus| —               | W 📋 generate      | —          | W 📋              | A 📋 npm          | —                | —         | A 📋           |
@@ -178,12 +179,17 @@ workflows cover ~80% of the benefit at ~5% of the cost.
 
 - ✅ **rust-cli** — 6 consumers on `@v1`, action stable at v1.2.1
   (see `git tag` for the current pin).
-- 🚧 **electron-app** — slice 1 in flight (darwin-arm64 + linux-x64
-  build + electron-builder native signing/notarization on macOS + GH
-  release; Windows opt-in, produces unsigned binaries until slice 3).
-  Pilot consumer: `lex-fmt/lexed`. Followers: `arthur-debert/arami-app`,
-  `arthur-debert/simple-gal-ui`. Auto-updater feed + e2e-in-CI ship in
-  follow-on slices. See #43.
+- ✅ **electron-app** — slice 1 + 1.5 shipped at `@v1`. First
+  consumer migrated: `lex-fmt/lexed`. Other electron consumer
+  (`arthur-debert/simple-gal-ui`) pending migration. Windows builds
+  are opt-in and unsigned until slice 3; e2e/auto-updater are slice
+  2. See #43 (closed for slice 1) + the follow-up issues.
+- 🚧 **tauri-app** — new stack row added. Pilot consumer:
+  `arthur-debert/arami-app` (originally listed as an electron-app
+  follower; clarified as Tauri during the lexed-pilot review). Will
+  share ~70% of the electron-app shape (prepare-release-npm,
+  smoke convention, GH release) with its own build / signing
+  toolchain (tauri build, Tauri's APPLE_* env vars).
 - ✅ **Cross-repo artifact fetcher** —
   [`bin/fetch-artifact`](bin/fetch-artifact) +
   [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
@@ -202,11 +208,11 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   layouts), no-lockfile npm fallback, venv-CLI exposure on the
   agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
   validates changes without burning a cloud session.
-- 📋 then, in some order: rust-lib (clapfig, standout) · vscode-ext
-  (lex-fmt/vscode) · nvim-plugin (lex-fmt/nvim) · tree-sitter
-  (lex-fmt/tree-sitter-lex) · python-pkg (lex-fmt/mkdocs-lex) ·
-  gh-action (arthur-debert/simple-gal-action) · brew-tap
-  (arthur-debert/homebrew-tools).
+- 📋 then, in some order: rust-lib (clapfig, standout) · tauri-app
+  (arami-app) · vscode-ext (lex-fmt/vscode) · nvim-plugin
+  (lex-fmt/nvim) · tree-sitter (lex-fmt/tree-sitter-lex) · python-pkg
+  (lex-fmt/mkdocs-lex) · gh-action (arthur-debert/simple-gal-action)
+  · brew-tap (arthur-debert/homebrew-tools).
 
 Order is driven by: (a) is there a consumer blocked on it today,
 (b) does shipping the row unblock several at once. We complete one
