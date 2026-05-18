@@ -293,16 +293,23 @@ jobs:
           # prerelease suffix (`1.2.3-rc.1`). Without this, the
           # Marketplace classifies it as a stable release and
           # subscribers on prerelease channels miss it.
+          #
+          # Note: macOS runners ship bash 3.2, which raises an
+          # "unbound variable" error on `"${arr[@]}"` when `arr` is
+          # an empty array under `set -u`. The
+          # `${arr[@]+"${arr[@]}"}` idiom expands to nothing on
+          # empty/unset and to the elements otherwise — bash 3.2
+          # safe.
           pre_flag=()
           if [ "${PRERELEASE}" = "true" ]; then
             pre_flag=(--pre-release)
           fi
           if [ -n "${TARGET}" ]; then
             out="${NAME}-${TARGET}.vsix"
-            npx --yes @vscode/vsce package "${pre_flag[@]}" --target "${TARGET}" -o "${out}"
+            npx --yes @vscode/vsce package ${pre_flag[@]+"${pre_flag[@]}"} --target "${TARGET}" -o "${out}"
           else
             out="${NAME}.vsix"
-            npx --yes @vscode/vsce package "${pre_flag[@]}" -o "${out}"
+            npx --yes @vscode/vsce package ${pre_flag[@]+"${pre_flag[@]}"} -o "${out}"
           fi
           echo "vsix=${out}" >> "${GITHUB_OUTPUT}"
 
@@ -353,14 +360,15 @@ jobs:
             exit 1
           fi
           # Match the package-side --pre-release flag so the publish
-          # call carries the same classification.
+          # call carries the same classification. Bash-3.2-safe
+          # empty-array expansion (see Package VSIX step note).
           pre_flag=()
           if [ "${PRERELEASE}" = "true" ]; then
             pre_flag=(--pre-release)
           fi
           for vsix in "${vsixes[@]}"; do
             echo "→ publishing ${vsix}"
-            npx --yes @vscode/vsce publish "${pre_flag[@]}" --packagePath "${vsix}"
+            npx --yes @vscode/vsce publish ${pre_flag[@]+"${pre_flag[@]}"} --packagePath "${vsix}"
           done
 
   # -------------------------------------------------------------------
@@ -396,14 +404,15 @@ jobs:
           shopt -u nullglob
           # ovsx publish accepts --pre-release on recent versions
           # (≥0.10). Older versions ignore unknown flags rather than
-          # erroring, so this is safe.
+          # erroring, so this is safe. Bash-3.2-safe empty-array
+          # expansion (see Package VSIX step note).
           pre_flag=()
           if [ "${PRERELEASE}" = "true" ]; then
             pre_flag=(--pre-release)
           fi
           for vsix in "${vsixes[@]}"; do
             echo "→ publishing ${vsix} to Open VSX"
-            npx --yes ovsx publish "${pre_flag[@]}" "${vsix}" -p "${OVSX_PAT}"
+            npx --yes ovsx publish ${pre_flag[@]+"${pre_flag[@]}"} "${vsix}" -p "${OVSX_PAT}"
           done
 
   # -------------------------------------------------------------------
