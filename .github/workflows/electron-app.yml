@@ -100,14 +100,15 @@ on:
 permissions:
   contents: write
 
-env:
-  # Output dir is parameterized via the `output-dir` input — defaults to
-  # electron-builder's own default (`dist`). lexed overrides to `release`
-  # via its `directories.output` config. See `inputs.output-dir`.
-  # (Job steps reference `${{ inputs.output-dir }}` directly; the env
-  # var here is kept only for back-compat if a future job needs a
-  # default fall-through.)
-  ELECTRON_BUILDER_OUT: ${{ inputs.output-dir || 'dist' }}
+# Note on customizing the build for sign-invalidating work (e.g. signing
+# helper bundles like .appex extensions that electron-builder doesn't
+# recurse into): do NOT do this in a post-build step in this workflow —
+# electron-builder signs AND notarizes inside the build step, and any
+# subsequent file modification invalidates the notarization, shipping a
+# broken artifact. Instead, use electron-builder's own `afterPack`
+# lifecycle hook (a JS function declared in package.json
+# `build.afterPack`), which runs BETWEEN pack and sign. That's the
+# canonical entry point for re-signing nested bundles.
 
 jobs:
   # -------------------------------------------------------------------
@@ -243,6 +244,31 @@ jobs:
             echo "::warning::No App Store Connect API key configured — electron-builder will skip notarization."
           fi
 
+      - name: Validate notarize input
+        shell: bash
+        env:
+          NOTARIZE_OVERRIDE: ${{ inputs.notarize }}
+          ASC_KEY_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
+        run: |
+          # Whitelist: true | false | empty. Anything else is a
+          # caller-side typo that electron-builder would silently
+          # accept or fail on confusingly — fail early instead.
+          case "${NOTARIZE_OVERRIDE}" in
+            ''|true|false) ;;
+            *)
+              echo "::error::inputs.notarize must be 'true', 'false', or empty (got: '${NOTARIZE_OVERRIDE}')"
+              exit 1
+              ;;
+          esac
+          # Fail fast when notarize is forced on without ASC secrets —
+          # otherwise the build runs, "notarization" silently no-ops,
+          # and the released DMG hits a bad-UX Gatekeeper prompt on
+          # user machines.
+          if [ "${NOTARIZE_OVERRIDE}" = "true" ] && [ "${ASC_KEY_PRESENT}" = "no" ]; then
+            echo "::error::inputs.notarize=true but ASC_API_KEY_BASE64 secret is missing. Either configure the ASC_API_KEY_* secrets on this repo or set notarize='' (respect package.json) / 'false'."
+            exit 1
+          fi
+
       - name: Build (electron-builder, mac --${{ matrix.arch }})
         shell: bash
         env:
@@ -255,28 +281,18 @@ jobs:
           fi
           npm run build -- "${args[@]}"
 
-      # Post-build hook (convention): scripts/post-build.sh. Use this
-      # for consumer-specific work electron-builder doesn't handle — the
-      # canonical example is re-signing helper bundles like a Quick Look
-      # appex that electron-builder doesn't recurse into. The script
-      # receives PLATFORM (mac|linux|windows), ARCH, and PACKAGE_DIR via
-      # env; consumer branches on PLATFORM as needed. Skipped silently
-      # when the file doesn't exist.
-      - name: Post-build hook (mac)
-        if: hashFiles('scripts/post-build.sh') != ''
-        shell: bash
-        env:
-          PLATFORM: mac
-          ARCH: ${{ matrix.arch }}
-          PACKAGE_DIR: ${{ inputs.output-dir }}
-        run: bash scripts/post-build.sh
-
       # Smoke test (convention): scripts/smoke.sh. Catches catastrophic
-      # build issues (wrong binary path, dylib missing, etc.) that no
-      # other test can — the only way to know the packaged build doesn't
-      # crash on launch is to launch it. PLATFORM/ARCH/PACKAGE_DIR env
-      # vars are exposed; consumer's script handles xvfb-run on linux,
-      # binary-path resolution per arch, etc.
+      # build issues (wrong binary path, dylib missing, Windows path
+      # quirks, etc.) that no other test can — the only way to know
+      # the packaged build doesn't crash on launch is to launch it.
+      # PLATFORM/ARCH/PACKAGE_DIR env vars are exposed; consumer's
+      # script handles xvfb-run on linux, binary-path resolution per
+      # arch, etc.
+      #
+      # Smoke runs AFTER signing+notarization. Any modification to the
+      # artifact in this step would invalidate notarization — keep it
+      # read-only (launch the binary, check exit / output; don't
+      # rewrite files).
       - name: Smoke test (mac)
         if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
@@ -323,15 +339,6 @@ jobs:
       - name: Build (electron-builder, linux --${{ matrix.arch }})
         run: |
           npm run build -- --linux --${{ matrix.arch }} --publish never
-
-      - name: Post-build hook (linux)
-        if: hashFiles('scripts/post-build.sh') != ''
-        shell: bash
-        env:
-          PLATFORM: linux
-          ARCH: ${{ matrix.arch }}
-          PACKAGE_DIR: ${{ inputs.output-dir }}
-        run: bash scripts/post-build.sh
 
       - name: Smoke test (linux)
         if: hashFiles('scripts/smoke.sh') != ''
@@ -396,15 +403,6 @@ jobs:
         run: |
           npm run build -- --win --${{ matrix.arch }} --publish never
         shell: bash
-
-      - name: Post-build hook (windows)
-        if: hashFiles('scripts/post-build.sh') != ''
-        shell: bash
-        env:
-          PLATFORM: windows
-          ARCH: ${{ matrix.arch }}
-          PACKAGE_DIR: ${{ inputs.output-dir }}
-        run: bash scripts/post-build.sh
 
       - name: Smoke test (windows)
         if: hashFiles('scripts/smoke.sh') != ''
