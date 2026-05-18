@@ -1,0 +1,161 @@
+name: Rust lib release
+
+# Reusable release workflow for Rust **library** crates (no binaries).
+# Consumers call this from their own .github/workflows/release.yml as a
+# thin caller pinned to @v1. See README §Stack matrix row "rust-lib"
+# and the tracking issue #44 for the column-by-column scope.
+#
+# What this is NOT
+# ----------------
+# This workflow does NOT cross-compile, sign, build .deb packages,
+# render Homebrew formulas, or attach binary artifacts to GH releases.
+# Those concerns live in the sibling `rust-cli` workflow. If you have
+# a Rust workspace that publishes BOTH a library crate AND a CLI
+# binary, use `rust-cli.yml@v1` — it handles both since it's a strict
+# superset.
+#
+# Trigger
+# -------
+# `workflow_dispatch` with a `version` input — matches the cross-repo
+# cascade-handler contract (`scripts/release/trigger-release` invokes
+# via `gh workflow run release.yml -f version=…`). Migration from a
+# tag-push trigger requires updating the consumer's trigger-release
+# primitive (if any); see lex-fmt/lexed#103 for the equivalent pattern.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 0.18.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      crates:
+        description: |
+          Comma-separated crate names in **topological dep order** (deps
+          before dependents). Even single-crate libs should list the
+          one crate name explicitly. Workspaces with multiple
+          publishable crates need the full order: `core-lib,utils,api`.
+        type: string
+        required: true
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section). Empty to skip changelog handling.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout. Most lib crates don''t need this.'
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push (bypasses ruleset). Falls back to GITHUB_TOKEN.'
+        required: false
+      CRATES_IO_KEY:
+        description: 'crates.io API token. Required for publish.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 1. Prepare: validate version, bump Cargo.toml(s) workspace-wide,
+  #    roll changelog, commit + tag + push. Resume-safe if the tag
+  #    already exists at the requested version (the prepare-release
+  #    composite action handles validation + skip).
+  # -------------------------------------------------------------------
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+
+      - uses: arthur-debert/release/.github/actions/prepare-release@v1
+        id: prep
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+  # -------------------------------------------------------------------
+  # 2. Publish crates to crates.io in declared topological order. The
+  #    publish-crate composite action's underlying script
+  #    (scripts/ci-publish-crate.sh) tolerates already-published
+  #    versions via the two-tier "JSON API pre-check + cargo output
+  #    grep" pattern — so a resumed release that's partially
+  #    published doesn't fail.
+  # -------------------------------------------------------------------
+  publish-crates:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+
+      - uses: arthur-debert/release/.github/actions/publish-crate@v1
+        with:
+          crates: ${{ inputs.crates }}
+          token: ${{ secrets.CRATES_IO_KEY }}
+
+  # -------------------------------------------------------------------
+  # 3. Create the GitHub release. Library releases don't carry binary
+  #    artifacts (the canonical distribution channel is crates.io), but
+  #    we still create a GH release so:
+  #    - Users see the changelog on github.com/<repo>/releases.
+  #    - The release becomes a stable anchor downstream consumers can
+  #      pin against (e.g. for security→patch glue).
+  #    - `repository_dispatch upstream-released` events can fire from
+  #      the caller after this returns (cascade pattern).
+  # -------------------------------------------------------------------
+  create-release:
+    needs: [prepare, publish-crates]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_flag=""
+          if [ "$PRERELEASE" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          # Resume-on-existing: if the release already exists for this
+          # tag (rare, but possible if create-release is re-run), edit
+          # the notes in place; else create it.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists — updating notes."
+            gh release edit "$TAG" --notes-file release-notes.md
+          else
+            gh release create "$TAG" \
+              $prerelease_flag \
+              --title "$TAG" \
+              --notes-file release-notes.md
+          fi

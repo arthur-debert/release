@@ -94,7 +94,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 
 | Stack          | format/lint     | unit tests | e2e             | build              | sign       | gh release        | pkg publish                          | dist: brew       | dist: apt | security→patch |
 |----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|--------------------------------------|------------------|-----------|----------------|
-| rust-lib       | W 📋            | W 📋       | —               | (cargo build)      | —          | (no binaries)     | A ✅ crates.io                       | —                | —         | A 📋           |
+| rust-lib       | (consumer)      | (consumer) | —               | ✅ via publish     | —          | W ✅ (notes)      | A ✅ crates.io                       | —                | —         | A 📋           |
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W 📋 tauri build   | A 📋 mac   | W 📋              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
@@ -184,6 +184,11 @@ workflows cover ~80% of the benefit at ~5% of the cost.
   (`arthur-debert/simple-gal-ui`) pending migration. Windows builds
   are opt-in and unsigned until slice 3; e2e/auto-updater are slice
   2. See #43 (closed for slice 1) + the follow-up issues.
+- 🚧 **rust-lib** — workflow shipped at `@v1`. Three pilot consumers
+  to migrate: `arthur-debert/clapfig` (next), `arthur-debert/standout`,
+  `lex-fmt/zed-lex`. Much smaller surface than rust-cli (no cross-
+  compile, no signing, no brew/apt, just crates.io publish + notes-
+  only GH release).
 - 🚧 **tauri-app** — new stack row added. Pilot consumer:
   `arthur-debert/arami-app` (originally listed as an electron-app
   follower; clarified as Tauri during the lexed-pilot review). Will
