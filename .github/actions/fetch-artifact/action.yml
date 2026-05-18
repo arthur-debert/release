@@ -50,6 +50,11 @@ runs:
           target="${HOME}/.local/bin"
         fi
         mkdir -p "${target}"
+        # Always export the absolute path so downstream steps using
+        # `installed-path` get an absolute reference, even when the
+        # caller passes a relative `target` like `bin` or
+        # `${{ github.workspace }}/x`.
+        target="$(cd "${target}" && pwd)"
         echo "target=${target}" >> "${GITHUB_OUTPUT}"
 
     - name: fetch-artifact

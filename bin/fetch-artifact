@@ -105,14 +105,19 @@ if ! jq -e --arg n "${NAME}" '.[$n]' "${MANIFEST}" >/dev/null 2>&1; then
 fi
 
 ENTRY="$(jq --arg n "${NAME}" '.[$n]' "${MANIFEST}")"
-VERSION_PIN="$(jq -r '.version' <<<"${ENTRY}")"
-REPO="$(jq -r '.repo' <<<"${ENTRY}")"
-ASSET_PATTERN="$(jq -r '.asset // ""' <<<"${ENTRY}")"
-TYPE_DECLARED="$(jq -r '.type // ""' <<<"${ENTRY}")"
+# `// empty` collapses null/missing to "" so later checks are simple
+# `[ -z ]` rather than redundant null-string comparison.
+VERSION_PIN="$(jq -r '.version // empty' <<<"${ENTRY}")"
+REPO="$(jq -r '.repo // empty' <<<"${ENTRY}")"
+ASSET_PATTERN="$(jq -r '.asset // empty' <<<"${ENTRY}")"
+TYPE_DECLARED="$(jq -r '.type // empty' <<<"${ENTRY}")"
 
+# Use bash's native indirect-expansion ${!var} rather than `eval`.
+# `eval` here would execute any command substitutions present in the
+# manifest fields, which is a code-execution path; ${!var} is purely
+# variable indirection and has no such hazard.
 for field in VERSION_PIN REPO; do
-  v="$(eval echo "\${$field}")"
-  if [ -z "${v}" ] || [ "${v}" = "null" ]; then
+  if [ -z "${!field}" ]; then
     err "${MANIFEST}:${NAME}: missing required field ${field,,}"
     exit 1
   fi
@@ -144,7 +149,7 @@ ARCH="$(resolve_arch)"
 
 # --- compute asset name ---------------------------------------------------
 
-if [ -z "${ASSET_PATTERN}" ] || [ "${ASSET_PATTERN}" = "null" ]; then
+if [ -z "${ASSET_PATTERN}" ]; then
   ASSET_PATTERN="${NAME}-{arch}.tar.gz"
 fi
 ASSET="${ASSET_PATTERN//\{arch\}/${ARCH}}"
@@ -214,7 +219,7 @@ esac
 # --- resolve install shape ------------------------------------------------
 
 TYPE="${TYPE_DECLARED}"
-if [ -z "${TYPE}" ] || [ "${TYPE}" = "null" ]; then
+if [ -z "${TYPE}" ]; then
   # Auto-detect: look for an executable file matching <name> anywhere in the
   # extracted tree. Match → binary. Else → tree.
   if find "${EXTRACT}" -type f -name "${NAME}" -perm -u+x 2>/dev/null | grep -q .; then
