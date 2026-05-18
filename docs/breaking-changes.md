@@ -11,28 +11,24 @@ coordinated with all consumers before cutting.
 
 ## v1.6.1 (2026-05-18) — fix: tree-sitter setup-node cache optional
 
-**Type:** PATCH. Caught on the lex-fmt/tree-sitter-lex pilot release.
-
-`actions/setup-node@v6` with `cache: 'npm'` hard-fails when no
-lockfile is present at the repo root — but many tree-sitter
-grammar repos use `npm install` rather than `npm ci` and ship
-no `package-lock.json`. lex-fmt/tree-sitter-lex hit this in the
-corpus-test job (before even running any tests), making the
-gate fire on a setup-node failure instead of an actual corpus
-regression — which is correct behavior (no tag pushed) but the
-wrong cause.
+**Type:** PATCH. `actions/setup-node@v6` with `cache: 'npm'`
+hard-fails when no matching npm-flavored lockfile is present —
+but tree-sitter grammar repos commonly use `npm install` rather
+than `npm ci` and ship no `package-lock.json`.
 
 Fixed in both the `corpus-test` and `build` jobs by gating
-`cache:` on `hashFiles()` of the standard JS lockfile paths:
+`cache:` on `hashFiles()` of the supported npm lockfile paths:
 
 ```yaml
-cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock') != '' && 'npm' || '' }}
+cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' && 'npm' || '' }}
 ```
 
-`cache: ''` is valid (means no cache).
+`cache: ''` is a valid value (means no cache). `yarn.lock` is
+deliberately NOT in the list — `cache: 'npm'` doesn't read yarn
+lockfiles, so including it would re-trigger the same hard-fail
+in yarn-only repos.
 
-Same class of bug as v1.3.1's `setup-uv` cache hard-fail on
-`**/uv.lock` missing — and the same shape of fix.
+Same class of bug + shape of fix as v1.3.1's `setup-uv` cache.
 
 ## v1.6.0 (2026-05-18) — additive: tree-sitter stack workflow
 
