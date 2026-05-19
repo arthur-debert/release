@@ -97,7 +97,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | rust-lib       | (consumer)      | (consumer) | —               | W ✅ via publish   | —          | W ✅ (notes)      | A ✅ crates.io                       | —                | —         | A 📋           |
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
-| tauri-app      | (consumer)      | (consumer) | W 📋 playwright | W ✅ tauri build   | W ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
+| tauri-app      | A ✅ gate       | (consumer) | W 📋 playwright | W ✅ tauri build   | W ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
 | nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W ✅ tag + release | —                 | —                | —         | A 📋 (tag)     |
 | tree-sitter    | W 📋            | W ✅ corpus³| —               | W ✅ generate      | —          | W ✅              | W ✅ npm (opt-in) | —                | —         | A ✅           |
@@ -105,12 +105,30 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 | gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W ✅ tag + v1     | (tag-driven²)     | —                | —         | A 📋 (move v1) |
 | brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
 
-What the matrix tells you at a glance: rust-cli is the only fully
-shipped row. Every other stack is mostly 📋. Mechanism column tells
-consumers what to expect when a row ships (mostly W = thin caller,
-W+A = thin caller plus stack-specific composite for sign/publish).
-`—` cells are deliberate — the role doesn't apply to that stack — so
-nobody goes looking for missing pieces.
+What the matrix tells you at a glance: every stack now ships a
+working `release` workflow (`W ✅` in `gh release`); rust-cli
+remains the most fully built-out row (every column shipped).
+`gh-action` and `brew-tap` deliberately have no separate `pkg
+publish` step (tag-driven Marketplace / tap is itself the
+destination). The remaining 📋 cells are largely test/lint
+scaffolding (nvim-plugin's busted/stylua, tree-sitter's lint,
+tauri-app's playwright e2e) — orthogonal to the release path.
+
+The `format/lint` column for the bot-bump commit is `A ✅ gate`
+across stacks where a `lefthook.yml` / `.pre-commit-config.yaml`
+/ `.husky/` is present in the consumer:
+`.github/actions/run-precommit-gate` runs the consumer's own
+gate on the bot's staged version-file bump before the
+`chore: Release vX.Y.Z` commit lands. Eliminates format-drift
+fights on the default branch from CI-driven releases. Shipped
+in v1.7.6. Marked on tauri-app today because that's where it
+was first reproduced + validated end-to-end; other stacks
+inherit it automatically (inlined into every bot-committing
+prepare step), the matrix cell will flip as each is exercised
+on a real consumer release.
+
+`—` cells are deliberate — the role doesn't apply to that
+stack — so nobody goes looking for missing pieces.
 
 **Compiled artifacts** in the build/release columns can be native
 binaries, wasm, or both — declared per consumer via workflow inputs
@@ -254,13 +272,17 @@ All shipped stack workflows ship to `@v1` (floating major); see
   repo-settings checkbox); nothing for CI to do. JS-action
   `dist/` build slice deferred until the first JS-action
   consumer surfaces.
-- ✅ **nvim-plugin** — `@v1`. Pilot `lex-fmt/nvim` pending
-  migration. Tag + GH release with auto-rolled Keep-a-Changelog
-  notes; no manifest bump (Neovim plugins are tag-distributed,
-  no version field). Sanity check requires `lua/` or `plugin/`
-  directory. Smoke testing deliberately deferred to a separate
-  `nvim-plugin-test.yml` (PR-gate). Optional rockspec publish:
-  future slice.
+- ✅ **nvim-plugin** — `@v1`. Pilot `lex-fmt/nvim` migrated +
+  verified end-to-end (0.10.4 → tag + GH release with rolled
+  CHANGELOG notes, `M.version` constant bumped in
+  `lua/lex/init.lua` via the `version-file` input added in
+  v1.7.1). Tag + GH release with auto-rolled Keep-a-Changelog
+  notes; optional `version-file` bump for plugins carrying a
+  `M.version = "X.Y.Z"` Lua constant; optional `prep-script`
+  for consumer-specific bumps. Sanity check requires `lua/` or
+  `plugin/` directory. Smoke testing deliberately deferred to
+  a separate `nvim-plugin-test.yml` (PR-gate). Optional
+  rockspec publish: future slice.
 - ✅ **tree-sitter** — `@v1`. Pilot `lex-fmt/tree-sitter-lex`
   migrated + verified end-to-end (0.10.4 → tree-sitter.tar.gz
   on the GH release, bundle layout matches the contract,
@@ -277,16 +299,22 @@ All shipped stack workflows ship to `@v1` (floating major); see
   `repository_dispatch` notifications are out of scope of this
   workflow (live in `cascade-handler.yml` + the consumer's
   thin caller).
-- 🚧 **tauri-app** — `@v1` (slice 1). Pilot `arthur-debert/arami-app`
-  pending migration (thin caller + `scripts/build-tauri.sh`
-  wiring is the remaining step). Slice 1 scope: cross-platform
-  `tauri build` (mac/linux/windows),
-  macOS code-signing + notarization via Tauri's `APPLE_*` env
-  vars, per-platform bundle artifacts on the GH release, version
+- ✅ **tauri-app** — `@v1` (slice 1). Pilot
+  `arthur-debert/arami-app` migrated + verified end-to-end
+  (0.1.7 → mac signed/notarized .dmg + linux .deb / .AppImage
+  / .rpm on the GH release). Slice 1 scope: cross-platform
+  `tauri build` (mac/linux; windows opt-out-able), macOS
+  code-signing + notarization via Tauri's `APPLE_*` env vars,
+  per-platform bundle artifacts on the GH release, version
   sync across all three Tauri version files (`package.json`,
-  `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`). Deferred
-  slices: updater signing keys, universal macOS binary,
-  auto-updater server config, Linux package signing.
+  `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`). Bot
+  bump commit passes the consumer's own pre-commit gate
+  (lefthook / pre-commit framework / husky) via
+  `.github/actions/run-precommit-gate` — eliminates the
+  format-drift class of failures from CI-driven releases.
+  Deferred slices: updater signing keys, universal macOS
+  binary, auto-updater server config, Linux package signing,
+  Windows build (needs consumer-side `.ico` generation).
 - 📋 **brew-tap** — not started. Tricky scope — the tap is the
   destination of pushes from other repos, not a release target
   itself. Likely workflow scope: tap-side validation (formula
@@ -309,12 +337,25 @@ All shipped stack workflows ship to `@v1` (floating major); see
   layouts), no-lockfile npm fallback, venv-CLI exposure on the
   agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
   validates changes without burning a cloud session.
-- 📋 next-up consumer migrations: `lex-fmt/nvim` (nvim-plugin),
+- 📋 next-up consumer migrations:
   `arthur-debert/simple-gal-ui` (electron-app),
   `lex-fmt/zed-lex` (rust-lib + wasm32-wasip2),
-  `arami-app` (after tauri-app workflow ships),
   `arthur-debert/simple-gal-action` (after gh-action JS-build
   slice ships).
+- ✅ **Pre-commit gate for bot-bump commits** — `v1.7.6`.
+  `.github/actions/run-precommit-gate` (canonical reference)
+  + equivalent shell inlined into every bot-committing prepare
+  step (3 composite actions + 3 inline workflows). Auto-
+  detects lefthook / pre-commit framework / husky in the
+  consumer; runs the gate on staged files before
+  `chore: Release vX.Y.Z` is committed; re-stages auto-fixes
+  (prettier --write, eslint --fix, lefthook
+  `stage_fixed: true`) so the bot commit captures them.
+  Closes the prettier-drift class of failures where CI-driven
+  releases land mis-indented version-file bumps that trip the
+  consumer's regular CI on the next push. Standardize-ops
+  alternative to per-stack format patches. First validated on
+  the `arami-app` 0.1.7 release.
 
 Order is driven by: (a) is there a consumer blocked on it today,
 (b) does shipping the row unblock several at once. We complete one
