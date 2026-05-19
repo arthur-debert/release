@@ -123,14 +123,14 @@ fi
 declare -a components=()
 if [ -f .release-sync.yaml ]; then
   manifest_source=".release-sync.yaml (consumer override)"
-  mapfile -t components < <(yq '.components[]' .release-sync.yaml)
+  mapfile -t components < <(yq '.components // [] | .[]' .release-sync.yaml)
 else
   manifest_source="templates/$stack/manifest.yaml (Stack default)"
   if ! git -C "$RELEASE_HOME" cat-file -e "$ref:templates/$stack/manifest.yaml" 2>/dev/null; then
     echo "release-sync: ref '$ref' has no templates/$stack/manifest.yaml" >&2
     exit 1
   fi
-  mapfile -t components < <(git -C "$RELEASE_HOME" show "$ref:templates/$stack/manifest.yaml" | yq '.components[]')
+  mapfile -t components < <(git -C "$RELEASE_HOME" show "$ref:templates/$stack/manifest.yaml" | yq '.components // [] | .[]')
 fi
 
 # Validate each declared Component exists in the ref.
@@ -265,7 +265,7 @@ lefthook_out="$lefthook_tmp/lefthook.yml"
   # Deep-merge all fragments, then strip the head/line/foot comments
   # that each fragment carries (otherwise the merged file inherits a
   # mess of "this is the X fragment" docstrings).
-  yq eval-all '. as $i ireduce({}; . * $i) | ... comments=""' "${frags[@]}"
+  yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""' "${frags[@]}"
 } > "$lefthook_out"
 
 # Run lefthook.yml through sync_one with a synthetic source ref.
