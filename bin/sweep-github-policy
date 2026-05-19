@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drop the canonical .github/ policy files into the current repo, based on
+# Drop the canonical policy + setup files into the current repo, based on
 # its detected stack.
 #
 # Usage:
@@ -8,6 +8,12 @@
 # - Auto-detects stack via detect-stack (override with --stack)
 # - For each template file: creates if missing; reports if already present
 #   with different content (use --force to overwrite)
+#
+# Source layout is path-mirror: files under templates/commons/** sync to
+# every consumer, files under templates/<stack>/** sync to consumers of
+# that stack. Destination path = source path with the prefix stripped.
+# To add a new managed file, drop it where you want it to land — no code
+# edit required.
 
 set -euo pipefail
 
@@ -28,8 +34,12 @@ cd "$repo_root"
 
 stack=${stack:-$(detect-stack)}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-templates="$script_dir/../templates/$stack"
-[ -d "$templates" ] || { echo "no templates for stack '$stack' at $templates" >&2; exit 1; }
+release_root="$script_dir/.."
+commons_dir="$release_root/templates/commons"
+stack_dir="$release_root/templates/$stack"
+
+[ -d "$stack_dir" ] || {
+  echo "no templates for stack '$stack' at $stack_dir" >&2; exit 1; }
 
 echo "repo:  $(basename "$repo_root")"
 echo "stack: $stack"
@@ -40,53 +50,36 @@ updated=0
 skipped=0
 conflicts=0
 
-# Map a template-relative path to its destination in the consumer repo.
-# Explicit by design: any new template path that doesn't match a documented
-# row produces an error rather than a silent .github/ default, so a future
-# contributor adding e.g. .gitignore or rustfmt.toml has to make a deliberate
-# routing decision. Mirror of the map_dest() in skills/gh-repo-setup/SKILL.md.
-map_dest() {
-  local rel=$1
-  case "$rel" in
-    workflows/*)                       printf '.github/%s' "$rel" ;;
-    scripts/*)                         printf '%s' "$rel" ;;
-    lefthook.yml)                      printf '%s' "$rel" ;;
-    CODEOWNERS                 | \
-    dependabot.yml             | \
-    copilot-instructions.md    | \
-    pull_request_template.md)          printf '.github/%s' "$rel" ;;
-    *)
-      echo "error: no destination mapping for template path '$rel' — add it to map_dest()" >&2
-      exit 1 ;;
-  esac
+process_subtree() {
+  local prefix=$1
+  [ -d "$prefix" ] || return 0
+  while IFS= read -r src; do
+    local dest=${src#"$prefix"/}
+    mkdir -p "$(dirname "$dest")"
+    if [ ! -e "$dest" ]; then
+      cp "$src" "$dest"
+      [ -x "$src" ] && chmod +x "$dest"
+      echo "  created   $dest"
+      created=$((created + 1))
+    elif cmp -s "$src" "$dest"; then
+      echo "  ok        $dest"
+      skipped=$((skipped + 1))
+    elif [ "$force" = 1 ]; then
+      cp "$src" "$dest"
+      [ -x "$src" ] && chmod +x "$dest"
+      echo "  updated   $dest"
+      updated=$((updated + 1))
+    else
+      echo "  conflict  $dest (differs; --force to overwrite)"
+      conflicts=$((conflicts + 1))
+    fi
+  done < <(find "$prefix" -type f -not -name '.DS_Store')
 }
 
-# Find all files in the template tree, relative to its root.
-while IFS= read -r src; do
-  rel=${src#"$templates/"}
-  # Skip .DS_Store and other macOS artifacts.
-  case "$rel" in .DS_Store) continue ;; esac
-  dest=$(map_dest "$rel")
-  mkdir -p "$(dirname "$dest")"
-  if [ ! -e "$dest" ]; then
-    cp "$src" "$dest"
-    # Preserve executable bit on scripts/ entries.
-    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
-    echo "  created   $dest"
-    created=$((created + 1))
-  elif cmp -s "$src" "$dest"; then
-    echo "  ok        $dest"
-    skipped=$((skipped + 1))
-  elif [ "$force" = 1 ]; then
-    cp "$src" "$dest"
-    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
-    echo "  updated   $dest"
-    updated=$((updated + 1))
-  else
-    echo "  conflict  $dest (differs; --force to overwrite)"
-    conflicts=$((conflicts + 1))
-  fi
-done < <(find "$templates" -type f)
+# Commons first, stack second — stack-specific files override commons on
+# collision (a stack may specialize a shared file).
+process_subtree "$commons_dir"
+process_subtree "$stack_dir"
 
 echo
 printf 'summary: %d created, %d updated, %d ok, %d conflicts\n' \

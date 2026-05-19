@@ -229,7 +229,7 @@ non-breaking tag. Fix-once-propagate is automatic: patch a workflow
 here, every consumer picks it up on their next CI run. This is the
 mechanism today and it works.
 
-### Files in the consumer — session-start `release-sync` 🚧
+### Files in the consumer — session-start `release-sync`
 
 Some files have to live in the consumer's tree because GitHub or
 local tooling reads them there: CODEOWNERS, dependabot.yml, the
@@ -303,8 +303,8 @@ bumped.
 
 Every onboarded repo carries `scripts/setup-dev-env.sh` +
 `.claude/settings.json`, both seeded from
-[`templates/setup-dev-env.sh`](templates/setup-dev-env.sh) and
-[`templates/.claude-settings.json`](templates/.claude-settings.json).
+[`templates/commons/scripts/setup-dev-env.sh`](templates/commons/scripts/setup-dev-env.sh) and
+[`templates/commons/.claude/settings.json`](templates/commons/.claude/settings.json).
 The settings file registers a SessionStart hook that runs the script
 on session start and resume. The script:
 
@@ -388,14 +388,17 @@ bin/                  human-runnable tooling, on $PATH via dodot release pack:
                       apply-ruleset, sweep-github-policy,
                       install-release-{secrets,token}, detect-stack,
                       audit-portfolio, the gh-pr-* loop helpers,
-                      release-sync 🚧, release-beta-list 🚧
+                      release-sync, release-beta-list
 rulesets/             branch-protection JSON templates
 scripts/              CI scripts exec'd by composite actions
-templates/
-  setup-dev-env.sh    canonical per-session bootstrap
-  .claude-settings.json   SessionStart hook config
-  rust/, commons/     stack-specific and cross-cutting policy files
-  homebrew-formula.rb.tmpl
+templates/            path-mirror layout — sync destination =
+                      source path minus the commons/ or <stack>/ prefix
+  commons/            synced to every consumer (setup-dev-env.sh,
+                      .claude/settings.json)
+  rust/, …            synced to consumers of that stack
+  fragments/          composition fragments (NOT synced — copy-paste)
+  render/             render templates (NOT synced — used by CI to
+                      produce per-release artifacts like brew formulae)
 orchestrator/         🚧 Python harness for local multi-repo
                       orchestration via Claude Agent SDK
 env/                  cloud-session setup.sh + user-level CLAUDE.md
