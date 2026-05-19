@@ -15,7 +15,7 @@ coordinated with all consumers before cutting.
 artifacts (WASM packages, asset bundles) in their
 `scripts/build-tauri.sh` convention hook via `gh release
 download` or `fetch-artifact`. Without `GH_TOKEN` in the
-build step's env, those subcommands fail with `gh: To use
+build step's env, those calls fail with `gh: To use
 GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN
 environment variable`.
 
