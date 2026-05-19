@@ -26,7 +26,7 @@ Fixed by adding two optional inputs to `nvim-plugin.yml`:
 - `version-file` — path to a Lua file containing
   `M.version = "X.Y.Z"`. Workflow bumps the constant via a
   perl substitution that handles either quote style. Refuses to
-  silently no-op: if the input is set the pattern MUST be present.
+  silently no-op: if the input is set, the pattern MUST be present.
 - `prep-script` — same shape as the input added to tauri-app.yml
   in v1.7.0. Optional script the workflow execs BEFORE the
   version-file bump, with `NEW_VERSION` + `PLUGIN_ROOT` in env.
