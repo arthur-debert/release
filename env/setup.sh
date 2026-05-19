@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-18-fetch-artifact   # bumps on every change so re-pasting is trivial
+# version: 2026-05-19-clone-lex-stack   # bumps on every change so re-pasting is trivial
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -286,6 +286,16 @@ if [ -f "$CLONE_DIR/bin/fetch-artifact" ]; then
   echo "installed fetch-artifact: $(fetch-artifact --version)"
 else
   echo "warning: bin/fetch-artifact not found in clone — consumers that depend on it will hand-roll the fetch" >&2
+fi
+
+# Install bin/clone-lex-stack — the multi-repo bootstrap helper that
+# the lex-multirepo skill drives. See skills/lex-multirepo/SKILL.md
+# and the merged plan in lex-fmt/lex#661 for the design.
+if [ -f "$CLONE_DIR/bin/clone-lex-stack" ]; then
+  install -m 0755 "$CLONE_DIR/bin/clone-lex-stack" /usr/local/bin/clone-lex-stack
+  echo "installed clone-lex-stack ($(command -v clone-lex-stack))"
+else
+  echo "warning: bin/clone-lex-stack not found in clone — the lex-multirepo skill will fall back to a manual gh clone loop" >&2
 fi
 
 # Cleanup the clone scratch dir so it doesn't end up in the snapshot.

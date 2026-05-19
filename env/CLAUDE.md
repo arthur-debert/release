@@ -77,6 +77,13 @@ friction back to `arthur-debert/release`. Invoke when you hit a problem
 the consumer repo can't fix in place (workflow misbehavior, broken policy
 template, helper-script bug).
 
+`~/.claude/skills/lex-multirepo/SKILL.md` bootstraps sibling lex-fmt
+repos into `/tmp/lex-fmt/<repo>/` for multi-repo agent tasks (planning,
+cross-repo analysis, reading shared specs in `comms`). Drives the
+`clone-lex-stack` helper. Invoke when a task names a sibling lex-fmt
+repo by name or spans ≥2 lex-fmt repos. The MCP server can't reach
+siblings; `gh` and this skill are the route.
+
 ## Tools available in this env
 
 Pre-installed by the env setup script — don't reinstall:
@@ -106,6 +113,11 @@ Pre-installed by the env setup script — don't reinstall:
   artifacts should call this rather than hand-rolling a `gh release
   download` block: `fetch-artifact lexd-lsp` is one line; the inline
   version is ~30.
+- **Multi-repo agent bootstrap:** `clone-lex-stack` (installed at
+  `/usr/local/bin/clone-lex-stack`). Clones sibling lex-fmt repos into
+  `/tmp/lex-fmt/<repo>/` so agents can read across the stack when MCP
+  is scoped to the rooted repo. See the `lex-multirepo` skill above
+  for usage.
 
 Plus what Anthropic ships by default: Node 20/21/22 + npm/yarn/pnpm/bun,
 Python 3.x + pip/poetry/uv, Ruby, PHP, Java 21, Go, Rust + cargo, C/C++
