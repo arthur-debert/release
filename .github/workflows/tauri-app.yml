@@ -626,6 +626,13 @@ jobs:
         env:
           BUNDLES: ${{ matrix.t.bundles }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
+          # Expose GH_TOKEN so consumer `scripts/build-tauri.sh`
+          # hooks (and any pre-build asset fetchers they shell to,
+          # e.g. `gh release download`, `fetch-artifact`) can
+          # authenticate. arami-app's scripts/fetch-wasm.sh hit
+          # `gh: To use GitHub CLI in a GitHub Actions workflow,
+          # set the GH_TOKEN environment variable` without this.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
           # Both branches `cd "${TAURI_DIR}"` so the hook starts at
