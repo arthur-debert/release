@@ -9,6 +9,75 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.6 (2026-05-19) — feat: shared pre-commit gate before bot commits
+
+**Type:** PATCH (additive; no required-input changes; existing
+consumers see no behavior change unless they have a lefthook /
+pre-commit / husky config).
+
+Bot commits from inside the release workflow have always bypassed
+client-side hooks by design — there is no `.git/hooks/pre-commit`
+symlink in the CI checkout. Every stack's prepare step rewrites
+version files with `jq` / `awk` / `perl`; none of those preserve
+consumer formatting. The consumer's regular CI then runs
+`prettier --check` / `eslint` / `ruff` on main, sees the bot's
+formatting drift, and fails — even though the release workflow
+itself succeeded end-to-end. Caught on `arami-app` 0.1.6.
+
+**What was rejected:** an ad-hoc per-stack prettier patch in
+tauri-app.yml (closed PR #92). Fragments ops; the whole point of
+this repo is to standardize.
+
+**What shipped:** a shared pre-commit gate. New composite action
+at `.github/actions/run-precommit-gate@v1` is the canonical
+reference, and every bot-committing prepare step inlines the
+equivalent gate shell before its `git commit`. The gate:
+
+1. Detects `lefthook.yml` / `.pre-commit-config.yaml` / `.husky/`
+   in the consumer.
+2. Installs the consumer's deps (auto-detects pnpm/npm/yarn for
+   lefthook, pipx for pre-commit framework).
+3. Runs the gate scoped to staged files (`--file` per staged
+   path for lefthook 2.x; `--files` for pre-commit framework).
+4. Re-stages any auto-fixes (prettier --write, eslint --fix,
+   lefthook `stage_fixed: true`) so the bot commit captures
+   them.
+5. No-op when the consumer has no pre-commit framework
+   configured.
+
+Coverage (all 6 bot-committing prepare steps):
+- `.github/actions/prepare-release` (rust-cli, rust-lib)
+- `.github/actions/prepare-release-npm` (electron-app, vscode-ext, tree-sitter)
+- `.github/actions/prepare-release-python` (python-pkg)
+- `.github/workflows/tauri-app.yml` (tauri-app)
+- `.github/workflows/nvim-plugin.yml` (nvim-plugin)
+- `.github/workflows/gh-action.yml` (gh-action)
+
+Inlined (not `uses:`) because each prepare step is a single
+monolithic `run:` block — splitting step boundaries would
+require restructuring stable workflow code. The composite
+action exists as the canonical reference + external-caller
+surface.
+
+**Escape hatch:** set `SKIP_PRECOMMIT_GATE=true` in the prepare
+job env to bypass entirely.
+
+**Why inlined duplication is acceptable:** ~40 lines × 6 files.
+The behavior is uniform, the snippet is small, and each location
+is locally testable in isolation. If GitHub later supports
+composite-action cross-references without ref pinning, we can
+refactor to a single `uses:` call.
+
+**Verified locally** against `/tmp/arami-app` (real
+arthur-debert/arami-app clone): simulated jq bump, ran the
+inlined gate snippet verbatim, observed:
+- Prettier reformatted both bumped JSON files with consumer's
+  tab style.
+- Lefthook's `stage_fixed: true` auto-restaged the fixes.
+- Total runtime: ~6 seconds (commands without matching globs
+  were skipped naturally — no need for special filtering).
+- Final staged content passes `prettier --check`.
+
 ## v1.7.5 (2026-05-19) — fix: tauri-app bundle-collect uses find (bash 3.2)
 
 **Type:** PATCH. The bundle-collection step used bash globstar

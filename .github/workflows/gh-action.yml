@@ -186,6 +186,55 @@ jobs:
             # No manifest to bump. Composite actions are identified by
             # the tag itself. Commit the rolled changelog (when any)
             # + tag current HEAD.
+            # Pre-commit gate — hold the bot commit to the consumer's
+            # own gate. Equivalent to
+            # .github/actions/run-precommit-gate@v1 (canonical
+            # reference); inlined because this step is a single `run:`
+            # block. Set SKIP_PRECOMMIT_GATE=true to bypass.
+            if [ "${SKIP_PRECOMMIT_GATE:-false}" != "true" ]; then
+              mapfile -t staged_arr < <(git diff --cached --name-only)
+              if [ "${#staged_arr[@]}" -gt 0 ]; then
+                if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+                  echo "Pre-commit gate: lefthook"
+                  lefthook_file_args=()
+                  for f in "${staged_arr[@]}"; do
+                    lefthook_file_args+=(--file "$f")
+                  done
+                  if [ -f pnpm-lock.yaml ]; then
+                    corepack enable >/dev/null 2>&1 || true
+                    pnpm install --frozen-lockfile --ignore-scripts
+                    pnpm exec lefthook run pre-commit "${lefthook_file_args[@]}"
+                  elif [ -f package-lock.json ]; then
+                    npm ci --ignore-scripts
+                    npx --no-install lefthook run pre-commit "${lefthook_file_args[@]}"
+                  elif [ -f yarn.lock ]; then
+                    corepack enable >/dev/null 2>&1 || true
+                    yarn install --frozen-lockfile --ignore-scripts
+                    yarn exec lefthook run pre-commit "${lefthook_file_args[@]}"
+                  elif command -v lefthook >/dev/null 2>&1; then
+                    lefthook run pre-commit "${lefthook_file_args[@]}"
+                  else
+                    npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
+                  fi
+                elif [ -f .pre-commit-config.yaml ] || [ -f .pre-commit-config.yml ]; then
+                  echo "Pre-commit gate: pre-commit framework"
+                  if command -v pipx >/dev/null 2>&1; then
+                    pipx run pre-commit run --files "${staged_arr[@]}"
+                  else
+                    python3 -m pip install --user --quiet pre-commit
+                    "$(python3 -m site --user-base)/bin/pre-commit" run --files "${staged_arr[@]}"
+                  fi
+                elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
+                  echo "Pre-commit gate: husky"
+                  bash .husky/pre-commit
+                fi
+                if ! git diff --quiet; then
+                  echo "Pre-commit gate produced auto-fixes — re-staging."
+                  git add -u
+                fi
+              fi
+            fi
+
             if ! git diff --cached --quiet; then
               git commit -m "chore: Release ${TAG}"
             fi
