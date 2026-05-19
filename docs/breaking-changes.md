@@ -9,6 +9,21 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.5 (2026-05-19) — fix: tauri-app bundle-collect uses find (bash 3.2)
+
+**Type:** PATCH. The bundle-collection step used bash globstar
+(`shopt -s globstar` + `**/*.ext`) to walk
+`src-tauri/target/release/bundle/`. macOS runners ship bash 3.2
+which doesn't support globstar: `shopt: globstar: invalid shell
+option name`.
+
+Switched to `find -type f \( -name '*.dmg' -o … \)`. Portable
+across bash versions and matches the same set of files.
+
+Caught after the mac build + sign + notarization actually
+succeeded end-to-end — the failure was purely in the post-build
+artifact collection.
+
 ## v1.7.4 (2026-05-19) — fix: tauri-app build step exposes GH_TOKEN
 
 **Type:** PATCH. Tauri consumers commonly fetch upstream
