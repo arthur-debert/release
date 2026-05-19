@@ -183,6 +183,16 @@ jobs:
               fi
               echo "→ running consumer prep-script: ${PREP_SCRIPT}"
               bash "${PREP_SCRIPT}" "${NEW_VERSION}"
+              # Defend against prep-scripts that mutate files but
+              # forget to `git add` them. Unstaged mutations would
+              # otherwise be silently dropped: the commit step only
+              # sees staged content, so HEAD gets tagged without
+              # the prep-script's changes. Fail loud here instead.
+              if ! git diff --quiet; then
+                echo "::error::prep-script mutated files but didn't \`git add\` them. Stage the modifications in the script (use \`git add\` after each mutation), or \`git stash\` them if intentionally out-of-release-scope."
+                git diff --stat
+                exit 1
+              fi
             fi
 
             # Optional `M.version` bump. Most modern Lua nvim
