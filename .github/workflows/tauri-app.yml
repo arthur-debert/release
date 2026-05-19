@@ -687,17 +687,22 @@ jobs:
           #   mac:     .dmg, .app.tar.gz (for the updater)
           #   linux:   .deb, .rpm, .AppImage
           #   windows: .msi, .exe (NSIS)
-          shopt -s nullglob globstar
-          for f in "${bundle_root}"/**/*.dmg \
-                   "${bundle_root}"/**/*.app.tar.gz \
-                   "${bundle_root}"/**/*.deb \
-                   "${bundle_root}"/**/*.rpm \
-                   "${bundle_root}"/**/*.AppImage \
-                   "${bundle_root}"/**/*.msi \
-                   "${bundle_root}"/**/*.exe; do
+          #
+          # `find` instead of bash globstar — macOS runners ship
+          # bash 3.2 which doesn't support `shopt -s globstar`,
+          # so `**/*.ext` is treated as a literal `**` and no
+          # files match. `find -name` is portable across bash
+          # versions and POSIX find implementations.
+          while IFS= read -r f; do
             cp "${f}" "${out}/"
-          done
-          shopt -u nullglob globstar
+          done < <(find "${bundle_root}" -type f \
+                     \( -name '*.dmg' \
+                        -o -name '*.app.tar.gz' \
+                        -o -name '*.deb' \
+                        -o -name '*.rpm' \
+                        -o -name '*.AppImage' \
+                        -o -name '*.msi' \
+                        -o -name '*.exe' \))
           count=$(find "${out}" -maxdepth 1 -type f | wc -l | tr -d ' ')
           echo "Collected ${count} artifacts:"
           ls -la "${out}"
