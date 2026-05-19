@@ -59,7 +59,10 @@ Same regardless of Stack:
   template at `rulesets/main-protection.json.tmpl`.
 - **Auto-review on draft PR** — Copilot and Gemini both review on
   `pull_request: opened`, drafts included. Draft → ready does not
-  re-trigger.
+  re-trigger. Cloud's **Auto-fix** then wakes a fresh session per
+  review comment (requires the
+  [Claude GitHub App](https://github.com/apps/claude) at the org
+  level). See "The agentic PR loop" below.
 - **Policy files** — CODEOWNERS, `pull_request_template.md`,
   `copilot-instructions.md`, `dependabot.yml`,
   `.github/workflows/copilot-review.yml`. Synced via the propagation
@@ -156,6 +159,52 @@ it. Today only `rust-cli` clears that bar.
 
 Unclassified-stack repos in the managed portfolio (`arami-core`,
 `lex-fmt/comms`, `simple-gal`): pending classification on take-iii.
+
+## The agentic PR loop
+
+Every onboarded repo follows the same review-and-merge flow. The
+agent drives steps 1–6; a human gates step 7.
+
+1. Agent opens the PR as a **draft**.
+2. Draft state auto-requests **Copilot** review (via policy at
+   `.github/workflows/copilot-review.yml`) and **Gemini** review
+   (via the Gemini bot installed at the org level).
+3. Agent waits for **both** reviews to post — batching over
+   per-reviewer catches overlapping comments and produces one
+   unified fix instead of two whipsaw fixes.
+4. Agent combines feedback, decides what to address and what to
+   push back on (see `skills/pr-review-respond` for the canonical
+   pushback patterns).
+5. For each comment: reply with the fix *or* a pushback reason,
+   then resolve the thread. **Unresolved threads remain the signal
+   that something is open** — making PR state trivially scannable.
+6. Agent flips the PR from **draft → ready**.
+7. Human reviews the final state and merges.
+
+The four GitHub events the loop depends on:
+
+- **review requested** — triggers the reviewer bots
+- **review submitted** — wakes the agent to address comments
+- **PR check results** — wakes the agent to fix failing CI
+- **PR state change** — draft → ready, merged, closed
+
+**What handles those events.** On cloud sessions, Anthropic's
+**Auto-fix** (managed internally by Claude Code Cloud — *not* a
+user-configurable [Routine](https://claude.ai/code/routines)) wakes
+a fresh session when review comments or check failures land on a
+PR in a repo with the
+[Claude GitHub App](https://github.com/apps/claude) installed. The
+leaf event-work — address this comment, fix this failing check —
+is essentially free once the GitHub App is installed at the org
+level.
+
+The local orchestrator (below) does not duplicate this. Its scope
+is the cross-repo, human-initiated work that cloud Auto-fix
+deliberately doesn't do: rolling a change across N consumers,
+driving a multi-PR epic, auditing a feature branch before merge.
+
+Long-form spec: [`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex)
+§2.
 
 ## How updates propagate
 
@@ -281,11 +330,14 @@ way a human would, using the [Claude Agent SDK](https://docs.anthropic.com/en/ap
 `setting_sources=["project"]` so the consumer's `.claude/` config is
 the source of truth.
 
-Why now: cloud sessions are great for single-repo work, but
-orchestrating across 20 repos by manually copy-pasting between cloud
-panels is the current bottleneck. A local orchestrator can spawn
-sub-sessions, route work to the right repo, and use GitHub events
-(PR opened, review posted, CI status) as the IPC.
+Why now: cloud sessions handle single-repo, event-triggered work
+well — Auto-fix wakes a fresh cloud session when review comments
+or check failures land (see "The agentic PR loop" above). What
+cloud cannot do is **cross-repo, human-initiated** work — rolling
+a v1.8 change across 6 rust-cli consumers, driving a multi-PR epic
+through lex's 3-deep dependency cascade, auditing take-iii against
+affected repos before merge. The orchestrator handles exactly that
+slice; it does not duplicate the cloud's PR-loop event handling.
 
 Billing: subscription-billed via the local `claude` CLI's OAuth
 token, *provided* `ANTHROPIC_API_KEY` is unset in the orchestrator's
