@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+#
+# clone-lex-stack — bootstrap sibling lex-fmt repos for agent use.
+#
+# Designed for Claude Code on the web (and any other gh-authenticated
+# environment) where the GitHub MCP server is hard-scoped to one repo
+# and an agent needs to read or work across sibling repos in the
+# lex-fmt org. Clones into a standard location so subsequent agent
+# steps in the same session can grep `/tmp/lex-fmt/` instead of
+# re-cloning ad hoc.
+#
+# Distinct from `clone-lex-repos` (which is the release-pipeline
+# bootstrap used by `release-lex`). This script targets the agent
+# audience: selective subset by default, optional dep bootstrap,
+# different repo list (includes mkdocs-lex and zed-lex; excludes
+# arthur-debert/release).
+#
+# Usage:
+#   clone-lex-stack [options] <repo>...
+#   clone-lex-stack --all [options]
+#
+# Options:
+#   --all              Clone every repo in the canonical lex-fmt stack.
+#                      Mutually exclusive with positional <repo> args.
+#   --with-setup       After clone, run scripts/setup-dev-env.sh in each
+#                      repo if it exists. Opt-in; most read-only tasks
+#                      don't need it.
+#   --depth=N          Shallow clone with the given depth. Default: full.
+#                      Use --depth=1 for fast read-only grep tasks.
+#   --refresh          If the target dir already exists, `git fetch +
+#                      reset --hard origin/<default-branch>` instead of
+#                      skipping. Default is skip-if-exists.
+#   --target=DIR       Override target dir (default: /tmp/lex-fmt).
+#   -h | --help        Print this help and exit.
+#
+# Output contract:
+#   stdout: tab-separated summary, one line per requested repo:
+#           <repo>\t<path>\t<status>
+#           where <status> ∈ {cloned, refreshed, skipped-exists,
+#                              setup-ok, setup-failed, clone-failed}
+#   stderr: human-readable progress.
+#
+# Exit codes:
+#   0  all requested repos reached a usable state (cloned + setup if
+#      requested; setup-failed counts as success for the clone itself
+#      but is reflected in stdout and the exit code is then nonzero).
+#   1  one or more repos failed to clone or setup.
+#   2  invalid arguments (unknown repo name, conflicting flags).
+#
+# Concurrency:
+#   Per-repo lock at <target>/.<repo>.lock via flock(1). Lock releases
+#   automatically when the script exits, including on SIGKILL — no
+#   stale-lock cleanup needed.
+
+set -euo pipefail
+
+# --- Canonical repo list (single source of truth) --------------------
+# When a new sibling repo joins the lex-fmt stack, add it here and
+# re-publish via env-setup. Q6 of the multi-repo bootstrap plan covers
+# why this is hardcoded for v1 rather than dynamic.
+CANONICAL_REPOS=(
+  lex
+  comms
+  mkdocs-lex
+  vscode
+  lexed
+  nvim
+  tree-sitter-lex
+  zed-lex
+)
+ORG="lex-fmt"
+
+# --- Argument parsing ------------------------------------------------
+all=false
+with_setup=false
+refresh=false
+depth=""
+target="/tmp/lex-fmt"
+requested=()
+
+die() { echo "clone-lex-stack: $*" >&2; exit 2; }
+
+usage() {
+  sed -n '/^# Usage:/,/^# Concurrency:/p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --all)          all=true; shift ;;
+    --with-setup)   with_setup=true; shift ;;
+    --refresh)      refresh=true; shift ;;
+    --depth=*)      depth="${1#--depth=}"; shift ;;
+    --depth)        depth="$2"; shift 2 ;;
+    --target=*)     target="${1#--target=}"; shift ;;
+    --target)       target="$2"; shift 2 ;;
+    -h|--help)      usage ;;
+    --)             shift; while [ $# -gt 0 ]; do requested+=("$1"); shift; done ;;
+    -*)             die "unknown option: $1" ;;
+    *)              requested+=("$1"); shift ;;
+  esac
+done
+
+if $all && [ ${#requested[@]} -gt 0 ]; then
+  die "--all is mutually exclusive with positional <repo> arguments"
+fi
+
+if ! $all && [ ${#requested[@]} -eq 0 ]; then
+  die "specify one or more repos, or pass --all (canonical list: ${CANONICAL_REPOS[*]})"
+fi
+
+if $all; then
+  requested=("${CANONICAL_REPOS[@]}")
+fi
+
+# Validate every requested name against the canonical list.
+for r in "${requested[@]}"; do
+  found=false
+  for c in "${CANONICAL_REPOS[@]}"; do
+    [ "$r" = "$c" ] && { found=true; break; }
+  done
+  $found || die "unknown repo: '$r' (canonical: ${CANONICAL_REPOS[*]})"
+done
+
+# --- Prereq checks ---------------------------------------------------
+command -v gh    >/dev/null 2>&1 || die "gh not on PATH"
+command -v flock >/dev/null 2>&1 || die "flock not on PATH"
+
+mkdir -p "$target"
+
+# --- Per-repo work ---------------------------------------------------
+clone_one() {
+  local repo="$1" dir="$target/$repo" status=""
+  local lockfile="$target/.${repo}.lock"
+
+  exec 9>"$lockfile"
+  flock -n 9 || { echo "→ $repo: locked by another process, skipping" >&2; printf '%s\t%s\t%s\n' "$repo" "$dir" "locked"; return 1; }
+
+  if [ -d "$dir/.git" ]; then
+    if $refresh; then
+      echo "→ $repo: refreshing" >&2
+      local def
+      def=$(git -C "$dir" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@') || def=main
+      if git -C "$dir" fetch --quiet origin "$def" \
+         && git -C "$dir" reset --quiet --hard "origin/$def"; then
+        status="refreshed"
+      else
+        status="clone-failed"
+      fi
+    else
+      echo "→ $repo: already cloned, skipping (use --refresh to update)" >&2
+      status="skipped-exists"
+    fi
+  else
+    echo "→ $repo: cloning" >&2
+    local args=()
+    [ -n "$depth" ] && args+=(-- --depth="$depth")
+    if gh repo clone "$ORG/$repo" "$dir" "${args[@]}" >&2; then
+      status="cloned"
+    else
+      status="clone-failed"
+    fi
+  fi
+
+  if $with_setup && [[ "$status" =~ ^(cloned|refreshed|skipped-exists)$ ]]; then
+    local setup="$dir/scripts/setup-dev-env.sh"
+    if [ -x "$setup" ]; then
+      echo "→ $repo: running setup-dev-env.sh" >&2
+      if ( cd "$dir" && ./scripts/setup-dev-env.sh ) >&2; then
+        status="setup-ok"
+      else
+        status="setup-failed"
+      fi
+    else
+      echo "→ $repo: no scripts/setup-dev-env.sh, skipping setup" >&2
+    fi
+  fi
+
+  printf '%s\t%s\t%s\n' "$repo" "$dir" "$status"
+  [[ "$status" =~ ^(cloned|refreshed|skipped-exists|setup-ok)$ ]]
+}
+
+# --- Main loop -------------------------------------------------------
+printf 'repo\tpath\tstatus\n'
+overall=0
+for repo in "${requested[@]}"; do
+  clone_one "$repo" || overall=1
+done
+
+if [ $overall -ne 0 ]; then
+  echo "" >&2
+  echo "clone-lex-stack: one or more repos failed — see stdout summary" >&2
+fi
+
+exit $overall
