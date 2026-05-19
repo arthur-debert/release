@@ -9,6 +9,35 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.6 (2026-05-19) — fix: tauri-app prepare re-formats bumped JSON files with prettier
+
+**Type:** PATCH. The prepare step uses `jq` to bump `.version`
+in `package.json` and `src-tauri/tauri.conf.json`. jq always
+writes 2-space indent, ignoring the consumer's prettier config
+(arami uses tabs). When the bot pushes the bump commit to the
+default branch, the consumer's regular CI runs
+`prettier --check` on the affected files and fails — even
+though the release workflow itself succeeded.
+
+After the jq edits, detect a prettier config (any
+`.prettierrc*` file, `prettier.config.*`, or a `prettier` key
+in `package.json` / its `devDependencies` / `dependencies`)
+and, when found, run `npx --yes prettier --write` on the
+bumped files. Restores the consumer's intended formatting
+with the new version embedded; the downstream check-format
+job stays green.
+
+Verified locally against `arthur-debert/arami-app` before
+shipping — bumped 0.1.6 → 0.1.7, ran the extracted shell
+block verbatim, confirmed `prettier --check` green and
+version landed in both files.
+
+Detection is conservative: if the consumer doesn't use
+prettier, the step is a silent no-op. If `npx --yes
+prettier` fails (network, registry hiccup), the step emits a
+`::warning::` and continues — the existing behavior is
+preserved.
+
 ## v1.7.5 (2026-05-19) — fix: tauri-app bundle-collect uses find (bash 3.2)
 
 **Type:** PATCH. The bundle-collection step used bash globstar

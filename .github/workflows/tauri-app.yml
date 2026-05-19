@@ -418,6 +418,36 @@ jobs:
             mv "${tauri_conf}.tmp" "${tauri_conf}"
           fi
 
+          # Re-format bumped JSON files with the consumer's prettier
+          # when configured. jq writes 2-space indent regardless of
+          # the consumer's style (arami uses tabs); running their
+          # prettier preserves the original formatting so the bot
+          # commit doesn't trip the downstream check-format CI.
+          has_prettier_config=0
+          for f in .prettierrc .prettierrc.json .prettierrc.yaml .prettierrc.yml \
+                   .prettierrc.js .prettierrc.cjs .prettierrc.mjs .prettierrc.toml \
+                   prettier.config.js prettier.config.cjs prettier.config.mjs; do
+            if [ -f "${f}" ]; then has_prettier_config=1; break; fi
+          done
+          if [ "${has_prettier_config}" = "0" ] && [ -f "${pkg}" ]; then
+            if jq -e '(.prettier // empty) | length > 0' "${pkg}" >/dev/null 2>&1; then
+              has_prettier_config=1
+            fi
+            if [ "${has_prettier_config}" = "0" ] && \
+               jq -e '(.devDependencies.prettier // .dependencies.prettier // empty)' \
+                  "${pkg}" >/dev/null 2>&1; then
+              has_prettier_config=1
+            fi
+          fi
+          if [ "${has_prettier_config}" = "1" ]; then
+            prettier_targets=("${pkg}")
+            [ -f "${tauri_conf}" ] && prettier_targets+=("${tauri_conf}")
+            echo "Prettier config detected — re-formatting: ${prettier_targets[*]}"
+            if ! npx --yes prettier --write "${prettier_targets[@]}"; then
+              echo "::warning::prettier --write failed; bot bump commit may trip consumer format-check CI"
+            fi
+          fi
+
           # Roll changelog when present + extract notes. The
           # extraction uses `c{print}` (not `c&&/\S/`) so blank lines
           # within the [Unreleased] section are preserved — matches
