@@ -67,9 +67,38 @@ End with a one-line verdict: "Setup looks coherent / Setup has issues: <brief>".
 ```
 
 The marker line + "report findings, not commentary" pattern keeps the
-agent in evaluator mode rather than coder mode. See the PR that
-introduced this verb for a worked example (Component-model validation
-against a dodot clone).
+agent in evaluator mode rather than coder mode.
+
+### Worked example
+
+Validating a Component-model adoption against a fresh dodot clone:
+
+```sh
+clone=$(mktemp -d)/dodot
+git clone ~/h/dodot "$clone"
+( cd "$clone" && RELEASE_REF=take-iii release-sync )
+orc probe --yes "$clone" "$(cat <<'EOF'
+This is not a coding task — we are evaluating your environment setup.
+1. From .release-sync-state.yaml, list Components and ref.
+2. List the pre-commit command names from lefthook.yml.
+3. Run `lefthook run pre-commit --all-files | head -80`. Report results.
+4. Verdict: one line.
+EOF
+)"
+```
+
+A representative reply structures the answer as numbered Markdown
+sections, ending with a verdict like:
+
+> **Verdict:** Setup looks coherent — all tools installed, lefthook
+> executes; the two lint failures are repo content issues, not
+> environment misconfiguration.
+
+The probe found a real bug on its first run against the Component
+model: `templates/rust/.github/pull_request_template.md` (shipped by
+release/) violates the `shell-quality` markdownlint config (MD041).
+That's the value loop in one example — static review missed it; the
+fresh agent's `lefthook run` surfaced it.
 
 ## Layout
 

@@ -19,6 +19,7 @@ async def run_session(
     resume: bool = False,
     verbose: bool = False,
     permission_mode: str = "acceptEdits",
+    persist_session: bool = True,
 ) -> str | None:
     """Send `prompt` to a session pinned at `repo_path`.
 
@@ -29,8 +30,13 @@ async def run_session(
     can execute lint/test commands; that mode is only safe against a
     throwaway clone.
 
-    Returns the discovered session_id (if any), and persists it so future
-    `resume=True` calls pick it up.
+    `persist_session` controls whether the discovered session_id is saved
+    to the sessions store. Defaults to True for normal `run`/`resume`
+    flows. `probe` passes False because probes are one-shot fresh-agent
+    evaluations — picking one up later via `orc resume` would surprise
+    the user.
+
+    Returns the discovered session_id (if any).
     """
     repo_path = str(Path(repo_path).expanduser().resolve())
     resume_id = state.get(repo_path) if resume else None
@@ -78,7 +84,7 @@ async def run_session(
 
         print()  # final newline after streamed content
 
-    if discovered_session_id:
+    if discovered_session_id and persist_session:
         state.set_(repo_path, discovered_session_id)
 
     return discovered_session_id

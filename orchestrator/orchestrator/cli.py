@@ -40,8 +40,22 @@ def cmd_probe(args: argparse.Namespace) -> int:
     widened permissions let the agent actually run things rather than
     just describe them.
 
+    Probe requires `--yes` as an explicit acknowledgement, because
+    accidentally pointing `bypassPermissions` at your real working tree
+    would let the subordinate agent run anything. The probe session is
+    NOT persisted (so a later `orc resume` won't pick it up).
+
     See orchestrator/README.md for the canonical eval-prompt pattern.
     """
+    if not args.yes:
+        print(
+            "orc probe runs with bypassPermissions — the subordinate agent\n"
+            "can execute any command in <repo>. Pass --yes to confirm <repo>\n"
+            "is a throwaway clone (e.g. under /tmp), not a user-owned working\n"
+            "tree.",
+            file=sys.stderr,
+        )
+        return 2
     asyncio.run(
         run_session(
             args.repo,
@@ -49,6 +63,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
             resume=False,
             verbose=args.verbose,
             permission_mode="bypassPermissions",
+            persist_session=False,
         )
     )
     return 0
@@ -97,6 +112,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_probe.add_argument("repo", help="path to throwaway clone of consumer repo")
     p_probe.add_argument("prompt", help="eval prompt — see orchestrator/README.md")
+    p_probe.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm <repo> is a throwaway clone (required — bypassPermissions "
+        "lets the subordinate agent run anything in it)",
+    )
     p_probe.set_defaults(func=cmd_probe)
 
     p_sessions = sub.add_parser("sessions", help="manage stored sessions")
