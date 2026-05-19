@@ -9,6 +9,19 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.3 (2026-05-19) — fix: tauri-app accepts passwordless .p12
+
+**Type:** PATCH. The preflight job's `APPLE_CERT_PASS_PRESENT`
+check rejected empty `APPLE_CERTIFICATE_PASSWORD` values — but
+passwordless `.p12`s are valid per PKCS12 spec, and macOS
+`security import` (Tauri's underlying tool) handles them.
+Forcing a placeholder password would either fail at decrypt
+time (wrong password) or require unrelated workflow hackery.
+
+Dropped the `APPLE_CERT_PASS_PRESENT` requirement; updated the
+input description noting empty is valid. `APPLE_CERTIFICATE` +
+`APPLE_SIGNING_IDENTITY` are still required when `build-mac=true`.
+
 ## v1.7.2 (2026-05-19) — fix: nvim-plugin version-file detection (slurp)
 
 **Type:** PATCH. v1.7.1's version-file pre-validation used

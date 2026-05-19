@@ -184,7 +184,7 @@ on:
         description: 'Base64-encoded Apple Developer ID Application .p12 certificate. Required when build-mac is true.'
         required: false
       APPLE_CERTIFICATE_PASSWORD:
-        description: 'Password for the .p12 certificate. Required when build-mac is true.'
+        description: 'Password for the .p12 certificate. Optional — leave empty for passwordless .p12s (valid per PKCS12 spec; macOS `security import` handles them).'
         required: false
       APPLE_SIGNING_IDENTITY:
         description: 'Apple signing identity, e.g. "Developer ID Application: Your Name (TEAMID)". Required when build-mac is true.'
@@ -212,7 +212,6 @@ jobs:
       BUILD_MAC: ${{ inputs.build-mac }}
       NOTARIZE: ${{ inputs.notarize }}
       APPLE_CERT_PRESENT: ${{ secrets.APPLE_CERTIFICATE != '' && 'yes' || 'no' }}
-      APPLE_CERT_PASS_PRESENT: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' && 'yes' || 'no' }}
       APPLE_ID_PRESENT: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'yes' || 'no' }}
       NOTARY_ID_PRESENT: ${{ secrets.APPLE_ID != '' && 'yes' || 'no' }}
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
@@ -222,8 +221,14 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
+          # Note: APPLE_CERTIFICATE_PASSWORD intentionally NOT required.
+          # Passwordless .p12s are valid (the password is just the
+          # wrapping passphrase, optional per PKCS12 spec). Tauri /
+          # `security import` accept empty passwords; gating on
+          # password-presence would force consumers to set placeholder
+          # secrets, which is footgun-prone.
           if [ "${BUILD_MAC}" = "true" ]; then
-            for v in APPLE_CERT_PRESENT APPLE_CERT_PASS_PRESENT APPLE_ID_PRESENT; do
+            for v in APPLE_CERT_PRESENT APPLE_ID_PRESENT; do
               if [ "${!v}" = "no" ]; then
                 name="${v%_PRESENT}"
                 echo "::error::build-mac=true but ${name} secret is missing"
