@@ -209,15 +209,20 @@ jobs:
                 exit 1
               fi
               # Both quote styles via \042 = " and \047 = ' in the
-              # perl regex. `perl -s` passes $v=… as a perl-level
+              # perl regex. `perl -0777 -ne` slurps the file as a
+              # single record (not line-by-line) so the regex sees
+              # the whole file. Line-by-line `perl -ne` would exit
+              # on the first non-matching line — the pre-1.7.2
+              # bug. `perl -s` passes $v=… as a perl-level
               # variable, sidestepping the shell-quoting puzzle of
-              # embedding ${NEW_VERSION} inside a substitution string.
-              if ! perl -ne 'exit(/M\.version\s*=\s*[\042\047][^\042\047]+[\042\047]/ ? 0 : 1)' "${VERSION_FILE}"; then
+              # embedding ${NEW_VERSION} inside a substitution
+              # string.
+              if ! perl -0777 -ne 'exit 0 if /M\.version\s*=\s*[\042\047][^\042\047]+[\042\047]/; exit 1' "${VERSION_FILE}"; then
                 echo "::error::version-file ${VERSION_FILE} has no M.version declaration to bump"
                 exit 1
               fi
               perl -s -i -pe 's/(M\.version\s*=\s*[\042\047])[^\042\047]+([\042\047])/${1}${v}${2}/' -- -v="${NEW_VERSION}" "${VERSION_FILE}"
-              if ! perl -ne 'exit(/M\.version\s*=\s*[\042\047]\Q'"${NEW_VERSION}"'\E[\042\047]/ ? 0 : 1)' "${VERSION_FILE}"; then
+              if ! perl -0777 -s -ne 'exit 0 if /M\.version\s*=\s*[\042\047]\Q${v}\E[\042\047]/; exit 1' -- -v="${NEW_VERSION}" "${VERSION_FILE}"; then
                 echo "::error::M.version bump in ${VERSION_FILE} did not produce expected value"
                 exit 1
               fi
