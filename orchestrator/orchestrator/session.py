@@ -18,11 +18,25 @@ async def run_session(
     prompt: str,
     resume: bool = False,
     verbose: bool = False,
+    permission_mode: str = "acceptEdits",
+    persist_session: bool = True,
 ) -> str | None:
     """Send `prompt` to a session pinned at `repo_path`.
 
-    Returns the discovered session_id (if any), and persists it so
-    future `resume=True` calls pick it up.
+    `permission_mode` controls how the subordinate agent's tool calls are
+    gated. Defaults to `acceptEdits` (auto-accept file edits, prompt for
+    command execution) — safe for sessions running against a user-owned
+    repo. The `probe` subcommand passes `bypassPermissions` so eval prompts
+    can execute lint/test commands; that mode is only safe against a
+    throwaway clone.
+
+    `persist_session` controls whether the discovered session_id is saved
+    to the sessions store. Defaults to True for normal `run`/`resume`
+    flows. `probe` passes False because probes are one-shot fresh-agent
+    evaluations — picking one up later via `orc resume` would surprise
+    the user.
+
+    Returns the discovered session_id (if any).
     """
     repo_path = str(Path(repo_path).expanduser().resolve())
     resume_id = state.get(repo_path) if resume else None
@@ -30,7 +44,7 @@ async def run_session(
     opts_kwargs: dict = {
         "cwd": repo_path,
         "setting_sources": ["project"],
-        "permission_mode": "acceptEdits",
+        "permission_mode": permission_mode,
     }
     if resume_id:
         opts_kwargs["resume"] = resume_id
@@ -70,7 +84,7 @@ async def run_session(
 
         print()  # final newline after streamed content
 
-    if discovered_session_id:
+    if discovered_session_id and persist_session:
         state.set_(repo_path, discovered_session_id)
 
     return discovered_session_id
