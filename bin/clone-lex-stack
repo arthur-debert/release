@@ -36,7 +36,7 @@
 # Output contract:
 #   stdout: tab-separated summary, one line per requested repo:
 #           <repo>\t<path>\t<status>
-#           where <status> ∈ {cloned, refreshed, skipped-exists,
+#           where <status> ∈ {cloned, refreshed, skipped-exists, locked,
 #                              setup-ok, setup-failed, clone-failed}
 #   stderr: human-readable progress.
 #
