@@ -11,13 +11,12 @@ coordinated with all consumers before cutting.
 
 ## v1.7.3 (2026-05-19) — fix: tauri-app accepts passwordless .p12
 
-**Type:** PATCH. Caught on the arami-app pilot setup. The
-preflight job's `APPLE_CERT_PASS_PRESENT` check rejected empty
-`APPLE_CERTIFICATE_PASSWORD` values — but passwordless `.p12`s
-are valid per PKCS12 spec, and macOS `security import` (Tauri's
-underlying tool) handles them fine. Forcing a placeholder
-password would either fail at decrypt time (wrong password) or
-require unrelated workflow hackery.
+**Type:** PATCH. The preflight job's `APPLE_CERT_PASS_PRESENT`
+check rejected empty `APPLE_CERTIFICATE_PASSWORD` values — but
+passwordless `.p12`s are valid per PKCS12 spec, and macOS
+`security import` (Tauri's underlying tool) handles them.
+Forcing a placeholder password would either fail at decrypt
+time (wrong password) or require unrelated workflow hackery.
 
 Dropped the `APPLE_CERT_PASS_PRESENT` requirement; updated the
 input description noting empty is valid. `APPLE_CERTIFICATE` +
