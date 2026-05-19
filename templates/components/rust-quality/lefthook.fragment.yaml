@@ -1,0 +1,18 @@
+# rust-quality lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only.
+#
+# rust-quality intentionally ships no config files — rustfmt's defaults
+# match the portfolio (0/21 repos override). Add a templates/components/
+# rust-quality/rustfmt.toml here if defaults need to change for everyone.
+
+pre-commit:
+  commands:
+    cargo-fmt:
+      glob: "*.rs"
+      run: cargo fmt -- --check
+      priority: 2
+    cargo-clippy:
+      glob: "*.rs"
+      run: cargo clippy -- -D warnings
+      priority: 2
