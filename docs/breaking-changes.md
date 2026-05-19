@@ -17,8 +17,9 @@ coordinated with all consumers before cutting.
 which doesn't support globstar: `shopt: globstar: invalid shell
 option name`.
 
-Switched to `find -type f \( -name '*.dmg' -o … \)`. Portable
-across bash versions and matches the same set of files.
+Switched to `find "${bundle_root}" -type f \( -name '*.dmg' -o
+… \)`. Portable across bash versions and matches the same set
+of files.
 
 Caught after the mac build + sign + notarization actually
 succeeded end-to-end — the failure was purely in the post-build
