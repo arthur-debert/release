@@ -118,14 +118,18 @@ process_subtree() {
   local prefix=$1
   while IFS=$'\t' read -r meta rel; do
     [ -n "$rel" ] || continue
-    local file_mode dest canonical
+    local file_mode dest
     file_mode=${meta%% *}
     dest=${rel#"$prefix"/}
 
-    canonical=$(git -C "$RELEASE_HOME" show "$ref:$rel")
-
-    if [ -f "$dest" ] && [ "$canonical" = "$(cat "$dest")" ]; then
-      # Mode could still drift; check it when we have a chance.
+    # Stream the canonical content directly into cmp / the file — avoids
+    # loading into a shell variable, which strips trailing newlines (and
+    # silently mangles files with `\n` endings: write loses the newline,
+    # then --check happily reports "clean" because both sides of the
+    # next comparison are equally stripped).
+    if [ -f "$dest" ] \
+       && git -C "$RELEASE_HOME" show "$ref:$rel" | cmp -s - "$dest"; then
+      # Content matches; mode may still drift.
       if [ "$file_mode" = "100755" ] && [ ! -x "$dest" ]; then
         :  # fall through to drift/sync path below
       elif [ "$file_mode" = "100644" ] && [ -x "$dest" ]; then
@@ -143,7 +147,7 @@ process_subtree() {
     fi
 
     mkdir -p "$(dirname "$dest")"
-    printf '%s' "$canonical" > "$dest"
+    git -C "$RELEASE_HOME" show "$ref:$rel" > "$dest"
     if [ "$file_mode" = "100755" ]; then
       chmod +x "$dest"
     else
