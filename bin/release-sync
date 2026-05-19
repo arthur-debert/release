@@ -18,18 +18,29 @@
 # (useful for testing un-pushed changes or pinning to a tag).
 #
 # Sync layout (path-mirror — destination = source path with the
-# templates/commons/ or templates/<stack>/ prefix stripped):
+# templates/commons/, templates/components/<c>/, or templates/<stack>/
+# prefix stripped):
 #
-#   templates/commons/**     → every consumer
-#   templates/<stack>/**     → consumers with that detected stack
+#   templates/commons/**          → every consumer
+#   templates/components/<c>/**   → consumers whose Stack declares <c>
+#   templates/<stack>/**          → consumers of that detected Stack
 #
-# Stack-specific paths win when they collide with commons. Files outside
-# those two subtrees (e.g. templates/fragments/, templates/render/) are
-# never synced.
+# The Component list is the union of (Stack default at
+# templates/<stack>/manifest.yaml) overridden by (consumer's
+# .release-sync.yaml at repo root, if present).
 #
-# File mode is preserved from the git tree (100755 → executable, 100644
-# → not). Adding a new managed file is a content-only change: drop it at
-# its mirror path in templates/, no code edit required.
+# Stack-specific paths win on collision with Component paths; Component
+# paths win on collision with commons. Files outside the three subtrees
+# (e.g. templates/fragments/, templates/render/) are never synced.
+#
+# File mode is preserved from the git tree (100755 → executable).
+#
+# Two files are GENERATED (not stored under templates/):
+#   - lefthook.yml — composed from templates/components/_lefthook-base.yaml
+#     + each declared Component's lefthook.fragment.yaml + the Stack's
+#     lefthook.fragment.yaml (if present), deep-merged via yq.
+#   - .release-sync-state.yaml — records the ref, sha, declared
+#     Components, and full file manifest for this sync.
 #
 # Exit codes:
 #   0  — clean (sync mode: wrote; check mode: no drift)
@@ -52,9 +63,12 @@ done
 RELEASE_HOME=${RELEASE_HOME:-$HOME/release}
 if [ ! -d "$RELEASE_HOME/.git" ]; then
   echo "release-sync: \$RELEASE_HOME='$RELEASE_HOME' is not a git clone" >&2
-  echo "  set RELEASE_HOME to point at a clone of arthur-debert/release" >&2
   exit 1
 fi
+command -v yq >/dev/null || {
+  echo "release-sync: yq is required (mikefarah/yq v4). Install via brew or apt." >&2
+  exit 1
+}
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "release-sync: not inside a git repo" >&2; exit 1; }
@@ -70,10 +84,10 @@ fi
 repo_name=$(basename "$repo_root")
 stack=$(detect-stack)
 
+# --- Ref selection -------------------------------------------------------
+
 ref=""
 if [ -n "${RELEASE_REF:-}" ]; then
-  # Explicit override — skip the dial and the fetch. Useful for testing
-  # un-pushed changes (point at a local ref) or pinning to a specific tag.
   if ! git -C "$RELEASE_HOME" rev-parse --verify --quiet "$RELEASE_REF" >/dev/null; then
     echo "release-sync: \$RELEASE_REF='$RELEASE_REF' is not a valid ref in \$RELEASE_HOME" >&2
     exit 1
@@ -90,76 +104,231 @@ else
   done
   if [ -z "$ref" ]; then
     echo "release-sync: no candidate branch found in \$RELEASE_HOME" >&2
-    echo "  expected one of: release/beta/$repo_name, release/beta/$stack, main" >&2
     exit 1
   fi
 fi
 
-# Verify the ref has a templates/<stack>/ tree; without it we can't sync.
+ref_sha=$(git -C "$RELEASE_HOME" rev-parse "$ref")
+
 if ! git -C "$RELEASE_HOME" ls-tree -d --name-only "$ref" -- "templates/$stack" \
      | grep -q .; then
   echo "release-sync: ref '$ref' has no templates/$stack/ tree" >&2
   exit 1
 fi
 
-echo "repo:  $repo_name"
-echo "stack: $stack"
-echo "ref:   $ref"
+# --- Manifest resolution -------------------------------------------------
+
+# Consumer's .release-sync.yaml at repo root wins if present; else the
+# Stack's manifest.yaml from the ref is the source of truth.
+declare -a components=()
+if [ -f .release-sync.yaml ]; then
+  manifest_source=".release-sync.yaml (consumer override)"
+  mapfile -t components < <(yq '.components // [] | .[]' .release-sync.yaml)
+else
+  manifest_source="templates/$stack/manifest.yaml (Stack default)"
+  if ! git -C "$RELEASE_HOME" cat-file -e "$ref:templates/$stack/manifest.yaml" 2>/dev/null; then
+    echo "release-sync: ref '$ref' has no templates/$stack/manifest.yaml" >&2
+    exit 1
+  fi
+  mapfile -t components < <(git -C "$RELEASE_HOME" show "$ref:templates/$stack/manifest.yaml" | yq '.components // [] | .[]')
+fi
+
+# Validate each declared Component exists in the ref.
+for c in "${components[@]}"; do
+  [ -n "$c" ] || continue
+  if ! git -C "$RELEASE_HOME" ls-tree -d --name-only "$ref" -- "templates/components/$c" \
+       | grep -q .; then
+    echo "release-sync: declared Component '$c' has no templates/components/$c/ tree in $ref" >&2
+    exit 1
+  fi
+done
+
+echo "repo:       $repo_name"
+echo "stack:      $stack"
+echo "ref:        $ref ($ref_sha)"
+echo "manifest:   $manifest_source"
+echo "components: ${components[*]:-(none)}"
 echo
+
+# --- Sync planning -------------------------------------------------------
+
+# For drift / sync, we visit subtrees in low-to-high precedence order:
+# commons < each component < stack. Later writes win.
+declare -a subtrees=("templates/commons")
+for c in "${components[@]}"; do
+  [ -n "$c" ] || continue
+  subtrees+=("templates/components/$c")
+done
+subtrees+=("templates/$stack")
+
+# Files emitted by the sync (relative to consumer root). Used both for
+# drift detection and to build the state file's `files:` list.
+declare -a synced_files=()
 
 clean=0
 drift=0
 wrote=0
 
-# Walk commons first, then stack. Stack files override commons on collision
-# (intentional: a stack can specialize a shared file). git ls-tree's mode
-# column tells us whether to set the executable bit on copy.
+# Returns 0 if the given source-tree path should be skipped (composition
+# input, not a destination file).
+should_skip_source() {
+  case "$1" in
+    */lefthook.fragment.yaml) return 0 ;;
+    */manifest.yaml) return 0 ;;
+    templates/components/_*) return 0 ;;
+    *.DS_Store) return 0 ;;
+  esac
+  return 1
+}
+
+sync_one() {
+  local rel=$1 file_mode=$2 dest=$3
+  # Content equality first.
+  if [ -f "$dest" ] \
+     && git -C "$RELEASE_HOME" show "$ref:$rel" | cmp -s - "$dest"; then
+    if [ "$file_mode" = "100755" ] && [ ! -x "$dest" ]; then
+      :  # mode drift
+    elif [ "$file_mode" = "100644" ] && [ -x "$dest" ]; then
+      :
+    else
+      clean=$((clean + 1))
+      return 0
+    fi
+  fi
+  if [ "$mode" = check ]; then
+    echo "  drift     $dest"
+    drift=$((drift + 1))
+    return 0
+  fi
+  mkdir -p "$(dirname "$dest")"
+  git -C "$RELEASE_HOME" show "$ref:$rel" > "$dest"
+  if [ "$file_mode" = "100755" ]; then chmod +x "$dest"
+  else chmod -x "$dest" 2>/dev/null || true
+  fi
+  echo "  synced    $dest"
+  wrote=$((wrote + 1))
+}
+
 process_subtree() {
   local prefix=$1
   while IFS=$'\t' read -r meta rel; do
     [ -n "$rel" ] || continue
+    should_skip_source "$rel" && continue
     local file_mode dest
     file_mode=${meta%% *}
     dest=${rel#"$prefix"/}
-
-    # Stream the canonical content directly into cmp / the file — avoids
-    # loading into a shell variable, which strips trailing newlines (and
-    # silently mangles files with `\n` endings: write loses the newline,
-    # then --check happily reports "clean" because both sides of the
-    # next comparison are equally stripped).
-    if [ -f "$dest" ] \
-       && git -C "$RELEASE_HOME" show "$ref:$rel" | cmp -s - "$dest"; then
-      # Content matches; mode may still drift.
-      if [ "$file_mode" = "100755" ] && [ ! -x "$dest" ]; then
-        :  # fall through to drift/sync path below
-      elif [ "$file_mode" = "100644" ] && [ -x "$dest" ]; then
-        :
-      else
-        clean=$((clean + 1))
-        continue
-      fi
-    fi
-
-    if [ "$mode" = check ]; then
-      echo "  drift     $dest"
-      drift=$((drift + 1))
-      continue
-    fi
-
-    mkdir -p "$(dirname "$dest")"
-    git -C "$RELEASE_HOME" show "$ref:$rel" > "$dest"
-    if [ "$file_mode" = "100755" ]; then
-      chmod +x "$dest"
-    else
-      chmod -x "$dest" 2>/dev/null || true
-    fi
-    echo "  synced    $dest"
-    wrote=$((wrote + 1))
+    synced_files+=("$dest")
+    sync_one "$rel" "$file_mode" "$dest"
   done < <(git -C "$RELEASE_HOME" ls-tree -r "$ref" -- "$prefix" 2>/dev/null || true)
 }
 
-process_subtree "templates/commons"
-process_subtree "templates/$stack"
+for st in "${subtrees[@]}"; do
+  process_subtree "$st"
+done
+
+# --- Generate lefthook.yml ----------------------------------------------
+
+# Extract base + each Component fragment + Stack fragment to a tmp dir,
+# then yq-merge them.
+lefthook_tmp=$(mktemp -d)
+trap 'rm -rf "$lefthook_tmp"' EXIT
+
+frags=()
+git -C "$RELEASE_HOME" show "$ref:templates/components/_lefthook-base.yaml" \
+  > "$lefthook_tmp/00-base.yaml" 2>/dev/null \
+  || { echo "release-sync: missing templates/components/_lefthook-base.yaml in $ref" >&2; exit 1; }
+frags+=("$lefthook_tmp/00-base.yaml")
+
+i=10
+for c in "${components[@]}"; do
+  [ -n "$c" ] || continue
+  fpath="templates/components/$c/lefthook.fragment.yaml"
+  if git -C "$RELEASE_HOME" cat-file -e "$ref:$fpath" 2>/dev/null; then
+    out="$lefthook_tmp/$i-$c.yaml"
+    git -C "$RELEASE_HOME" show "$ref:$fpath" > "$out"
+    frags+=("$out")
+    i=$((i + 1))
+  fi
+done
+
+stack_frag="templates/$stack/lefthook.fragment.yaml"
+if git -C "$RELEASE_HOME" cat-file -e "$ref:$stack_frag" 2>/dev/null; then
+  git -C "$RELEASE_HOME" show "$ref:$stack_frag" > "$lefthook_tmp/99-stack.yaml"
+  frags+=("$lefthook_tmp/99-stack.yaml")
+fi
+
+lefthook_out="$lefthook_tmp/lefthook.yml"
+{
+  printf '# Generated by release-sync from arthur-debert/release@%s. Do not edit.\n' "${ref_sha:0:12}"
+  printf '# Regenerate by running release-sync. Edit fragments in templates/components/<comp>/lefthook.fragment.yaml.\n'
+  printf '\n'
+  # Deep-merge all fragments, then strip the head/line/foot comments
+  # that each fragment carries (otherwise the merged file inherits a
+  # mess of "this is the X fragment" docstrings).
+  yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""' "${frags[@]}"
+} > "$lefthook_out"
+
+# Run lefthook.yml through sync_one with a synthetic source ref.
+synced_files+=("lefthook.yml")
+if [ -f lefthook.yml ] && cmp -s "$lefthook_out" lefthook.yml; then
+  clean=$((clean + 1))
+elif [ "$mode" = check ]; then
+  echo "  drift     lefthook.yml (generated)"
+  drift=$((drift + 1))
+else
+  cp "$lefthook_out" lefthook.yml
+  echo "  synced    lefthook.yml (generated)"
+  wrote=$((wrote + 1))
+fi
+
+# --- Generate .release-sync-state.yaml ----------------------------------
+
+# Sort + dedupe the file list (we may have visited the same path through
+# multiple subtrees; precedence already handled, but the manifest should
+# list each path once).
+synced_files+=(".release-sync-state.yaml")
+mapfile -t state_files < <(printf '%s\n' "${synced_files[@]}" | sort -u)
+
+# Preserve the existing timestamp if --check; else stamp now.
+existing_synced_at=""
+if [ -f .release-sync-state.yaml ]; then
+  existing_synced_at=$(yq '.synced_at // ""' .release-sync-state.yaml)
+fi
+if [ "$mode" = check ] && [ -n "$existing_synced_at" ]; then
+  stamp=$existing_synced_at
+else
+  stamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+fi
+
+state_out="$lefthook_tmp/.release-sync-state.yaml"
+{
+  printf '# Managed by release-sync. Do not edit.\n'
+  printf 'synced_from: arthur-debert/release\n'
+  printf 'ref: %s\n' "$ref"
+  printf 'sha: %s\n' "$ref_sha"
+  printf 'synced_at: %s\n' "$stamp"
+  printf 'stack: %s\n' "$stack"
+  printf 'components:\n'
+  for c in "${components[@]}"; do
+    [ -n "$c" ] || continue
+    printf '  - %s\n' "$c"
+  done
+  printf 'files:\n'
+  for f in "${state_files[@]}"; do
+    printf '  - %s\n' "$f"
+  done
+} > "$state_out"
+
+if [ -f .release-sync-state.yaml ] && cmp -s "$state_out" .release-sync-state.yaml; then
+  clean=$((clean + 1))
+elif [ "$mode" = check ]; then
+  echo "  drift     .release-sync-state.yaml"
+  drift=$((drift + 1))
+else
+  cp "$state_out" .release-sync-state.yaml
+  echo "  synced    .release-sync-state.yaml"
+  wrote=$((wrote + 1))
+fi
 
 echo
 if [ "$mode" = check ]; then

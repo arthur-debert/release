@@ -391,12 +391,18 @@ bin/                  human-runnable tooling, on $PATH via dodot release pack:
                       release-sync, release-beta-list
 rulesets/             branch-protection JSON templates
 scripts/              CI scripts exec'd by composite actions
-templates/            path-mirror layout — sync destination =
-                      source path minus the commons/ or <stack>/ prefix
+templates/            path-mirror layout — sync destination = source path
+                      minus the commons/, components/<c>/, or <stack>/ prefix
   commons/            synced to every consumer (setup-dev-env.sh,
                       .claude/settings.json)
-  rust/, …            synced to consumers of that stack
-  fragments/          composition fragments (NOT synced — copy-paste)
+  components/<c>/     synced to consumers whose Stack declares <c>; each
+                      Component ships its config files + a
+                      lefthook.fragment.yaml (composition input for the
+                      generated lefthook.yml). See
+                      docs/references/component-model.md
+  <stack>/            Stack-specific recipe: manifest.yaml (default
+                      Components) + optional lefthook.fragment.yaml +
+                      any Stack-specific files
   render/             render templates (NOT synced — used by CI to
                       produce per-release artifacts like brew formulae)
 orchestrator/         🚧 Python harness for local multi-repo

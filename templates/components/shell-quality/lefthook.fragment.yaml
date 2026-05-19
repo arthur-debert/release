@@ -1,0 +1,18 @@
+# shell-quality lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only (no auto-fix and re-stage).
+
+pre-commit:
+  commands:
+    markdownlint:
+      glob: "**/*.md"
+      run: markdownlint {staged_files}
+      priority: 2
+    yamllint:
+      glob: "**/*.{yml,yaml}"
+      run: yamllint {staged_files}
+      priority: 2
+    shellcheck:
+      glob: "**/*.{sh,bash}"
+      run: shellcheck {staged_files}
+      priority: 2
