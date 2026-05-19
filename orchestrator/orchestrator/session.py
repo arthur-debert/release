@@ -18,11 +18,19 @@ async def run_session(
     prompt: str,
     resume: bool = False,
     verbose: bool = False,
+    permission_mode: str = "acceptEdits",
 ) -> str | None:
     """Send `prompt` to a session pinned at `repo_path`.
 
-    Returns the discovered session_id (if any), and persists it so
-    future `resume=True` calls pick it up.
+    `permission_mode` controls how the subordinate agent's tool calls are
+    gated. Defaults to `acceptEdits` (auto-accept file edits, prompt for
+    command execution) — safe for sessions running against a user-owned
+    repo. The `probe` subcommand passes `bypassPermissions` so eval prompts
+    can execute lint/test commands; that mode is only safe against a
+    throwaway clone.
+
+    Returns the discovered session_id (if any), and persists it so future
+    `resume=True` calls pick it up.
     """
     repo_path = str(Path(repo_path).expanduser().resolve())
     resume_id = state.get(repo_path) if resume else None
@@ -30,7 +38,7 @@ async def run_session(
     opts_kwargs: dict = {
         "cwd": repo_path,
         "setting_sources": ["project"],
-        "permission_mode": "acceptEdits",
+        "permission_mode": permission_mode,
     }
     if resume_id:
         opts_kwargs["resume"] = resume_id

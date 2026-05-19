@@ -29,6 +29,31 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_probe(args: argparse.Namespace) -> int:
+    """Send an eval prompt to a fresh subordinate agent.
+
+    Probe is for verification-by-proxy: a fresh agent in `<repo>` answers
+    structured questions about its environment, reports whether the setup
+    is coherent, runs lint/test commands as needed. Permission mode is
+    `bypassPermissions` — assumes `<repo>` is a throwaway clone, not a
+    user-owned working tree. The clone bounds the blast radius; the
+    widened permissions let the agent actually run things rather than
+    just describe them.
+
+    See orchestrator/README.md for the canonical eval-prompt pattern.
+    """
+    asyncio.run(
+        run_session(
+            args.repo,
+            args.prompt,
+            resume=False,
+            verbose=args.verbose,
+            permission_mode="bypassPermissions",
+        )
+    )
+    return 0
+
+
 def cmd_sessions_list(_: argparse.Namespace) -> int:
     sessions = state.all_sessions()
     if not sessions:
@@ -64,6 +89,15 @@ def main(argv: list[str] | None = None) -> int:
     p_resume.add_argument("repo")
     p_resume.add_argument("prompt")
     p_resume.set_defaults(func=cmd_resume)
+
+    p_probe = sub.add_parser(
+        "probe",
+        help="evaluate a repo's environment via a fresh subordinate agent "
+        "(throwaway clone — uses bypassPermissions)",
+    )
+    p_probe.add_argument("repo", help="path to throwaway clone of consumer repo")
+    p_probe.add_argument("prompt", help="eval prompt — see orchestrator/README.md")
+    p_probe.set_defaults(func=cmd_probe)
 
     p_sessions = sub.add_parser("sessions", help="manage stored sessions")
     sp = p_sessions.add_subparsers(dest="sub_cmd", required=True)
