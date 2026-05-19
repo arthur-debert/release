@@ -9,6 +9,34 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.1 (2026-05-19) — fix: nvim-plugin adds version-file + prep-script
+
+**Type:** PATCH. Caught on the lex-fmt/nvim pilot 0.10.2 cut.
+
+Most Lua-based Neovim plugins carry an internal version constant
+(typically `M.version = "X.Y.Z"` in `lua/<name>/init.lua`) that
+plugin code references at runtime. The pre-migration release flow
+relied on a consumer-side `scripts/release/update-release`
+primitive to bump it. The slice-1 workflow assumed nvim plugins
+have no version constant ("no manifest to bump") — which is true
+for some plugins but not for the canonical convention.
+
+Fixed by adding two optional inputs to `nvim-plugin.yml`:
+
+- `version-file` — path to a Lua file containing
+  `M.version = "X.Y.Z"`. Workflow bumps the constant via a
+  perl substitution that handles either quote style. Refuses to
+  silently no-op: if the input is set the pattern MUST be present.
+- `prep-script` — same shape as the input added to tauri-app.yml
+  in v1.7.0. Optional script the workflow execs BEFORE the
+  version-file bump, with `NEW_VERSION` + `PLUGIN_ROOT` in env.
+  Use for: multiple version sources, submodule refreshes,
+  upstream-dep pin syncs, etc. Generalized across stacks.
+
+After this fix, lex-fmt/nvim's caller wires
+`version-file: lua/lex/init.lua` and the manual release flow
+(Mode A) keeps `M.version` in sync with the pushed tag.
+
 ## v1.7.0 (2026-05-18) — additive: tauri-app stack workflow (slice 1)
 
 **Type:** MINOR (new category workflow; no consumer breakage).
