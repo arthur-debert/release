@@ -4,7 +4,7 @@ name: Copilot Review (self)
 # (dogfood the canonical PR loop on release itself).
 #
 # Trigger policy (also the canonical policy in
-# templates/rust/workflows/copilot-review.yml, kept in lockstep):
+# templates/rust/.github/workflows/copilot-review.yml, kept in lockstep):
 #   - `on: pull_request: types: [opened]` — fires once at PR creation,
 #     regardless of draft state. Drafts get Copilot too.
 #   - `ready_for_review` is intentionally NOT in the types list — going

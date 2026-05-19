@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# Sync managed files from the release repo into the current consumer repo.
+#
+# Usage:
+#   release-sync          # write canonical files into the working tree
+#   release-sync --check  # exit non-zero if any managed file has drifted
+#
+# Reads files from $RELEASE_HOME (default $HOME/release) using `git show
+# <ref>:<path>` — the source clone's working tree is never touched, so
+# this is safe to run against a clone you're actively editing.
+#
+# Branch dial (first match wins):
+#   origin/release/beta/<consumer-repo-name>
+#   origin/release/beta/<stack>
+#   origin/main
+#
+# Override with $RELEASE_REF=<any-gitref> to skip the dial and the fetch
+# (useful for testing un-pushed changes or pinning to a tag).
+#
+# Sync layout (path-mirror — destination = source path with the
+# templates/commons/ or templates/<stack>/ prefix stripped):
+#
+#   templates/commons/**     → every consumer
+#   templates/<stack>/**     → consumers with that detected stack
+#
+# Stack-specific paths win when they collide with commons. Files outside
+# those two subtrees (e.g. templates/fragments/, templates/render/) are
+# never synced.
+#
+# File mode is preserved from the git tree (100755 → executable, 100644
+# → not). Adding a new managed file is a content-only change: drop it at
+# its mirror path in templates/, no code edit required.
+#
+# Exit codes:
+#   0  — clean (sync mode: wrote; check mode: no drift)
+#   1  — drift detected (--check only) or fatal error
+#   64 — bad usage
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+mode=sync
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check) mode=check; shift ;;
+    -h|--help) show_help; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; show_help >&2; exit 64 ;;
+  esac
+done
+
+RELEASE_HOME=${RELEASE_HOME:-$HOME/release}
+if [ ! -d "$RELEASE_HOME/.git" ]; then
+  echo "release-sync: \$RELEASE_HOME='$RELEASE_HOME' is not a git clone" >&2
+  echo "  set RELEASE_HOME to point at a clone of arthur-debert/release" >&2
+  exit 1
+fi
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
+  echo "release-sync: not inside a git repo" >&2; exit 1; }
+cd "$repo_root"
+
+release_real=$(cd "$RELEASE_HOME" && pwd -P)
+repo_real=$(pwd -P)
+if [ "$release_real" = "$repo_real" ]; then
+  echo "release-sync: refusing to run inside \$RELEASE_HOME ($RELEASE_HOME)" >&2
+  exit 1
+fi
+
+repo_name=$(basename "$repo_root")
+stack=$(detect-stack)
+
+ref=""
+if [ -n "${RELEASE_REF:-}" ]; then
+  # Explicit override — skip the dial and the fetch. Useful for testing
+  # un-pushed changes (point at a local ref) or pinning to a specific tag.
+  if ! git -C "$RELEASE_HOME" rev-parse --verify --quiet "$RELEASE_REF" >/dev/null; then
+    echo "release-sync: \$RELEASE_REF='$RELEASE_REF' is not a valid ref in \$RELEASE_HOME" >&2
+    exit 1
+  fi
+  ref=$RELEASE_REF
+else
+  git -C "$RELEASE_HOME" fetch --quiet --prune origin
+  for candidate in "release/beta/$repo_name" "release/beta/$stack" main; do
+    if git -C "$RELEASE_HOME" rev-parse --verify --quiet \
+         "refs/remotes/origin/$candidate" >/dev/null; then
+      ref="origin/$candidate"
+      break
+    fi
+  done
+  if [ -z "$ref" ]; then
+    echo "release-sync: no candidate branch found in \$RELEASE_HOME" >&2
+    echo "  expected one of: release/beta/$repo_name, release/beta/$stack, main" >&2
+    exit 1
+  fi
+fi
+
+# Verify the ref has a templates/<stack>/ tree; without it we can't sync.
+if ! git -C "$RELEASE_HOME" ls-tree -d --name-only "$ref" -- "templates/$stack" \
+     | grep -q .; then
+  echo "release-sync: ref '$ref' has no templates/$stack/ tree" >&2
+  exit 1
+fi
+
+echo "repo:  $repo_name"
+echo "stack: $stack"
+echo "ref:   $ref"
+echo
+
+clean=0
+drift=0
+wrote=0
+
+# Walk commons first, then stack. Stack files override commons on collision
+# (intentional: a stack can specialize a shared file). git ls-tree's mode
+# column tells us whether to set the executable bit on copy.
+process_subtree() {
+  local prefix=$1
+  while IFS=$'\t' read -r meta rel; do
+    [ -n "$rel" ] || continue
+    local file_mode dest canonical
+    file_mode=${meta%% *}
+    dest=${rel#"$prefix"/}
+
+    canonical=$(git -C "$RELEASE_HOME" show "$ref:$rel")
+
+    if [ -f "$dest" ] && [ "$canonical" = "$(cat "$dest")" ]; then
+      # Mode could still drift; check it when we have a chance.
+      if [ "$file_mode" = "100755" ] && [ ! -x "$dest" ]; then
+        :  # fall through to drift/sync path below
+      elif [ "$file_mode" = "100644" ] && [ -x "$dest" ]; then
+        :
+      else
+        clean=$((clean + 1))
+        continue
+      fi
+    fi
+
+    if [ "$mode" = check ]; then
+      echo "  drift     $dest"
+      drift=$((drift + 1))
+      continue
+    fi
+
+    mkdir -p "$(dirname "$dest")"
+    printf '%s' "$canonical" > "$dest"
+    if [ "$file_mode" = "100755" ]; then
+      chmod +x "$dest"
+    else
+      chmod -x "$dest" 2>/dev/null || true
+    fi
+    echo "  synced    $dest"
+    wrote=$((wrote + 1))
+  done < <(git -C "$RELEASE_HOME" ls-tree -r "$ref" -- "$prefix" 2>/dev/null || true)
+}
+
+process_subtree "templates/commons"
+process_subtree "templates/$stack"
+
+echo
+if [ "$mode" = check ]; then
+  printf 'summary: %d clean, %d drift\n' "$clean" "$drift"
+  [ "$drift" -eq 0 ]
+else
+  printf 'summary: %d synced, %d already clean\n' "$wrote" "$clean"
+fi

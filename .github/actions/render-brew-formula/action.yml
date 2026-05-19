@@ -54,7 +54,7 @@ runs:
           for(i=1;i<=NF;i++) printf "%s", toupper(substr($i,1,1)) tolower(substr($i,2))
         }')
 
-        TMPL="${TEMPLATE_PATH:-${{ github.action_path }}/../../../templates/homebrew-formula.rb.tmpl}"
+        TMPL="${TEMPLATE_PATH:-${{ github.action_path }}/../../../templates/render/homebrew-formula.rb.tmpl}"
         [ -f "$TMPL" ] || { echo "::error::Template not found: $TMPL"; exit 1; }
 
         # Build env-var list for the Python renderer. URLS_JSON keys become

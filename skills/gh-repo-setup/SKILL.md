@@ -182,77 +182,62 @@ Dry-run mode: skip the final `gh api -X PUT/POST` block and just `echo "$PAYLOAD
 
 ## Step 3: sweep policy files
 
-For each template file under `$RELEASE_CLONE/templates/$STACK/`, drop it into the right place in the target repo. Compare before copying so we can report `ok`, `created`, `updated`, or `conflict`.
+Drop the canonical policy + setup files into the target repo. Compare before copying so we can report `ok`, `created`, `updated`, or `conflict`.
 
-### Destination mapping
+### Source layout (path-mirror)
 
-Templates live as a flat-ish tree under `release/templates/<stack>/`, but the destination in each consumer repo depends on the template's path:
+Sources live under two subtrees:
 
-| Template path | Destination in consumer | Why |
-|---|---|---|
-| `workflows/*` | `.github/workflows/*` | GitHub Actions location |
-| `scripts/*` | `scripts/*` (repo root) | Repo-local helpers, used by pre-commit hooks and CI |
-| `lefthook.yml` | `lefthook.yml` (repo root) | Tool config consumed by `lefthook install` at repo root |
-| `CODEOWNERS`, `dependabot.yml`, `copilot-instructions.md`, `pull_request_template.md` | `.github/<file>` | Standard GitHub policy files |
+- `release/templates/commons/**` — synced to every consumer
+- `release/templates/<stack>/**` — synced to consumers of that stack
 
-The mapping is **explicit by design**. If you add a new file to a stack template, `map_dest()` will error out with `no destination mapping for template path '<rel>'`, forcing a deliberate routing decision — `.gitignore`, `justfile`, `rustfmt.toml`, and similar belong at repo root, not under `.github/`, and we don't want a silent catch-all sending them to the wrong place.
+The destination in each consumer is the source path with the `templates/commons/` or `templates/<stack>/` prefix stripped. For example, `templates/rust/.github/dependabot.yml` lands at `.github/dependabot.yml`; `templates/commons/scripts/setup-dev-env.sh` lands at `scripts/setup-dev-env.sh`.
+
+No destination map. To add a new managed file, drop it under the right subtree at the path you want it to land. Files outside `commons/` and `<stack>/` (e.g. `templates/fragments/`, `templates/render/`) are never synced.
+
+Stack-specific paths win on collision with commons (a stack may specialize a shared file).
 
 ```sh
 set -euo pipefail
 
-TEMPLATES="$RELEASE_CLONE/templates/$STACK"
-[ -d "$TEMPLATES" ] || { echo "no templates for stack '$STACK' at $TEMPLATES" >&2; exit 1; }
+COMMONS="$RELEASE_CLONE/templates/commons"
+STACK_DIR="$RELEASE_CLONE/templates/$STACK"
+[ -d "$STACK_DIR" ] || { echo "no templates for stack '$STACK' at $STACK_DIR" >&2; exit 1; }
 
 FORCE=${FORCE:-0}   # set FORCE=1 if you want conflicts overwritten
 CREATED=0; UPDATED=0; SKIPPED=0; CONFLICTS=0
 
-# Enumerate explicitly. Any new template file whose path doesn't match a
-# documented mapping causes an error rather than a silent .github/ default —
-# the contributor adding the new file has to make a deliberate routing choice.
-map_dest() {
-  local rel=$1
-  case "$rel" in
-    workflows/*)                      printf '.github/%s' "$rel" ;;
-    scripts/*)                        printf '%s' "$rel" ;;
-    lefthook.yml)                     printf '%s' "$rel" ;;
-    CODEOWNERS                  | \
-    dependabot.yml              | \
-    copilot-instructions.md     | \
-    pull_request_template.md)         printf '.github/%s' "$rel" ;;
-    *)
-      echo "ERROR: no destination mapping for template path '$rel' — add it to map_dest()" >&2
-      exit 1 ;;
-  esac
-}
-
 cd "$TARGET_ROOT"
 
-while IFS= read -r src; do
-  rel=${src#"$TEMPLATES/"}
-  case "$rel" in
-    .DS_Store) continue ;;
-  esac
-  dest=$(map_dest "$rel")
-  mkdir -p "$(dirname "$dest")"
-  if [ ! -e "$dest" ]; then
-    cp "$src" "$dest"
-    # Preserve executable bit on scripts/ entries.
-    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
-    echo "  created   $dest"
-    CREATED=$((CREATED + 1))
-  elif cmp -s "$src" "$dest"; then
-    echo "  ok        $dest"
-    SKIPPED=$((SKIPPED + 1))
-  elif [ "$FORCE" = 1 ]; then
-    cp "$src" "$dest"
-    case "$rel" in scripts/*) chmod +x "$dest" ;; esac
-    echo "  updated   $dest"
-    UPDATED=$((UPDATED + 1))
-  else
-    echo "  conflict  $dest  (differs; set FORCE=1 to overwrite)"
-    CONFLICTS=$((CONFLICTS + 1))
-  fi
-done < <(find "$TEMPLATES" -type f)
+process_subtree() {
+  local prefix=$1
+  [ -d "$prefix" ] || return 0
+  while IFS= read -r src; do
+    local dest=${src#"$prefix"/}
+    mkdir -p "$(dirname "$dest")"
+    if [ ! -e "$dest" ]; then
+      cp "$src" "$dest"
+      [ -x "$src" ] && chmod +x "$dest"
+      echo "  created   $dest"
+      CREATED=$((CREATED + 1))
+    elif cmp -s "$src" "$dest"; then
+      echo "  ok        $dest"
+      SKIPPED=$((SKIPPED + 1))
+    elif [ "$FORCE" = 1 ]; then
+      cp "$src" "$dest"
+      [ -x "$src" ] && chmod +x "$dest"
+      echo "  updated   $dest"
+      UPDATED=$((UPDATED + 1))
+    else
+      echo "  conflict  $dest  (differs; set FORCE=1 to overwrite)"
+      CONFLICTS=$((CONFLICTS + 1))
+    fi
+  done < <(find "$prefix" -type f -not -name '.DS_Store')
+}
+
+# Commons first, stack second — stack overrides on collision.
+process_subtree "$COMMONS"
+process_subtree "$STACK_DIR"
 
 printf 'policy files: %d created, %d updated, %d ok, %d conflicts\n' \
   "$CREATED" "$UPDATED" "$SKIPPED" "$CONFLICTS"
