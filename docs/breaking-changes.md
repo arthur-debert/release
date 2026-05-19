@@ -9,6 +9,23 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.2 (2026-05-19) — fix: nvim-plugin version-file detection (slurp)
+
+**Type:** PATCH. v1.7.1's version-file pre-validation used
+`perl -ne 'exit(... ? 0 : 1)'` which evaluates per-line and
+exits on the FIRST line that doesn't match — so even when
+`M.version` exists on a later line, the check incorrectly
+errored with "no M.version declaration to bump".
+
+Caught on the lex-fmt/nvim 0.10.3 verification cut after #61
+landed; prepare job failed before tagging.
+
+Fixed by switching both pre- and post-validation checks to
+`perl -0777 -ne …; exit 1` — slurp the file as one record so
+the regex sees the whole file at once. The substitution path
+itself (line-by-line `perl -i -pe`) is unchanged and was
+working correctly.
+
 ## v1.7.1 (2026-05-19) — fix: nvim-plugin adds version-file + prep-script
 
 **Type:** PATCH. Caught on the lex-fmt/nvim pilot 0.10.2 cut.
