@@ -9,6 +9,22 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+## v1.7.4 (2026-05-19) — fix: tauri-app build step exposes GH_TOKEN
+
+**Type:** PATCH. Tauri consumers commonly fetch upstream
+artifacts (WASM packages, asset bundles) in their
+`scripts/build-tauri.sh` convention hook via `gh release
+download` or `fetch-artifact`. Without `GH_TOKEN` in the
+build step's env, those calls fail with `gh: To use
+GitHub CLI in a GitHub Actions workflow, set the GH_TOKEN
+environment variable`.
+
+Added `GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}`
+to the `Build` step's env block. Falls back to `GITHUB_TOKEN`
+when no `RELEASE_TOKEN` secret is provided. Mirrors the same
+pattern already applied to `vscode-ext.yml`'s
+`pre-vsce-package` step.
+
 ## v1.7.3 (2026-05-19) — fix: tauri-app accepts passwordless .p12
 
 **Type:** PATCH. The preflight job's `APPLE_CERT_PASS_PRESENT`
