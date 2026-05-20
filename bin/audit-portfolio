@@ -100,7 +100,16 @@ for r in "${repos[@]}"; do
   ec=$?
   fails=$(printf '%s\n' "$out" | grep -cE '^\s*\[FAIL\]')
   warns=$(printf '%s\n' "$out" | grep -cE '^\s*\[WARN\]')
-  summary_rows+=("$ec|$fails|$warns|$r")
+  passes=$(printf '%s\n' "$out" | grep -cE '^\s*\[PASS\]')
+  skips=$(printf '%s\n' "$out" | grep -cE '^\s*\[SKIP\]')
+  # Conformance = pass rate excluding SKIPs (which are N/A rows).
+  applicable=$((passes + fails + warns))
+  if [ "$applicable" -gt 0 ]; then
+    conf_pct=$((100 * passes / applicable))
+  else
+    conf_pct=0
+  fi
+  summary_rows+=("$ec|$fails|$warns|$passes|$skips|$conf_pct|$r")
   if [ "$fails" -gt 0 ] || [ "$warns" -gt 0 ]; then
     detail_repos+=("$r")
   fi
@@ -113,11 +122,17 @@ if [ "$json_mode" = "1" ]; then
 fi
 
 # --- Table summary ---
+# Conformance column: passes / (passes + fails + warns), excluding SKIPs.
+# A skipped check is N/A and shouldn't count against or for the score.
 echo
-printf '%-40s %5s %5s %s\n' "REPO" "FAIL" "WARN" "STATUS"
-printf '%-40s %5s %5s %s\n' "----" "----" "----" "------"
+printf '%-40s %5s %5s %5s %s\n' "REPO" "FAIL" "WARN" "CONF" "STATUS"
+printf '%-40s %5s %5s %5s %s\n' "----" "----" "----" "----" "------"
+total_passes=0
+total_applicable=0
 for row in "${summary_rows[@]}"; do
-  IFS='|' read -r ec fails warns r <<<"$row"
+  IFS='|' read -r ec fails warns passes skips conf_pct r <<<"$row"
+  total_passes=$((total_passes + passes))
+  total_applicable=$((total_applicable + passes + fails + warns))
   if [ "$only_failing" = "1" ] && [ "$fails" = "0" ] && [ "$warns" = "0" ]; then
     continue
   fi
@@ -127,7 +142,7 @@ for row in "${summary_rows[@]}"; do
     2) status="warn" ;;
     *) status="?($ec)" ;;
   esac
-  printf '%-40s %5s %5s %s\n' "$r" "$fails" "$warns" "$status"
+  printf '%-40s %5s %5s %4s%% %s\n' "$r" "$fails" "$warns" "$conf_pct" "$status"
 done
 
 # --- Detail view: re-invoke audit-repo --quiet for problem repos ---
@@ -141,7 +156,13 @@ if [ "${#detail_repos[@]}" -gt 0 ]; then
 fi
 
 # --- Summary line ---
-printf 'summary: %d repo(s), %d failure(s), %d warning(s)\n' "${#repos[@]}" "$total_fails" "$total_warns"
+if [ "$total_applicable" -gt 0 ]; then
+  portfolio_conf=$((100 * total_passes / total_applicable))
+else
+  portfolio_conf=0
+fi
+printf 'summary: %d repo(s), %d failure(s), %d warning(s), portfolio conformance: %d%% (%d/%d applicable rows pass)\n' \
+  "${#repos[@]}" "$total_fails" "$total_warns" "$portfolio_conf" "$total_passes" "$total_applicable"
 
 if [ "$total_fails" -gt 0 ]; then exit 1; fi
 if [ "$total_warns" -gt 0 ]; then exit 2; fi

@@ -30,6 +30,14 @@
 #   7. ci_main_green     — most recent default-branch CI run succeeded
 #   8. private_mod_auth  — if go.mod has private arthur-debert/* deps, workflows
 #                          configure git insteadOf with RELEASE_TOKEN
+#
+# Conformance checks (WARN-only — don't fail; surface adoption gaps):
+#   9. release_sync       — .release-sync-state.yaml present (Component-model
+#                            adoption signal)
+#  10. scripts_inventory  — what's left in scripts/ beyond the canonical
+#                            setup-dev-env.sh + project extras
+#  11. workflows_canonical — count of workflows that are NOT thin callers of
+#                            arthur-debert/release/* (legacy / bespoke surface)
 
 set -uo pipefail
 
@@ -212,6 +220,81 @@ check_private_mod_auth() {
   fi
 }
 
+# --- Conformance check 9: release_sync state ---
+# `.release-sync-state.yaml` is dropped by the take-iii `release-sync`
+# script when a consumer adopts the Component model. Its presence
+# (independent of freshness) is the cleanest single signal of
+# Component-model adoption.
+check_release_sync() {
+  local body
+  body=$(gh api "repos/$repo/contents/.release-sync-state.yaml" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
+  if [ -z "$body" ]; then
+    record WARN release_sync "no .release-sync-state.yaml — Component model not adopted"
+    return
+  fi
+  local sha
+  sha=$(printf '%s\n' "$body" | grep -E '^sha:' | head -1 | awk '{print $2}')
+  local components
+  components=$(printf '%s\n' "$body" | awk '/^components:/{flag=1;next} /^[a-z_]+:/{flag=0} flag && /^ *- /{gsub(/^ *- /,""); print}' | paste -sd, -)
+  record PASS release_sync "adopted (sha=${sha:0:7}, components: ${components:-none})"
+}
+
+# --- Conformance check 10: scripts inventory ---
+# Canonical layout: `scripts/setup-dev-env.sh` only. Other files in
+# scripts/ are either legacy (`pre-commit`, `ci.sh`, `check`) that
+# should migrate to `bin/`, or project-specific extras that are fine
+# but worth surfacing. WARN with the inventory; don't FAIL.
+check_scripts_inventory() {
+  local listing
+  listing=$(gh api "repos/$repo/contents/scripts" 2>/dev/null | jq -r '.[]? | select(.type=="file") | .name')
+  if [ -z "$listing" ]; then
+    record SKIP scripts_inventory "no scripts/ dir on default branch"
+    return
+  fi
+  local extras
+  # Canonical scripts/ contents: setup-dev-env.sh only.
+  extras=$(printf '%s\n' "$listing" | grep -v '^setup-dev-env\.sh$' | paste -sd, -)
+  if [ -z "$extras" ]; then
+    record PASS scripts_inventory "only setup-dev-env.sh (canonical)"
+  else
+    record WARN scripts_inventory "non-canonical: ${extras}"
+  fi
+}
+
+# --- Conformance check 11: workflows canonicality ---
+# A "canonical" workflow either calls a release/ reusable workflow
+# (`uses: arthur-debert/release/.github/workflows/...`), or IS the
+# release-synced `copilot-review.yml` thin caller. Bespoke workflows
+# (full inline jobs that don't delegate to release/) are surfaced as
+# the conformance gap.
+check_workflows_canonical() {
+  local listing
+  listing=$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null | jq -r '.[]? | select(.type=="file") | .name')
+  if [ -z "$listing" ]; then
+    record SKIP workflows_canonical "no .github/workflows/ on default branch"
+    return
+  fi
+  local canonical=0 bespoke_list="" total=0
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    total=$((total+1))
+    local body
+    body=$(gh api "repos/$repo/contents/.github/workflows/$f" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
+    if printf '%s\n' "$body" | grep -qE 'uses:.*arthur-debert/release/\.github/workflows/'; then
+      canonical=$((canonical+1))
+    else
+      bespoke_list+="${f}, "
+    fi
+  done <<<"$listing"
+  bespoke_list=${bespoke_list%, }
+  if [ -z "$bespoke_list" ]; then
+    record PASS workflows_canonical "all $total workflows are thin callers of release/"
+  else
+    local bespoke_count=$((total - canonical))
+    record WARN workflows_canonical "$canonical/$total canonical; bespoke: ${bespoke_list}"
+  fi
+}
+
 # Run all checks
 check_ruleset
 check_release_token
@@ -221,6 +304,9 @@ check_dep_security
 check_dep_policy
 check_ci_main_green
 check_private_mod_auth
+check_release_sync
+check_scripts_inventory
+check_workflows_canonical
 
 # --- Output ---
 if [ "$json_mode" = "1" ]; then
