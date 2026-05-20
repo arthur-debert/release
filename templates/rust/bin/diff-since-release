@@ -11,7 +11,11 @@
 
 set -euo pipefail
 
-latest_tag=$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-' | head -n1)
+# `|| true` at the pipeline tail because under `set -euo pipefail`,
+# grep exits 1 when nothing matches (fresh repo, or only pre-release
+# tags exist) — without this, the script aborts before reaching the
+# friendly "No release tags found" branch below.
+latest_tag=$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-' | head -n1 || true)
 
 if [ -z "$latest_tag" ]; then
     echo "No release tags found"
