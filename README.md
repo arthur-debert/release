@@ -96,6 +96,7 @@ Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` pare
 |----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|--------------------------------------|------------------|-----------|----------------|
 | rust-lib       | (consumer)      | (consumer) | —               | W ✅ via publish   | —          | W ✅ (notes)      | A ✅ crates.io                       | —                | —         | A 📋           |
 | rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
+| go-cli         | W ✅            | W ✅       | (consumer)      | W ✅ cross         | A ✅ mac   | W ✅              | (tag-driven⁴)                        | A ✅ shared tap  | A 📋      | A 📋           |
 | electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | tauri-app      | A ✅ gate       | (consumer) | W 📋 playwright | W ✅ tauri build   | W ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
 | vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
@@ -197,6 +198,13 @@ Used today by `arami-core` (wasm consumed by `arami-app`) and
 `lex-fmt/lex` (`lex-wasm` member). See
 `docs/per-category/rust-cli.md` §WASM.
 
+⁴ **go-cli — tag-driven module distribution.** Go modules are pulled
+from a repo's Git tags directly; the `go release` job creating a tag
+*is* the publish for any downstream `go get` / `go install` consumer.
+No registry step. The Homebrew formula covers binary distribution for
+end users; consumers wanting only the binary install with `brew
+install arthur-debert/tools/<bin>`.
+
 ## Composition principle
 
 Most repos have **two layers** of concerns: a stack-specific one (rust
@@ -248,6 +256,15 @@ All shipped stack workflows ship to `@v1` (floating major); see
   `lex-fmt/zed-lex` pending (needs `wasm32-wasip2` target — likely
   fits a future `rustup-targets` input or a dedicated
   `zed-extension` micro-stack).
+- 🚧 **go-cli** — `@v1`, slice 1. Pilot `arthur-debert/supage`
+  migration in flight. Slice 1 scope: cross-compile via Go's
+  built-in `GOOS`/`GOARCH` (darwin/arm64, linux/amd64, linux/arm64),
+  optional macOS sign + notarize via the shared `sign-mac` action,
+  GH release with rolled Keep-a-Changelog notes, Homebrew formula
+  rendered against the shared template and pushed to
+  `arthur-debert/homebrew-tools`. No registry-publish step — Go
+  modules are pulled from Git tags directly. Deferred: BATS e2e
+  smoke convention, Windows builds, security→patch glue.
 - ✅ **vscode-ext** — `@v1`. Pilot `lex-fmt/vscode` migrated +
   verified end-to-end (0.10.2 → Marketplace + 4 platform VSIXes;
   0.10.3 → Marketplace listing fix for the Eclipse namespace

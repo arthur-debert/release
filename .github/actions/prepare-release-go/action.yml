@@ -1,0 +1,206 @@
+name: 'Prepare release (Go)'
+description: |
+  Validate a version, roll the changelog, commit + tag + push for a Go project.
+  Go ships version metadata via `-ldflags -X` at build time, so unlike the Rust
+  flavor there is no manifest version field to bump — the tag itself is the
+  source of truth. Resume-on-failure: if the tag already exists at the given
+  version, skip the bump and emit the tag's SHA so downstream jobs can re-run
+  cleanly.
+
+inputs:
+  version:
+    description: 'Version to release (e.g. 0.1.0 or 1.0.0-rc.1)'
+    required: true
+  changelog-path:
+    description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section)'
+    required: false
+    default: 'CHANGELOG.md'
+
+outputs:
+  version:
+    description: 'Validated version (no leading v)'
+    value: ${{ steps.outputs.outputs.version }}
+  release-sha:
+    description: 'Commit SHA of the tag (for downstream jobs to checkout)'
+    value: ${{ steps.outputs.outputs.sha }}
+  prerelease:
+    description: '"true" if version contains a pre-release suffix'
+    value: ${{ steps.outputs.outputs.prerelease }}
+  notes-path:
+    description: 'Path to extracted release notes file'
+    value: 'release-notes.md'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate and detect resume case
+      id: detect
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if ! [[ "$NEW_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+          echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: $NEW_VERSION)"
+          exit 1
+        fi
+
+        IS_PRERELEASE=false
+        if [[ "$NEW_VERSION" == *-* ]]; then
+          IS_PRERELEASE=true
+        fi
+        echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+        TAG="v$NEW_VERSION"
+        git fetch --tags origin >/dev/null 2>&1 || true
+
+        if git rev-parse "$TAG" >/dev/null 2>&1; then
+          TAG_SHA=$(git rev-list -n 1 "$TAG")
+          echo "tag $TAG already exists at $TAG_SHA — resuming"
+          echo "skip=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$TAG_SHA" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "skip=false" >> "$GITHUB_OUTPUT"
+
+    - name: Roll changelog (final release only)
+      if: steps.detect.outputs.skip != 'true' && steps.detect.outputs.prerelease != 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+        NEW_VERSION: ${{ inputs.version }}
+      run: |
+        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          roll "$CHANGELOG" "$NEW_VERSION" release-notes.md
+
+    - name: Extract changelog notes (prerelease)
+      if: steps.detect.outputs.skip != 'true' && steps.detect.outputs.prerelease == 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+      run: |
+        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          extract "$CHANGELOG" release-notes.md
+
+    - name: Commit, tag, push
+      id: push
+      if: steps.detect.outputs.skip != 'true'
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        CHANGELOG: ${{ inputs.changelog-path }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+      run: |
+        set -euo pipefail
+        TAG="v$NEW_VERSION"
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        # Final releases roll the changelog into a versioned section;
+        # prereleases keep the [Unreleased] section intact. Either way,
+        # if nothing got staged we tag the existing HEAD directly so
+        # tag-only prereleases (no changelog change) still push a tag.
+        if [ "$IS_PRERELEASE" != "true" ] && [ -f "$CHANGELOG" ]; then
+          git add "$CHANGELOG"
+        fi
+
+        if ! git diff --cached --quiet; then
+          # Pre-commit gate — hold the bot commit to the consumer's own
+          # gate. Equivalent to .github/actions/run-precommit-gate@v1
+          # (canonical reference); inlined because this step is a single
+          # `run:` block. Set SKIP_PRECOMMIT_GATE=true to bypass.
+          if [ "${SKIP_PRECOMMIT_GATE:-false}" != "true" ]; then
+            mapfile -t staged_arr < <(git diff --cached --name-only)
+            if [ "${#staged_arr[@]}" -gt 0 ]; then
+              if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+                echo "Pre-commit gate: lefthook"
+                lefthook_file_args=()
+                for f in "${staged_arr[@]}"; do
+                  lefthook_file_args+=(--file "$f")
+                done
+                if command -v lefthook >/dev/null 2>&1; then
+                  lefthook run pre-commit "${lefthook_file_args[@]}"
+                else
+                  npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
+                fi
+              elif [ -f .pre-commit-config.yaml ] || [ -f .pre-commit-config.yml ]; then
+                echo "Pre-commit gate: pre-commit framework"
+                if command -v pipx >/dev/null 2>&1; then
+                  pipx run pre-commit run --files "${staged_arr[@]}"
+                else
+                  python3 -m pip install --user --quiet pre-commit
+                  "$(python3 -m site --user-base)/bin/pre-commit" run --files "${staged_arr[@]}"
+                fi
+              elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
+                echo "Pre-commit gate: husky"
+                bash .husky/pre-commit
+              fi
+              if ! git diff --quiet; then
+                echo "Pre-commit gate produced auto-fixes — re-staging."
+                git add -u
+              fi
+            fi
+          fi
+          git commit -m "chore: Release $TAG"
+        else
+          echo "No file changes to commit — tagging HEAD directly."
+        fi
+
+        git tag -a "$TAG" -m "Release $TAG"
+        git push origin HEAD
+        git push origin "$TAG"
+
+        SHA=$(git rev-parse HEAD)
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+    - name: Extract notes for resume case
+      if: steps.detect.outputs.skip == 'true'
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+        NEW_VERSION: ${{ inputs.version }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+      run: |
+        set -euo pipefail
+        if [ "$IS_PRERELEASE" = "true" ]; then
+          bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+            extract "$CHANGELOG" release-notes.md
+        else
+          awk -v v="$NEW_VERSION" '
+            $0 ~ "^## \\[" v "\\]" { found=1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' "$CHANGELOG" > release-notes.md
+          if ! grep -qE '\S' release-notes.md; then
+            echo "Release v$NEW_VERSION" > release-notes.md
+          fi
+        fi
+
+    - name: Emit outputs
+      id: outputs
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+        RESUME_SHA: ${{ steps.detect.outputs.sha }}
+        PUSH_SHA: ${{ steps.push.outputs.sha }}
+      run: |
+        SHA="${PUSH_SHA:-$RESUME_SHA}"
+        if [ -z "$SHA" ]; then
+          echo "::error::Internal: neither push.sha nor detect.sha is set"
+          exit 1
+        fi
+        echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
+
+    - name: Upload release notes for downstream jobs
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: release-notes.md
+        if-no-files-found: error
+        retention-days: 7

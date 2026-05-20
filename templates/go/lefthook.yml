@@ -1,0 +1,35 @@
+# Pre-commit hooks — ordered by priority (lower number runs first).
+# If a priority group fails, later groups are skipped.
+#
+#   1 — Auto-fix:  gofmt -w (staged files only, re-staged)
+#   2 — Check:     go vet, golangci-lint, tests (parallel, via scripts/check-*)
+#
+# CI runs the same checks via scripts/check. Keep them in sync when
+# adding checks.
+#
+# Setup: `brew install lefthook && lefthook install`
+# (or `npm install -g lefthook` if brew is not available)
+
+pre-commit:
+  commands:
+    # --- Phase 1: Auto-fix ---
+    # Format ONLY the staged .go files — not the whole module — so
+    # unrelated unstaged edits don't leak into the commit and gofmt
+    # version drift in untouched files doesn't produce lingering
+    # unstaged diffs after the commit lands.
+    gofmt:
+      glob: '**/*.go'
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+      priority: 1
+
+    # --- Phase 2: Checks (parallel) ---
+    lint:
+      glob: '**/*.go'
+      run: scripts/check-lint
+      priority: 2
+
+    tests:
+      glob: '**/*.go'
+      run: scripts/check-tests
+      priority: 2

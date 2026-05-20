@@ -45,6 +45,12 @@ if [ -f Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
   cargo fetch --locked --quiet || true
 fi
 
+# Go: `go mod download` populates the module cache without building.
+# Cheap when the cache is already warm; ~free in steady state.
+if [ -f go.mod ] && command -v go >/dev/null 2>&1; then
+  go mod download 2>/dev/null || true
+fi
+
 # Node (npm/yarn/pnpm). We deliberately do NOT guard on `! -d node_modules`:
 # the env-snapshot caches a node_modules paired with a previous branch's
 # lockfile, and a feature branch that bumps the lockfile (Playwright is

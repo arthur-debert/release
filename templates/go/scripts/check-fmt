@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+echo "Checking formatting..."
+# gofmt -l emits one filename per unformatted file. We can't use the exit
+# code as the gate — it exits 0 even when files are unformatted; the
+# non-empty output is the signal.
+unformatted=$(gofmt -l .)
+if [ -n "$unformatted" ]; then
+  echo "Files not gofmt'd:" >&2
+  echo "$unformatted" >&2
+  echo "" >&2
+  echo "Run \`gofmt -w .\` to fix." >&2
+  exit 1
+fi
+echo "Formatting OK"
