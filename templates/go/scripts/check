@@ -5,6 +5,9 @@ set -euo pipefail
 # Each step is its own script so they can be run individually.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# `gofmt -l .` and `go vet ./...` are cwd-relative, so anchor at the repo
+# root regardless of where the caller invoked us from.
+cd "$SCRIPT_DIR/.."
 
 "$SCRIPT_DIR/check-fmt"
 "$SCRIPT_DIR/check-lint"

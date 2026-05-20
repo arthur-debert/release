@@ -46,9 +46,12 @@ if [ -f Cargo.toml ] && command -v cargo >/dev/null 2>&1; then
 fi
 
 # Go: `go mod download` populates the module cache without building.
-# Cheap when the cache is already warm; ~free in steady state.
+# Cheap when the cache is already warm; ~free in steady state. Keep
+# stderr visible so module-resolution / auth failures surface during
+# debugging — `|| true` keeps us best-effort without silencing the why.
 if [ -f go.mod ] && command -v go >/dev/null 2>&1; then
-  go mod download 2>/dev/null || true
+  go version
+  go mod download || true
 fi
 
 # Node (npm/yarn/pnpm). We deliberately do NOT guard on `! -d node_modules`:
