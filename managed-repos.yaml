@@ -22,8 +22,11 @@ projects:
   dodot:
     - arthur-debert/dodot
 
-  homebrew-tools:
-    - arthur-debert/homebrew-tools
+  # Secondary stack — brew-tap. Different lifecycle (formulas land via
+  # release-workflow pushes, not PR loop). Out of audit scope for now;
+  # uncomment when the brew-tap stack workstream picks up.
+  # homebrew-tools:
+  #   - arthur-debert/homebrew-tools
 
   lex:
     - lex-fmt/comms
@@ -37,15 +40,21 @@ projects:
   padz:
     - arthur-debert/padz
 
-  release:
-    - arthur-debert/release
+  # release/ itself — the source-of-truth repo doesn't carry many of
+  # the per-consumer baseline files (it IS the source). Out of audit
+  # scope for now; will need a release/-specific check set if we
+  # want to track its own hygiene.
+  # release:
+  #   - arthur-debert/release
 
   rustloc:
     - arthur-debert/rustloc
 
   simple-gal:
     - arthur-debert/simple-gal
-    - arthur-debert/simple-gal-action
+    # gh-action stack — secondary, not yet tackled (#108).
+    # Uncomment when the gh-action stack workstream picks up.
+    # - arthur-debert/simple-gal-action
     - arthur-debert/simple-gal-ui
 
   standout:
