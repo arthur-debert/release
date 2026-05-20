@@ -93,6 +93,18 @@ on:
         required: false
         default: ''
 
+      cgo:
+        description: |
+          Set CGO_ENABLED for builds. Default `false` (CGO_ENABLED=0): produces
+          fully static binaries that run on minimal containers and brew tarballs.
+          Set `true` if the CLI imports a package that requires cgo (e.g. some
+          DNS resolver paths via `net`, sqlite3 bindings, etc.). Note that
+          enabling cgo blocks cross-compilation unless the matching native
+          toolchain is present on the runner.
+        type: boolean
+        required: false
+        default: false
+
       version-package:
         description: 'Go import path of the package whose `version` variable receives the release version via -ldflags -X. Empty = no injection (binary will report whatever default it embeds).'
         type: string
@@ -275,9 +287,14 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.version }}
           VERSION_PACKAGE: ${{ inputs.version-package }}
           VERSION_VARIABLE: ${{ inputs.version-variable }}
+          CGO: ${{ inputs.cgo }}
         run: |
           set -euo pipefail
-          export CGO_ENABLED=0
+          if [ "$CGO" = "true" ]; then
+            export CGO_ENABLED=1
+          else
+            export CGO_ENABLED=0
+          fi
 
           ldflags="-s -w"
           if [ -n "$VERSION_PACKAGE" ]; then
@@ -375,6 +392,7 @@ jobs:
               --output-format json --no-wait)
             ID=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
             echo "  submission $ID; polling..."
+            accepted=false
             for i in $(seq 1 120); do
               S=$(xcrun notarytool info "$ID" \
                 --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
@@ -382,13 +400,24 @@ jobs:
                 "import sys,json; print(json.load(sys.stdin).get('status','Unknown'))" 2>/dev/null \
                 || echo Unknown)
               echo "  [$i/120] $S"
-              [ "$S" = "Accepted" ] && break
+              if [ "$S" = "Accepted" ]; then
+                accepted=true
+                break
+              fi
               if [ "$S" = "Invalid" ] || [ "$S" = "Rejected" ]; then
                 xcrun notarytool log "$ID" --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" 2>&1 || true
                 exit 1
               fi
               sleep 30
             done
+            if [ "$accepted" != "true" ]; then
+              # Timeout reached without Accepted — don't fall through and
+              # ship a binary that was never confirmed notarized. Dump the
+              # last log to help diagnose the stall.
+              echo "::error::Notarization for $name did not reach Accepted within 120 polls (~60min). Last status: $S"
+              xcrun notarytool log "$ID" --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" 2>&1 || true
+              exit 1
+            fi
             rm "$name-notarize.zip"
           done
           rm -f "$KEY"
