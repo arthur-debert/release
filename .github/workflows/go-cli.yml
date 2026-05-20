@@ -87,6 +87,20 @@ on:
         required: false
         default: ''
 
+      brew-private-repo:
+        description: |
+          Set true when the source repo is private. Adds the
+          GitHubPrivateRepositoryReleaseDownloadStrategy class + `using:`
+          clauses to the rendered formula so `brew install` can fetch
+          assets via the authenticated assets API. End users need to
+          `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` (or set
+          it to any PAT with read access to the private repo) before
+          running brew install. Default false renders the standard
+          public formula.
+        type: boolean
+        required: false
+        default: false
+
       go-version:
         description: 'Go version to install. Empty = read from go.mod.'
         type: string
@@ -585,6 +599,7 @@ jobs:
           urls-json: ${{ steps.values.outputs.urls }}
           shas-json: ${{ steps.values.outputs.shas }}
           output-path: out/${{ inputs.bin-name }}.rb
+          private-repo: ${{ inputs.brew-private-repo }}
 
       - uses: arthur-debert/release/.github/actions/push-brew-tap@v1
         if: steps.guard.outputs.skip != 'true'

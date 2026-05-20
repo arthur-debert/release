@@ -11,6 +11,7 @@
 # extra URL/SHA pair if a project needs Intel-mac.
 # Add `on_arm` under on_linux for aarch64-musl, etc.
 
+{{PRIVATE_REPO_PREAMBLE}}
 class {{CLASS_NAME}} < Formula
   desc "{{DESC}}"
   homepage "{{HOMEPAGE}}"
@@ -19,18 +20,18 @@ class {{CLASS_NAME}} < Formula
 
   on_macos do
     on_arm do
-      url "{{URL_AARCH64_APPLE_DARWIN}}"
+      url "{{URL_AARCH64_APPLE_DARWIN}}"{{USING_CLAUSE}}
       sha256 "{{SHA_AARCH64_APPLE_DARWIN}}"
     end
   end
 
   on_linux do
     on_intel do
-      url "{{URL_X86_64_UNKNOWN_LINUX_GNU}}"
+      url "{{URL_X86_64_UNKNOWN_LINUX_GNU}}"{{USING_CLAUSE}}
       sha256 "{{SHA_X86_64_UNKNOWN_LINUX_GNU}}"
     end
     on_arm do
-      url "{{URL_AARCH64_UNKNOWN_LINUX_GNU}}"
+      url "{{URL_AARCH64_UNKNOWN_LINUX_GNU}}"{{USING_CLAUSE}}
       sha256 "{{SHA_AARCH64_UNKNOWN_LINUX_GNU}}"
     end
   end
