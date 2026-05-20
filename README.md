@@ -97,6 +97,42 @@ but a bump that lands in main without a release leaves users on the
 vulnerable binary, so the `security → patch release` glue is the
 load-bearing piece.
 
+## Managed repos
+
+Canonical list of repos this release/ portfolio covers. 21 repos
+across 3 multi-repo "projects" (lex, arami, simple-gal) plus
+single-repo projects.
+
+| Project | Repo (owner/name) | Local path |
+|---|---|---|
+| arami | `arthur-debert/arami-app` | `~/h/arami/arami-app` |
+| arami | `arthur-debert/arami-core` | `~/h/arami/arami-core` |
+| burgertocow | `arthur-debert/burgertocow` | `~/h/burgertocow` |
+| clapfig | `arthur-debert/clapfig` | `~/h/clapfig` |
+| dodot | `arthur-debert/dodot` | `~/h/dodot` |
+| homebrew-tools | `arthur-debert/homebrew-tools` | `~/h/homebrew-tools` |
+| lex | `lex-fmt/comms` | `~/h/lex-fmt/comms` |
+| lex | `lex-fmt/lex` | `~/h/lex-fmt/lex` |
+| lex | `lex-fmt/lexed` | `~/h/lex-fmt/lexed` |
+| lex | `lex-fmt/nvim` | `~/h/lex-fmt/nvim` |
+| lex | `lex-fmt/tree-sitter-lex` | `~/h/lex-fmt/tree-sitter-lex` |
+| lex | `lex-fmt/vscode` | `~/h/lex-fmt/vscode` |
+| lex | `lex-fmt/zed-lex` | `~/h/lex-fmt/zed-lex` |
+| padz | `arthur-debert/padz` | `~/h/padz` |
+| release | `arthur-debert/release` | `~/h/release` |
+| rustloc | `arthur-debert/rustloc` | `~/h/rustloc` |
+| simple-gal | `arthur-debert/simple-gal` | `~/h/simple-gal/simple-gal` |
+| simple-gal | `arthur-debert/simple-gal-action` | `~/h/simple-gal/simple-gal-action` |
+| simple-gal | `arthur-debert/simple-gal-ui` | `~/h/simple-gal/simple-gal-ui` |
+| standout | `arthur-debert/standout` | `~/h/standout` |
+| supage | `arthur-debert/supage` | `~/h/supage` |
+
+Repos NOT in this list are out of scope, even if they happen to
+carry the `main-branch-protection` ruleset (which was applied
+broadly across `arthur-debert/` for unrelated reasons). The
+`audit-portfolio` discovery uses the ruleset as a convenience proxy
+but the authoritative set is the table above.
+
 ## Capability matrix — Stack × Component
 
 What release can do today. Rows = Stack; columns = Component bundles
