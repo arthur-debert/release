@@ -13,16 +13,23 @@ pre-commit:
       run: yamllint {staged_files}
       priority: 2
     shellcheck:
-      # Lefthook's glob matches by name; extensionless shell scripts
-      # under scripts/ and bin/ (a near-universal portfolio convention
-      # — `scripts/check`, `bin/release-create`, etc.) wouldn't match
-      # **/*.{sh,bash} alone. Include those directories explicitly.
-      # A non-shell file under those dirs (e.g. a .py) would fail
-      # shellcheck loudly — that's acceptable feedback ("this isn't
-      # actually a shell script, move it or rename it").
+      # Extensionless executables under scripts/ and bin/ are the
+      # portfolio convention (`scripts/check`, `bin/release-create`,
+      # `scripts/release/publish`, etc.). Recursive `**` so nested
+      # subdirectories are covered too.
+      #
+      # exclude: list filters out common non-shell file types that
+      # may legitimately live under scripts/ or bin/ (README.md, a
+      # tool's .json config, a Python helper). Shell-extension files
+      # (*.sh / *.bash) anywhere in the tree still match via the
+      # first glob entry. False positives from less common types (a
+      # Lua script in scripts/, say) will fail shellcheck loudly —
+      # acceptable signal to rename or move.
       glob:
         - "**/*.{sh,bash}"
-        - "scripts/*"
-        - "bin/*"
+        - "scripts/**"
+        - "bin/**"
+      exclude:
+        - "**/*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
       run: shellcheck {staged_files}
       priority: 2
