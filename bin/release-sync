@@ -181,8 +181,63 @@ should_skip_source() {
   return 1
 }
 
+# Compose canonical's above-marker content with consumer's below-marker
+# extras for setup-dev-env.sh. The canonical file ends with a
+# `# release-sync:marker-end` sentinel; everything in the consumer's
+# file *after* that sentinel is the consumer's project-specific extras
+# (Xvfb start, pinned-binary fetches, etc.) and must be preserved on
+# every re-sync. Naive byte-replace would clobber that content.
+#
+# stdout: the composed content the consumer's file should contain.
+compose_setup_dev_env() {
+  local canonical_content=$1 consumer_path=$2
+  local sentinel='# release-sync:marker-end'
+  local extras=""
+  if [ -f "$consumer_path" ]; then
+    # Extras = everything in the consumer file after the LAST occurrence
+    # of the sentinel line. If the sentinel is absent (older consumer,
+    # never re-synced post-sentinel-introduction), extras stays empty
+    # and we write canonical wholesale — accept the one-time loss
+    # rather than guess-merge.
+    extras=$(awk -v s="$sentinel" '
+      found && NR>found_line { print }
+      $0 ~ s { found=1; found_line=NR }
+    ' "$consumer_path")
+  fi
+  printf '%s' "$canonical_content"
+  if [ -n "$extras" ]; then
+    printf '\n%s\n' "$extras"
+  fi
+}
+
 sync_one() {
   local rel=$1 file_mode=$2 dest=$3
+
+  # Special case: setup-dev-env.sh has a canonical-above / project-extras-below
+  # split marked by the `release-sync:marker-end` sentinel. Use the composer
+  # so re-syncs don't clobber consumer extras.
+  if [ "$dest" = "scripts/setup-dev-env.sh" ]; then
+    local canonical composed
+    canonical=$(git -C "$RELEASE_HOME" show "$ref:$rel")
+    composed=$(compose_setup_dev_env "$canonical" "$dest")
+    if [ -f "$dest" ] && [ "$composed" = "$(cat "$dest")" ]; then
+      if [ "$file_mode" = "100755" ] && [ ! -x "$dest" ]; then :
+      elif [ "$file_mode" = "100644" ] && [ -x "$dest" ]; then :
+      else clean=$((clean + 1)); return 0
+      fi
+    fi
+    if [ "$mode" = check ]; then
+      echo "  drift     $dest"; drift=$((drift + 1)); return 0
+    fi
+    mkdir -p "$(dirname "$dest")"
+    printf '%s' "$composed" > "$dest"
+    if [ "$file_mode" = "100755" ]; then chmod +x "$dest"
+    else chmod -x "$dest" 2>/dev/null || true
+    fi
+    echo "  synced    $dest"; wrote=$((wrote + 1))
+    return 0
+  fi
+
   # Content equality first.
   if [ -f "$dest" ] \
      && git -C "$RELEASE_HOME" show "$ref:$rel" | cmp -s - "$dest"; then
