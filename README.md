@@ -105,10 +105,10 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 
 | Stack         | gh-release | changelog | version-bump | macos-codesign | precommit-gate | crate-publish | npm-publish | pypi-publish | brew-tap-push | bats | wasm-pack | mkdocs | commons-lint |
 |---------------|:----------:|:---------:|:------------:|:--------------:|:--------------:|:-------------:|:-----------:|:------------:|:-------------:|:----:|:---------:|:------:|:------------:|
-| rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | 🚧 | 📋 |
-| rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | 📋 |
-| electron-app  | ✅ | ✅ | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
-| tauri-app     | ✅ | ✅ | ✅ | ✅ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
+| rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | 🚧 | ✅ |
+| rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
+| electron-app  | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
+| tauri-app     | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
 | vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
 | nvim-plugin   | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 📋 | — | 🚧 | 📋 |
 | tree-sitter   | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
@@ -123,6 +123,24 @@ Used by `arami-core` and `lex-fmt/lex`.
 ² VS Code Marketplace + Open VSX (Open VSX off until Eclipse
 namespace approval at
 [EclipseFdn/open-vsx.org#10424](https://github.com/EclipseFdn/open-vsx.org/issues/10424)).
+
+³ Downgraded 2026-05-20: the canonical
+`electron-app.yml@v1` / `tauri-app.yml` workflow uses
+electron-builder's native single-pass sign + notarize, which has
+**never produced a successful release** through the canonical
+caller. The 🚧 reflects that the OLD self-contained `release.yml`
+in lexed had a working SKILL.md submit/poll/staple path
+(v0.10.1 shipped clean 2026-05-17), but that workflow no longer
+exists and the canonical replacement is unproven. Tracked at
+[#122](https://github.com/arthur-debert/release/issues/122); the
+USE-and-succeed validation run is gated on lexed#106 (CHANGELOG
+unblocker for canonical workflow pre-flight).
+
+`commons-lint` for rust-cli / rust-lib went 📋 → ✅ on
+2026-05-20 with the take-iii Component model landing
+(`shell-quality` Component: md/yaml/sh + editorconfig; exercised
+on dodot, clapfig, rustloc, burgertocow). Other stacks stay 📋
+until their per-stack `manifest.yaml` lands ([#106](https://github.com/arthur-debert/release/issues/106)).
 
 `mkdocs` is 🚧 across the board: shipped today as a copy-once
 template (see [lex-fmt/mkdocs-lex docs deployment](https://github.com/lex-fmt/mkdocs-lex/blob/main/docs/deployment/examples/docs.yml)).
@@ -142,9 +160,9 @@ Where each consumer actually sits. Four states:
 
 | Stack         | Repos (state) |
 |---------------|---|
-| rust-cli      | `dodot`, `lex-fmt/lex`, `padz`, `rustloc`, `burgertocow`, `treex` — **fleet-adopted** |
-| rust-lib      | `clapfig`, `standout` — **pilot-running**; `lex-fmt/zed-lex` — **planned** (needs `wasm32-wasip2`) |
-| electron-app  | `lex-fmt/lexed` — **pilot-running**; `simple-gal-ui` — **planned** |
+| rust-cli      | `dodot`, `lex-fmt/lex`, `padz`, `rustloc`, `burgertocow` — **fleet-adopted** |
+| rust-lib      | `clapfig` — **fleet-adopted** (Component model + canonical release); `standout` — **pilot-running**; `lex-fmt/zed-lex` — **planned** (needs `wasm32-wasip2`) |
+| electron-app  | `lex-fmt/lexed` — **pilot-running** ⚠️ (canonical `electron-app.yml@v1` unproven; see footnote ³ above); `simple-gal-ui` — **planned** |
 | tauri-app     | `arami-app` — **pilot-running** |
 | vscode-ext    | `lex-fmt/vscode` — **pilot-running** |
 | nvim-plugin   | `lex-fmt/nvim` — **pilot-running** |
@@ -155,7 +173,29 @@ Where each consumer actually sits. Four states:
 
 A Stack flips to **fleet-adopted** only when ≥80% of its eligible
 consumers are on `@v1` *and* have cut at least one release through
-it. Today only `rust-cli` clears that bar.
+it. Today `rust-cli` and `rust-lib` clear that bar.
+
+(Note: `treex` was previously listed under rust-cli but is NOT a
+managed-portfolio repo per
+[the managed-repo audit](https://github.com/arthur-debert/release/issues/105);
+removed 2026-05-20.)
+
+### Component-model adoption (take-iii, in flight)
+
+Separate axis: which managed repos have adopted the take-iii
+Component model (release-sync + generated `lefthook.yml` from
+shell-quality + rust-quality fragments + `.release-sync-state.yaml`).
+This is precommit-gate territory, not release-path adoption — the
+two flip independently.
+
+| Stack | Adopted | Pending |
+|---|---|---|
+| rust-cli  | `dodot`, `rustloc`, `burgertocow` | `lex-fmt/lex` (was on feature branch), `padz` (bare-repo at `~/h/padz`; needs worktree setup) |
+| rust-lib  | `clapfig` | `standout` (on feature branch) |
+| (other stacks) | — | per-stack `manifest.yaml` not yet built ([#106](https://github.com/arthur-debert/release/issues/106)) |
+
+Driven by `orc propagate` ([#117](https://github.com/arthur-debert/release/pull/117), merged) — the propagation
+verb landed mid-session and onboarded 3 consumers in one command.
 
 Unclassified-stack repos in the managed portfolio (`arami-core`,
 `lex-fmt/comms`, `simple-gal`): pending classification on take-iii.
