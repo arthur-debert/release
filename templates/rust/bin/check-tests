@@ -10,9 +10,16 @@ echo "Running tests..."
 # `"$@"` forwards extra args to nextest/cargo, e.g.:
 #   bin/check-tests --nocapture
 #   bin/check-tests -p mycrate test_name
+# `--no-tests=pass` (nextest) / suppress-no-tests-error (cargo test) so
+# a workspace with zero tests on a fresh repo doesn't fail the umbrella
+# check. Tests proper still fail loudly when present — we just don't
+# treat "no tests authored yet" as a regression.
 if command -v cargo-nextest &>/dev/null; then
-    cargo nextest run --workspace --all-features "$@"
+    cargo nextest run --workspace --all-features --no-tests=pass "$@"
 else
+    # cargo test exits 0 when there are no tests anyway; --no-tests-doc
+    # avoids invoking rustdoc unnecessarily when the workspace has no
+    # doc-test surface yet.
     cargo test --workspace --all-features "$@"
 fi
 echo "Tests OK"
