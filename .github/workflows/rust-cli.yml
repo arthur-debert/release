@@ -71,6 +71,19 @@ on:
         required: false
         default: 'arthur-debert/homebrew-tools'
 
+      brew-private-repo:
+        description: |
+          Set true when the source repo is private. Adds the
+          GitHubPrivateRepositoryReleaseDownloadStrategy class + `using:`
+          clauses to the rendered formula so `brew install` can fetch
+          assets via the authenticated assets API. End users need to
+          export HOMEBREW_GITHUB_API_TOKEN (e.g. `=$(gh auth token)`)
+          with read access to the private repo. Default false renders
+          the standard public formula.
+        type: boolean
+        required: false
+        default: false
+
       submodules:
         description: 'Pass --recurse-submodules on checkout (lex needs this; most projects do not).'
         type: boolean
@@ -576,6 +589,7 @@ jobs:
           urls-json: ${{ steps.values.outputs.urls }}
           shas-json: ${{ steps.values.outputs.shas }}
           output-path: out/${{ inputs.bin-name }}.rb
+          private-repo: ${{ inputs.brew-private-repo }}
 
       - uses: arthur-debert/release/.github/actions/push-brew-tap@v1
         if: steps.guard.outputs.skip != 'true'
