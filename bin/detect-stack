@@ -25,6 +25,11 @@ if [ -f Cargo.toml ]; then
   echo rust; exit 0
 fi
 
+# go
+if [ -f go.mod ]; then
+  echo go; exit 0
+fi
+
 # javascript-side
 if [ -f package.json ]; then
   if grep -q '"electron-builder"' package.json 2>/dev/null || grep -q '"electron"' package.json 2>/dev/null; then
