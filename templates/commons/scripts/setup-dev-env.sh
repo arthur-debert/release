@@ -286,3 +286,11 @@ fi
 #
 # No trailing `exit 0` — bash exits 0 on EOF when `set -euo pipefail`
 # succeeded. Adding one here would make appended extras unreachable.
+#
+# Below: the `release-sync:marker-end` sentinel marks the end of the
+# canonical section. release-sync splits the consumer's file at this
+# sentinel — content at or above is replaced on every sync from
+# release/; content below is the consumer's project-local extras and is
+# preserved across syncs. The sentinel must be the LAST line of the
+# canonical (no trailing prose) so the splitter knows where to cut.
+# release-sync:marker-end
