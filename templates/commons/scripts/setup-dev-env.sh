@@ -207,6 +207,9 @@ if [ "$(uname -s)" = "Linux" ] \
    && command -v certutil >/dev/null 2>&1 \
    && command -v openssl >/dev/null 2>&1; then
   _ca_tmp="$(mktemp -d)"
+  # Guarantee cleanup even if awk / cp / openssl below errors out under
+  # `set -e`. Without this, mid-section failure leaks the tmp dir.
+  trap 'rm -rf "${_ca_tmp}"' EXIT
   _found=0
 
   # Layout A: split the system bundle into per-cert PEMs if it contains
@@ -214,11 +217,11 @@ if [ "$(uname -s)" = "Linux" ] \
   # Linux boxes (where the bundle has no matches).
   if [ -f /etc/ssl/certs/ca-certificates.crt ] \
      && grep -q 'Anthropic' /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
-    awk '
+    awk -v sandbox_dir="${_ca_tmp}" '
       /-----BEGIN CERTIFICATE-----/ { n++; fn = sandbox_dir "/bundle_" n ".pem"; in_cert = 1 }
       in_cert                       { print > fn }
       /-----END CERTIFICATE-----/   { in_cert = 0; close(fn) }
-    ' sandbox_dir="${_ca_tmp}" /etc/ssl/certs/ca-certificates.crt
+    ' /etc/ssl/certs/ca-certificates.crt
     _found=1
   fi
 
@@ -251,7 +254,7 @@ if [ "$(uname -s)" = "Linux" ] \
     done
   fi
 
-  rm -rf "${_ca_tmp}"
+  # Cleanup is handled by the EXIT trap installed at the top of this block.
 fi
 
 # --- 3. Pre-commit hook wiring -------------------------------------------
