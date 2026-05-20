@@ -64,9 +64,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: read     # required for checkout
+  pages: write       # required even for deploy: false (see note below)
+  id-token: write    # required even for deploy: false (see note below)
 
 jobs:
   docs:
@@ -78,6 +78,14 @@ jobs:
 GitHub Pages setup: one-time, in repo Settings → Pages → set source
 to "GitHub Actions". After that, the first push to main triggers
 build + deploy.
+
+**Permissions gotcha:** the caller MUST grant `pages: write` and
+`id-token: write` even when running with `deploy: false`. GitHub
+validates callee permissions at workflow-load time (before evaluating
+`if:` guards), so the presence of the deploy job's permissions on the
+callee forces the caller to grant them too. Missing them produces a
+silent `startup_failure` with no useful detail in the UI. Grant all
+three always; it's a one-time copy-paste.
 
 ## Plugin-agnostic by design
 

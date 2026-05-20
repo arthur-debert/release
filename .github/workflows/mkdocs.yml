@@ -14,18 +14,26 @@ name: mkdocs (build + deploy)
 #     pull_request:
 #       paths: ['docs/**', 'mkdocs.yml']
 #     workflow_dispatch:
-#   permissions:
-#     contents: read
-#     pages: write
-#     id-token: write
+#   permissions:                  # ALL THREE required even for build-only
+#     contents: read              # callers — GitHub validates callee
+#     pages: write                # permissions upfront, including jobs
+#     id-token: write             # that won't run due to `if:` guards.
 #   jobs:
 #     docs:
 #       uses: arthur-debert/release/.github/workflows/mkdocs.yml@v1
 #       with:
 #         requirements: docs/requirements.txt   # consumer's pin file
+#         # deploy: 'false'      # opt-out of deploy; build runs anyway
 #
 # Deploy only fires on `push` to the default branch. PRs and non-main
 # branches just exercise the build (strict) for verification.
+#
+# Why all three permissions: GitHub validates that caller permissions
+# are ≥ callee permissions at workflow-load time, BEFORE evaluating
+# `if:` conditions. The deploy job's `pages: write` + `id-token: write`
+# trigger the check even when `deploy: false` means it won't run.
+# Granting all three on the caller is the price; missing any → startup
+# failure with "workflow file issue" (no further detail in the UI).
 
 on:
   workflow_call:
