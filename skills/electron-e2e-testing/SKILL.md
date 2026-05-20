@@ -369,14 +369,18 @@ export async function waitForReady(page: Page, key: string, timeout = 15_000) {
 export async function expectEvent(page: Page, type: string,
                                   predicate?: (e: any) => boolean,
                                   timeout = 5_000) {
+  // Serialize the predicate across the page boundary — Playwright's
+  // page.waitForFunction runs in the browser context, where the JS
+  // predicate from our test process isn't directly callable.
   return await page.waitForFunction(
-    ({ t, hasFilter }) => {
+    ({ t, pStr }) => {
       const evts = window.__e2e.events.filter(e => e.type === t)
-      if (!hasFilter) return evts[evts.length - 1]
-      // predicate filtering is done client-side via re-poll if needed
-      return evts[evts.length - 1]
+      if (!pStr) return evts[evts.length - 1]
+      // eslint-disable-next-line no-new-func — predicate is author-controlled
+      const fn = new Function('e', 'return (' + pStr + ')(e)')
+      return evts.find(fn as (e: unknown) => boolean)
     },
-    { t: type, hasFilter: !!predicate }, { timeout })
+    { t: type, pStr: predicate?.toString() }, { timeout })
 }
 ```
 
@@ -560,15 +564,18 @@ splash. Poll for the editor:
 
 ```ts
 async function getEditorWindow(app: ElectronApplication, timeout = 10_000) {
-  const start = Date.now()
-  while (Date.now() - start < timeout) {
-    for (const w of app.windows()) {
-      const url = w.url()
-      if (!url.startsWith('data:')) return w
-    }
-    await new Promise(r => setTimeout(r, 100))
+  // Check existing windows first (the editor may already be open).
+  for (const w of app.windows()) {
+    if (!w.url().startsWith('data:')) return w
   }
-  throw new Error('editor window did not appear')
+  // Otherwise wait for the next window event with the right URL.
+  // Uses Playwright's event-driven wait rather than a setTimeout poll
+  // — matches the "no waitForTimeout / sleeps" rule this skill itself
+  // teaches.
+  return await app.waitForEvent('window', {
+    predicate: (page) => !page.url().startsWith('data:'),
+    timeout,
+  })
 }
 ```
 
