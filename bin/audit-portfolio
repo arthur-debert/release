@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
-# Audit every onboarded repo across arthur-debert and lex-fmt against the
-# portfolio "good state" baseline. Auto-discovers repos via the
-# main-branch-protection ruleset (same logic as install-release-token).
+# Audit every managed repo against the portfolio "good state" baseline.
+#
+# Source of truth: managed-repos.yaml at the release/ repo root. The
+# 21-repo canonical set (per the README's "Managed repos" table) is
+# what gets audited. `--discover` falls back to the old ruleset-based
+# auto-discovery (useful for finding repos NOT in the manifest that
+# carry the ruleset).
 #
 # Usage:
-#   audit-portfolio                              # auto-discover, table output
-#   audit-portfolio --owners arthur-debert
-#   audit-portfolio --repos arthur-debert/dodot,lex-fmt/lex
+#   audit-portfolio                              # read managed-repos.yaml
+#   audit-portfolio --repos arthur-debert/dodot,lex-fmt/lex   # explicit set
+#   audit-portfolio --discover                   # legacy auto-discover via ruleset
+#   audit-portfolio --discover --owners arthur-debert
 #   audit-portfolio --json                       # one JSON object per line
 #   audit-portfolio --only-failing               # hide all-green repos in table
 #
@@ -20,6 +25,7 @@ set -uo pipefail
 
 owners="arthur-debert,lex-fmt"
 explicit_repos=""
+discover=0
 json_mode=0
 only_failing=0
 
@@ -27,6 +33,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --owners)       owners=$2; shift 2 ;;
     --repos)        explicit_repos=$2; shift 2 ;;
+    --discover)     discover=1; shift ;;
     --json)         json_mode=1; shift ;;
     --only-failing) only_failing=1; shift ;;
     -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
@@ -36,10 +43,11 @@ done
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 audit_repo="$script_dir/audit-repo"
+manifest_file="$script_dir/../managed-repos.yaml"
 exclude_file="$script_dir/../audit-exclude.yml"
 [ -x "$audit_repo" ] || { echo "error: $audit_repo not found or not executable" >&2; exit 1; }
 
-# Build exclude set from audit-exclude.yml (lines like "  - repo: owner/name").
+# Build exclude set from audit-exclude.yml (legacy, only used by --discover).
 declare -a excluded_repos
 if [ -f "$exclude_file" ]; then
   while IFS= read -r line; do
@@ -57,12 +65,12 @@ is_excluded() {
   return 1
 }
 
-# Discover repos
+# Discover repos: explicit --repos > --discover ruleset > managed-repos.yaml
 repos=()
 if [ -n "$explicit_repos" ]; then
   IFS=',' read -ra repos <<< "$explicit_repos"
-else
-  [ "$json_mode" = "0" ] && echo "discovering onboarded repos in: $owners" >&2
+elif [ "$discover" = "1" ]; then
+  [ "$json_mode" = "0" ] && echo "discovering onboarded repos in: $owners (legacy ruleset path)" >&2
   for owner in $(echo "$owners" | tr ',' ' '); do
     while read -r r; do
       rs=$(gh api "repos/$r/rulesets" 2>/dev/null || echo '[]')
@@ -75,6 +83,15 @@ else
       repos+=("$r")
     done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
   done
+else
+  # Default path: read managed-repos.yaml.
+  [ -f "$manifest_file" ] || { echo "error: $manifest_file not found; pass --discover or --repos" >&2; exit 1; }
+  while IFS= read -r r; do
+    [ -n "$r" ] && repos+=("$r")
+  done < <(grep -E '^[[:space:]]*-[[:space:]]+' "$manifest_file" \
+           | sed -E 's/^[[:space:]]*-[[:space:]]+//; s/[[:space:]]+#.*$//' \
+           | grep -E '^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$')
+  [ "$json_mode" = "0" ] && echo "auditing managed repos from $manifest_file (${#repos[@]} repos)" >&2
 fi
 
 if [ ${#repos[@]} -eq 0 ]; then

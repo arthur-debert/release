@@ -1,0 +1,65 @@
+# Canonical list of repos this release/ portfolio manages.
+# Source of truth for audit-portfolio + any future per-fleet tooling.
+# README.md's "Managed repos" table is the human-readable mirror.
+#
+# Adding a repo: append it under the right project + run audit-repo
+# to confirm onboarding. Removing a repo: delete the line; if removal
+# is permanent and the repo still carries the main-branch-protection
+# ruleset, also note it in this file's tail comment so future maintainers
+# don't accidentally re-add it via ruleset discovery.
+
+projects:
+  arami:
+    - arthur-debert/arami-app
+    - arthur-debert/arami-core
+
+  burgertocow:
+    - arthur-debert/burgertocow
+
+  clapfig:
+    - arthur-debert/clapfig
+
+  dodot:
+    - arthur-debert/dodot
+
+  homebrew-tools:
+    - arthur-debert/homebrew-tools
+
+  lex:
+    - lex-fmt/comms
+    - lex-fmt/lex
+    - lex-fmt/lexed
+    - lex-fmt/nvim
+    - lex-fmt/tree-sitter-lex
+    - lex-fmt/vscode
+    - lex-fmt/zed-lex
+
+  padz:
+    - arthur-debert/padz
+
+  release:
+    - arthur-debert/release
+
+  rustloc:
+    - arthur-debert/rustloc
+
+  simple-gal:
+    - arthur-debert/simple-gal
+    - arthur-debert/simple-gal-action
+    - arthur-debert/simple-gal-ui
+
+  standout:
+    - arthur-debert/standout
+
+  supage:
+    - arthur-debert/supage
+
+# NOT managed even though they carry the main-branch-protection
+# ruleset (which was applied broadly across arthur-debert/* for
+# unrelated reasons). Listed here so audit-portfolio's old auto-discover
+# path is self-documenting for the day someone tries to reintroduce it:
+# - arthur-debert/treex                — inactive
+# - arthur-debert/dotcat               — unrelated personal project
+# - arthur-debert/falala               — unrelated personal project
+# - arthur-debert/electron-splashguard — unrelated personal project
+# - arthur-debert/nanodoc              — unrelated personal project

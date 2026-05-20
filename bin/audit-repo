@@ -246,7 +246,12 @@ check_release_sync() {
 # but worth surfacing. WARN with the inventory; don't FAIL.
 check_scripts_inventory() {
   local listing
-  listing=$(gh api "repos/$repo/contents/scripts" 2>/dev/null | jq -r '.[]? | select(.type=="file") | .name')
+  # `if type == "array"` guards against gh api returning an error object
+  # (`{"message":"Not Found"}`) when scripts/ doesn't exist on this repo's
+  # default branch — without the guard, `.[]?` iterates the object's
+  # values and select(.type) trips on the string body.
+  listing=$(gh api "repos/$repo/contents/scripts" 2>/dev/null \
+    | jq -r 'if type == "array" then .[] | select(.type=="file") | .name else empty end')
   if [ -z "$listing" ]; then
     record SKIP scripts_inventory "no scripts/ dir on default branch"
     return
@@ -269,7 +274,9 @@ check_scripts_inventory() {
 # the conformance gap.
 check_workflows_canonical() {
   local listing
-  listing=$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null | jq -r '.[]? | select(.type=="file") | .name')
+  # Same array-vs-error-object guard as check_scripts_inventory.
+  listing=$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null \
+    | jq -r 'if type == "array" then .[] | select(.type=="file") | .name else empty end')
   if [ -z "$listing" ]; then
     record SKIP workflows_canonical "no .github/workflows/ on default branch"
     return
