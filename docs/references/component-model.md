@@ -186,16 +186,21 @@ implicitly today (via per-Stack hand-maintained lefthook).
 
 Ships:
 
-- `lefthook.fragment.yaml` — `cargo fmt --all -- --check` (glob
-  `**/*.rs`); `cargo clippy --all-targets -- -D warnings` (glob
-  `**/*.rs` and `**/Cargo.toml` — so dependency / feature changes
-  trigger clippy too). Priority 2 (check-only). `--all` covers
-  workspace projects; no-op on single-crate. `--all-features` is
-  intentionally NOT included — projects often have conflicting
-  features; override per-Stack if needed.
+- `lefthook.fragment.yaml`:
+  - `cargo fmt --all -- --check` — glob `**/*.rs` + `**/rustfmt.toml`
+    (format-config changes re-trigger the check).
+  - `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+    — glob `**/*.rs` + `**/Cargo.toml` + `**/Cargo.lock`. Matches what
+    every rust-cli / rust-lib consumer's CI runs (so pre-commit signal
+    mirrors CI; otherwise commits pass hooks but fail CI). Cargo.lock
+    in the glob because new dep versions can introduce new clippy
+    warnings (deprecations, lint upgrades).
+  - Priority 2 (check-only).
 
 No config files. rustfmt's stdlib defaults match the portfolio
-(0/21 repos override).
+(0/21 repos override). Projects with conflicting features that break
+under `--all-features` can override the Stack manifest's Component
+selection.
 
 ### `bats`
 

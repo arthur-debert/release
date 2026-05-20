@@ -13,6 +13,16 @@ pre-commit:
       run: yamllint {staged_files}
       priority: 2
     shellcheck:
-      glob: "**/*.{sh,bash}"
+      # Lefthook's glob matches by name; extensionless shell scripts
+      # under scripts/ and bin/ (a near-universal portfolio convention
+      # — `scripts/check`, `bin/release-create`, etc.) wouldn't match
+      # **/*.{sh,bash} alone. Include those directories explicitly.
+      # A non-shell file under those dirs (e.g. a .py) would fail
+      # shellcheck loudly — that's acceptable feedback ("this isn't
+      # actually a shell script, move it or rename it").
+      glob:
+        - "**/*.{sh,bash}"
+        - "scripts/*"
+        - "bin/*"
       run: shellcheck {staged_files}
       priority: 2
