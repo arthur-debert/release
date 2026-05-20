@@ -199,9 +199,12 @@ compose_setup_dev_env() {
     # never re-synced post-sentinel-introduction), extras stays empty
     # and we write canonical wholesale — accept the one-time loss
     # rather than guess-merge.
+    # Literal-match (index()) rather than regex (~) — if a future
+    # sentinel ever includes a `.` or `*`, `~` would silently become
+    # a wildcard match. Use exact-string indexOf instead.
     extras=$(awk -v s="$sentinel" '
       found && NR>found_line { print }
-      $0 ~ s { found=1; found_line=NR }
+      index($0, s) > 0 { found=1; found_line=NR }
     ' "$consumer_path")
   fi
   printf '%s' "$canonical_content"
@@ -217,10 +220,13 @@ sync_one() {
   # split marked by the `release-sync:marker-end` sentinel. Use the composer
   # so re-syncs don't clobber consumer extras.
   if [ "$dest" = "scripts/setup-dev-env.sh" ]; then
-    local canonical composed
-    canonical=$(git -C "$RELEASE_HOME" show "$ref:$rel")
-    composed=$(compose_setup_dev_env "$canonical" "$dest")
-    if [ -f "$dest" ] && [ "$composed" = "$(cat "$dest")" ]; then
+    local tmp_composed
+    tmp_composed=$(mktemp)
+    # shellcheck disable=SC2064 — early expansion of $tmp_composed is intentional
+    trap "rm -f '$tmp_composed'" RETURN
+    compose_setup_dev_env "$(git -C "$RELEASE_HOME" show "$ref:$rel")" "$dest" > "$tmp_composed"
+    # cmp/redirect avoids the $(cat) trailing-newline stripping trap.
+    if [ -f "$dest" ] && cmp -s "$tmp_composed" "$dest"; then
       if [ "$file_mode" = "100755" ] && [ ! -x "$dest" ]; then :
       elif [ "$file_mode" = "100644" ] && [ -x "$dest" ]; then :
       else clean=$((clean + 1)); return 0
@@ -230,7 +236,7 @@ sync_one() {
       echo "  drift     $dest"; drift=$((drift + 1)); return 0
     fi
     mkdir -p "$(dirname "$dest")"
-    printf '%s' "$composed" > "$dest"
+    cp "$tmp_composed" "$dest"
     if [ "$file_mode" = "100755" ]; then chmod +x "$dest"
     else chmod -x "$dest" 2>/dev/null || true
     fi
