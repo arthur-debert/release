@@ -109,7 +109,15 @@ API key auth (`--key` / `--key-id` / `--issuer`) is Apple's recommended path for
       --issuer "${{ secrets.ASC_API_ISSUER_ID }}" \
       --output-format json \
       --no-wait)
-    ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+    # Defensive parse: `.get('id', '')` instead of `['id']` so a
+    # malformed notarytool response (rate-limit / auth error / etc.)
+    # produces an empty ID and a useful downstream failure rather
+    # than an opaque python KeyError in the CI log.
+    ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+    if [ -z "$ID" ]; then
+      echo "::error::notarytool submit did not return an id; raw response: $RESULT"
+      exit 1
+    fi
     echo "submission-id=$ID" >> "$GITHUB_OUTPUT"
 ```
 
