@@ -107,6 +107,7 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 |---------------|:----------:|:---------:|:------------:|:--------------:|:--------------:|:-------------:|:-----------:|:------------:|:-------------:|:----:|:---------:|:------:|:------------:|
 | rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | 🚧 | ✅ |
 | rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
+| go-cli        | ✅ | ✅ | —⁴ | 🚧³ | ✅ | — | — | — | ✅ | 📋 | — | 🚧 | 📋 |
 | electron-app  | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
 | tauri-app     | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
 | vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
@@ -141,6 +142,15 @@ the USE-and-succeed validation run for `electron-app.yml@v1` is gated
 on [lex-fmt/lexed#106](https://github.com/lex-fmt/lexed/pull/106)
 (CHANGELOG unblocker for canonical workflow pre-flight).
 
+⁴ **go-cli — version-bump and tag-driven distribution.** Go modules
+ship from Git tags directly; the `go release` job creating a tag IS
+the publish for any downstream `go get` / `go install` consumer. No
+registry-publish step. The Homebrew formula covers binary
+distribution for end users; consumers wanting only the binary install
+with `brew install arthur-debert/tools/<bin>`. version-bump is ✅
+because `prepare-release-go` rolls CHANGELOG + creates the tag, even
+though Go itself has no manifest version field.
+
 `commons-lint` for rust-cli / rust-lib went 📋 → ✅ on
 2026-05-20 with the take-iii Component model landing
 (`shell-quality` Component: md/yaml/sh + editorconfig; exercised
@@ -174,6 +184,7 @@ Where each consumer actually sits. Four states:
 | tree-sitter   | `lex-fmt/tree-sitter-lex` — **pilot-running** |
 | python-pkg    | (no managed-portfolio repos yet) |
 | gh-action     | `release` (self, dogfooded) — **pilot-running**; `simple-gal-action` — **planned** |
+| go-cli        | `supage` — **pilot-running** (new stack landed via #126) |
 | brew-tap      | `homebrew-tools` — **planned** |
 
 A Stack flips to **fleet-adopted** only when ≥80% of its eligible
@@ -198,8 +209,9 @@ two flip independently.
 
 | Stack | Adopted | Pending |
 |---|---|---|
-| rust-cli  | `dodot`, `rustloc`, `burgertocow` | `lex-fmt/lex` (active work on a feature branch when batch ran), `padz` (configured as a bare repo locally; needs a linked worktree on `main` before `orc propagate` can clear pre-flight) |
-| rust-lib  | `clapfig` | `standout` (on feature branch) |
+| rust-cli  | `dodot`, `rustloc`, `burgertocow`, `lex-fmt/lex`, `padz` | (none — all 5 adopted) |
+| rust-lib  | `clapfig`, `standout` | (none — both adopted) |
+| go-cli    | `supage` (pending — validation in flight) | (no other go consumers in the portfolio yet) |
 | (other stacks) | — | per-stack `manifest.yaml` not yet built ([#106](https://github.com/arthur-debert/release/issues/106)) |
 
 Driven by `orc propagate` ([#117](https://github.com/arthur-debert/release/pull/117), merged) — the propagation
@@ -282,7 +294,7 @@ mechanism today and it works.
 Some files have to live in the consumer's tree because GitHub or
 local tooling reads them there: CODEOWNERS, dependabot.yml, the
 `copilot-review.yml` workflow itself, lefthook fragments,
-`scripts/check-*` helpers, the consumer's own `setup-dev-env.sh`.
+`bin/check-*` helpers, the consumer's own `setup-dev-env.sh`.
 
 **Current state.** Updates land via PR fan-out — `bin/sweep-github-policy`
 loops over the portfolio and opens one PR per repo per change. This

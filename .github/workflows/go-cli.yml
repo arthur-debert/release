@@ -1,0 +1,596 @@
+name: Go CLI release
+
+# Reusable release workflow for go-cli projects. Consumers call this from
+# their own .github/workflows/release.yml with workflow_dispatch + version
+# input. See docs/per-category/go-cli.md for the full input shape and
+# examples for a paste-ready consumer workflow.
+#
+# Differences from rust-cli:
+#   - No manifest version bump (Go embeds version via -ldflags -X at build).
+#   - No `crates` / publish-to-registry step (Go modules are pulled from
+#     git tags by consumers directly).
+#   - Cross-compilation is built into the Go toolchain — no per-arch cross
+#     toolchain installs needed for linux→linux. Single ubuntu-latest runner
+#     handles all linux targets; macOS targets still run on macos-14 so
+#     codesign + notarize can use the native keychain + xcrun.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.1.0 or 1.0.0-rc.1)'
+        type: string
+        required: true
+
+      bin-name:
+        description: 'Primary binary / brew formula name. Built from `go build ./cmd/<bin-name>` by default; override via build-path.'
+        type: string
+        required: true
+
+      build-path:
+        description: 'Go package path to build for bin-name (default: ./cmd/<bin-name>). Override for layouts that don''t follow the cmd/<name> convention.'
+        type: string
+        required: false
+        default: ''
+
+      extra-binaries:
+        description: 'Comma-separated additional binaries to build (NOT brew-formulated). Each entry is either "name" (built from ./cmd/<name>) or "name=./path/to/pkg".'
+        type: string
+        required: false
+        default: ''
+
+      darwin-archs:
+        description: 'Comma-separated macOS archs (arm64 only by canonical; intel-mac dropped). Set "" to skip macOS.'
+        type: string
+        required: false
+        default: 'arm64'
+
+      linux-archs:
+        description: 'Comma-separated linux archs.'
+        type: string
+        required: false
+        default: 'x86_64,aarch64'
+
+      windows-archs:
+        description: 'Comma-separated windows archs (default empty; opt-in).'
+        type: string
+        required: false
+        default: ''
+
+      brew:
+        description: 'Render and push Homebrew formula to tap.'
+        type: boolean
+        required: false
+        default: true
+
+      brew-tap:
+        description: 'Tap repo to push the formula to (owner/repo).'
+        type: string
+        required: false
+        default: 'arthur-debert/homebrew-tools'
+
+      brew-desc:
+        description: 'Formula `desc` line (single line, ≤79 chars, no trailing period). Required when brew: true — Go has no canonical metadata file to derive this from.'
+        type: string
+        required: false
+        default: ''
+
+      brew-license:
+        description: 'Formula `license` identifier (e.g. MIT). Required when brew: true.'
+        type: string
+        required: false
+        default: ''
+
+      brew-homepage:
+        description: 'Formula `homepage` URL. Defaults to the GitHub repo URL when empty.'
+        type: string
+        required: false
+        default: ''
+
+      go-version:
+        description: 'Go version to install. Empty = read from go.mod.'
+        type: string
+        required: false
+        default: ''
+
+      cgo:
+        description: |
+          Set CGO_ENABLED for builds. Default `false` (CGO_ENABLED=0): produces
+          fully static binaries that run on minimal containers and brew tarballs.
+          Set `true` if the CLI imports a package that requires cgo (e.g. some
+          DNS resolver paths via `net`, sqlite3 bindings, etc.). Note that
+          enabling cgo blocks cross-compilation unless the matching native
+          toolchain is present on the runner.
+        type: boolean
+        required: false
+        default: false
+
+      version-package:
+        description: 'Go import path of the package whose `version` variable receives the release version via -ldflags -X. Empty = no injection (binary will report whatever default it embeds).'
+        type: string
+        required: false
+        default: ''
+
+      version-variable:
+        description: 'Name of the string variable inside version-package to set. Defaults to `Version`.'
+        type: string
+        required: false
+        default: 'Version'
+
+      submodules:
+        description: 'Pass --recurse-submodules on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog format).'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push (bypasses ruleset).'
+        required: false
+      APPLE_CERTIFICATE_P12_BASE64:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      ASC_API_KEY_BASE64:
+        required: false
+      ASC_API_KEY_ID:
+        required: false
+      ASC_API_ISSUER_ID:
+        required: false
+      HOMEBREW_TAP_TOKEN:
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  setup-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - name: Build matrix from arch inputs
+        id: build
+        env:
+          DARWIN_ARCHS: ${{ inputs.darwin-archs }}
+          LINUX_ARCHS: ${{ inputs.linux-archs }}
+          WINDOWS_ARCHS: ${{ inputs.windows-archs }}
+        run: |
+          set -euo pipefail
+          entries='[]'
+
+          # Each entry: target triple (rust-style — used in artifact names
+          # for parity with the rust-cli brew formula renderer), the Go
+          # GOOS/GOARCH values, the runner, whether to codesign, and the
+          # archive extension.
+          add() {
+            local target=$1 goos=$2 goarch=$3 os=$4 sign=$5 ext_archive=$6 ext_bin=$7
+            entries=$(echo "$entries" | jq \
+              --arg t "$target" --arg go "$goos" --arg ga "$goarch" \
+              --arg o "$os" --argjson s "$sign" \
+              --arg ea "$ext_archive" --arg eb "$ext_bin" \
+              '. + [{
+                target: $t, goos: $go, goarch: $ga, os: $o, sign: $s,
+                ext_archive: $ea, ext_bin: $eb
+              }]')
+          }
+
+          for arch in $(echo "${DARWIN_ARCHS}" | tr ',' ' '); do
+            case "$arch" in
+              arm64|aarch64) add "aarch64-apple-darwin" "darwin" "arm64" "macos-14" true  "tar.gz" "" ;;
+              x86_64|amd64)  add "x86_64-apple-darwin"  "darwin" "amd64" "macos-13" true  "tar.gz" "" ;;
+              "") ;;
+              *) echo "::error::unknown darwin arch: $arch"; exit 1 ;;
+            esac
+          done
+
+          for arch in $(echo "${LINUX_ARCHS}" | tr ',' ' '); do
+            case "$arch" in
+              x86_64|amd64)  add "x86_64-unknown-linux-gnu"  "linux" "amd64" "ubuntu-latest" false "tar.gz" "" ;;
+              aarch64|arm64) add "aarch64-unknown-linux-gnu" "linux" "arm64" "ubuntu-latest" false "tar.gz" "" ;;
+              "") ;;
+              *) echo "::error::unknown linux arch: $arch"; exit 1 ;;
+            esac
+          done
+
+          for arch in $(echo "${WINDOWS_ARCHS}" | tr ',' ' '); do
+            case "$arch" in
+              x86_64|amd64) add "x86_64-pc-windows-msvc" "windows" "amd64" "windows-latest" false "zip" ".exe" ;;
+              "") ;;
+              *) echo "::error::unknown windows arch: $arch"; exit 1 ;;
+            esac
+          done
+
+          compact=$(echo "$entries" | jq -c .)
+          echo "matrix=$compact" >> "$GITHUB_OUTPUT"
+          echo "Computed matrix:"
+          echo "$entries" | jq .
+
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules }}
+          token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: arthur-debert/release/.github/actions/setup-go@v1
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      - uses: arthur-debert/release/.github/actions/prepare-release-go@v1
+        id: prep
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+  create-release:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release notes from prepare job
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: v${{ needs.prepare.outputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-binaries:
+    needs: [prepare, create-release, setup-matrix]
+    if: always() && !failure() && !cancelled()
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.setup-matrix.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules }}
+
+      - uses: arthur-debert/release/.github/actions/setup-go@v1
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      - name: Build binaries
+        shell: bash
+        env:
+          BIN_NAME: ${{ inputs.bin-name }}
+          BUILD_PATH: ${{ inputs.build-path }}
+          EXTRA: ${{ inputs.extra-binaries }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          TARGET: ${{ matrix.target }}
+          EXT_BIN: ${{ matrix.ext_bin }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          VERSION_PACKAGE: ${{ inputs.version-package }}
+          VERSION_VARIABLE: ${{ inputs.version-variable }}
+          CGO: ${{ inputs.cgo }}
+        run: |
+          set -euo pipefail
+          if [ "$CGO" = "true" ]; then
+            export CGO_ENABLED=1
+          else
+            export CGO_ENABLED=0
+          fi
+
+          ldflags="-s -w"
+          if [ -n "$VERSION_PACKAGE" ]; then
+            ldflags="$ldflags -X ${VERSION_PACKAGE}.${VERSION_VARIABLE}=${VERSION}"
+          fi
+
+          build_one() {
+            local name=$1 pkg=$2
+            local out="${name}${EXT_BIN}"
+            echo "→ building $name for $GOOS/$GOARCH from $pkg"
+            go build -trimpath -ldflags="$ldflags" -o "$out" "$pkg"
+          }
+
+          # Primary binary
+          primary_pkg="${BUILD_PATH:-./cmd/$BIN_NAME}"
+          build_one "$BIN_NAME" "$primary_pkg"
+
+          # Extra binaries: "name" or "name=./path"
+          if [ -n "$EXTRA" ]; then
+            IFS=',' read -ra LIST <<< "$EXTRA"
+            for entry in "${LIST[@]}"; do
+              entry=$(echo "$entry" | xargs)
+              [ -z "$entry" ] && continue
+              if [[ "$entry" == *=* ]]; then
+                name="${entry%%=*}"
+                pkg="${entry#*=}"
+              else
+                name="$entry"
+                pkg="./cmd/$entry"
+              fi
+              build_one "$name" "$pkg"
+            done
+          fi
+
+      - name: Sign macOS binaries
+        id: sign
+        if: matrix.sign
+        uses: arthur-debert/release/.github/actions/sign-mac@v1
+        with:
+          cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          paths: ${{ inputs.bin-name }}
+
+      - name: Sign extra macOS binaries
+        if: matrix.sign && inputs.extra-binaries != '' && steps.sign.outputs.signed == 'true'
+        shell: bash
+        env:
+          EXTRA: ${{ inputs.extra-binaries }}
+          IDENTITY: ${{ steps.sign.outputs.identity }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra LIST <<< "$EXTRA"
+          for entry in "${LIST[@]}"; do
+            entry=$(echo "$entry" | xargs)
+            [ -z "$entry" ] && continue
+            name="${entry%%=*}"
+            echo "→ signing $name"
+            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$name"
+            codesign --verify --strict "$name"
+          done
+
+      - name: Notarize signed binaries
+        if: matrix.sign && steps.sign.outputs.signed == 'true'
+        shell: bash
+        env:
+          BIN_NAME: ${{ inputs.bin-name }}
+          EXTRA: ${{ inputs.extra-binaries }}
+          ASC_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$ASC_KEY_BASE64" ]; then
+            echo "::warning::No ASC API key — skipping notarization."
+            exit 0
+          fi
+          KEY="$RUNNER_TEMP/AuthKey.p8"
+          echo "$ASC_KEY_BASE64" | base64 --decode > "$KEY"
+
+          names=("$BIN_NAME")
+          if [ -n "$EXTRA" ]; then
+            IFS=',' read -ra LIST <<< "$EXTRA"
+            for entry in "${LIST[@]}"; do
+              entry=$(echo "$entry" | xargs)
+              [ -z "$entry" ] && continue
+              names+=("${entry%%=*}")
+            done
+          fi
+
+          for name in "${names[@]}"; do
+            zip "$name-notarize.zip" "$name"
+            echo "→ submitting $name for notarization"
+            R=$(xcrun notarytool submit "$name-notarize.zip" \
+              --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
+              --output-format json --no-wait)
+            ID=$(echo "$R" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+            echo "  submission $ID; polling..."
+            accepted=false
+            for i in $(seq 1 120); do
+              S=$(xcrun notarytool info "$ID" \
+                --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" \
+                --output-format json 2>&1 | python3 -c \
+                "import sys,json; print(json.load(sys.stdin).get('status','Unknown'))" 2>/dev/null \
+                || echo Unknown)
+              echo "  [$i/120] $S"
+              if [ "$S" = "Accepted" ]; then
+                accepted=true
+                break
+              fi
+              if [ "$S" = "Invalid" ] || [ "$S" = "Rejected" ]; then
+                xcrun notarytool log "$ID" --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" 2>&1 || true
+                exit 1
+              fi
+              sleep 30
+            done
+            if [ "$accepted" != "true" ]; then
+              # Timeout reached without Accepted — don't fall through and
+              # ship a binary that was never confirmed notarized. Dump the
+              # last log to help diagnose the stall.
+              echo "::error::Notarization for $name did not reach Accepted within 120 polls (~60min). Last status: $S"
+              xcrun notarytool log "$ID" --key "$KEY" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" 2>&1 || true
+              exit 1
+            fi
+            rm "$name-notarize.zip"
+          done
+          rm -f "$KEY"
+
+      - name: Package binaries (canonical subdir layout)
+        shell: bash
+        env:
+          BIN_NAME: ${{ inputs.bin-name }}
+          EXTRA: ${{ inputs.extra-binaries }}
+          TARGET: ${{ matrix.target }}
+          EXT_ARCHIVE: ${{ matrix.ext_archive }}
+          EXT_BIN: ${{ matrix.ext_bin }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          names=("$BIN_NAME")
+          if [ -n "$EXTRA" ]; then
+            IFS=',' read -ra LIST <<< "$EXTRA"
+            for entry in "${LIST[@]}"; do
+              entry=$(echo "$entry" | xargs)
+              [ -z "$entry" ] && continue
+              names+=("${entry%%=*}")
+            done
+          fi
+
+          for name in "${names[@]}"; do
+            artifact="${name}-${TARGET}"
+            mkdir -p "dist/$artifact"
+            cp "${name}${EXT_BIN}" "dist/$artifact/"
+            for doc in README.md CHANGELOG.md LICENSE; do
+              [ -f "$doc" ] && cp "$doc" "dist/$artifact/" || true
+            done
+            cd dist
+            if [ "$EXT_ARCHIVE" = "zip" ]; then
+              if command -v 7z >/dev/null 2>&1; then
+                7z a "../${artifact}.${EXT_ARCHIVE}" "$artifact" >/dev/null
+              else
+                zip -r "../${artifact}.${EXT_ARCHIVE}" "$artifact" >/dev/null
+              fi
+            else
+              tar -czf "../${artifact}.${EXT_ARCHIVE}" "$artifact"
+            fi
+            cd - >/dev/null
+            echo "✓ packaged ${artifact}.${EXT_ARCHIVE}"
+          done
+
+      - name: Upload binaries to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BIN_NAME: ${{ inputs.bin-name }}
+          EXTRA: ${{ inputs.extra-binaries }}
+          TARGET: ${{ matrix.target }}
+          EXT_ARCHIVE: ${{ matrix.ext_archive }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          names=("$BIN_NAME")
+          if [ -n "$EXTRA" ]; then
+            IFS=',' read -ra LIST <<< "$EXTRA"
+            for entry in "${LIST[@]}"; do
+              entry=$(echo "$entry" | xargs)
+              [ -z "$entry" ] && continue
+              names+=("${entry%%=*}")
+            done
+          fi
+          for name in "${names[@]}"; do
+            artifact="${name}-${TARGET}.${EXT_ARCHIVE}"
+            gh release upload "v$VERSION" "$artifact" --clobber
+          done
+
+      - name: Upload binaries as workflow artifacts (for brew job)
+        uses: actions/upload-artifact@v4
+        with:
+          name: bins-${{ matrix.target }}
+          path: |
+            *.tar.gz
+            *.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  homebrew-formula:
+    needs: [prepare, build-binaries]
+    # Skip prereleases: brew tap is the stable channel. Pushing an
+    # `rc.N` formula replaces the stable formula for `brew install`
+    # users with a non-stable build, which is almost never what we want.
+    if: always() && !failure() && !cancelled() && inputs.brew && needs.prepare.outputs.prerelease != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check tap token + required inputs
+        id: guard
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          BREW_DESC: ${{ inputs.brew-desc }}
+          BREW_LICENSE: ${{ inputs.brew-license }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN not configured — skipping formula push."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ -z "$BREW_DESC" ] || [ -z "$BREW_LICENSE" ]; then
+            echo "::error::brew: true requires brew-desc and brew-license inputs (Go has no canonical metadata file to derive them from)."
+            exit 1
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules }}
+
+      - name: Download tarballs
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: bins-*
+          merge-multiple: true
+
+      - name: Compute URLs, SHAs
+        if: steps.guard.outputs.skip != 'true'
+        id: values
+        env:
+          BIN_NAME: ${{ inputs.bin-name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BREW_HOMEPAGE: ${{ inputs.brew-homepage }}
+        run: |
+          set -euo pipefail
+          HOMEPAGE="${BREW_HOMEPAGE:-https://github.com/${GITHUB_REPOSITORY}}"
+          echo "homepage=$HOMEPAGE" >> "$GITHUB_OUTPUT"
+
+          URL_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${BIN_NAME}"
+          urls='{}'
+          shas='{}'
+          for f in "${BIN_NAME}"-*.tar.gz "${BIN_NAME}"-*.zip; do
+            [ -f "$f" ] || continue
+            base="${f#"${BIN_NAME}"-}"
+            if [[ "$base" == *.tar.gz ]]; then
+              triple="${base%.tar.gz}"
+              ext="tar.gz"
+            elif [[ "$base" == *.zip ]]; then
+              triple="${base%.zip}"
+              ext="zip"
+            else
+              continue
+            fi
+            key=$(echo "$triple" | tr 'a-z-' 'A-Z_')
+            sha=$(sha256sum "$f" | cut -d' ' -f1)
+            urls=$(echo "$urls" | jq --arg k "$key" --arg v "${URL_BASE}-${triple}.${ext}" '. + {($k): $v}')
+            shas=$(echo "$shas" | jq --arg k "$key" --arg v "$sha" '. + {($k): $v}')
+          done
+          echo "urls<<EOF" >> "$GITHUB_OUTPUT"; echo "$urls" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "shas<<EOF" >> "$GITHUB_OUTPUT"; echo "$shas" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - uses: arthur-debert/release/.github/actions/render-brew-formula@v1
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          bin-name: ${{ inputs.bin-name }}
+          version: ${{ needs.prepare.outputs.version }}
+          desc: ${{ inputs.brew-desc }}
+          license: ${{ inputs.brew-license }}
+          homepage: ${{ steps.values.outputs.homepage }}
+          urls-json: ${{ steps.values.outputs.urls }}
+          shas-json: ${{ steps.values.outputs.shas }}
+          output-path: out/${{ inputs.bin-name }}.rb
+
+      - uses: arthur-debert/release/.github/actions/push-brew-tap@v1
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          tap-repo: ${{ inputs.brew-tap }}
+          tap-token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          formula-name: ${{ inputs.bin-name }}
+          formula-path: out/${{ inputs.bin-name }}.rb
+          version: ${{ needs.prepare.outputs.version }}

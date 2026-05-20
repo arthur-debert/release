@@ -1,0 +1,27 @@
+name: 'Setup Go'
+description: 'Install Go and cache module + build artifacts. Reads the version from go.mod by default.'
+
+inputs:
+  go-version:
+    description: 'Go version to install. Overrides the go.mod directive when set.'
+    required: false
+    default: ''
+  go-version-file:
+    description: 'Path to a go.mod (or .go-version) file. Used when go-version is empty.'
+    required: false
+    default: 'go.mod'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go-version }}
+        go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
+        cache: true
+        cache-dependency-path: '**/go.sum'
+
+    - name: Show Go version
+      shell: bash
+      run: go version

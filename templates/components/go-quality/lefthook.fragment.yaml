@@ -1,0 +1,47 @@
+# go-quality lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only (no auto-fix).
+
+pre-commit:
+  commands:
+    gofmt:
+      # gofmt -l prints unformatted file names and exits 0 even when
+      # there are unformatted files; we want the hook to fail in that
+      # case. Pipe through a test that succeeds only when stdin is
+      # empty. Glob matches Go sources anywhere in the tree.
+      glob: "**/*.go"
+      run: |
+        unformatted=$(gofmt -l {staged_files})
+        if [ -n "$unformatted" ]; then
+          echo "Files not gofmt'd:" >&2
+          echo "$unformatted" >&2
+          echo "Run 'gofmt -w .' to fix." >&2
+          exit 1
+        fi
+      priority: 2
+    go-vet:
+      # go vet operates on import paths, not files. Glob still gates
+      # which staged files trigger the hook, but the command lints the
+      # whole module — that matches what CI does and catches
+      # cross-package issues (a vet warning that touches a file you
+      # didn't stage but lives in the same package).
+      glob:
+        - "**/*.go"
+        - "**/go.mod"
+        - "**/go.sum"
+      run: go vet ./...
+      priority: 2
+    golangci-lint:
+      # Opt-in: only runs if golangci-lint is installed. CI is expected
+      # to install it via the canonical setup-go action; locally,
+      # contributors `brew install golangci-lint` once.
+      glob:
+        - "**/*.go"
+        - "**/go.mod"
+      run: |
+        if command -v golangci-lint >/dev/null 2>&1; then
+          golangci-lint run ./...
+        else
+          echo "golangci-lint not installed (skipping; install via brew install golangci-lint)" >&2
+        fi
+      priority: 2
