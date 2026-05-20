@@ -124,17 +124,22 @@ Used by `arami-core` and `lex-fmt/lex`.
 namespace approval at
 [EclipseFdn/open-vsx.org#10424](https://github.com/EclipseFdn/open-vsx.org/issues/10424)).
 
-³ Downgraded 2026-05-20: the canonical
-`electron-app.yml@v1` / `tauri-app.yml` workflow uses
-electron-builder's native single-pass sign + notarize, which has
-**never produced a successful release** through the canonical
-caller. The 🚧 reflects that the OLD self-contained `release.yml`
-in lexed had a working SKILL.md submit/poll/staple path
-(v0.10.1 shipped clean 2026-05-17), but that workflow no longer
-exists and the canonical replacement is unproven. Tracked at
-[#122](https://github.com/arthur-debert/release/issues/122); the
-USE-and-succeed validation run is gated on lexed#106 (CHANGELOG
-unblocker for canonical workflow pre-flight).
+³ Downgraded 2026-05-20:
+
+- `electron-app.yml@v1` uses electron-builder's native single-pass
+  sign + notarize. **Never produced a successful release through the
+  canonical caller.** The OLD self-contained `release.yml` in lexed
+  had a working submit/poll/staple path (v0.10.1 shipped clean
+  2026-05-17), but that workflow no longer exists; the canonical
+  replacement is unproven.
+- `tauri-app.yml` uses `npx tauri build` with `APPLE_*` env vars
+  (Tauri's own signing path, NOT electron-builder). **No release
+  attempted via the canonical caller; also unproven.**
+
+Tracked at [#122](https://github.com/arthur-debert/release/issues/122);
+the USE-and-succeed validation run for `electron-app.yml@v1` is gated
+on [lex-fmt/lexed#106](https://github.com/lex-fmt/lexed/pull/106)
+(CHANGELOG unblocker for canonical workflow pre-flight).
 
 `commons-lint` for rust-cli / rust-lib went 📋 → ✅ on
 2026-05-20 with the take-iii Component model landing
@@ -173,12 +178,15 @@ Where each consumer actually sits. Four states:
 
 A Stack flips to **fleet-adopted** only when ≥80% of its eligible
 consumers are on `@v1` *and* have cut at least one release through
-it. Today `rust-cli` and `rust-lib` clear that bar.
+it. Today only `rust-cli` clears that bar (5/5 eligible consumers
+adopted). `rust-lib` has 1 of 2 eligible consumers fleet-adopted
+(clapfig done, standout pilot) — 50%, so the stack-level state is
+*pilot-running* even though one consumer is fleet-adopted.
 
-(Note: `treex` was previously listed under rust-cli but is NOT a
+(`treex` was previously listed under rust-cli but is NOT a
 managed-portfolio repo per
 [the managed-repo audit](https://github.com/arthur-debert/release/issues/105);
-removed 2026-05-20.)
+removed.)
 
 ### Component-model adoption (take-iii, in flight)
 
@@ -190,7 +198,7 @@ two flip independently.
 
 | Stack | Adopted | Pending |
 |---|---|---|
-| rust-cli  | `dodot`, `rustloc`, `burgertocow` | `lex-fmt/lex` (was on feature branch), `padz` (bare-repo at `~/h/padz`; needs worktree setup) |
+| rust-cli  | `dodot`, `rustloc`, `burgertocow` | `lex-fmt/lex` (active work on a feature branch when batch ran), `padz` (configured as a bare repo locally; needs a linked worktree on `main` before `orc propagate` can clear pre-flight) |
 | rust-lib  | `clapfig` | `standout` (on feature branch) |
 | (other stacks) | — | per-stack `manifest.yaml` not yet built ([#106](https://github.com/arthur-debert/release/issues/106)) |
 
