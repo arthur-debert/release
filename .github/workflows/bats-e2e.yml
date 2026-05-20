@@ -1,0 +1,116 @@
+name: BATS e2e
+
+# Reusable workflow: install bats + run the consumer's e2e suite.
+#
+# Consumers call this from a thin caller workflow, typically alongside
+# their main CI workflow:
+#
+#   jobs:
+#     e2e:
+#       uses: arthur-debert/release/.github/workflows/bats-e2e.yml@v1
+#       with:
+#         pre-test: scripts/build-for-e2e   # optional
+#         runner:   bin/check-e2e            # default
+#
+# The default runner is the canonical `bin/check-e2e` synced into every
+# consumer that opts into the `bats` Component. It auto-discovers the
+# consumer's bats layout (see templates/components/bats/bin/check-e2e).
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: |
+          Path to the e2e runner script in the consumer repo. Default is
+          the Component-supplied `bin/check-e2e` which discovers the
+          layout by convention. Override only if you need a custom
+          entry point (e.g. a non-bats e2e harness).
+        type: string
+        required: false
+        default: 'bin/check-e2e'
+
+      pre-test:
+        description: |
+          Optional path to a script that runs before the e2e runner.
+          Typical use: build the binary, prepare fixtures, start a
+          background server. Empty means skip the pre-step.
+        type: string
+        required: false
+        default: ''
+
+      bats-version:
+        description: |
+          Version of bats-core to install. Default `latest` tracks the
+          marketplace action's default. Pin if a release regression is
+          breaking the consumer (rare).
+        type: string
+        required: false
+        default: 'latest'
+
+      runs-on:
+        description: |
+          Runner label. Default `ubuntu-latest`. Set to `macos-14` etc.
+          if the suite has platform-specific assertions.
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+      submodules:
+        description: 'Pass --recurse-submodules on checkout (lex pattern).'
+        type: boolean
+        required: false
+        default: false
+
+      timeout-minutes:
+        description: |
+          Job timeout. E2E suites can be slower than unit tests; default
+          30m caps runaway suites without being so aggressive that a
+          legitimate full suite hits it.
+        type: number
+        required: false
+        default: 30
+
+      setup-script:
+        description: |
+          Optional path to a setup script that runs after bats install
+          but before pre-test (e.g. installs language toolchains the
+          binary build needs). Empty means skip.
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: ${{ inputs.submodules }}
+
+      - name: Install bats-core
+        # Modern canonical install. Replaces the per-consumer `git clone` +
+        # `install.sh` boilerplate that exists in dodot et al today.
+        uses: bats-core/bats-action@4.0.0
+        with:
+          bats-version: ${{ inputs.bats-version }}
+
+      - name: Run setup script
+        if: inputs.setup-script != ''
+        run: bash "${{ inputs.setup-script }}"
+
+      - name: Run pre-test
+        if: inputs.pre-test != ''
+        run: bash "${{ inputs.pre-test }}"
+
+      - name: Run e2e suite
+        run: |
+          if [ ! -x "${{ inputs.runner }}" ]; then
+            echo "::error::E2E runner not found or not executable: ${{ inputs.runner }}" >&2
+            echo "Adopt the canonical bats Component (release-sync) or set 'runner:' in the workflow caller." >&2
+            exit 1
+          fi
+          "${{ inputs.runner }}"
