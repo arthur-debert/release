@@ -33,6 +33,7 @@ propagate is mechanical and doesn't need LLM intelligence.
 """
 
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,15 +75,14 @@ def propagate_one(
     dry_run: bool = False,
 ) -> PropagateResult:
     repo_str = str(repo_path)
-    if not (repo_path / ".git").exists():
-        return PropagateResult(repo_str, "error", error="not a git repo")
 
-    # Pre-flight: must be a working tree, not a bare repo or some other
-    # non-checkout state. (Empirical: `~/h/padz` is configured as a bare
-    # repo with `core.bare=true` even though files happen to live in the
-    # directory; running `git status` there exit-128s with "this
-    # operation must be run in a work tree." The propagate flow needs an
-    # actual checkout to branch/commit on.)
+    # Pre-flight: must be a git work tree, not a bare repo / non-checkout
+    # state / non-repo at all. `git rev-parse --is-inside-work-tree`
+    # subsumes a basic "is this a git repo?" check — it exits non-zero
+    # for non-repos and prints "false" for bare-repo CWDs. Empirical:
+    # ~/h/padz is configured as a bare repo (`core.bare=true`) even
+    # though files live in the directory, and `git status` there
+    # exit-128s with "this operation must be run in a work tree."
     is_wt = subprocess.run(
         ["git", "rev-parse", "--is-inside-work-tree"],
         cwd=repo_path,
@@ -90,13 +90,17 @@ def propagate_one(
         text=True,
     )
     if is_wt.returncode != 0 or is_wt.stdout.strip() != "true":
+        quoted = shlex.quote(str(repo_path))
+        quoted_base = shlex.quote(base_branch)
+        detail = (is_wt.stderr or is_wt.stdout or "").strip()
+        suffix = f" ({detail})" if detail else ""
         return PropagateResult(
             repo_str, "error",
             error=(
-                "not a git work tree (bare repo or non-checkout state). "
-                "If this is a bare repo, set up a linked worktree on the "
-                f"base branch first: `git -C {repo_path} worktree add "
-                f"<path> {base_branch}`, then propagate against that path."
+                f"not a git work tree (bare repo or non-checkout state){suffix}. "
+                "If this is a bare repo, set up a linked worktree on the base "
+                f"branch first: `git -C {quoted} worktree add <path> "
+                f"{quoted_base}`, then propagate against that path."
             ),
         )
 
