@@ -4,10 +4,11 @@ This is a Go project (CLI, server, or module).
 
 ## Before suggesting a fix
 
-- Run the project's umbrella check script if one exists (in `scripts/`,
-  commonly named `check`, `pre-commit`, or `ci.sh` — run `ls scripts/` to
-  see which); otherwise `gofmt -l . && go vet ./... && go test ./...`
-  (plus `golangci-lint run` if `.golangci.yml` is present). CI runs the
+- Run the project's umbrella check — `bin/check` (which dispatches to
+  `bin/check-fmt`, `bin/check-lint`, `bin/check-tests`). If the repo
+  predates the Component-model adoption, fall back to
+  `gofmt -l . && go vet ./... && go test ./...` (plus
+  `golangci-lint run` if `.golangci.yml` is present). CI runs the
   same; if your suggestion doesn't pass, it won't merge — check
   `.github/workflows/` for the source of truth.
 - Never propose changes that leave tests failing.

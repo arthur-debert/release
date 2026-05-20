@@ -5,7 +5,7 @@
 ## Checklist
 
 - [ ] Changelog `Unreleased` section updated (or chore/docs-only)
-- [ ] Project umbrella check passes locally — `scripts/{check,pre-commit,ci.sh}` or `gofmt -l . && go vet ./... && go test ./...`
+- [ ] Project umbrella check passes locally — `bin/check` (or `gofmt -l . && go vet ./... && go test ./...`)
 - [ ] Tests added or updated for behavior changes
 
 ## Notes for reviewers

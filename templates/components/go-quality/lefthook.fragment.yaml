@@ -11,6 +11,12 @@ pre-commit:
       # empty. Glob matches Go sources anywhere in the tree.
       glob: "**/*.go"
       run: |
+        # `gofmt -l` lists unformatted files but exits 0 either way —
+        # the non-empty output is the signal. A real gofmt failure
+        # (e.g. parse error) DOES exit non-zero, though, and we want
+        # that to fail the hook too. `set -e` makes the failing gofmt
+        # propagate before the `if` overwrites $?.
+        set -e
         unformatted=$(gofmt -l {staged_files})
         if [ -n "$unformatted" ]; then
           echo "Files not gofmt'd:" >&2
