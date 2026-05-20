@@ -67,14 +67,14 @@ on:
         required: false
         default: '3.x'
 
-      runs-on:
-        description: 'Runner label.'
+      runner:
+        description: 'Runner label (passed through as `runs-on`).'
         type: string
         required: false
         default: 'ubuntu-latest'
 
-      timeout-minutes:
-        description: 'Job timeout (each job).'
+      timeout:
+        description: 'Job timeout in minutes (each job; passed through as `timeout-minutes`).'
         type: number
         required: false
         default: 15
@@ -120,8 +120,8 @@ jobs:
   build:
     permissions:
       contents: read
-    runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
     outputs:
       site-dir: ${{ inputs.site-dir }}
     steps:
@@ -180,8 +180,8 @@ jobs:
       contents: read
       pages: write
       id-token: write
-    runs-on: ${{ inputs.runs-on }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
