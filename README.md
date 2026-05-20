@@ -141,17 +141,17 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 
 | Stack         | gh-release | changelog | version-bump | macos-codesign | precommit-gate | crate-publish | npm-publish | pypi-publish | brew-tap-push | bats | wasm-pack | mkdocs | commons-lint |
 |---------------|:----------:|:---------:|:------------:|:--------------:|:--------------:|:-------------:|:-----------:|:------------:|:-------------:|:----:|:---------:|:------:|:------------:|
-| rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | 🚧 | ✅ |
+| rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | ✅ | ✅ |
 | rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
-| go-cli        | ✅ | ✅ | —⁴ | 🚧³ | ✅ | — | — | — | ✅ | 📋 | — | 🚧 | 📋 |
+| go-cli        | ✅ | ✅ | —⁴ | 🚧³ | ✅ | — | — | — | ✅⁵ | 🚧 | — | 🚧 | 📋 |
 | electron-app  | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
 | tauri-app     | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
 | vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
-| nvim-plugin   | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 📋 | — | 🚧 | 📋 |
+| nvim-plugin   | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
 | tree-sitter   | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
 | python-pkg    | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ | — | — | — | 🚧 | 📋 |
-| gh-action     | ✅ | ✅ | — | — | ✅ | — | — | — | — | 📋 | — | 🚧 | 📋 |
-| brew-tap      | — | — | — | — | ✅ | — | — | — | (is tap) | 📋 | — | 🚧 | 📋 |
+| gh-action     | ✅ | ✅ | — | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
+| brew-tap      | — | — | — | — | ✅ | — | — | — | (is tap) | 🚧 | — | 🚧 | 📋 |
 
 ¹ Opt-in `wasm-package` slot — Rust workspace with a wasm-bindgen
 member publishes both the crate and an npm tarball of the wasm build.
@@ -187,15 +187,39 @@ with `brew install arthur-debert/tools/<bin>`. version-bump is ✅
 because `prepare-release-go` rolls CHANGELOG + creates the tag, even
 though Go itself has no manifest version field.
 
+⁵ **go-cli brew-tap-push — supports private repos.** Set
+`brew-private-repo: true` on the caller and the rendered formula
+inlines a `GitHubPrivateRepositoryReleaseDownloadStrategy` + `using:`
+clauses so `brew install` fetches release assets via the
+authenticated GitHub assets API. End users export
+`HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` (or any PAT with read
+access) before `brew install`. Used by supage (the first private-repo
+go-cli consumer). The same option exists on rust-cli for parity.
+
 `commons-lint` for rust-cli / rust-lib went 📋 → ✅ on
 2026-05-20 with the take-iii Component model landing
 (`shell-quality` Component: md/yaml/sh + editorconfig; exercised
 on dodot, clapfig, rustloc, burgertocow). Other stacks stay 📋
 until their per-stack `manifest.yaml` lands ([#106](https://github.com/arthur-debert/release/issues/106)).
 
-`mkdocs` is 🚧 across the board: shipped today as a copy-once
-template (see [lex-fmt/mkdocs-lex docs deployment](https://github.com/lex-fmt/mkdocs-lex/blob/main/docs/deployment/examples/docs.yml)).
-Lifting it to a first-class Component is a target on take-iii.
+`bats` and `mkdocs` Components landed on take-iii 2026-05-20:
+
+- **`bats`** — `templates/components/bats/bin/check-e2e` (convention-
+  discovery runner) + `.github/workflows/bats-e2e.yml` (reusable
+  workflow with canonical `bats-core/bats-action@4.0.0` install).
+  Opt-in via `.release-sync.yaml`. Adopted on dodot and padz.
+  rust-cli is ✅ (built + exercised end-to-end); other stacks that
+  could benefit are 🚧 pending first-consumer adoption.
+- **`mkdocs`** — `templates/components/mkdocs/bin/check-docs` (local
+  strict-mode build with auto-config-discovery) +
+  `.github/workflows/mkdocs.yml` (reusable workflow with build
+  always, deploy gated on push to default branch via first-party
+  `actions/deploy-pages`). Plugin-agnostic — consumer's
+  `requirements` file drives mkdocs / theme / plugin selection.
+  Adopted on dodot for PR-time build validation; deploy migration
+  pending the Pages source flip to "GitHub Actions" mode.
+
+See `docs/per-component/{bats,mkdocs}.md` for adoption details.
 
 ## Adoption matrix — Stack × Repo
 
@@ -220,14 +244,14 @@ Where each consumer actually sits. Four states:
 | tree-sitter   | `lex-fmt/tree-sitter-lex` — **pilot-running** |
 | python-pkg    | (no managed-portfolio repos yet) |
 | gh-action     | `release` (self, dogfooded) — **pilot-running**; `simple-gal-action` — **planned** |
-| go-cli        | `supage` — **pilot-running** (new stack landed via #126) |
+| go-cli        | `supage` — **fleet-adopted** (1/1; `0.0.1` + `0.0.2` cut through canonical pipeline incl. private-repo Homebrew formula via brew-private-repo: true) |
 | brew-tap      | `homebrew-tools` — **planned** |
 
 A Stack flips to **fleet-adopted** only when ≥80% of its eligible
 consumers are on `@v1` *and* have cut at least one release through
-it. Today only `rust-cli` clears that bar (5/5 eligible consumers
-adopted). `rust-lib` has 1 of 2 eligible consumers fleet-adopted
-(clapfig done, standout pilot) — 50%, so the stack-level state is
+it. Today `rust-cli` (5/5) and `go-cli` (1/1, supage) clear that
+bar. `rust-lib` has 1 of 2 eligible consumers fleet-adopted (clapfig
+done, standout pilot) — 50%, so the stack-level state is
 *pilot-running* even though one consumer is fleet-adopted.
 
 (`treex` was previously listed under rust-cli but is NOT a
@@ -247,7 +271,7 @@ two flip independently.
 |---|---|---|
 | rust-cli  | `dodot`, `rustloc`, `burgertocow`, `lex-fmt/lex`, `padz` | (none — all 5 adopted) |
 | rust-lib  | `clapfig`, `standout` | (none — both adopted) |
-| go-cli    | `supage` (pending — validation in flight) | (no other go consumers in the portfolio yet) |
+| go-cli    | `supage` | (no other go consumers in the portfolio yet) |
 | (other stacks) | — | per-stack `manifest.yaml` not yet built ([#106](https://github.com/arthur-debert/release/issues/106)) |
 
 Driven by `orc propagate` ([#117](https://github.com/arthur-debert/release/pull/117), merged) — the propagation
