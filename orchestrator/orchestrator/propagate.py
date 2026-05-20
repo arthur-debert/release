@@ -77,6 +77,29 @@ def propagate_one(
     if not (repo_path / ".git").exists():
         return PropagateResult(repo_str, "error", error="not a git repo")
 
+    # Pre-flight: must be a working tree, not a bare repo or some other
+    # non-checkout state. (Empirical: `~/h/padz` is configured as a bare
+    # repo with `core.bare=true` even though files happen to live in the
+    # directory; running `git status` there exit-128s with "this
+    # operation must be run in a work tree." The propagate flow needs an
+    # actual checkout to branch/commit on.)
+    is_wt = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    if is_wt.returncode != 0 or is_wt.stdout.strip() != "true":
+        return PropagateResult(
+            repo_str, "error",
+            error=(
+                "not a git work tree (bare repo or non-checkout state). "
+                "If this is a bare repo, set up a linked worktree on the "
+                f"base branch first: `git -C {repo_path} worktree add "
+                f"<path> {base_branch}`, then propagate against that path."
+            ),
+        )
+
     # Pre-flight: clean working tree
     status = _run(["git", "status", "--porcelain"], cwd=repo_path).stdout.strip()
     if status:
