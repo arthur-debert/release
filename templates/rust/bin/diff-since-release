@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Show commits on the current branch since the last final release.
+#
+# Skips pre-release tags (e.g. `v1.0.0-rc.1`) so the diff is against the
+# last *final* release — pre-releases share `## [Unreleased]` changelog
+# entries with the final they lead up to; the relevant scope is what's
+# accumulated since that final.
+#
+# Usage: diff-since-release
+# Exits 1 if no release tags exist yet.
+
+set -euo pipefail
+
+latest_tag=$(git tag --list 'v*' --sort=-version:refname | grep -v -- '-' | head -n1)
+
+if [ -z "$latest_tag" ]; then
+    echo "No release tags found"
+    exit 1
+fi
+
+echo "Changes since $latest_tag:"
+echo "---"
+git --no-pager log --oneline "$latest_tag"..HEAD
