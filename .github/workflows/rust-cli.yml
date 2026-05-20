@@ -77,9 +77,10 @@ on:
           GitHubPrivateRepositoryReleaseDownloadStrategy class + `using:`
           clauses to the rendered formula so `brew install` can fetch
           assets via the authenticated assets API. End users need to
-          export HOMEBREW_GITHUB_API_TOKEN (e.g. `=$(gh auth token)`)
-          with read access to the private repo. Default false renders
-          the standard public formula.
+          `export HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` (or set
+          it to any PAT with read access to the private repo) before
+          running brew install. Default false renders the standard
+          public formula.
         type: boolean
         required: false
         default: false
