@@ -370,15 +370,30 @@ export async function expectEvent(page: Page, type: string,
                                   predicate?: (e: any) => boolean,
                                   timeout = 5_000) {
   // Serialize the predicate across the page boundary — Playwright's
-  // page.waitForFunction runs in the browser context, where the JS
-  // predicate from our test process isn't directly callable.
+  // page.waitForFunction runs in the browser context. Two constraints:
+  //
+  //   1. Predicate must be self-contained (a pure function over its
+  //      argument). It can't close over test-process variables —
+  //      they don't exist in the browser context. Capture values
+  //      into the function body instead:
+  //          // ❌  const expected = 42; expectEvent(p, 't', e => e.n === expected)
+  //          // ✅  expectEvent(p, 't', e => e.n === 42)
+  //
+  //   2. Strict CSP (unsafe-eval disallowed) blocks `new Function`.
+  //      If your app sets such a CSP for tests, switch this helper
+  //      to a structural-match form (predicate as a `{key: value}`
+  //      object rather than a function).
+  //
+  // Both branches return the LATEST matching event (.findLast for the
+  // predicate path) — consistent with the no-predicate path's
+  // evts[evts.length-1] semantic.
   return await page.waitForFunction(
     ({ t, pStr }) => {
       const evts = window.__e2e.events.filter(e => e.type === t)
       if (!pStr) return evts[evts.length - 1]
       // eslint-disable-next-line no-new-func — predicate is author-controlled
-      const fn = new Function('e', 'return (' + pStr + ')(e)')
-      return evts.find(fn as (e: unknown) => boolean)
+      const fn = new Function('e', 'return (' + pStr + ')(e)') as (e: unknown) => boolean
+      return evts.findLast(fn)
     },
     { t: type, pStr: predicate?.toString() }, { timeout })
 }
@@ -560,7 +575,7 @@ await page.keyboard.type('text')
 ### Splash windows
 
 Apps that show a splash window before the editor: `firstWindow()` returns the
-splash. Poll for the editor:
+splash. Wait for the editor window via Playwright's event API:
 
 ```ts
 async function getEditorWindow(app: ElectronApplication, timeout = 10_000) {

@@ -109,13 +109,17 @@ API key auth (`--key` / `--key-id` / `--issuer`) is Apple's recommended path for
       --issuer "${{ secrets.ASC_API_ISSUER_ID }}" \
       --output-format json \
       --no-wait)
-    # Defensive parse: `.get('id', '')` instead of `['id']` so a
-    # malformed notarytool response (rate-limit / auth error / etc.)
-    # produces an empty ID and a useful downstream failure rather
-    # than an opaque python KeyError in the CI log.
+    # If `xcrun notarytool submit` fails (non-zero), GH Actions'
+    # default `shell: bash` runs with `-eo pipefail` and the step
+    # aborts here — the parse below is never reached. This defensive
+    # parse handles a narrower case: submit returns 0 but the JSON
+    # body is malformed or missing 'id' (rare; usually an API surface
+    # change). `.get('id','')` + an explicit empty-ID check turns
+    # that into a `::error::` annotation with the raw response,
+    # rather than a python KeyError traceback in the CI log.
     ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
     if [ -z "$ID" ]; then
-      echo "::error::notarytool submit did not return an id; raw response: $RESULT"
+      echo "::error::notarytool submit returned 0 but no 'id' in response: $RESULT"
       exit 1
     fi
     echo "submission-id=$ID" >> "$GITHUB_OUTPUT"
