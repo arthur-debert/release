@@ -96,9 +96,13 @@ API key auth (`--key` / `--key-id` / `--issuer`) is Apple's recommended path for
     echo "$ASC_API_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
 
 - name: Submit DMG for notarization
+  id: notarize-submit
   shell: bash
   run: |
-    DMG=$(ls release/*.dmg | head -1)
+    # Find the produced DMG regardless of electron-builder's
+    # `directories.output` setting (`dist/` is the default; some
+    # workflows use `release/`, `out/`, or a tagged subdir).
+    DMG=$(find . -maxdepth 3 -name '*.dmg' -type f | head -1)
     RESULT=$(xcrun notarytool submit "$DMG" \
       --key "$RUNNER_TEMP/AuthKey.p8" \
       --key-id "${{ secrets.ASC_API_KEY_ID }}" \

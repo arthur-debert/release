@@ -6,8 +6,8 @@ description: |
   "turn this into a task / todo list"; (2) the agent needs to persist context across
   a compaction or handoff; (3) the user asks what's been noted, what's planned, what's
   done; (4) the repo already has a .padz/ directory and the user refers to "my notes"
-  or "my pads". Not for working ON padz itself — see padz-output and padz-display-identifiers
-  for that.
+  or "my pads". Not for working ON padz itself — see the padz repo's own
+  `.claude/skills/` (padz-output, padz-display-identifiers, etc.) for that.
 ---
 
 # padz for agents
