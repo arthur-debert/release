@@ -11,19 +11,27 @@
 
 set -euo pipefail
 
-# Fail fast if `git tag` itself errors (corrupt .git, etc.) — capture
-# its output separately so the | grep | head pipeline can't mask a
-# git-level failure with an empty-result false-positive.
+# Fail fast if `git tag` itself errors (corrupt .git, unborn HEAD,
+# etc.) — capture into a variable so the | grep | head pipeline can't
+# mask a git-level failure with an empty-result false-positive.
 all_tags=$(git tag --list 'v*' --sort=-version:refname --merged HEAD)
+
 # Filter pre-release tags (anything with `-`); pre-releases share
 # `## [Unreleased]` entries with the final they lead up to, so the
 # diff that matters is against the last *final* release. `--merged
 # HEAD` scopes to tags reachable from the current branch (relevant on
-# maintenance branches that have older tip than main).
+# maintenance branches with an older tip than main).
 #
-# `|| true` only on the grep|head chain — grep exits 1 on no-match,
-# which is "no final tags" not "git broke."
-latest_tag=$(printf '%s\n' "$all_tags" | grep -v -- '-' | head -n1 || true)
+# Guard the pipeline behind a non-empty check on `$all_tags` because
+# `printf '%s\n' ""` emits a stray newline that grep -v '-' would
+# accept, producing an empty `latest_tag` via a phantom row rather
+# than the clean empty-result path. `|| true` on the grep|head chain
+# is for "no final tags exist (only pre-releases)" — grep exits 1 on
+# no-match, which is data, not failure.
+latest_tag=""
+if [ -n "$all_tags" ]; then
+    latest_tag=$(printf '%s\n' "$all_tags" | grep -v -- '-' | head -n1 || true)
+fi
 
 if [ -z "$latest_tag" ]; then
     echo "No release tags found (on this branch)" >&2
