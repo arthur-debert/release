@@ -2,19 +2,30 @@
 
 Per-repo flow:
 
-    pre-flight: working tree clean + on base branch
-    git pull
+    pre-flight:   working tree clean + on base branch
+    git pull --ff-only base
+    release-sync --check          # canonical "is there drift?" probe
+        exit 0  → skip; no branch created; report "no-changes"
+        exit 1  → drift detected; proceed
+        other   → fail loud
     git checkout -b <branch>
-    release-sync (env: RELEASE_HOME, RELEASE_REF)
-    if no changes: drop branch, report "no-changes"
+    release-sync                  # real sync (env: RELEASE_HOME, RELEASE_REF)
+    git add -A && git commit
+    if --dry-run: revert to base + drop branch; report "dry-run"
     else:
-        git add -A && git commit
-        if --dry-run: drop branch, report "dry-run"
-        else: git push + gh pr create + report "ok" with PR URL
+        git push + gh pr create + report "ok" with PR URL
+        (on gh failure: checkout back to base; pushed branch left intact
+         on origin for manual recovery)
 
-Per-repo failures are caught and reported; a failure in one repo does
-not abort the rest. On any error the script attempts to restore the
-repo to base_branch with the work-branch deleted.
+The `--check`-first design matters: `.release-sync-state.yaml`'s
+`synced_at` timestamp updates on every sync write. A naive "run sync,
+then `git status`" would always show drift even when content matches.
+`--check` preserves the timestamp during comparison, giving an
+accurate signal.
+
+Per-repo failures are captured and reported; a failure in one repo
+does not abort the rest. On any error the local working tree is
+restored to base_branch.
 
 Mechanical git/gh operations only — no Claude Agent SDK involvement.
 The Agent SDK is what powers `orc probe` (verification-by-proxy);
@@ -79,11 +90,15 @@ def propagate_one(
             repo_str, "error", error=f"not on {base_branch} (on {current})"
         )
 
-    # Pull base.
+    # Pull base — ff-only so an accidentally-diverged local doesn't get
+    # a silent merge commit dropped on it.
     try:
-        _run(["git", "pull", "--quiet"], cwd=repo_path)
+        _run(["git", "pull", "--ff-only", "--quiet"], cwd=repo_path)
     except subprocess.CalledProcessError as e:
-        return PropagateResult(repo_str, "error", error=f"pull failed: {e.stderr or e}")
+        return PropagateResult(
+            repo_str, "error",
+            error=f"pull --ff-only failed: {e.stderr or e.stdout or e}",
+        )
 
     sync_env = {
         **os.environ,
@@ -112,10 +127,33 @@ def propagate_one(
             error=f"release-sync --check exited {check.returncode}: {check.stderr or check.stdout}",
         )
 
+    # Refuse to clobber an existing local branch. The caller is expected
+    # to pick a unique-per-ref branch name (cli.py appends the ref's
+    # short SHA by default), so collision means a prior partial run left
+    # state behind. Fail loud rather than silently destroying that work.
+    existing = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+    )
+    if existing.returncode == 0:
+        return PropagateResult(
+            repo_str, "error",
+            error=(
+                f"branch '{branch}' already exists locally — delete it "
+                f"(`git -C {repo_path} branch -D {branch}`) or rerun with "
+                "--branch <unique-name>."
+            ),
+        )
+
     try:
         _run(["git", "checkout", "-b", branch], cwd=repo_path)
     except subprocess.CalledProcessError as e:
-        return PropagateResult(repo_str, "error", error=f"branch create failed: {e.stderr or e}")
+        return PropagateResult(
+            repo_str, "error",
+            error=f"branch create failed: {e.stderr or e.stdout or e}",
+        )
 
     # Best-effort restore on any error past this point.
     def _restore() -> None:
@@ -130,7 +168,8 @@ def propagate_one(
     except subprocess.CalledProcessError as e:
         _restore()
         return PropagateResult(
-            repo_str, "error", error=f"release-sync failed: {e.stderr or e}"
+            repo_str, "error",
+            error=f"release-sync failed: {e.stderr or e.stdout or e}",
         )
 
     try:
@@ -139,7 +178,8 @@ def propagate_one(
     except subprocess.CalledProcessError as e:
         _restore()
         return PropagateResult(
-            repo_str, "error", error=f"commit failed: {e.stderr or e}"
+            repo_str, "error",
+            error=f"commit failed: {e.stderr or e.stdout or e}",
         )
 
     if dry_run:
@@ -151,30 +191,34 @@ def propagate_one(
     except subprocess.CalledProcessError as e:
         _restore()
         return PropagateResult(
-            repo_str, "error", error=f"push failed: {e.stderr or e}"
+            repo_str, "error",
+            error=f"push failed: {e.stderr or e.stdout or e}",
         )
 
     try:
         pr_out = _run(
             [
-                "gh",
-                "pr",
-                "create",
-                "--base",
-                base_branch,
-                "--title",
-                pr_title,
-                "--body",
-                pr_body,
+                "gh", "pr", "create",
+                "--base", base_branch,
+                "--title", pr_title,
+                "--body", pr_body,
             ],
             cwd=repo_path,
         ).stdout.strip()
-        # gh prints status warnings on stdout first; the PR URL is the last line.
+        # gh prints status warnings on stdout first; PR URL is the last line.
         pr_url = pr_out.splitlines()[-1]
     except subprocess.CalledProcessError as e:
-        # Push succeeded but PR failed — leave the branch in place for manual recovery.
+        # Push succeeded but PR failed — leave the pushed branch in place
+        # on origin for manual recovery, but checkout the local working
+        # tree back to base so subsequent runs (and the user's shell)
+        # land in a predictable state.
+        try:
+            _run(["git", "checkout", base_branch], cwd=repo_path)
+        except subprocess.CalledProcessError:
+            pass
         return PropagateResult(
-            repo_str, "error", branch=branch, error=f"pr create failed: {e.stderr or e}"
+            repo_str, "error", branch=branch,
+            error=f"pr create failed: {e.stderr or e.stdout or e}",
         )
 
     return PropagateResult(repo_str, "ok", branch=branch, pr_url=pr_url)
@@ -191,20 +235,33 @@ def propagate_many(
     base_branch: str = "main",
     dry_run: bool = False,
 ) -> list[PropagateResult]:
-    return [
-        propagate_one(
-            p,
-            release_home=release_home,
-            ref=ref,
-            branch=branch,
-            pr_title=pr_title,
-            pr_body=pr_body,
-            commit_msg=commit_msg,
-            base_branch=base_branch,
-            dry_run=dry_run,
-        )
-        for p in repo_paths
-    ]
+    # Wrap each propagate_one in a catch-all: propagate_one returns
+    # PropagateResult(status="error", ...) for known subprocess failures,
+    # but uncaught surprises (FileNotFoundError if `git`/`gh` is missing,
+    # CalledProcessError from one of the pre-flight `_run`s, ...) would
+    # otherwise abort the whole batch. The whole point of fan-out is
+    # that one repo's failure can't take out the others.
+    results: list[PropagateResult] = []
+    for p in repo_paths:
+        try:
+            results.append(
+                propagate_one(
+                    p,
+                    release_home=release_home,
+                    ref=ref,
+                    branch=branch,
+                    pr_title=pr_title,
+                    pr_body=pr_body,
+                    commit_msg=commit_msg,
+                    base_branch=base_branch,
+                    dry_run=dry_run,
+                )
+            )
+        except Exception as e:  # noqa: BLE001 — intentional broad catch
+            results.append(
+                PropagateResult(str(p), "error", error=f"unexpected: {e!r}")
+            )
+    return results
 
 
 def render_summary(results: list[PropagateResult]) -> str:

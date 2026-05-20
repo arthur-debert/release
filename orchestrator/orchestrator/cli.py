@@ -10,8 +10,17 @@ from . import state
 from .session import run_session
 
 
+_DEFAULT_PROPAGATE_BRANCH = "chore/release-sync-update"
+
+
 def _guard_billing() -> None:
-    """Hard-fail if ANTHROPIC_API_KEY is set; subscription billing is the intent."""
+    """Hard-fail if ANTHROPIC_API_KEY is set; subscription billing is the intent.
+
+    Called by the SDK-backed commands (run/resume/probe), not by the
+    mechanical commands (propagate, sessions). `propagate` shells out to
+    git + gh only — no LLM calls, no billing risk — and shouldn't be
+    blocked by API-key presence.
+    """
     if os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit(
             "ANTHROPIC_API_KEY is set in the environment. Unset it to use "
@@ -20,11 +29,13 @@ def _guard_billing() -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    _guard_billing()
     asyncio.run(run_session(args.repo, args.prompt, resume=False, verbose=args.verbose))
     return 0
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
+    _guard_billing()
     asyncio.run(run_session(args.repo, args.prompt, resume=True, verbose=args.verbose))
     return 0
 
@@ -36,13 +47,34 @@ def cmd_propagate(args: argparse.Namespace) -> int:
     abort the rest. The summary at the end reports per-repo outcomes
     (ok / no-changes / dry-run / error). Exit 1 if any repo errored.
     """
+    import subprocess
     from .propagate import PropagateResult, propagate_many, render_summary
 
     paths = [Path(p).expanduser().resolve() for p in args.repos]
     release_home = Path(args.release_home).expanduser().resolve()
 
+    # Resolve the ref to a short SHA up-front and append to the branch
+    # name (unless the user supplied --branch explicitly). Makes the
+    # default branch unique per ref, so re-running propagate against the
+    # same ref won't collide with a prior partial run's leftover branch.
+    branch = args.branch
+    if branch == _DEFAULT_PROPAGATE_BRANCH:
+        try:
+            short_sha = subprocess.run(
+                ["git", "-C", str(release_home), "rev-parse", "--short", args.ref],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            branch = f"{branch}-{short_sha}"
+        except subprocess.CalledProcessError as e:
+            print(
+                f"orc propagate: could not resolve --ref '{args.ref}' in "
+                f"{release_home}: {e.stderr or e}",
+                file=sys.stderr,
+            )
+            return 1
+
     print(f"propagating release@{args.ref} → {len(paths)} repo(s)")
-    print(f"branch in each consumer: {args.branch}")
+    print(f"branch in each consumer: {branch}")
     if args.dry_run:
         print("DRY RUN — no push, no PR")
     print()
@@ -51,7 +83,7 @@ def cmd_propagate(args: argparse.Namespace) -> int:
         paths,
         release_home=release_home,
         ref=args.ref,
-        branch=args.branch,
+        branch=branch,
         pr_title=args.pr_title,
         pr_body=args.pr_body,
         commit_msg=args.commit_msg,
@@ -97,6 +129,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    _guard_billing()
     asyncio.run(
         run_session(
             args.repo,
@@ -127,8 +160,10 @@ def cmd_sessions_clear(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    _guard_billing()
-
+    # No top-level _guard_billing(): mechanical commands (propagate,
+    # sessions) don't touch the SDK and shouldn't be blocked by
+    # ANTHROPIC_API_KEY presence. Each SDK-backed cmd (run/resume/probe)
+    # calls _guard_billing() itself.
     parser = argparse.ArgumentParser(prog="orc", description="release orchestrator (spike)")
     parser.add_argument(
         "-v", "--verbose", action="store_true",
@@ -160,8 +195,14 @@ def main(argv: list[str] | None = None) -> int:
         help="release-sync ref (default: main; use take-iii while it's open)",
     )
     p_propagate.add_argument(
-        "--branch", default="chore/release-sync-update",
-        help="branch name to create in each consumer (default: chore/release-sync-update)",
+        "--branch", default=_DEFAULT_PROPAGATE_BRANCH,
+        help=(
+            "branch name to create in each consumer (default: "
+            f"{_DEFAULT_PROPAGATE_BRANCH}-<short-sha>, where short-sha "
+            "is the resolved release ref — keeps the default unique per "
+            "ref so re-runs don't collide with a prior partial run's "
+            "leftover branch)"
+        ),
     )
     p_propagate.add_argument(
         "--base-branch", default="main",
