@@ -186,9 +186,16 @@ implicitly today (via per-Stack hand-maintained lefthook).
 
 Ships:
 
-- `rustfmt.toml` — sensible defaults (or empty file = stdlib defaults)
-- `lefthook.fragment.yaml` — `cargo fmt --check`, `cargo clippy -- -D
-  warnings` (priority 2)
+- `lefthook.fragment.yaml` — `cargo fmt --all -- --check` (glob
+  `**/*.rs`); `cargo clippy --all-targets -- -D warnings` (glob
+  `**/*.rs` and `**/Cargo.toml` — so dependency / feature changes
+  trigger clippy too). Priority 2 (check-only). `--all` covers
+  workspace projects; no-op on single-crate. `--all-features` is
+  intentionally NOT included — projects often have conflicting
+  features; override per-Stack if needed.
+
+No config files. rustfmt's stdlib defaults match the portfolio
+(0/21 repos override).
 
 ### `bats`
 

@@ -9,10 +9,17 @@
 pre-commit:
   commands:
     cargo-fmt:
-      glob: "*.rs"
-      run: cargo fmt -- --check
+      glob: "**/*.rs"
+      run: cargo fmt --all -- --check
       priority: 2
     cargo-clippy:
-      glob: "*.rs"
-      run: cargo clippy -- -D warnings
+      # Match any Rust source OR any Cargo.toml (workspace root + per-
+      # crate manifests). Dependency / feature changes trigger clippy
+      # the same as code edits. Other TOMLs (rustfmt.toml, clippy.toml,
+      # tooling configs) are intentionally NOT in the glob — they don't
+      # affect what clippy reports.
+      glob:
+        - "**/*.rs"
+        - "**/Cargo.toml"
+      run: cargo clippy --all-targets -- -D warnings
       priority: 2
