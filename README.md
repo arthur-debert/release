@@ -408,8 +408,28 @@ templates/            path-mirror layout — sync destination = source path
 orchestrator/         🚧 Python harness for local multi-repo
                       orchestration via Claude Agent SDK
 env/                  cloud-session setup.sh + user-level CLAUDE.md
-skills/               standalone Claude Code skills, cloned to
-                      ~/.claude/skills/ in cloud sessions
+skills/               canonical portfolio Claude Code skills, cloned
+                      to ~/.claude/skills/ in cloud sessions via
+                      env/setup.sh:
+                      - gh-pr-review-loop  (drive a PR through the
+                        canonical arthur-debert/* PR pipeline)
+                      - gh-repo-setup      (onboard a new repo to the
+                        canonical .github/ + RELEASE_TOKEN setup)
+                      - pr-review-respond  (Copilot/Gemini triage
+                        without bin/ helpers)
+                      - release-issue-relay (file infra bugs against
+                        release/ from inside a consumer)
+                      - lex-primer         (writing valid .lex content)
+                      - lex-multirepo      (cross-repo work in lex-fmt/*)
+                      - padz-for-agents    (use padz for notes across
+                        agent sessions)
+                      - electron-e2e-testing (canonical window.__e2e
+                        runtime contract for electron Stacks)
+                      - macos-signing-notarization (mac code-signing +
+                        notarization in CI for electron Stacks)
+                      Personal/user-only skills (gws-*, recipe-*,
+                      persona-*) stay under ~/.claude/skills/ — not
+                      portfolio-canonical.
 docs/
   per-category/       input shapes per Stack
   proposals/          spec docs + rollout plans
