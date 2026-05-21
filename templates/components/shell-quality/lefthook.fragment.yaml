@@ -1,21 +1,37 @@
 # shell-quality lefthook fragment.
 # Merged into the consumer's lefthook.yml by release-sync.
 # Priority 2 = check-only (no auto-fix and re-stage).
+#
+# Each hook is `command -v`-guarded so a contributor without the tool
+# installed gets a clear skip-with-notice rather than a cryptic "command
+# not found" hook failure. Cloud Claude Code sessions have all three
+# tools installed by env/setup.sh; local dev pre-installs via
+# `brew install markdownlint-cli yamllint shellcheck` (or equivalent).
 
 pre-commit:
   commands:
     markdownlint:
       glob: "**/*.md"
-      run: markdownlint {staged_files}
+      run: >-
+        if command -v markdownlint >/dev/null 2>&1; then
+          markdownlint {staged_files};
+        else
+          echo "markdownlint not installed (skipping; install with brew install markdownlint-cli)" >&2;
+        fi
       priority: 2
     yamllint:
       glob: "**/*.{yml,yaml}"
-      run: yamllint {staged_files}
+      run: >-
+        if command -v yamllint >/dev/null 2>&1; then
+          yamllint {staged_files};
+        else
+          echo "yamllint not installed (skipping; install with brew install yamllint)" >&2;
+        fi
       priority: 2
     shellcheck:
-      # Extensionless executables under scripts/ and bin/ are the
-      # portfolio convention (`scripts/check`, `bin/release-create`,
-      # `scripts/release/publish`, etc.). Recursive `**` so nested
+      # Extensionless executables under bin/ and scripts/ are the
+      # portfolio convention (`bin/check`, `bin/release-create`,
+      # `scripts/setup-dev-env.sh`, etc.). Recursive `**` so nested
       # subdirectories are covered too.
       #
       # exclude: list filters out common non-shell file types that
@@ -31,5 +47,10 @@ pre-commit:
         - "bin/**"
       exclude:
         - "**/*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
-      run: shellcheck {staged_files}
+      run: >-
+        if command -v shellcheck >/dev/null 2>&1; then
+          shellcheck {staged_files};
+        else
+          echo "shellcheck not installed (skipping; install with brew install shellcheck)" >&2;
+        fi
       priority: 2
