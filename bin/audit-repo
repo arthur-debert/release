@@ -328,22 +328,37 @@ check_ci_calls_bin_check() {
     record SKIP ci_calls_bin_check "no .github/workflows/"
     return
   fi
-  local found=""
+  # Canonical reusable workflows in release/ that internally invoke
+  # bin/check (or its Component-supplied siblings like bin/check-e2e
+  # via the bats integration). If a consumer thin-calls one of these,
+  # the canonical interface IS being exercised — even though the
+  # literal `run: bin/check` string lives in the callee, not the
+  # caller. Keep this list in sync as new <stack>-ci.yml workflows ship.
+  local canonical_callees='arthur-debert/release/\.github/workflows/(rust-ci|go-ci|bats-e2e)\.yml'
+  local found="" via_reusable=""
   while IFS= read -r f; do
     [ -z "$f" ] && continue
     local body
     body=$(gh api "repos/$repo/contents/.github/workflows/$f" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
-    # Match `run: bin/check` (the umbrella) or `run: bin/check-e2e` etc.
-    # but not `bin/check-fmt` invoked alone (those are atomic Tasks the
-    # umbrella composes — invoking only one is a smell worth its own
-    # warning if we ever surface it).
+    # (a) Direct `run: bin/check` (umbrella) or `run: bin/check-e2e` etc.
+    # Excludes `bin/check-fmt` invoked alone — those are atomic Tasks
+    # the umbrella composes.
     if printf '%s\n' "$body" | grep -qE '^[[:space:]]*run:[[:space:]]*bin/check([[:space:]]|$)'; then
       found="$found, $f"
+    # (b) Thin-caller of a canonical release/ reusable that runs bin/check
+    # internally. Same semantics — the canonical interface is exercised.
+    elif printf '%s\n' "$body" | grep -qE "uses:[[:space:]]*${canonical_callees}"; then
+      via_reusable="$via_reusable, $f"
     fi
   done <<<"$listing"
   found=${found#, }
-  if [ -n "$found" ]; then
+  via_reusable=${via_reusable#, }
+  if [ -n "$found" ] && [ -n "$via_reusable" ]; then
+    record PASS ci_calls_bin_check "direct: $found; via reusable: $via_reusable"
+  elif [ -n "$found" ]; then
     record PASS ci_calls_bin_check "called in: $found"
+  elif [ -n "$via_reusable" ]; then
+    record PASS ci_calls_bin_check "via release/ reusable workflow in: $via_reusable"
   else
     record WARN ci_calls_bin_check "Component model adopted but no workflow calls bin/check (CI duplicates invocation)"
   fi

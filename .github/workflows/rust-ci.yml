@@ -123,6 +123,29 @@ on:
         required: false
         default: 30
 
+      fetch-depth:
+        description: |
+          Forwarded to `actions/checkout`'s `fetch-depth`. Default `1`
+          (shallow, matches checkout's own default). Set `0` (full
+          history) when the consumer's checks need git history —
+          e.g. a "diff since N commits ago" test (rustloc#57 surfaced
+          this) or any rustdoc / changelog tooling that walks tags.
+          Only affects the `check` job's checkout. The `e2e` job uses
+          a sparse checkout that doesn't need this knob.
+        type: number
+        required: false
+        default: 1
+
+      submodules:
+        description: |
+          Forwarded to `actions/checkout`'s `submodules`. Default
+          `false`. Set `true` for "first-level submodules" or
+          `'recursive'` for nested submodules. lex-fmt/lex needs
+          `recursive`; most consumers don't have submodules.
+        type: string
+        required: false
+        default: 'false'
+
 permissions:
   contents: read
 
@@ -138,6 +161,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ inputs.fetch-depth }}
+          submodules: ${{ inputs.submodules }}
 
       - name: Setup Rust (toolchain + cache)
         uses: arthur-debert/release/.github/actions/setup-rust@v1
@@ -193,6 +219,9 @@ jobs:
           sparse-checkout: |
             tests/e2e
             bin
+          # Submodules forwarded here too — some e2e suites need them
+          # (e.g. lex's bats tests reference comms submodule fixtures).
+          submodules: ${{ inputs.submodules }}
 
       - name: Download binary
         if: inputs.binary-name != ''
