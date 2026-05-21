@@ -165,7 +165,7 @@ on:
           job context only has access to the calling repo, so
           fetching artifacts from a separate private repo (e.g.
           arami-app pulling WASM from a private `arami-core`)
-          needs a PAT. arami-app passes `${{ secrets.RELEASE_TOKEN }}`
+          needs a PAT. arami-app passes `secrets.RELEASE_TOKEN`
           here. Falls back to the default `GITHUB_TOKEN` when not
           set. Name matches the convention used in
           `copilot-review.yml`.
