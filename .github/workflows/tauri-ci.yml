@@ -154,6 +154,22 @@ on:
         required: false
         default: 'false'
 
+    secrets:
+      gh_token:
+        description: |
+          Optional `GH_TOKEN` exposed to the `pre-test` step and to
+          `bin/check`. Plumb this when the pre-test (or any check
+          script) calls `gh release download` / `gh api` against a
+          private sibling repo — `GITHUB_TOKEN` from the default
+          job context only has access to the calling repo, so
+          fetching artifacts from a separate private repo (e.g.
+          arami-app pulling WASM from a private `arami-core`)
+          needs a PAT. arami-app passes `${{ secrets.RELEASE_TOKEN }}`
+          here. Falls back to the default `GITHUB_TOKEN` when not
+          set. Name matches the convention used in
+          `copilot-review.yml`.
+        required: false
+
 permissions:
   contents: read
 
@@ -166,6 +182,13 @@ jobs:
     timeout-minutes: ${{ inputs.timeout }}
     permissions:
       contents: read
+    env:
+      # Expose GH_TOKEN job-wide so pre-test, bin/check, and the
+      # optional tauri-build smoke can shell to `gh release download`
+      # / `gh api` against private sibling repos. Falls back to the
+      # default `GITHUB_TOKEN` when the caller doesn't pass an
+      # explicit `gh-token` secret.
+      GH_TOKEN: ${{ secrets.gh_token || github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
