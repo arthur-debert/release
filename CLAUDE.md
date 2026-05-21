@@ -101,14 +101,6 @@ lex-fmt/lex v0.9.1.
 
 ## Operational rules
 
-- **While `take-iii` is open, feature-branch PRs target `take-iii`,
-  not `main`.** take-iii is the long-running integration branch for
-  the propagation / release-sync / orchestrator rework. All in-flight
-  work branches off take-iii and merges back into take-iii. main only
-  sees take-iii when the user explicitly says "merge take-iii to main"
-  — never as a side-effect of an individual PR. Default
-  `gh pr create --base take-iii`; do not let gh's auto-default to main
-  win. This rule retires the day take-iii itself lands on main.
 - **Bug fixes go here, not in consumers.** A bug surfaced by a
   consumer is fixed here, tagged as a PATCH, and the `v1` branch
   advanced. Consumers re-run; nothing for them to edit.
