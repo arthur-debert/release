@@ -16,11 +16,13 @@ name: Rust CI
 #    Fix-once-propagate works because the script lives in the consumer
 #    tree and is the same shape across the fleet.
 #
-#  * **Per-job permissions, not workflow-level.** GitHub validates
+#  * **Minimal permissions, declared at both levels.** Top-level
+#    `permissions: contents: read` is the union; per-job blocks repeat
+#    `contents: read` for explicitness — GitHub validates
 #    reusable-workflow permission compatibility at workflow-load time
 #    against every job in the callee, even ones gated by `if:` (see
-#    feedback_reusable_workflow_permissions_upfront). Both jobs need
-#    only `contents: read`; the caller can mirror that.
+#    feedback_reusable_workflow_permissions_upfront). The caller can
+#    mirror with a single `contents: read` at workflow level.
 #
 #  * **`Swatinem/rust-cache@v2` via the shared `setup-rust` composite.**
 #    Caching is mandatory per CLAUDE.md ("without it a 2-minute Rust
@@ -62,10 +64,13 @@ on:
     inputs:
       extra-targets:
         description: |
-          Comma-separated additional rustup targets to install (passed
-          to dtolnay/rust-toolchain `targets:`). Example: `wasm32-wasip2`
-          for the zed-lex extension. Empty (default) skips the extra
-          target add.
+          Space-separated additional rustup targets to install. Passed
+          through to the shared `setup-rust` composite, which forwards
+          to dtolnay/rust-toolchain `targets:` AND re-runs
+          `rustup target add <value>` — the latter is strictly
+          space-separated, so commas will fail there. Example:
+          `wasm32-wasip2` for the zed-lex extension. Most consumers
+          only need a single target. Empty (default) skips.
         type: string
         required: false
         default: ''
@@ -91,11 +96,17 @@ on:
       binary-name:
         description: |
           When set, the check job runs `cargo build --release -p
-          <binary-name>` after `bin/check` passes and uploads the binary
-          as `<binary-name>-linux`. The e2e job (if `bats: true`)
-          downloads that artifact and exposes it via
-          `<BINARY_NAME_UPPER>_BIN` (e.g. `DODOT_BIN`). Empty (default)
-          skips the build + upload.
+          <binary-name>` (cargo `-p` = workspace PACKAGE, not bin
+          target). Convention across the fleet: the package name and
+          the produced binary file name are the same string (dodot,
+          padz, lex, supage all line up this way; matches what
+          rust-cli.yml's release workflow assumes via `bin-name`).
+          The compiled binary is uploaded as `<binary-name>-linux`.
+          The e2e job (if `bats: true`) downloads that artifact and
+          exposes it via `<BINARY_NAME_UPPER>_BIN` (e.g. `DODOT_BIN`).
+          If your package name and binary name diverge, this input
+          isn't the right shape for you — file an issue.
+          Empty (default) skips the build + upload.
         type: string
         required: false
         default: ''
@@ -136,7 +147,9 @@ jobs:
 
       - name: Install cargo-nextest
         # Canonical test runner used by bin/check-tests across the fleet.
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
 
       - name: Run pre-test
         if: inputs.pre-test != ''
@@ -155,10 +168,13 @@ jobs:
 
       - name: Upload binary
         if: inputs.binary-name != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.binary-name }}-linux
           path: target/release/${{ inputs.binary-name }}
+          # Fail loudly when the binary is missing — silent success
+          # masks misconfiguration (wrong binary-name, build skipped).
+          if-no-files-found: error
 
   e2e:
     if: inputs.bats
@@ -180,7 +196,7 @@ jobs:
 
       - name: Download binary
         if: inputs.binary-name != ''
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.binary-name }}-linux
 

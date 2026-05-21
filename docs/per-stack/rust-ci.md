@@ -52,12 +52,22 @@ All inputs are optional.
 
 | Input | Default | Description |
 |---|---|---|
-| `extra-targets` | `''` | Comma-separated extra rustup targets to install (e.g. `wasm32-wasip2` for zed-lex). Passed to `dtolnay/rust-toolchain targets:`. |
+| `extra-targets` | `''` | Space-separated extra rustup targets (e.g. `wasm32-wasip2` for zed-lex). Forwarded to the shared `setup-rust` composite, which re-runs `rustup target add` with this value — that command is strictly space-separated, so commas will fail. Most consumers only need a single target. |
 | `pre-test` | `''` | Path to a script run before `bin/check`. Use for grammar downloads, fixture prep, codegen. |
 | `bats` | `false` | When `true`, add a second `e2e` job that installs bats-core and calls `bin/check-e2e`. |
-| `binary-name` | `''` | When set, the check job builds `cargo build --release -p <binary-name>` after `bin/check` passes and uploads it as `<binary-name>-linux`. |
+| `binary-name` | `''` | When set, the check job runs `cargo build --release -p <binary-name>` (cargo `-p` selects a workspace **package**, not a bin target — see below) and uploads `<binary-name>-linux`. |
 | `runner` | `'ubuntu-latest'` | Runner label for both jobs. |
 | `timeout` | `30` | Per-job timeout (minutes). |
+
+## On `binary-name` — package vs bin
+
+The build uses `cargo build --release -p <binary-name>` where `-p`
+selects a workspace **package**. The convention across the fleet
+is that the package name and the produced binary file name are the
+same string: dodot, padz, lex, supage all line up this way, and
+`rust-cli.yml`'s release workflow assumes the same via its
+`bin-name` input. If your package name and binary name diverge,
+this input isn't the right shape for you — file an issue.
 
 ## How `binary-name` and `bats` interact
 
