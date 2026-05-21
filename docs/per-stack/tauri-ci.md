@@ -215,10 +215,10 @@ All inputs are optional.
 
 | Secret | Required | Description |
 |---|---|---|
-| `gh_token` | no | Exposed as `GH_TOKEN` job-wide. Pass when your `pre-test` (or any check script) calls `gh release download` / `gh api` against a *private sibling repo*. The default `GITHUB_TOKEN` only has access to the calling repo. arami-app passes `${{ secrets.RELEASE_TOKEN }}` here so `pnpm fetch:wasm` can pull WASM from the private `arami-core`. Falls back to `github.token` when not set. Name matches the existing `copilot-review.yml` convention. |
+| `gh_token` | no | Exposed as `GH_TOKEN` to the `pre-test`, `bin/check`, and `tauri-build` smoke steps (step-scoped, not job-wide — third-party setup actions don't see it). Pass when your `pre-test` (or any check script) calls `gh release download` / `gh api` against a *private sibling repo*. The default `GITHUB_TOKEN` only has access to the calling repo. arami-app passes `${{ secrets.RELEASE_TOKEN }}` here so `pnpm fetch:wasm` can pull WASM from the private `arami-core`. Falls back to `github.token` when not set. Name matches the existing `copilot-review.yml` convention. |
 
 Same-org consumers can also use `secrets: inherit` to forward every
-caller secret, but the explicit `gh-token` shape is preferred — it
+caller secret, but the explicit `gh_token` shape is preferred — it
 keeps the surface visible at the call site and works across orgs.
 
 ## Permissions

@@ -157,9 +157,10 @@ on:
     secrets:
       gh_token:
         description: |
-          Optional `GH_TOKEN` exposed to the `pre-test` step and to
-          `bin/check`. Plumb this when the pre-test (or any check
-          script) calls `gh release download` / `gh api` against a
+          Optional `GH_TOKEN` exposed (step-scoped, not job-wide) to
+          the `pre-test`, `bin/check`, and `tauri-build` smoke steps.
+          Plumb this when the pre-test (or any check script) calls
+          `gh release download` / `gh api` against a
           private sibling repo — `GITHUB_TOKEN` from the default
           job context only has access to the calling repo, so
           fetching artifacts from a separate private repo (e.g.
@@ -182,13 +183,6 @@ jobs:
     timeout-minutes: ${{ inputs.timeout }}
     permissions:
       contents: read
-    env:
-      # Expose GH_TOKEN job-wide so pre-test, bin/check, and the
-      # optional tauri-build smoke can shell to `gh release download`
-      # / `gh api` against private sibling repos. Falls back to the
-      # default `GITHUB_TOKEN` when the caller doesn't pass an
-      # explicit `gh-token` secret.
-      GH_TOKEN: ${{ secrets.gh_token || github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -321,6 +315,14 @@ jobs:
       - name: Run pre-test
         if: inputs.pre-test != ''
         shell: bash
+        env:
+          # Scoped here (not job-wide) so the PAT — when a caller
+          # passes one — is only visible to consumer-controlled
+          # commands, not third-party setup actions. arami-app's
+          # `pnpm fetch:wasm` shells to `gh release download` against
+          # private `arami-core`; `GITHUB_TOKEN` only sees the calling
+          # repo. Falls back to `github.token` when no PAT is plumbed.
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: ${{ inputs.pre-test }}
 
       - name: Run canonical checks (bin/check)
@@ -331,6 +333,8 @@ jobs:
         # template / npm-quality Component, propagate via
         # release-sync, every consumer's CI picks it up on the next
         # run.
+        env:
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: bin/check
 
       - name: Tauri build (smoke)
@@ -348,6 +352,7 @@ jobs:
         shell: bash
         env:
           PM: ${{ steps.pm.outputs.pm }}
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: |
           if [ "${PM}" = "npm" ]; then
             npx --no-install tauri build
