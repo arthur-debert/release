@@ -289,13 +289,17 @@ jobs:
 
       - name: Install Linux Tauri system deps
         # Tauri's Linux build links against libwebkit2gtk, libgtk-3,
-        # libsoup, libayatana-appindicator, librsvg2. Only required
-        # when `tauri-build: true` (the `bin/check` umbrella never
-        # invokes `tauri build` — it just runs cargo on the Tauri
-        # crate, which compiles fine without these). Skipped on
-        # non-Linux runners and when tauri-build is off — keeps the
-        # default check path fast.
-        if: inputs.tauri-build && runner.os == 'Linux'
+        # libsoup, libayatana-appindicator, librsvg2. These are
+        # required to COMPILE the Tauri crate — not just to bundle.
+        # `cargo clippy` and `cargo test` (run by bin/check) walk
+        # the dep graph and trigger compilation of glib-sys /
+        # webkit2gtk-sys, which fail at pkg-config lookup without
+        # the system libs. arami-app surfaced this on first
+        # adoption (glib-2.0 not found in pkg-config search path).
+        #
+        # Always install on Linux; skipped on macOS/Windows runners
+        # where Tauri's deps come from the platform SDKs.
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
