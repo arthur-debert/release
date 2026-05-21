@@ -91,10 +91,20 @@ consumer's `package.json` exposes the standard portfolio aliases:
 | `typecheck` | `tsc --noEmit`. The hook fires only when TS files are staged. |
 | `test:unit` | Vitest (or other unit-only runner). The umbrella's `bin/check-tests` forwards `-- --run` so vitest doesn't enter watch mode. |
 
-Consumers that haven't wired one of these get a skip-with-notice
-from the corresponding `bin/check-*` script and a silent fallback
-to `npx <tool>` at hook level. Wire them in `package.json` to
-upgrade the hook from "best effort" to "first-class".
+The pre-commit hooks DON'T use these aliases — they call the tool
+directly via `npx --no-install` against staged files (see "What
+ships" above). The aliases are consumed by the umbrella scripts
+(`bin/check-lint`, `bin/check-fmt`, `bin/check-tests`):
+
+- `bin/check-lint` / `bin/check-fmt` skip-with-notice if neither
+  the npm script nor the tool dep is present. Wire the alias in
+  `package.json` to upgrade from "skipped" to "checked".
+- `bin/check-tests` skips if neither `test:unit` nor `test` is
+  present.
+
+A project staging `.ts` files without `eslint` declared as a dep
+will fail the pre-commit hook (npx --no-install errors). That's
+the correct signal — fix the missing dep, don't paper over.
 
 ## Why the `bin/check-*` scripts still probe for npm scripts
 

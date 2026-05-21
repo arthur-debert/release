@@ -18,10 +18,17 @@
 # typecheck has no per-file form (tsc operates on the project), so
 # it goes through `npm run typecheck` when staged TS changes.
 #
-# `npx --no-install` so the tool resolves to the consumer's pinned
-# version in package-lock.json. If the tool isn't a declared dep,
-# the hook fails loudly — that's correct (a project staging *.ts
-# files without eslint installed is misconfigured).
+# `npx --no-install` so the tool resolves to the version pinned in
+# the consumer's local `node_modules` (whichever lockfile produced
+# it — package-lock.json, npm-shrinkwrap.json, pnpm-lock.yaml,
+# yarn.lock). If the tool isn't a declared dep, the hook fails
+# loudly — that's correct (a project staging *.ts files without
+# eslint installed is misconfigured).
+#
+# `eslint --max-warnings 0` matches the portfolio's npm `lint`
+# convention: a warning is a failure. Without it the hook would
+# accept warnings while CI's `bin/check-lint` (via `npm run lint`)
+# would reject them — confusing.
 
 pre-commit:
   commands:
@@ -33,12 +40,12 @@ pre-commit:
         - "**/*.{js,jsx,ts,tsx,vue,mjs,cjs}"
         - "**/.eslintrc*"
         - "**/eslint.config.*"
-      run: npx --no-install eslint {staged_files}
+      run: npx --no-install eslint --max-warnings 0 -- {staged_files}
       priority: 2
     prettier:
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
-      run: npx --no-install prettier --check {staged_files}
+      run: npx --no-install prettier --check -- {staged_files}
       priority: 2
     typecheck:
       # tsc operates on the project as a whole — no per-file invocation.
