@@ -168,6 +168,14 @@ jobs:
         with:
           version: 10
 
+      - name: Enable corepack (yarn)
+        if: steps.pm.outputs.pm == 'yarn'
+        # yarn isn't on PATH by default on the GH runner. corepack
+        # (bundled with Node ≥16.10) provisions yarn from the project's
+        # packageManager field if set, else a default modern release.
+        # Must run BEFORE setup-node so `cache: yarn` finds the install.
+        run: corepack enable
+
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
