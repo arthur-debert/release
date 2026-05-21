@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-19-clone-lex-stack   # bumps on every change so re-pasting is trivial
+# version: 2026-05-20-supage-firestore-emulator
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
