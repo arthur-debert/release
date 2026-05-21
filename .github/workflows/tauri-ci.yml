@@ -102,9 +102,11 @@ on:
           smoke gate. False by default — full Tauri builds are slow
           and happen at release time via `tauri-app.yml`. Opt in
           only when you want every PR to gate on "the bundle still
-          produces". When enabled on Linux runners, the workflow
-          also installs the Tauri system dependencies
-          (libwebkit2gtk, etc.).
+          produces". Note: Linux Tauri system libs
+          (libwebkit2gtk, libgtk-3, etc.) are installed
+          unconditionally on Linux runners — `cargo clippy` /
+          `cargo test` (in bin/check) need them to compile the
+          Tauri crate, regardless of this flag.
         type: boolean
         required: false
         default: false
