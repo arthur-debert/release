@@ -1,0 +1,176 @@
+name: mdbook (build + deploy)
+
+# Reusable workflow: build an mdBook site, deploy to GitHub Pages on
+# pushes to the default branch. Sibling of `mkdocs.yml` — same shape,
+# same per-job permission split, same deploy-on-push-to-main default.
+#
+# Typical thin caller in a consumer:
+#
+#   name: Docs
+#   on:
+#     push:
+#       branches: [main]
+#       paths: ['docs/**', 'book.toml', '.github/workflows/docs.yml']
+#     pull_request:
+#       paths: ['docs/**', 'book.toml']
+#     workflow_dispatch:
+#   permissions:                  # ALL THREE required even for build-only
+#     contents: read              # callers — GitHub validates callee
+#     pages: write                # permissions upfront, including jobs
+#     id-token: write             # that won't run due to `if:` guards.
+#   jobs:
+#     docs:
+#       uses: arthur-debert/release/.github/workflows/mdbook.yml@v1
+#       with:
+#         # book-dir: 'docs'      # if book.toml lives under docs/, not root
+#         # output-dir: 'book'    # mdbook default; override if book.toml's
+#         #                       # `build.build-dir` is elsewhere
+#         # cname: 'docs.example.com'  # for custom-domain deploys
+#         # deploy: 'false'       # opt-out of deploy; build runs anyway
+#
+# Deploy only fires on `push` to the default branch. PRs and non-main
+# branches just exercise the build for verification.
+#
+# Why all three permissions: see the matching note in `mkdocs.yml`.
+# GitHub validates caller-vs-callee permission compatibility at
+# workflow-load time, including jobs gated by `if:`; granting all
+# three on the caller is the price for the build/deploy split.
+
+on:
+  workflow_call:
+    inputs:
+      book-dir:
+        description: |
+          Directory containing `book.toml`. Empty (default) means the
+          book lives at the repo root (standout pattern). Set to
+          `docs` when `book.toml` is under `docs/` (simple-gal pattern).
+        type: string
+        required: false
+        default: ''
+
+      output-dir:
+        description: |
+          Path (relative to repo root) where mdBook writes the rendered
+          site. Default `book` matches mdBook's default. Override when
+          your `book.toml` sets a non-default `build.build-dir`
+          (simple-gal uses `target/book`).
+        type: string
+        required: false
+        default: 'book'
+
+      mdbook-version:
+        description: |
+          mdBook release to install (no leading `v`). Default `0.4.44`
+          — bump deliberately. The install URL is hardcoded to the
+          Linux x86_64 tarball from the rust-lang/mdBook releases.
+        type: string
+        required: false
+        default: '0.4.44'
+
+      cname:
+        description: |
+          Optional CNAME content for a custom-domain GitHub Pages
+          deploy. When non-empty, the workflow writes this string to
+          `<output-dir>/CNAME` before upload. Empty (default) skips.
+        type: string
+        required: false
+        default: ''
+
+      runner:
+        description: 'Runner label (passed through as `runs-on`).'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+      timeout:
+        description: 'Job timeout in minutes (each job; passed through as `timeout-minutes`).'
+        type: number
+        required: false
+        default: 15
+
+      deploy:
+        description: |
+          Override the default deploy behavior. Default (empty) means
+          "deploy on push to main, otherwise just build". Set `'false'`
+          to never deploy (build-only); set `'true'` to force deploy
+          even on PR (rarely useful).
+        type: string
+        required: false
+        default: ''
+
+# Per-ref concurrency: a second push to main shouldn't fight an
+# in-flight deploy. `cancel-in-progress: false` lets the current
+# deploy finish; the second run waits.
+concurrency:
+  group: mdbook-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for git-revision-date-style preprocessors
+
+      - name: Install mdBook
+        env:
+          MDBOOK_VERSION: ${{ inputs.mdbook-version }}
+        run: |
+          set -euo pipefail
+          curl -sSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xz
+          chmod +x mdbook
+          sudo mv mdbook /usr/local/bin/
+          mdbook --version
+
+      - name: Build
+        env:
+          BOOK_DIR: ${{ inputs.book-dir }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BOOK_DIR}" ]; then
+            mdbook build "${BOOK_DIR}"
+          else
+            mdbook build
+          fi
+
+      - name: Write CNAME
+        if: inputs.cname != ''
+        env:
+          OUTPUT_DIR: ${{ inputs.output-dir }}
+          CNAME: ${{ inputs.cname }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${CNAME}" > "${OUTPUT_DIR}/CNAME"
+
+      - name: Upload site artifact
+        if: |
+          inputs.deploy == 'true' ||
+          (inputs.deploy != 'false' && github.event_name == 'push' &&
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ inputs.output-dir }}
+
+  deploy:
+    needs: build
+    if: |
+      inputs.deploy == 'true' ||
+      (inputs.deploy != 'false' && github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
