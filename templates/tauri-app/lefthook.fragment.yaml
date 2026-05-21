@@ -1,0 +1,44 @@
+# tauri-app stack-level lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only (no auto-fix and re-stage).
+#
+# Why a Stack-level fragment instead of reusing the rust-quality
+# Component:
+#
+# rust-quality assumes Cargo.toml at the repo ROOT and globs `**/*.rs`
+# at the root. In a Tauri app the Cargo workspace lives in `src-tauri/`
+# (canonical Tauri layout) — the consumer's repo root is the frontend.
+# Running `cargo fmt` from root would error ("could not find Cargo.toml
+# in /path/or any parent dir").
+#
+# The fix is to scope these hooks to src-tauri/: glob matches files
+# under src-tauri/**, and the `run` block `cd`s into src-tauri/ before
+# invoking cargo. Same tool, same flags as rust-quality — just rooted
+# under the Tauri subproject. See docs/per-stack/tauri-ci.md for why
+# we don't ship a "tauri-rust-quality" Component (Stack-level
+# fragment is the right home for one-off layout variations).
+
+pre-commit:
+  commands:
+    tauri-cargo-fmt:
+      glob:
+        - "src-tauri/**/*.rs"
+        - "src-tauri/**/rustfmt.toml"
+      run: cd src-tauri && cargo fmt --all -- --check
+      priority: 2
+    tauri-cargo-clippy:
+      # Match any Rust source OR Cargo manifest OR Cargo.lock under
+      # src-tauri/. Dependency / feature changes trigger clippy the
+      # same as code edits — and Cargo.lock specifically because new
+      # dep versions can introduce new clippy warnings (deprecations,
+      # lint upgrades).
+      glob:
+        - "src-tauri/**/*.rs"
+        - "src-tauri/**/Cargo.toml"
+        - "src-tauri/**/Cargo.lock"
+      # `--all-features` exercises every feature-gated path that
+      # clippy could find, matching what bin/check-tests does —
+      # pre-commit signal mirrors CI, no "passes locally fails in CI"
+      # surprise.
+      run: cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings
+      priority: 2

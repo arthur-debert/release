@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical tauri-app unit test runner. Two halves:
+#
+#   1. Frontend (root). Probes scripts in preference order:
+#        a. `test:unit` — explicit unit-only alias (vitest convention).
+#           Forwards `-- --run` so vitest runs once instead of entering
+#           watch mode.
+#        b. `test` — generic alias (npm default). Passed through
+#           verbatim; the consumer's script is expected to terminate.
+#      Skip-with-notice if neither exists — repos still scaffolding
+#      unit tests should not fail the umbrella `bin/check`.
+#
+#   2. Rust (src-tauri/). Prefers `cargo nextest run` if nextest is
+#      installed (the portfolio canonical runner — see rust-cli's
+#      bin/check-tests); falls back to `cargo test`. The
+#      `--all-features` flag matches what rust-quality's clippy hook
+#      uses, keeping pre-commit and CI in sync.
+#
+# `"$@"` forwards extra args to the frontend test runner so the
+# script can be invoked like:
+#   bin/check-tests --reporter=verbose
+
+echo "Running frontend unit tests..."
+
+if [ ! -f package.json ]; then
+    echo "No package.json — skipping frontend tests."
+else
+    if node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts['test:unit'] ? 0 : 1)" 2>/dev/null; then
+        # Vitest convention: `--run` disables watch mode. Use `-- --run`
+        # so the flag is forwarded to vitest rather than swallowed by npm.
+        npm run --silent test:unit -- --run "$@"
+    elif node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.test ? 0 : 1)" 2>/dev/null; then
+        npm test --silent -- "$@"
+    else
+        echo "No 'test:unit' or 'test' script — skipping frontend tests."
+    fi
+fi
+
+echo "Frontend tests OK"
+
+echo "Running Rust tests (src-tauri/)..."
+
+if [ -f src-tauri/Cargo.toml ]; then
+    if command -v cargo-nextest >/dev/null 2>&1; then
+        # `--no-tests=pass` so an unconfigured rust suite doesn't fail
+        # the umbrella before the consumer has wired its first test.
+        (cd src-tauri && cargo nextest run --all-features --no-tests=pass)
+    else
+        (cd src-tauri && cargo test --all-features)
+    fi
+    echo "Rust tests OK"
+else
+    echo "No src-tauri/Cargo.toml — skipping rust tests."
+fi

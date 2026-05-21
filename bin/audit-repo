@@ -334,7 +334,7 @@ check_ci_calls_bin_check() {
   # the canonical interface IS being exercised — even though the
   # literal `run: bin/check` string lives in the callee, not the
   # caller. Keep this list in sync as new <stack>-ci.yml workflows ship.
-  local canonical_callees='arthur-debert/release/\.github/workflows/(rust-ci|go-ci|electron-ci|bats-e2e|mkdocs)\.yml'
+  local canonical_callees='arthur-debert/release/\.github/workflows/(rust-ci|go-ci|electron-ci|tauri-ci|bats-e2e|mkdocs)\.yml'
   local found="" via_reusable=""
   while IFS= read -r f; do
     [ -z "$f" ] && continue

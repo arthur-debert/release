@@ -20,6 +20,16 @@ if [ -f grammar.js ]; then
   echo tree-sitter; exit 0
 fi
 
+# tauri-app — must precede both the bare `rust` branch (a tauri repo
+# could conceivably ship a root Cargo.toml in a workspace-root layout)
+# AND the `electron-app` branch (a tauri repo could carry electron in
+# devDependencies for a legacy reason; src-tauri/Cargo.toml is the
+# discriminator). The presence of BOTH signals — a Rust core under
+# src-tauri/ and a frontend at root — is what makes it tauri-app.
+if [ -f src-tauri/Cargo.toml ] && [ -f package.json ]; then
+  echo tauri-app; exit 0
+fi
+
 # rust
 if [ -f Cargo.toml ]; then
   echo rust; exit 0

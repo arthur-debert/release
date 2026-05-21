@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical tauri-app lint. Two halves:
+#
+#   1. Frontend (root): consumer's `lint` npm script, or fall back to
+#      `npx eslint .` if eslint is a dep.
+#   2. Rust (src-tauri/): `cargo clippy --all-targets --all-features
+#      -- -D warnings`. Mirrors what rust-quality's pre-commit hook
+#      does, so pre-commit signal matches CI.
+#
+# Skip-with-notice on each side if the relevant tool isn't wired.
+
+echo "Running frontend lint..."
+
+if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.lint ? 0 : 1)" 2>/dev/null; then
+    npm run --silent lint
+elif [ -f package.json ] && node -e "process.exit(require('./package.json').devDependencies && require('./package.json').devDependencies.eslint ? 0 : (require('./package.json').dependencies && require('./package.json').dependencies.eslint ? 0 : 1))" 2>/dev/null; then
+    npx --no-install eslint .
+else
+    echo "No 'lint' script and no eslint dependency — skipping frontend lint."
+fi
+
+echo "Frontend lint OK"
+
+echo "Running Rust lint (src-tauri/)..."
+
+if [ -f src-tauri/Cargo.toml ]; then
+    (cd src-tauri && cargo clippy --all-targets --all-features -- -D warnings)
+    echo "Rust lint OK"
+else
+    echo "No src-tauri/Cargo.toml — skipping rust lint."
+fi
