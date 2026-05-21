@@ -67,15 +67,20 @@ Same regardless of Stack:
   `copilot-instructions.md`, `dependabot.yml`,
   `.github/workflows/copilot-review.yml`. Synced via the propagation
   model below.
-- **Pre-commit hooks** — thin husky / pre-commit-framework /
-  lefthook config that shells out to Component-supplied scripts
-  (`bin/check-fmt`, `bin/check-lint`, `bin/check-tests`). Local
-  hooks ARE the canonical interface. **Whether CI also calls these
-  is per-repo today** — see "CI workflow reusability gap" below.
+- **Pre-commit hooks** — `lefthook.yml` that shells out to
+  Component-supplied scripts (`bin/check-fmt`, `bin/check-lint`,
+  `bin/check-tests`). lefthook is canonical; husky / pre-commit-
+  framework configs in older repos are recognized by CI's
+  `run-precommit-gate` action for backwards compatibility but new
+  onboardings use lefthook. Local hooks ARE the canonical interface.
+  **Whether CI also calls these is per-repo today** — see "CI
+  workflow reusability gap" below.
 - **Session-start bootstrap** — `scripts/setup-dev-env.sh` runs on
-  every Claude Code session start (cloud and local). Handles
-  submodules, deps, NSS cert import, venv PATH exposure, lefthook
-  wiring.
+  every Claude Code session start. Pre-commit hook wiring (`lefthook
+  install`, clearing any stale `core.hooksPath=.husky` from a prior
+  husky setup) runs in both local and cloud. Submodules, deps, NSS
+  cert import, venv PATH exposure are cloud-only — locally the dev
+  already has those.
 - **Agent guidance** — per-repo `CLAUDE.md` for project-specific
   notes; user-level `CLAUDE.md` for portfolio-wide rules,
   distributed via [`env/CLAUDE.md`](env/CLAUDE.md).

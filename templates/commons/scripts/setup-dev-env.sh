@@ -11,7 +11,12 @@
 # fetch, extra rustup targets, etc.) append them below the marker at the
 # bottom — anything above it is rsync'd from the template.
 #
-# Cloud-only: local sessions exit early (devs already have their env).
+# Pre-commit hook wiring runs in BOTH local and cloud sessions (a fresh
+# clone has no `.git/hooks/pre-commit` wired regardless of where the dev
+# is). Everything else below the cloud-only gate is cloud-only —
+# submodules, project dep caches, NSS cert imports etc. are already in
+# place on a dev's local machine.
+#
 # Detects stack by filesystem signals — handles rust, node, ruby, python,
 # and consumers with no project deps (just lefthook / hand-rolled hook
 # wiring).
@@ -22,11 +27,61 @@
 
 set -euo pipefail
 
-# Cloud-only gate. Local sessions already have their env set up.
-[ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
-
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
+
+# --- 0. Pre-commit hook wiring (BOTH local and cloud) -------------------
+# Wiring `.git/hooks/pre-commit` is per-clone state — every fresh clone
+# (and cloud snapshot) starts without it, so we wire it on every session
+# and in both contexts. Runs ABOVE the cloud-only gate because skipping
+# it locally is what produces the "agents are still running husky"
+# symptom: lefthook never gets installed, husky's old wiring keeps
+# firing.
+#
+# Default: lefthook (binary installed at env-setup time in cloud, by
+# brew/cargo/npm locally). Fallback for repos that ship a hand-rolled
+# scripts/pre-commit instead (zed-lex, tree-sitter-lex pattern): symlink
+# it into .git/hooks/.
+#
+# Husky migration: if a previous `husky install` set
+# `core.hooksPath=.husky`, git routes hooks to `.husky/pre-commit` and
+# ignores `.git/hooks/pre-commit` entirely — so `lefthook install`
+# silently no-ops. Clear that config first when migrating a repo to
+# lefthook. We do NOT delete `.husky/` itself; that's a consumer-side
+# cleanup (committed file, belongs in a PR).
+
+if [ -f lefthook.yml ] && command -v lefthook >/dev/null 2>&1; then
+  if [ "$(git config --get core.hooksPath 2>/dev/null)" = ".husky" ]; then
+    # Don't suppress unset failures with `|| true` — if the unset
+    # fails (e.g. unwritable .git/config), `core.hooksPath=.husky`
+    # stays in place and the subsequent `lefthook install` is
+    # effectively a no-op (git still routes hooks to .husky/pre-commit).
+    # The user needs to know that, not have it silently swallowed.
+    if ! git config --unset core.hooksPath; then
+      echo "warning: failed to unset core.hooksPath (=.husky); husky redirect still active — lefthook install will not take effect" >&2
+    fi
+  fi
+  if ! lefthook install >/dev/null; then
+    echo "warning: lefthook install failed — pre-commit hook NOT wired" >&2
+  fi
+elif [ -x scripts/pre-commit ]; then
+  # Resolve the hooks dir via git plumbing rather than hardcoding
+  # `.git/hooks`. In a git-worktree the per-worktree hooks live under
+  # `.git/worktrees/<name>/hooks/`, and `.git` itself is a file (not
+  # a directory), so `mkdir -p .git/hooks` fails. `--git-path hooks`
+  # returns the right location in either layout. We also honor an
+  # already-set `core.hooksPath` if present — fallback consumers
+  # may have configured one deliberately. Use an absolute symlink
+  # target so it resolves correctly from any hooks-dir depth.
+  _hooks_dir="$(git config --get core.hooksPath 2>/dev/null || git rev-parse --git-path hooks)"
+  mkdir -p "${_hooks_dir}"
+  ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit"
+fi
+
+# Cloud-only gate. Everything below is cloud-only — local sessions
+# already have submodules, project deps, the NSS cert DB, etc., set up
+# by the dev's machine.
+[ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
 
 # --- 1. Universal git hygiene --------------------------------------------
 # Cloud clones are shallow; restore submodule content and release tags.
@@ -270,20 +325,6 @@ if [ "$(uname -s)" = "Linux" ] \
       done
     fi
   ) || true
-fi
-
-# --- 3. Pre-commit hook wiring -------------------------------------------
-# Default: lefthook (binary installed at env-setup time). Fallback for
-# repos that ship a hand-rolled scripts/pre-commit instead (zed-lex,
-# tree-sitter-lex pattern): symlink it into .git/hooks/.
-
-if [ -f lefthook.yml ] && command -v lefthook >/dev/null 2>&1; then
-  if ! lefthook install >/dev/null; then
-    echo "warning: lefthook install failed — pre-commit hook NOT wired" >&2
-  fi
-elif [ -x scripts/pre-commit ]; then
-  mkdir -p .git/hooks
-  ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
 fi
 
 # --- 4. Project-local extras ---------------------------------------------
