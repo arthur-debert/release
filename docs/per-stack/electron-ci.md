@@ -112,6 +112,47 @@ apply-ruleset --checks "check / check,e2e"
 If the caller's job ID isn't `check`, adjust the prefix accordingly
 (e.g. `jobs: ci: uses: …` produces `ci / check`).
 
+## `.prettierignore` the canonical files (do this in the same PR)
+
+`bin/check-fmt` runs the consumer's `format:check` (typically
+`prettier --check .`). Without exclusion, prettier reformats the
+release-sync-managed files (`.markdownlint.json`, `lefthook.yml`,
+the `bin/check*` scripts, etc.) per the consumer's prettier config —
+drifting them from canonical and breaking the next sync.
+
+Add an exhaustive ignore block to `.prettierignore` for every
+release-sync-managed path:
+
+```gitignore
+# Canonical files managed by arthur-debert/release release-sync — they
+# have their own formatting conventions (yamllint/markdownlint) and
+# re-formatting them per the consumer's prettier config would drift
+# them from canonical, breaking the next release-sync re-sync.
+.markdownlint.json
+.shellcheckrc
+.yamllint
+.editorconfig
+lefthook.yml
+.release-sync-state.yaml
+.github/copilot-instructions.md
+.github/pull_request_template.md
+.github/CODEOWNERS
+.github/dependabot.yml
+.github/workflows/copilot-review.yml
+bin/check
+bin/check-fmt
+bin/check-lint
+bin/check-tests
+bin/diff-since-release
+scripts/setup-dev-env.sh
+```
+
+Surfaced on simple-gal-ui's adoption (the second electron-app
+consumer) — CI's `check / check` job failed on
+`prettier --check .markdownlint.json` because the canonical
+markdownlint config doesn't match the consumer's prettier rules.
+Same pattern will apply to any future electron consumer.
+
 ## Inputs
 
 All inputs are optional.
