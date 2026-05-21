@@ -52,14 +52,30 @@ cd "${REPO_ROOT}"
 
 if [ -f lefthook.yml ] && command -v lefthook >/dev/null 2>&1; then
   if [ "$(git config --get core.hooksPath 2>/dev/null)" = ".husky" ]; then
-    git config --unset core.hooksPath || true
+    # Don't suppress unset failures with `|| true` — if the unset
+    # fails (e.g. unwritable .git/config), `core.hooksPath=.husky`
+    # stays in place and the subsequent `lefthook install` is
+    # effectively a no-op (git still routes hooks to .husky/pre-commit).
+    # The user needs to know that, not have it silently swallowed.
+    if ! git config --unset core.hooksPath; then
+      echo "warning: failed to unset core.hooksPath (=.husky); husky redirect still active — lefthook install will not take effect" >&2
+    fi
   fi
   if ! lefthook install >/dev/null; then
     echo "warning: lefthook install failed — pre-commit hook NOT wired" >&2
   fi
 elif [ -x scripts/pre-commit ]; then
-  mkdir -p .git/hooks
-  ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+  # Resolve the hooks dir via git plumbing rather than hardcoding
+  # `.git/hooks`. In a git-worktree the per-worktree hooks live under
+  # `.git/worktrees/<name>/hooks/`, and `.git` itself is a file (not
+  # a directory), so `mkdir -p .git/hooks` fails. `--git-path hooks`
+  # returns the right location in either layout. We also honor an
+  # already-set `core.hooksPath` if present — fallback consumers
+  # may have configured one deliberately. Use an absolute symlink
+  # target so it resolves correctly from any hooks-dir depth.
+  _hooks_dir="$(git config --get core.hooksPath 2>/dev/null || git rev-parse --git-path hooks)"
+  mkdir -p "${_hooks_dir}"
+  ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit"
 fi
 
 # Cloud-only gate. Everything below is cloud-only — local sessions
