@@ -13,9 +13,9 @@ pre-commit:
       run: yamllint {staged_files}
       priority: 2
     shellcheck:
-      # Extensionless executables under scripts/ and bin/ are the
-      # portfolio convention (`scripts/check`, `bin/release-create`,
-      # `scripts/release/publish`, etc.). Recursive `**` so nested
+      # Extensionless executables under bin/ and scripts/ are the
+      # portfolio convention (`bin/check`, `bin/release-create`,
+      # `scripts/setup-dev-env.sh`, etc.). Recursive `**` so nested
       # subdirectories are covered too.
       #
       # exclude: list filters out common non-shell file types that
