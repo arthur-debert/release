@@ -50,10 +50,11 @@ on:
 
       output-dir:
         description: |
-          Path (relative to repo root) where mdBook writes the rendered
-          site. Default `book` matches mdBook's default. Override when
-          your `book.toml` sets a non-default `build.build-dir`
-          (simple-gal uses `target/book`).
+          Path (relative to repo root) where the rendered site lands.
+          The build step passes this as an absolute `--dest-dir` to
+          mdbook, so it's authoritative regardless of `book-dir` or
+          any `build.build-dir` set in book.toml. Default `book`;
+          override per-consumer (simple-gal uses `target/book`).
         type: string
         required: false
         default: 'book'
@@ -119,23 +120,36 @@ jobs:
       - name: Install mdBook
         env:
           MDBOOK_VERSION: ${{ inputs.mdbook-version }}
+        # Install into a user-owned dir + add to PATH instead of
+        # `sudo mv /usr/local/bin`. Avoids breaking on self-hosted /
+        # hardened runners where `sudo` isn't available or
+        # `/usr/local/bin` isn't writable.
         run: |
           set -euo pipefail
+          install_dir="${HOME}/.local/bin"
+          mkdir -p "${install_dir}"
           curl -sSL "https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar -xz
-          chmod +x mdbook
-          sudo mv mdbook /usr/local/bin/
-          mdbook --version
+            | tar -xz -C "${install_dir}"
+          chmod +x "${install_dir}/mdbook"
+          echo "${install_dir}" >> "${GITHUB_PATH}"
+          "${install_dir}/mdbook" --version
 
       - name: Build
         env:
           BOOK_DIR: ${{ inputs.book-dir }}
+          OUTPUT_DIR: ${{ inputs.output-dir }}
+        # Pass `--dest-dir` as an ABSOLUTE path so it's authoritative
+        # regardless of where mdbook resolves it from (book root vs
+        # repo root) or any `build.build-dir` in book.toml. This makes
+        # the workflow's `output-dir` input the single source of truth
+        # for where the upload step looks.
         run: |
           set -euo pipefail
+          dest="${GITHUB_WORKSPACE}/${OUTPUT_DIR}"
           if [ -n "${BOOK_DIR}" ]; then
-            mdbook build "${BOOK_DIR}"
+            mdbook build "${BOOK_DIR}" --dest-dir "${dest}"
           else
-            mdbook build
+            mdbook build --dest-dir "${dest}"
           fi
 
       - name: Write CNAME
