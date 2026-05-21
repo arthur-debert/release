@@ -2,7 +2,11 @@
 
 Reusable PR-time check workflow for `electron-app` consumers. Lives at
 `.github/workflows/electron-ci.yml@v1`. The release-path sibling is
-`electron-app.yml`; see `per-category/electron-app.md`.
+`electron-app.yml` (see the top-level
+[README's category matrix](../../README.md#category-matrix) — a
+dedicated per-category doc for electron-app is not yet written; the
+canonical reference is the workflow file itself at
+`.github/workflows/electron-app.yml`).
 
 ## Why this exists
 

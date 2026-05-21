@@ -154,14 +154,26 @@ jobs:
         # If a consumer's shared package doesn't have its own
         # package-lock.json, they should add one; falling back to
         # `npm install` here would mask the drift.
+        #
+        # `working-directory:` (rather than `cd` inside `run:`) so
+        # the directory scope is unambiguous — each GitHub Actions
+        # step starts a fresh shell, so a `cd` here wouldn't leak
+        # to later steps, but `working-directory:` makes the intent
+        # explicit and avoids reviewer confusion.
+        working-directory: ${{ inputs.shared-build-dir }}
         run: |
-          cd "${{ inputs.shared-build-dir }}"
           npm ci
           npm run build
 
       - name: Install Playwright browsers
         if: inputs.playwright
-        run: npx playwright install --with-deps
+        # `npx --no-install` so we use the playwright CLI version
+        # pinned in package-lock.json instead of letting npx fetch
+        # a potentially newer release. If playwright isn't a
+        # consumer dep, the step fails loudly — opting into the
+        # `playwright: true` input but not declaring the dep is
+        # misconfiguration, not a fallback case.
+        run: npx --no-install playwright install --with-deps
 
       - name: Run pre-test
         if: inputs.pre-test != ''
