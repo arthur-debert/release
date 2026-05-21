@@ -229,24 +229,29 @@ RELEASE path only today.** Every consumer's `release.yml` is a thin
 caller of `arthur-debert/release/.github/workflows/<stack>.yml@v1`
 — that part is real and works.
 
-**The CI / PR-time check path is NOT reusable yet.** release/ ships
-no reusable check-time workflow (no `rust-ci.yml`, no `go-ci.yml`).
-So every consumer hand-rolls `ci.yml` / `test.yml`. Some adopted
-consumers call the Component-supplied `bin/check` from their
-bespoke CI (dodot, burgertocow, clapfig, supage); others duplicate
-the canonical clippy/test invocations inline (padz, rustloc); one
-has a fully bespoke pipeline (standout — no `ci.yml` at all,
-different layout).
+**The CI / PR-time check path is partially reusable.** As of
+[#TBD], `rust-ci.yml` exists and is piloted on `dodot`. Other
+rust consumers still hand-roll `ci.yml` / `test.yml`. `go-ci.yml`
+and siblings are not built yet. Some adopted consumers call the
+Component-supplied `bin/check` from their bespoke CI (dodot,
+burgertocow, clapfig, supage); others duplicate the canonical
+clippy/test invocations inline (padz, rustloc); one has a fully
+bespoke pipeline (standout — no `ci.yml` at all, different
+layout). The fan-out from dodot to the rest of the rust fleet
+is intentional follow-up, not a side effect of the workflow
+landing.
 
 Net effect: a fix to canonical clippy flags propagates to consumers
 that call `bin/check` from CI. A fix to setup-rust, cache config,
 toolchain version pin, or the matrix shape does NOT propagate to
 anyone — there's no reusable workflow tying these together.
 
-Tracked as part of #103 / #107. Until `rust-ci.yml` (+ siblings)
+Tracked as part of #103 / #107. Until `rust-ci.yml` is adopted
+across the fleet (only `dodot` today) and `go-ci.yml` / siblings
 land, "fleet-adopted" in the matrices below means "uses release/'s
 reusable RELEASE workflow + has the Component model files synced",
-not "all of CI flows through release/".
+not "all of CI flows through release/". See
+`docs/per-stack/rust-ci.md` for the new workflow's caller shape.
 
 ## Adoption matrix — Stack × Repo
 
