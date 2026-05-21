@@ -199,8 +199,8 @@ All inputs are optional.
 | Input | Default | Description |
 |---|---|---|
 | `node-version` | `'22'` | Forwarded to `actions/setup-node`. Match the consumer's `engines.node` pin. |
-| `rust-toolchain` | `'stable'` | Passed to `dtolnay/rust-toolchain`. If you have a `rust-toolchain.toml` at repo root, dtolnay picks the channel up from there regardless. |
-| `tauri-build` | `false` | When true, runs `<pm> tauri build` after `bin/check` as a smoke gate. Also installs Linux Tauri system deps when running on Linux. Slow — leave off unless you need it. |
+| `rust-toolchain` | `''` (empty) | When empty, the workflow honors `rust-toolchain.toml` at repo root if present (arami-app pins this way); otherwise falls back to `stable`. Set to an explicit channel (`'stable'`, `'1.85.0'`, `'nightly'`) to override the file. |
+| `tauri-build` | `false` | When true, runs `tauri build` after `bin/check` as a smoke gate (invoked as `npx --no-install tauri build` for npm; `pnpm tauri build` / `yarn tauri build` for the other managers). Also installs Linux Tauri system deps when running on Linux. Slow — leave off unless you need it. |
 | `pre-test` | `''` | Shell command run after deps are installed but before `bin/check`. Use for upstream WASM fetches, fixture prep, codegen. |
 | `playwright` | `false` | When true, `npx playwright install --with-deps` runs after deps are installed. Browsers only — does NOT add an e2e job. |
 | `runner` | `'ubuntu-latest'` | Runner label. Override to `macos-latest` if your check job needs platform-specific behavior (e.g. running Playwright against a macOS-only build). |

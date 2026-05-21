@@ -87,13 +87,14 @@ on:
 
       rust-toolchain:
         description: |
-          Rust toolchain channel. Passed through to the shared
-          `setup-rust` composite (which prefers rust-toolchain.toml
-          when present — see the action for resolution order).
-          Default `'stable'`.
+          Rust toolchain channel. If empty (default), the workflow
+          honors `rust-toolchain.toml` at repo root when present
+          (arami-app pins this way) and falls back to `stable`
+          otherwise. Set explicitly (e.g. `'1.85.0'`, `'nightly'`,
+          `'stable'`) to override the file. Default empty.
         type: string
         required: false
-        default: 'stable'
+        default: ''
 
       tauri-build:
         description: |
@@ -215,18 +216,33 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.pm.outputs.cache }}
 
-      - name: Setup Rust toolchain
+      - name: Resolve Rust toolchain channel
         # Tauri's Cargo workspace lives at src-tauri/, not at repo
-        # root. The shared `setup-rust` composite reads
-        # rust-toolchain.toml from the CWD — so consumers that pin
-        # their toolchain typically put rust-toolchain.toml at the
-        # REPO ROOT (arami-app does this), and dtolnay/rust-toolchain
-        # picks the channel up from there. If the consumer prefers
-        # to pin inside src-tauri/, the `rust-toolchain` input
-        # overrides — pass through to dtolnay@stable directly.
+        # root. Consumers that pin their toolchain put
+        # rust-toolchain.toml at the REPO ROOT (arami-app does this).
+        # When the `rust-toolchain` input is empty, honor the file;
+        # otherwise the input wins. Mirrors the resolution logic in
+        # the shared `setup-rust` composite — but kept inline here
+        # because we also need a different rust-cache config
+        # (workspaces: src-tauri) than the composite ships.
+        id: rust-channel
+        shell: bash
+        env:
+          INPUT_CHANNEL: ${{ inputs.rust-toolchain }}
+        run: |
+          if [ -n "${INPUT_CHANNEL}" ]; then
+            CHANNEL="${INPUT_CHANNEL}"
+          elif [ -f rust-toolchain.toml ]; then
+            CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
+          else
+            CHANNEL=stable
+          fi
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ inputs.rust-toolchain }}
+          toolchain: ${{ steps.rust-channel.outputs.channel }}
           components: clippy, rustfmt
 
       - name: Cache Rust (src-tauri)
@@ -297,6 +313,21 @@ jobs:
       - name: Tauri build (smoke)
         if: inputs.tauri-build
         # Off by default — release-time only. When opted in, this
-        # uses the auto-detected package manager so npm/pnpm/yarn
-        # consumers all work without consumer config.
-        run: ${{ steps.pm.outputs.pm }} tauri build
+        # uses the auto-detected package manager. Each manager
+        # invokes the local tauri CLI differently:
+        #   * pnpm / yarn — `pnpm tauri build` / `yarn tauri build`
+        #     resolve `tauri` from node_modules/.bin transparently.
+        #   * npm — `npm tauri build` is NOT a valid invocation
+        #     (npm has no "run a node_modules binary by name"
+        #     subcommand). Use `npx --no-install tauri build`,
+        #     which picks up the locally installed CLI without
+        #     fetching from the registry.
+        shell: bash
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
+        run: |
+          if [ "${PM}" = "npm" ]; then
+            npx --no-install tauri build
+          else
+            "${PM}" tauri build
+          fi
