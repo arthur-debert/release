@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Anchor at repo root so `go vet ./...` and `golangci-lint run ./...`
+# see the whole module regardless of caller's cwd.
+cd "$(cd "$(dirname "$0")/.." && pwd)"
+
 echo "Running go vet..."
 go vet ./...
 

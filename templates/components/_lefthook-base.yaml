@@ -1,0 +1,15 @@
+# Base header for the generated lefthook.yml. Merged with each Component's
+# lefthook.fragment.yaml + the Stack's lefthook.fragment.yaml (if present)
+# to produce the consumer's lefthook.yml.
+#
+# Filename starts with `_` so release-sync skips it as a direct sync source
+# — it is composition input, not a destination file.
+
+output:
+  - meta
+  - skips
+  - summary
+
+pre-commit:
+  parallel: true
+  commands: {}

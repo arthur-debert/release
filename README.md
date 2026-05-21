@@ -1,555 +1,620 @@
 # release
 
-This repo contains the infrastructure around my projects (arthur-debert and lex-fmt), ensuring that:
+Reusable infrastructure for releasing software across the
+arthur-debert and lex-fmt portfolios — ~20 repos spanning Rust CLIs
+and libraries, Tauri / Electron desktop apps, editor extensions
+(VS Code, Neovim, Zed), tree-sitter grammars, Python packages,
+GitHub Actions, and a Homebrew tap. One canonical pipeline per
+category; consumers call into it with a thin `with:` block.
 
-- Consistent workflows — especially an agentic one — across multiple projects.
-- Updates and changes benefit all projects at once.
-- Less mental overhead from each of the ~16 projects having its own idiosyncratic way to do releases.
-- By having automated GH settings, setup, and tooling, new projects can have a mature ecosystem in minutes.
+Two properties make the model work:
 
-The scope includes:
+- **Fix-once-propagate.** Consumers pin `@v1` (floating major), so
+  a fix here propagates to every consumer on their next CI run. No
+  per-repo edit.
+- **Code + configuration, not just code.** Standardization covers
+  runtime code (workflows, composite actions, scripts) *and*
+  configuration documents that live in each consumer's tree
+  (CODEOWNERS, dependabot.yml, branch-protection ruleset, agent
+  guidance). Both surfaces need to stay current; the propagation
+  model below handles each at the cheapest mechanism that fits.
 
-- The GitHub repo config (main-branch policies, PR review policies, Copilot wiring).
-- The agentic workflow for development.
-- Provisioning of projects, including Claude Code on the web sessions.
-- The ability to run or update all these policies and settings idempotently (safe to re-run).
-- Common workflows / actions for CI test and checks, release, and distribution.
+Working-on-this-repo details: [`CLAUDE.md`](CLAUDE.md).
+Long-form vision: [`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex).
 
-## Properties
+## Vocabulary
 
-  Two properties make the above work in practice:
+Four levels, used throughout the rest of this doc:
 
-- **Fix-once-propagate.** Consumers pin `@v1` (floating major), so a fix
-    here propagates to all of them on their next CI run. No per-repo edit.
-    This is what makes the shared infrastructure pay for itself versus
-    copy-pasted workflows.
-- **Code + configuration, not just code.** Standardization covers two
-    surfaces: runtime code that executes in CI (workflows, actions,
-    scripts), and configuration documents that live in each consumer
-    (CODEOWNERS, dependabot.yml, branch-protection ruleset, agent
-    guidance markdown). Both need to be applied to every repo and kept
-    in sync.
-  
+- **Stack** — language/runtime profile. One Stack per consumer repo.
+  Examples: `rust-cli`, `rust-lib`, `electron-app`, `tauri-app`,
+  `vscode-ext`, `nvim-plugin`, `tree-sitter`, `python-pkg`,
+  `gh-action`, `brew-tap`.
+- **Component** — reusable capability module, orthogonal to Stack.
+  Any Stack can compose any Component. Examples: `macos-codesign`,
+  `brew-tap-push`, `mkdocs`, `bats`, `playwright`, `precommit-gate`,
+  `markdown-lint`, `wasm-pack`, `gh-release`, `changelog`,
+  `version-bump`.
+- **Task** — atomic verb, provided by exactly one Component or
+  Stack. Examples: `lint-markdown`, `test-unit-rust`, `test-e2e-bats`,
+  `build-dmg`, `sign-mac`, `notarize-mac`, `publish-cargo`,
+  `bump-version`, `roll-changelog`.
+- **Flow** — trigger-bound sequence of Tasks. The triggers are
+  `pre-commit`, `pr-checks` (push / PR), `release` (tag /
+  `workflow_dispatch`), `nightly`. A Flow is what a CI workflow file
+  actually maps to.
+
+Mental model: Stack × Component grid says *what's available*;
+Task × Stack/Component says *the atomic implementation*; Flow ×
+Stack says *what runs when*. Note that "test" alone is a category,
+not a Task (`test-unit-rust` is the Task); "check" is a Flow
+composed of lint and test Tasks, not a Task itself.
+
 ## What every onboarded repo gets
 
-Same regardless of stack. Mechanism in parentheses (legend below):
+Same regardless of Stack:
 
 - **Branch protection** — main-branch ruleset: PR required, linear
-  history, no force-push, no delete (R, applied via `bin/apply-ruleset`,
-  template at `rulesets/main-protection.json.tmpl`).
-- **Copilot review auto-trigger** — `.github/workflows/copilot-review.yml`
-  fires once on `pull_request: opened`, reviewing both drafts and
-  ready PRs. Draft → ready does not re-trigger (T).
+  history, no force-push, no delete. Applied via `bin/apply-ruleset`,
+  template at `rulesets/main-protection.json.tmpl`.
+- **Auto-review on draft PR** — Copilot and Gemini both review on
+  `pull_request: opened`, drafts included. Draft → ready does not
+  re-trigger. Cloud's **Auto-fix** then wakes a fresh session per
+  review comment (requires the
+  [Claude GitHub App](https://github.com/apps/claude) at the org
+  level). See "The agentic PR loop" below.
 - **Policy files** — CODEOWNERS, `pull_request_template.md`,
-  `copilot-instructions.md` (T, swept in via `bin/sweep-github-policy`).
-- **Dependabot** — see policy below (T+R).
-- **Pre-commit hooks** — thin husky/pre-commit config in the consumer
-  that shells out to scripts here, so local hooks call exactly the same
-  checks CI calls. No divergence by construction (T+S).
-- **Claude Code on the web SessionStart bootstrap** —
-  `scripts/setup-dev-env.sh` is the per-session dev-env bootstrap;
-  `.claude/settings.json` carries the SessionStart hook that invokes
-  it. Both are seeded from `templates/setup-dev-env.sh` and
-  `templates/.claude-settings.json` here, and re-synced into consumers
-  as the canonical evolves. Detects stack by filesystem signals;
-  handles rust/node/ruby/python deps + git hygiene + Chromium NSS
-  trust store + venv-CLI PATH exposure (T).
-- **Agent guidance** — per-repo `CLAUDE.md` for project-specific notes;
-  shared snippets live here and are referenced (G).
+  `copilot-instructions.md`, `dependabot.yml`,
+  `.github/workflows/copilot-review.yml`. Synced via the propagation
+  model below.
+- **Pre-commit hooks** — thin husky / pre-commit-framework /
+  lefthook config that shells out to Component-supplied scripts
+  (`bin/check-fmt`, `bin/check-lint`, `bin/check-tests`). Local
+  hooks ARE the canonical interface. **Whether CI also calls these
+  is per-repo today** — see "CI workflow reusability gap" below.
+- **Session-start bootstrap** — `scripts/setup-dev-env.sh` runs on
+  every Claude Code session start (cloud and local). Handles
+  submodules, deps, NSS cert import, venv PATH exposure, lefthook
+  wiring.
+- **Agent guidance** — per-repo `CLAUDE.md` for project-specific
+  notes; user-level `CLAUDE.md` for portfolio-wide rules,
+  distributed via [`env/CLAUDE.md`](env/CLAUDE.md).
 
 ### Dependabot policy
 
 Three sub-policies, deliberate:
 
-| Sub-role | Mechanism | Where enabled |
-|---|---|---|
-| Dependabot **security** updates | R (per-repo API toggle) | every onboarded repo |
-| **GitHub Actions version** freshness | T (`dependabot.yml`, `github-actions` ecosystem only) | only `release/` and any repo that holds its own CI workflows |
-| **Application dependency** freshness (npm/cargo/etc.) | — | disabled, deliberately |
-| **Security → patch release** glue | W + A | 📋 planned per-stack (auto-cut a patch release on security PR merge so users actually receive the fix) |
-
-Rationale: freshness mode at portfolio scale generates dozens of
-no-op PRs per day with near-zero value. Major-version sweeps (Tailwind
-4 → 5, React 18 → 19, etc.) are evaluation work — picked up
-deliberately when we want them, not pushed by a bot. Security is the
-one case worth automating, but a security bump that lands in main
-without a release leaves users on the vulnerable binary — so the
-`security → patch release` glue is the load-bearing piece, not the
-bump itself.
-
-## Stack matrix
-
-Mechanism legend:
-
-| | |
+| Sub-role | Where enabled |
 |---|---|
-| **W** | reusable workflow lives here, consumer has a thin caller (`uses: arthur-debert/release/...@v1`); fix-once-propagate works |
-| **A** | composite action lives here, called inside a W |
-| **S** | standalone script lives here, exec'd by an A or by pre-commit |
-| **T** | file is templated *into* the consumer; can drift until the next sweep |
-| **R** | applied via API, no file in consumer |
-| **G** | markdown read by humans/agents |
+| Dependabot **security** updates | every onboarded repo (API toggle) |
+| GitHub Actions **version** freshness | only `release/` and other CI-holding repos (`dependabot.yml`) |
+| **Application dep** freshness (npm/cargo/...) | disabled, deliberately |
+| **Security → patch release** glue | planned per-Stack |
 
-Status: ✅ shipped · 🚧 in flight · 📋 planned · — N/A · `(...)` parenthetical context.
+Freshness mode at portfolio scale generates dozens of no-op PRs per
+day. Major-version sweeps are evaluation work — picked up
+deliberately, not pushed by a bot. Security automation is worth it,
+but a bump that lands in main without a release leaves users on the
+vulnerable binary, so the `security → patch release` glue is the
+load-bearing piece.
 
-| Stack          | format/lint     | unit tests | e2e             | build              | sign       | gh release        | pkg publish                          | dist: brew       | dist: apt | security→patch |
-|----------------|-----------------|------------|-----------------|--------------------|------------|-------------------|--------------------------------------|------------------|-----------|----------------|
-| rust-lib       | (consumer)      | (consumer) | —               | W ✅ via publish   | —          | W ✅ (notes)      | A ✅ crates.io                       | —                | —         | A 📋           |
-| rust-cli       | W ✅            | W ✅       | W ✅ (BATS)     | W ✅ cross         | —          | W ✅              | A ✅ crates.io · A ✅ npm (wasm)¹    | A ✅ shared tap  | A 📋      | A 📋           |
-| go-cli         | W ✅            | W ✅       | (consumer)      | W ✅ cross         | A ✅ mac   | W ✅              | (tag-driven⁴)                        | A ✅ shared tap  | A 📋      | A 📋           |
-| electron-app   | (consumer)      | (consumer) | W 🚧 smoke conv | W ✅ builder       | A ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
-| tauri-app      | A ✅ gate       | (consumer) | W 📋 playwright | W ✅ tauri build   | W ✅ mac   | W ✅              | 📋 auto-updater   | (cask, future)   | —         | A 📋           |
-| vscode-ext     | (consumer)      | (consumer) | (consumer)      | W ✅ vsce package  | —          | W ✅              | W ✅ marketplace · W ✅ Open VSX | —    | —         | A 📋           |
-| nvim-plugin    | W 📋 stylua     | W 📋 busted| W 📋 headless   | (source)           | —          | W ✅ tag + release | —                 | —                | —         | A 📋 (tag)     |
-| tree-sitter    | W 📋            | W ✅ corpus³| —               | W ✅ generate      | —          | W ✅              | W ✅ npm (opt-in) | —                | —         | A ✅           |
-| python-pkg     | (consumer)      | (consumer) | —               | W ✅ uv build      | —          | W ✅              | W ✅ PyPI · W ✅ TestPyPI (opt-in) | —    | —         | A 📋           |
-| gh-action      | W 📋 actionlint | W 📋 bats  | W 📋 nektos/act | (composite)        | —          | W ✅ tag + v1     | (tag-driven²)     | —                | —         | A 📋 (move v1) |
-| brew-tap       | W 📋 shellcheck | W 📋 bats  | W 📋 docker     | —                  | —          | (pulled, not released) | —            | (this IS the tap)| —         | (upstream)     |
+## Managed repos
 
-What the matrix tells you at a glance: every stack now ships a
-working `release` workflow (`W ✅` in `gh release`); rust-cli
-remains the most fully built-out row (every column shipped).
-`gh-action` and `brew-tap` deliberately have no separate `pkg
-publish` step (tag-driven Marketplace / tap is itself the
-destination). The remaining 📋 cells are largely test/lint
-scaffolding (nvim-plugin's busted/stylua, tree-sitter's lint,
-tauri-app's playwright e2e) — orthogonal to the release path.
+Canonical list of repos this release/ portfolio covers. 21 repos
+across 3 multi-repo "projects" (lex, arami, simple-gal) plus
+single-repo projects.
 
-The `format/lint` column for the bot-bump commit is `A ✅ gate`
-across stacks where a `lefthook.yml` / `.pre-commit-config.yaml`
-/ `.husky/` is present in the consumer:
-`.github/actions/run-precommit-gate` runs the consumer's own
-gate on the bot's staged version-file bump before the
-`chore: Release vX.Y.Z` commit lands. Eliminates format-drift
-fights on the default branch from CI-driven releases. Shipped
-in v1.7.6. Marked on tauri-app today because that's where it
-was first reproduced + validated end-to-end; other stacks
-inherit it automatically (inlined into every bot-committing
-prepare step), the matrix cell will flip as each is exercised
-on a real consumer release.
+| Project | Repo (owner/name) | Local path |
+|---|---|---|
+| arami | `arthur-debert/arami-app` | `~/h/arami/arami-app` |
+| arami | `arthur-debert/arami-core` | `~/h/arami/arami-core` |
+| burgertocow | `arthur-debert/burgertocow` | `~/h/burgertocow` |
+| clapfig | `arthur-debert/clapfig` | `~/h/clapfig` |
+| dodot | `arthur-debert/dodot` | `~/h/dodot` |
+| homebrew-tools | `arthur-debert/homebrew-tools` | `~/h/homebrew-tools` |
+| lex | `lex-fmt/comms` | `~/h/lex-fmt/comms` |
+| lex | `lex-fmt/lex` | `~/h/lex-fmt/lex` |
+| lex | `lex-fmt/lexed` | `~/h/lex-fmt/lexed` |
+| lex | `lex-fmt/nvim` | `~/h/lex-fmt/nvim` |
+| lex | `lex-fmt/tree-sitter-lex` | `~/h/lex-fmt/tree-sitter-lex` |
+| lex | `lex-fmt/vscode` | `~/h/lex-fmt/vscode` |
+| lex | `lex-fmt/zed-lex` | `~/h/lex-fmt/zed-lex` |
+| padz | `arthur-debert/padz` | `~/h/padz` |
+| release | `arthur-debert/release` | `~/h/release` |
+| rustloc | `arthur-debert/rustloc` | `~/h/rustloc` |
+| simple-gal | `arthur-debert/simple-gal` | `~/h/simple-gal/simple-gal` |
+| simple-gal | `arthur-debert/simple-gal-action` | `~/h/simple-gal/simple-gal-action` |
+| simple-gal | `arthur-debert/simple-gal-ui` | `~/h/simple-gal/simple-gal-ui` |
+| standout | `arthur-debert/standout` | `~/h/standout` |
+| supage | `arthur-debert/supage` | `~/h/supage` |
 
-`—` cells are deliberate — the role doesn't apply to that
-stack — so nobody goes looking for missing pieces.
+Repos NOT in this list are out of scope, even if they happen to
+carry the `main-branch-protection` ruleset (which was applied
+broadly across `arthur-debert/` for unrelated reasons). The
+`audit-portfolio` discovery uses the ruleset as a convenience proxy
+but the authoritative set is the table above.
 
-**Compiled artifacts** in the build/release columns can be native
-binaries, wasm, or both — declared per consumer via workflow inputs
-rather than being row-specific. Same pipeline shape; different
-attached artifacts and publish destinations. ¹ below is the canonical
-example.
+## Capability matrix — Stack × Component
 
-**Documentation deploy is a cross-cutting feature, not a stack row.**
-The portfolio standardised on **mkdocs** (with the lex-fmt/mkdocs-lex
-plugin for Lex-format docs) as the single documentation toolchain.
-Any consumer — regardless of its main-stack row — can adopt the
-canonical deploy workflow by copying
-[`lex-fmt/mkdocs-lex/docs/deployment/examples/docs.yml`](https://github.com/lex-fmt/mkdocs-lex/blob/main/docs/deployment/examples/docs.yml)
-into its `.github/workflows/`. The workflow is intentionally shipped
-as a **copy-once template**, not as a reusable `uses:` caller: it's
-short, stable, and barely customisable, so the indirection cost of a
-thin-caller mechanism outweighs its propagation benefit. Drift is
-acceptable; re-copy if the upstream changes meaningfully. The earlier
-`mdbook-site` and `jekyll-site` rows are retired — dodot/lex/standout
-mid-port from mdbook, comms moving from jekyll.
+What release can do today. Rows = Stack; columns = Component bundles
+the Stack pulls in. `✅` built and exercised end-to-end; `🚧`
+scaffolded but not exercised; `📋` planned; `—` not applicable.
 
-² **gh-action — tag-driven Marketplace listing.** The GitHub Actions
-Marketplace lists from a repo's release tags directly, gated by a
-one-time repo-settings checkbox ("Publish this Action to the
-GitHub Marketplace") at first release creation. There is no
-publish API for CI to call — the `release` job creating a tag
-*is* the publish.
+| Stack         | gh-release | changelog | version-bump | macos-codesign | precommit-gate | crate-publish | npm-publish | pypi-publish | brew-tap-push | bats | wasm-pack | mkdocs | commons-lint |
+|---------------|:----------:|:---------:|:------------:|:--------------:|:--------------:|:-------------:|:-----------:|:------------:|:-------------:|:----:|:---------:|:------:|:------------:|
+| rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | ✅ | ✅ |
+| rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
+| go-cli        | ✅ | ✅ | —⁴ | 🚧³ | ✅ | — | — | — | ✅⁵ | 🚧 | — | 🚧 | 📋 |
+| electron-app  | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
+| tauri-app     | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
+| vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
+| nvim-plugin   | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
+| tree-sitter   | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
+| python-pkg    | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ | — | — | — | 🚧 | 📋 |
+| gh-action     | ✅ | ✅ | — | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
+| brew-tap      | — | — | — | — | ✅ | — | — | — | (is tap) | 🚧 | — | 🚧 | 📋 |
 
-³ **tree-sitter — corpus tests are release-gating.** Corpus tests
-run in a dedicated `corpus-test` job that gates the `prepare`
-job, so a `grammar.js` change that breaks the corpus blocks the
-tag-push entirely — failed releases leave no dangling tags. Set
-`run-corpus-tests: false` only when the PR-time test workflow is
-authoritative and main is trusted green.
+¹ Opt-in `wasm-package` slot — Rust workspace with a wasm-bindgen
+member publishes both the crate and an npm tarball of the wasm build.
+Used by `arami-core` and `lex-fmt/lex`.
 
-**tree-sitter bundle layout** (contractual with downstream
-consumers):
+² VS Code Marketplace + Open VSX (Open VSX off until Eclipse
+namespace approval at
+[EclipseFdn/open-vsx.org#10424](https://github.com/EclipseFdn/open-vsx.org/issues/10424)).
 
+³ Downgraded 2026-05-20:
+
+- `electron-app.yml@v1` uses electron-builder's native single-pass
+  sign + notarize. **Never produced a successful release through the
+  canonical caller.** The OLD self-contained `release.yml` in lexed
+  had a working submit/poll/staple path (v0.10.1 shipped clean
+  2026-05-17), but that workflow no longer exists; the canonical
+  replacement is unproven.
+- `tauri-app.yml` uses `npx tauri build` with `APPLE_*` env vars
+  (Tauri's own signing path, NOT electron-builder). **No release
+  attempted via the canonical caller; also unproven.**
+
+Tracked at [#122](https://github.com/arthur-debert/release/issues/122);
+the USE-and-succeed validation run for `electron-app.yml@v1` is gated
+on [lex-fmt/lexed#106](https://github.com/lex-fmt/lexed/pull/106)
+(CHANGELOG unblocker for canonical workflow pre-flight).
+
+⁴ **go-cli — version-bump and tag-driven distribution.** Go modules
+ship from Git tags directly; the `go release` job creating a tag IS
+the publish for any downstream `go get` / `go install` consumer. No
+registry-publish step. The Homebrew formula covers binary
+distribution for end users; consumers wanting only the binary install
+with `brew install arthur-debert/tools/<bin>`. version-bump is ✅
+because `prepare-release-go` rolls CHANGELOG + creates the tag, even
+though Go itself has no manifest version field.
+
+⁵ **go-cli brew-tap-push — supports private repos.** Set
+`brew-private-repo: true` on the caller and the rendered formula
+inlines a `GitHubPrivateRepositoryReleaseDownloadStrategy` + `using:`
+clauses so `brew install` fetches release assets via the
+authenticated GitHub assets API. End users export
+`HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` (or any PAT with read
+access) before `brew install`. Used by supage (the first private-repo
+go-cli consumer). The same option exists on rust-cli for parity.
+
+`commons-lint` for rust-cli / rust-lib went 📋 → ✅ on
+2026-05-20 with the take-iii Component model landing
+(`shell-quality` Component: md/yaml/sh + editorconfig; exercised
+on dodot, clapfig, rustloc, burgertocow). Other stacks stay 📋
+until their per-stack `manifest.yaml` lands ([#106](https://github.com/arthur-debert/release/issues/106)).
+
+`bats` and `mkdocs` Components landed on take-iii 2026-05-20:
+
+- **`bats`** — `templates/components/bats/bin/check-e2e` (convention-
+  discovery runner) + `.github/workflows/bats-e2e.yml` (reusable
+  workflow with canonical `bats-core/bats-action@4.0.0` install).
+  Opt-in via `.release-sync.yaml`. Adopted on dodot and padz.
+  rust-cli is ✅ (built + exercised end-to-end); other stacks that
+  could benefit are 🚧 pending first-consumer adoption.
+- **`mkdocs`** — `templates/components/mkdocs/bin/check-docs` (local
+  strict-mode build with auto-config-discovery) +
+  `.github/workflows/mkdocs.yml` (reusable workflow with build
+  always, deploy gated on push to default branch via first-party
+  `actions/deploy-pages`). Plugin-agnostic — consumer's
+  `requirements` file drives mkdocs / theme / plugin selection.
+  Adopted on dodot for PR-time build validation; deploy migration
+  pending the Pages source flip to "GitHub Actions" mode.
+
+See `docs/per-component/{bats,mkdocs}.md` for adoption details.
+
+## CI workflow reusability gap (unflinching)
+
+**The "fix once, propagate everywhere" model below applies to the
+RELEASE path only today.** Every consumer's `release.yml` is a thin
+caller of `arthur-debert/release/.github/workflows/<stack>.yml@v1`
+— that part is real and works.
+
+**The CI / PR-time check path is partially reusable.** As of
+[#130](https://github.com/arthur-debert/release/pull/130),
+`rust-ci.yml` exists and is piloted on `dodot`
+([dodot#192](https://github.com/arthur-debert/dodot/pull/192)).
+Other rust consumers still hand-roll `ci.yml` / `test.yml`.
+`go-ci.yml` and siblings are not built yet. Some adopted
+consumers call the Component-supplied `bin/check` from their
+bespoke CI (dodot, burgertocow, clapfig, supage); others
+duplicate the canonical clippy/test invocations inline (padz,
+rustloc); one has a fully bespoke pipeline (standout — no
+`ci.yml` at all, different layout). The fan-out from dodot to
+the rest of the rust fleet is intentional follow-up, not a side
+effect of the workflow landing.
+
+Net effect: a fix to canonical clippy flags propagates to consumers
+that call `bin/check` from CI. A fix to `setup-rust`, cache config,
+toolchain version pin, or the matrix shape propagates **only to
+consumers that thin-call `rust-ci.yml`** — today that's `dodot`
+only. The other rust consumers still hand-roll, so the same fix
+doesn't reach them until they migrate too.
+
+Tracked as part of #103 / #107. Until `rust-ci.yml` is adopted
+across the fleet (only `dodot` today) and `go-ci.yml` / siblings
+land, "fleet-adopted" in the matrices below means "uses release/'s
+reusable RELEASE workflow + has the Component model files synced",
+not "all of CI flows through release/". See
+`docs/per-stack/rust-ci.md` for the new workflow's caller shape.
+
+## Adoption matrix — Stack × Repo
+
+Where each consumer actually sits on the **release** path. Four
+states (note: this matrix is about release reusability — CI
+reusability is the gap called out above):
+
+- **planned** — repo identified for this Stack; no work yet.
+- **implemented** — workflow caller wired; release path not
+  yet exercised end-to-end on a real cut.
+- **pilot-running** — at least one release shipped through the
+  canonical path; remaining gaps tracked as issues.
+- **fleet-adopted** — repo is the steady-state consumer; the Stack
+  is considered the source of truth for its release path.
+
+| Stack         | Repos (state) |
+|---------------|---|
+| rust-cli      | `dodot`, `lex-fmt/lex`, `padz`, `rustloc`, `burgertocow` — **fleet-adopted** |
+| rust-lib      | `clapfig` — **fleet-adopted** (Component model + canonical release); `standout` — **pilot-running**; `lex-fmt/zed-lex` — **planned** (needs `wasm32-wasip2`) |
+| electron-app  | `lex-fmt/lexed` — **pilot-running** ⚠️ (canonical `electron-app.yml@v1` unproven; see footnote ³ above); `simple-gal-ui` — **planned** |
+| tauri-app     | `arami-app` — **pilot-running** |
+| vscode-ext    | `lex-fmt/vscode` — **pilot-running** |
+| nvim-plugin   | `lex-fmt/nvim` — **pilot-running** |
+| tree-sitter   | `lex-fmt/tree-sitter-lex` — **pilot-running** |
+| python-pkg    | (no managed-portfolio repos yet) |
+| gh-action     | `release` (self, dogfooded) — **pilot-running**; `simple-gal-action` — **planned** |
+| go-cli        | `supage` — **fleet-adopted** (1/1; `0.0.1` + `0.0.2` cut through canonical pipeline incl. private-repo Homebrew formula via brew-private-repo: true) |
+| brew-tap      | `homebrew-tools` — **planned** |
+
+A Stack flips to **fleet-adopted** only when ≥80% of its eligible
+consumers are on `@v1` *and* have cut at least one release through
+it. Today `rust-cli` (5/5) and `go-cli` (1/1, supage) clear that
+bar. `rust-lib` has 1 of 2 eligible consumers fleet-adopted (clapfig
+done, standout pilot) — 50%, so the stack-level state is
+*pilot-running* even though one consumer is fleet-adopted.
+
+(`treex` was previously listed under rust-cli but is NOT a
+managed-portfolio repo per
+[the managed-repo audit](https://github.com/arthur-debert/release/issues/105);
+removed.)
+
+### Component-model adoption (take-iii, in flight)
+
+Separate axis: which managed repos have adopted the take-iii
+Component model (release-sync + generated `lefthook.yml` from
+shell-quality + rust-quality fragments + `.release-sync-state.yaml`).
+This is precommit-gate territory, not release-path adoption — the
+two flip independently.
+
+**Important distinction (the CI gap, restated):** "adopted" here
+means **files are present in the consumer's tree**. Whether CI
+actually CALLS `bin/check` is separate. Current state across the 7
+adopted rust consumers: 4 wire CI to `bin/check` (dodot,
+burgertocow, clapfig, supage); 2 duplicate the canonical invocation
+inline in `ci.yml` (padz, rustloc); 1 has no `ci.yml` (standout).
+A reusable `rust-ci.yml` is the missing piece.
+
+| Stack | Adopted | Pending |
+|---|---|---|
+| rust-cli  | `dodot`, `rustloc`, `burgertocow`, `lex-fmt/lex`, `padz` | (none — all 5 adopted) |
+| rust-lib  | `clapfig`, `standout` | (none — both adopted) |
+| go-cli    | `supage` | (no other go consumers in the portfolio yet) |
+| (other stacks) | — | per-stack `manifest.yaml` not yet built ([#106](https://github.com/arthur-debert/release/issues/106)) |
+
+Driven by `orc propagate` ([#117](https://github.com/arthur-debert/release/pull/117), merged) — the propagation
+verb landed mid-session and onboarded 3 consumers in one command.
+
+Unclassified-stack repos in the managed portfolio (`arami-core`,
+`lex-fmt/comms`, `simple-gal`): pending classification on take-iii.
+
+## The agentic PR loop
+
+Every onboarded repo follows the same review-and-merge flow. The
+agent drives steps 1–6; a human gates step 7.
+
+1. Agent opens the PR as a **draft**.
+2. Draft state auto-requests **Copilot** review (via policy at
+   `.github/workflows/copilot-review.yml`) and **Gemini** review
+   (via the Gemini bot installed at the org level).
+3. Agent waits for **both** reviews to post — batching over
+   per-reviewer catches overlapping comments and produces one
+   unified fix instead of two whipsaw fixes.
+4. Agent combines feedback, decides what to address and what to
+   push back on (see `skills/pr-review-respond` for the canonical
+   pushback patterns).
+5. For each comment: reply with the fix *or* a pushback reason,
+   then resolve the thread. **Unresolved threads remain the signal
+   that something is open** — making PR state trivially scannable.
+6. Agent flips the PR from **draft → ready**.
+7. Human reviews the final state and merges.
+
+The four GitHub events the loop depends on:
+
+- **review requested** — triggers the reviewer bots
+- **review submitted** — wakes the agent to address comments
+- **PR check results** — wakes the agent to fix failing CI
+- **PR state change** — draft → ready, merged, closed
+
+**What handles those events.** On cloud sessions, Anthropic's
+**Auto-fix** (managed internally by Claude Code Cloud — *not* a
+user-configurable [Routine](https://claude.ai/code/routines)) wakes
+a fresh session when review comments or check failures land on a
+PR in a repo with the
+[Claude GitHub App](https://github.com/apps/claude) installed. The
+leaf event-work — address this comment, fix this failing check —
+is essentially free once the GitHub App is installed at the org
+level.
+
+The local orchestrator (below) does not duplicate this. Its scope
+is the cross-repo, human-initiated work that cloud Auto-fix
+deliberately doesn't do: rolling a change across N consumers,
+driving a multi-PR epic, auditing a feature branch before merge.
+
+Long-form spec: [`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex)
+§2.
+
+## How updates propagate
+
+Two surfaces, two mechanisms.
+
+### Workflows — `uses:` against `@v1`
+
+Reusable workflows live at `.github/workflows/<stack>.yml` here.
+Consumers call them with a thin caller:
+
+```yaml
+# in the consumer
+jobs:
+  release:
+    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1
+    with:
+      ...
 ```
-tree-sitter.tar.gz
-├── tree-sitter-<parser>.wasm  ← required
-├── grammar.js                 ← required
-├── package.json               ← required
-├── tree-sitter.json           ← optional (if present in repo)
-├── src/
-│   ├── parser.c               ← required, freshly generated
-│   ├── scanner.c | scanner.cc ← optional, gated by file existence
-│   └── tree_sitter/
-│       ├── parser.h           ← required
-│       ├── alloc.h            ← optional (newer CLI versions)
-│       └── array.h            ← optional (newer CLI versions)
-└── queries/
-    └── *.scm                  ← optional dir; if queries/ exists
-                                 it MUST contain at least one .scm
-```
 
-Plus anything `scripts/bundle-extras.sh` adds (e.g.
-`shared/embedded-grammars.json`).
+`v1` is a floating branch that always points at the latest
+non-breaking tag. Fix-once-propagate is automatic: patch a workflow
+here, every consumer picks it up on their next CI run. This is the
+mechanism today and it works.
 
-¹ **rust-cli + npm (wasm)** — opt-in slot for Rust workspaces with a
-wasm-bindgen crate consumed by JS/TS. Set `wasm-package: <member>` on
-the caller and the canonical pipeline builds via `wasm-pack` once,
-attaches `<member>-wasm.tar.gz` to the GH release, and `npm publish`es
-the same artifact (no second Rust install, shares the warm cache).
-Used today by `arami-core` (wasm consumed by `arami-app`) and
-`lex-fmt/lex` (`lex-wasm` member). See
-`docs/per-category/rust-cli.md` §WASM.
+### Files in the consumer — session-start `release-sync`
 
-⁴ **go-cli — tag-driven module distribution.** Go modules are pulled
-from a repo's Git tags directly; the `go release` job creating a tag
-*is* the publish for any downstream `go get` / `go install` consumer.
-No registry step. The Homebrew formula covers binary distribution for
-end users; consumers wanting only the binary install with `brew
-install arthur-debert/tools/<bin>`.
+Some files have to live in the consumer's tree because GitHub or
+local tooling reads them there: CODEOWNERS, dependabot.yml, the
+`copilot-review.yml` workflow itself, lefthook fragments,
+`bin/check-*` helpers, the consumer's own `setup-dev-env.sh`.
 
-## Composition principle
+**Current state.** Updates land via PR fan-out — `bin/sweep-github-policy`
+loops over the portfolio and opens one PR per repo per change. This
+is the bottleneck the take-iii branch replaces.
 
-Most repos have **two layers** of concerns: a stack-specific one (rust
-build/test/release, electron-app sign+publish, etc.) and a cross-
-cutting commons one (Markdown / YAML / shell lint, link-check, hook
-wiring). The portfolio handles each at the cheapest mechanism that
-fits.
+**Target model.** A pull-on-session-start sync with a beta-branch
+dial:
 
-- **Stack-specific concerns** ship as reusable workflows (`W`) +
-  composite actions (`A`) here in `release/`, called by consumers via
-  thin `uses: arthur-debert/release/.github/workflows/<stack>.yml@v1`
-  blocks. Fix-once-propagate; consumers don't edit per-repo when a fix
-  lands here. Single source of truth.
-- **Cross-cutting commons concerns** ship in one of two forms:
-  - As a separate reusable CI workflow (e.g. `commons.yml` —
-    markdown / yaml / shell lint) that every consumer `uses:`-es
-    alongside its stack workflow. Same `W` mechanism, just a new row
-    that isn't "a stack."
-  - As **copy-once templates** under `templates/commons/` (e.g.
-    `lefthook.fragment.yaml`) when the file lives entirely in the
-    consumer's checkout and a thin-caller mechanism wouldn't make
-    sense. Drift is acceptable; re-copy when the upstream changes
-    meaningfully. The mkdocs deploy workflow is the same pattern.
+1. `scripts/setup-dev-env.sh` runs on every session start (cloud
+   and local — Claude Code's SessionStart hook fires the same way
+   in both environments).
+2. Early in the script, `release-sync` runs:
+   - `git fetch --all --prune` against `~/release`
+   - selects a branch: `release/beta/<consumer-repo-name>` if it
+     exists, else `release/beta/<stack>`, else `main`
+   - checks out the selected branch
+   - copies managed files into the consumer working tree
+3. CI's `pr-checks` Flow runs `release-sync --check`. If the
+   working tree diverges from canonical, the build fails. Drift
+   becomes a normal CI failure the agent fixes in passing — no
+   batch fan-out PRs.
 
-**Why not a fragment composer / template generator?** At our scale
-(~10 stacks, ~16 consumers, single-developer) the maintenance cost of
-a composition system (fragment ordering, merge correctness, generator
-debugging) exceeds the duplication it would eliminate. If we ever hit
-≥30 stacks or measurable drift incidents, the tool to reach for is
-[copier](https://copier.readthedocs.io) — purpose-built for
-template-with-resync — not ansible (which is fleet config, not
-template composition). Until then, documented copy-paste + reusable
-workflows cover ~80% of the benefit at ~5% of the cost.
+The beta-branch dial is how we test changes without coordinated
+fleet rollout:
 
-## Status & next-up
+- Push a change for one repo: commit on `release/beta/dodot`.
+- Push a change for one Stack: commit on `release/beta/rust-cli`.
+- Ship to fleet: merge to main, delete the beta branch.
 
-All shipped stack workflows ship to `@v1` (floating major); see
-`docs/breaking-changes.md` for the per-tag history. Consumers pin
-`@v1` and never need to track individual minor/patch tags.
+The burden lives in release's branch namespace. The cloud env
+template and the consumer's setup script never change for routine
+work; a new beta branch costs zero cloud-env clicks.
 
-- ✅ **rust-cli** — `@v1`. 6 consumers migrated.
-- 🚧 **electron-app** — `@v1`, slice 1 + 1.5. Consumers migrated:
-  `lex-fmt/lexed` ✅. `arthur-debert/simple-gal-ui` pending
-  migration. Windows builds opt-in and unsigned until slice 3;
-  e2e + auto-updater are slice 2. See #43 (closed for slice 1) +
-  follow-up issues.
-- 🚧 **rust-lib** — `@v1`. Consumers migrated:
-  `arthur-debert/clapfig` ✅, `arthur-debert/standout` ✅.
-  `lex-fmt/zed-lex` pending (needs `wasm32-wasip2` target — likely
-  fits a future `rustup-targets` input or a dedicated
-  `zed-extension` micro-stack).
-- 🚧 **go-cli** — `@v1`, slice 1. Pilot `arthur-debert/supage`
-  migration in flight. Slice 1 scope: cross-compile via Go's
-  built-in `GOOS`/`GOARCH` (darwin/arm64, linux/amd64, linux/arm64),
-  optional macOS sign + notarize via the shared `sign-mac` action,
-  GH release with rolled Keep-a-Changelog notes, Homebrew formula
-  rendered against the shared template and pushed to
-  `arthur-debert/homebrew-tools`. No registry-publish step — Go
-  modules are pulled from Git tags directly. Deferred: BATS e2e
-  smoke convention, Windows builds, security→patch glue.
-- ✅ **vscode-ext** — `@v1`. Pilot `lex-fmt/vscode` migrated +
-  verified end-to-end (0.10.2 → Marketplace + 4 platform VSIXes;
-  0.10.3 → Marketplace listing fix for the Eclipse namespace
-  claim). Open VSX publish currently off in the caller — pending
-  Eclipse Foundation approval of the `lex` namespace claim at
-  [EclipseFdn/open-vsx.org#10424](https://github.com/EclipseFdn/open-vsx.org/issues/10424).
-  Flip `publish-openvsx: true` in the caller once approved.
-  Supports per-target VSIX matrix,
-  `scripts/pre-vsce-package.sh` convention hook,
-  `--pre-release` threading.
-- ✅ **python-pkg** — `@v1`. Pilot `lex-fmt/mkdocs-lex`
-  migrated + verified end-to-end (`mkdocs-lex-plugin` 0.2.1 →
-  PyPI + GH release). `uv build` → sdist + wheel;
-  `uvx twine upload --skip-existing` → PyPI / TestPyPI.
-  Awk-based pyproject `[project].version` bump (zero toolchain
-  deps). Optional `scripts/pre-build.sh` hook.
-- ✅ **gh-action** — `@v1`. Canonical consumer = this repo
-  itself; dogfooded end-to-end via the v1.5.0 / v1.6.0 / v1.6.1
-  self-cuts. Tag + GH release + auto-advance of the floating-
-  major branch (`v1`, `v2`, …) — the dist channel for this
-  stack. GH Marketplace listing is tag-driven (one-time
-  repo-settings checkbox); nothing for CI to do. JS-action
-  `dist/` build slice deferred until the first JS-action
-  consumer surfaces.
-- ✅ **nvim-plugin** — `@v1`. Pilot `lex-fmt/nvim` migrated +
-  verified end-to-end (0.10.4 → tag + GH release with rolled
-  CHANGELOG notes, `M.version` constant bumped in
-  `lua/lex/init.lua` via the `version-file` input added in
-  v1.7.1). Tag + GH release with auto-rolled Keep-a-Changelog
-  notes; optional `version-file` bump for plugins carrying a
-  `M.version = "X.Y.Z"` Lua constant; optional `prep-script`
-  for consumer-specific bumps. Sanity check requires `lua/` or
-  `plugin/` directory. Smoke testing deliberately deferred to
-  a separate `nvim-plugin-test.yml` (PR-gate). Optional
-  rockspec publish: future slice.
-- ✅ **tree-sitter** — `@v1`. Pilot `lex-fmt/tree-sitter-lex`
-  migrated + verified end-to-end (0.10.4 → tree-sitter.tar.gz
-  on the GH release, bundle layout matches the contract,
-  corpus-test gate held, downstream-notify fan-out fired
-  successfully to vscode + lexed). nvim handler workflow has
-  its own bug — tracked at
-  [lex-fmt/nvim#59](https://github.com/lex-fmt/nvim/issues/59).
-  Build: `tree-sitter generate` + corpus tests (release-gating)
-  + `tree-sitter build --wasm`, assemble `tree-sitter.tar.gz`
-  containing the standard parser bundle (layout is contractual
-  with downstream callers — see footnote ³). Optional npm
-  publish (off by default; most parsers ship via tarball only).
-  `scripts/bundle-extras.sh` convention hook. Downstream
-  `repository_dispatch` notifications are out of scope of this
-  workflow (live in `cascade-handler.yml` + the consumer's
-  thin caller).
-- ✅ **tauri-app** — `@v1` (slice 1). Pilot
-  `arthur-debert/arami-app` migrated + verified end-to-end
-  (0.1.7 → mac signed/notarized .dmg + linux .deb / .AppImage
-  / .rpm on the GH release). Slice 1 scope: cross-platform
-  `tauri build` (mac/linux; windows opt-out-able), macOS
-  code-signing + notarization via Tauri's `APPLE_*` env vars,
-  per-platform bundle artifacts on the GH release, version
-  sync across all three Tauri version files (`package.json`,
-  `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`). Bot
-  bump commit passes the consumer's own pre-commit gate
-  (lefthook / pre-commit framework / husky) via
-  `.github/actions/run-precommit-gate` — eliminates the
-  format-drift class of failures from CI-driven releases.
-  Deferred slices: updater signing keys, universal macOS
-  binary, auto-updater server config, Linux package signing,
-  Windows build (needs consumer-side `.ico` generation).
-- 📋 **brew-tap** — not started. Tricky scope — the tap is the
-  destination of pushes from other repos, not a release target
-  itself. Likely workflow scope: tap-side validation (formula
-  syntax, audit), stale-formula sweep, cross-formula CI.
-- ✅ **Cross-repo artifact fetcher** —
-  [`bin/fetch-artifact`](bin/fetch-artifact) +
-  [`.github/actions/fetch-artifact/`](.github/actions/fetch-artifact/)
-  read the canonical `artifacts.json` schema (see
-  [`docs/artifacts-schema.md`](docs/artifacts-schema.md)) and install
-  pinned cross-repo binaries / source trees from GH releases. Used by
-  `scripts/setup-dev-env.sh` locally and by stack reusable workflows
-  in CI — single implementation, single bug surface. Unblocks the
-  electron-app / vscode-ext / nvim-plugin / python-pkg stack rollouts
-  (they all consume upstream artifacts).
-- ✅ **Cloud-session bootstrap** — `env/setup.sh` + canonical
-  `templates/setup-dev-env.sh` + `templates/.claude-settings.json`
-  deployed to all 16 consumer repos. Five iteration rounds folded
-  in: apt-package consolidation, Python venv self-heal, Chromium
-  NSS DB cert import (both system-bundle and standalone-PEM
-  layouts), no-lockfile npm fallback, venv-CLI exposure on the
-  agent's PATH. Local Docker harness (`tests/cloud-env-check/`)
-  validates changes without burning a cloud session.
-- 📋 next-up consumer migrations:
-  `arthur-debert/simple-gal-ui` (electron-app),
-  `lex-fmt/zed-lex` (rust-lib + wasm32-wasip2),
-  `arthur-debert/simple-gal-action` (after gh-action JS-build
-  slice ships).
-- ✅ **Pre-commit gate for bot-bump commits** — `v1.7.6`.
-  `.github/actions/run-precommit-gate` (canonical reference)
-  + equivalent shell inlined into every bot-committing prepare
-  step (3 composite actions + 3 inline workflows). Auto-
-  detects lefthook / pre-commit framework / husky in the
-  consumer; runs the gate on staged files before
-  `chore: Release vX.Y.Z` is committed; re-stages auto-fixes
-  (prettier --write, eslint --fix, lefthook
-  `stage_fixed: true`) so the bot commit captures them.
-  Closes the prettier-drift class of failures where CI-driven
-  releases land mis-indented version-file bumps that trip the
-  consumer's regular CI on the next push. Standardize-ops
-  alternative to per-stack format patches. First validated on
-  the `arami-app` 0.1.7 release.
+### Branch hygiene
 
-Order is driven by: (a) is there a consumer blocked on it today,
-(b) does shipping the row unblock several at once. We complete one
-stack vertically (every column on a row) before starting the next.
+`bin/release-beta-list` reports open `release/beta/*` branches with
+age and ahead-of-main count. Stale betas are visible; the convention
+is delete-on-merge.
 
-## Claude Code on the web (cloud session distribution)
+## Local and cloud orchestration
 
-Separate from the CI infrastructure above, this repo also provisions
-**Claude Code on the web** sessions across the portfolio in two
-complementary layers.
+The portfolio runs across two execution environments — Claude Code
+on the web (cloud) and Claude Code locally. The infrastructure is
+designed to be identical in both.
 
-### Layer 1 — env (once per Claude environment)
+### Cloud env layer
 
-[`env/setup.sh`](env/setup.sh) is pasted into the **Setup script**
-field at [claude.ai/code](https://claude.ai/code) → environment
-settings, once. It runs as root, gets snapshotted, and seeds:
+[`env/setup.sh`](env/setup.sh) is pasted once into the
+[claude.ai/code](https://claude.ai/code) **Setup script** field per
+environment. It seeds:
 
-- OS-level tooling: `gh`, `lefthook`, `bats`, `@vscode/vsce`, `ovsx`,
-  `lua5.4` + `luarocks` + `busted` + `vusted` + `luacheck`,
-  `neovim` ≥0.11 (the apt package on noble is 0.9.5 which is too old
-  for current `nvim-lspconfig`, so we overlay the official stable
-  tarball under `/usr/local`), `xvfb`, `libnss3-tools` (provides
-  `certutil` for the per-session Chromium NSS cert import), the
-  Tauri/GTK system libs (`libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
-  `libsoup-3.0-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
-  `libjavascriptcoregtk-4.1-dev`), and `uuid-runtime`.
-- `~/.claude/skills/*` cloned from this repo (standalone skills picked
-  up by Claude Code at session start, no plugin install / trust
-  prompt).
-- `~/.claude/CLAUDE.md` from [`env/CLAUDE.md`](env/CLAUDE.md) —
-  user-level instructions loaded into every cloud session in that
-  env.
+- OS tooling: `gh`, `lefthook`, `bats`, `vsce`, `ovsx`, Lua +
+  luarocks + busted + vusted, Neovim ≥0.11, `xvfb`,
+  `libnss3-tools`, Tauri's GTK system libs.
+- `~/.claude/skills/*` — standalone skills cloned from this repo.
+- `~/.claude/CLAUDE.md` — user-level instructions from
+  [`env/CLAUDE.md`](env/CLAUDE.md).
+- `~/release` — a shallow blobless clone of this repo, pinned to
+  `main`. Re-fetched on each session start by `release-sync`.
 
-Per-env config that sits alongside the script:
+Pasted once per Claude environment; touched only when env-level deps
+change. The `# version:` header invalidates the cached snapshot when
+bumped.
 
-1. `GH_TOKEN=<fine-grained PAT>` in the env-vars field, scoped
-   `Contents/Issues/Pull requests: Read and write` on the related-repo
-   group. `gh` reads it automatically.
-2. (Optional, recommended) The
-   [Claude GitHub App](https://github.com/apps/claude) installed on
-   the relevant orgs so **Auto-fix** fires on review comments.
+### Per-session layer
 
-Updates land by pushing here, bumping the `# version:` header in
-`env/setup.sh`, and re-pasting in the env UI. The version-header bump
-invalidates the cached snapshot; the next session re-clones.
-
-### Layer 2 — per-session (in each consumer repo)
-
-Every onboarded repo carries `scripts/setup-dev-env.sh` and
+Every onboarded repo carries `scripts/setup-dev-env.sh` +
 `.claude/settings.json`, both seeded from
-[`templates/setup-dev-env.sh`](templates/setup-dev-env.sh) and
-[`templates/.claude-settings.json`](templates/.claude-settings.json).
+[`templates/commons/scripts/setup-dev-env.sh`](templates/commons/scripts/setup-dev-env.sh) and
+[`templates/commons/.claude/settings.json`](templates/commons/.claude/settings.json).
 The settings file registers a SessionStart hook that runs the script
-on every session start (and resume); the script:
+on session start and resume. The script:
 
-- Restores submodules + tags (cloud clones are shallow).
-- Installs project deps via the right tool for the stack (cargo
-  fetch / npm install — with a no-lockfile fallback — / yarn / pnpm
-  / bundler / pip into `.venv`, self-healing partial venvs).
-- Imports the sandbox-egress TLS-inspecting CA into `~/.pki/nssdb`
-  so Chromium / Electron / Playwright don't reject HTTPS resources
-  with `ERR_CERT_AUTHORITY_INVALID`. Probes both layouts seen in the
-  cloud env (in-bundle and standalone-PEM under
-  `/etc/ssl/certs/swp-ca-*.pem`).
-- Symlinks every `.venv/bin/*` executable (except python/pip/activate
-  family) into `~/.local/bin/` so `subprocess.run(['mkdocs', ...])`
-  (and similar test patterns) resolve venv-installed CLIs without
-  needing the venv activated. The cloud Bash tool's non-interactive
-  shells inherit a fixed PATH and don't source `~/.bashrc`, so this
-  symlink dance is the load-bearing PATH-exposure mechanism.
-- Wires `lefthook install` (or falls back to symlinking a
-  repo-local `scripts/pre-commit`).
-- Below an explicit marker, consumers append project-local extras
-  (Xvfb daemon start for Electron repos, pinned-binary fetches via
-  `shared/lex-deps.json`, etc.).
+- Runs `release-sync` (target model; see propagation above).
+- Restores submodules, fetches tags.
+- Installs project deps via the right tool for the Stack (cargo
+  fetch / npm / yarn / pnpm / bundler / pip into `.venv`,
+  self-healing partial venvs).
+- Imports the sandbox-egress CA into `~/.pki/nssdb` so Chromium /
+  Electron / Playwright don't reject HTTPS with
+  `ERR_CERT_AUTHORITY_INVALID`.
+- Symlinks `.venv/bin/*` into `~/.local/bin/` so non-interactive
+  Bash sessions resolve venv-installed CLIs without an active venv.
+- Wires `lefthook install` (or falls back to symlinking
+  `scripts/pre-commit`).
 
-Re-syncing the canonical: copy `templates/setup-dev-env.sh` verbatim
-into the consumer's `scripts/setup-dev-env.sh`, preserve everything
-below the marker, commit.
-[`tests/cloud-env-check/`](tests/cloud-env-check/) validates the
-chain locally with a Docker image that approximates the cloud Ubuntu
-base, so template edits don't have to round-trip through a real cloud
-session to find regressions.
+### SDK orchestrator harness 🚧
 
-### Currently shipped skills
+Goal: a local Python harness that drives multi-repo work the same
+way a human would, using the [Claude Agent SDK](https://docs.anthropic.com/en/api/agent-sdk)
+(`claude_agent_sdk`, or `claude -p` for shell glue). One
+`ProjectSession` per consumer, each with its own `cwd` and
+`setting_sources=["project"]` so the consumer's `.claude/` config is
+the source of truth.
 
-- **`pr-review-respond`** — reply to and resolve PR review comments
-  using `gh` + `jq`. Cloud-native alternative to the local
-  `gh-pr-resolve-thread` script. Handles both Copilot and Gemini
-  reviews; encodes pushback patterns for the four recurring wrong
-  suggestions.
-- **`gh-repo-setup`** — brings a repo up to the canonical release-loop
-  setup (branch-protection ruleset, per-stack policy files,
-  copilot-review wiring). Idempotent. Used when onboarding a new repo
-  or verifying alignment.
-- **`release-issue-relay`** — escalates infrastructure friction back
-  to `arthur-debert/release`. Invoked when a cloud session hits a
-  problem the consumer repo can't fix in place (workflow misbehavior,
-  broken policy template, helper-script bug).
-- **`lex-primer`** — primer for writing and reading `.lex` documents
-  (Lex is not Markdown; the skill teaches the syntax).
+Why now: cloud sessions handle single-repo, event-triggered work
+well — Auto-fix wakes a fresh cloud session when review comments
+or check failures land (see "The agentic PR loop" above). What
+cloud cannot do is **cross-repo, human-initiated** work — rolling
+a v1.8 change across 6 rust-cli consumers, driving a multi-PR epic
+through lex's 3-deep dependency cascade, auditing take-iii against
+affected repos before merge. The orchestrator handles exactly that
+slice; it does not duplicate the cloud's PR-loop event handling.
 
-### Where this is heading
+Billing: subscription-billed via the local `claude` CLI's OAuth
+token, *provided* `ANTHROPIC_API_KEY` is unset in the orchestrator's
+environment. From 2026-06-15 onward, Agent SDK / `claude -p` usage
+on subscription plans draws from a separate monthly credit pool.
 
-See [`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex)
-for the broader workflow vision and
-[`docs/proposals/phased-rollout.lex`](docs/proposals/phased-rollout.lex)
-for the execution plan. Phase 1 (this work) unifies the local-only and
-cloud-distribution mechanisms under one main branch.
+Design TBD; lives at `orchestrator/` in this repo for now —
+keeping it single-repo to avoid re-introducing the file-distribution
+problem the rest of this doc fights against.
+
+### Cross-compile spike 🚧
+
+Goal: build Linux and Windows artifacts from a macOS host using
+container-based cross-compile. Tauri ships official guidance; the
+same approach works for plain Rust and Electron. Order:
+
+1. `rust-cli` first — cheapest, biggest payoff. Unlocks full local
+   end-to-end release for the Stack with the most consumers.
+2. `tauri-app` — Tauri's docs cover this directly.
+3. `electron-app` — electron-builder + Wine in container.
+
+Payoff: typo-class bugs caught locally in seconds instead of
+through a 30-minute CI loop.
 
 ## Versioning
 
 | Bump | Trigger |
 |---|---|
-| PATCH (`v1.2.3` → `v1.2.4`) | bug fix in any composite action, no input changes |
+| PATCH (`v1.2.3` → `v1.2.4`) | bug fix, no input changes |
 | MINOR (`v1.2.x` → `v1.3.0`) | new optional input, new opt-in feature, new category workflow |
 | MAJOR (`v1.x.x` → `v2.0.0`) | required-input rename, default behavior change, removed input |
 
-Tags: plain `vX.Y.Z`. Floating major: the `v1` branch always points at
-the latest non-breaking tag. Consumers pin `@v1` for floating, `@v1.2.3`
-for exact. Anything that forces every consumer to edit their thin
-caller is a MAJOR — coordinate the bump with all consumers before
-cutting it.
+Tags: plain `vX.Y.Z`. Floating major: the `v1` branch always points
+at the latest non-breaking tag. Anything that forces every consumer
+to edit their thin caller is a MAJOR — coordinate the bump with all
+consumers before cutting it.
+
+See [`docs/breaking-changes.md`](docs/breaking-changes.md) for the
+per-tag history.
 
 ## Layout
 
 ```
 .github/
-  workflows/                  # reusable workflows (one per category, "W")
-  actions/                    # composite actions, called inside workflows ("A")
-bin/                          # human-runnable policy tools (apply-ruleset,
-                              # sweep-github-policy, install-release-secrets,
-                              # install-release-token, detect-stack)
-                              # on PATH via the dodot release pack
-rulesets/                     # ruleset JSON templates for branch protection
-scripts/                      # CI scripts exec'd by composite actions ("S")
-templates/
-  setup-dev-env.sh            # canonical per-session bootstrap copied into
-                              # each consumer's scripts/setup-dev-env.sh
-  .claude-settings.json       # SessionStart hook config; copied into each
-                              # consumer's .claude/settings.json
-  rust/                       # stack-specific policy files swept into consumers
-  commons/                    # cross-cutting copy-once snippets (markdown/
-                              # yaml/shell lefthook fragment, etc.) — paste
-                              # into the consumer's stack template, drift
-                              # acceptable. See "Composition principle"
-                              # section above.
-  homebrew-formula.rb.tmpl    # render template
+  workflows/          reusable workflows (one per Stack)
+  actions/            composite actions (Components, called inside workflows)
+bin/                  human-runnable tooling, on $PATH via dodot release pack:
+                      apply-ruleset, sweep-github-policy,
+                      install-release-{secrets,token}, detect-stack,
+                      audit-portfolio, the gh-pr-* loop helpers,
+                      release-sync, release-beta-list
+rulesets/             branch-protection JSON templates
+scripts/              CI scripts exec'd by composite actions
+templates/            path-mirror layout — sync destination = source path
+                      minus the commons/, components/<c>/, or <stack>/ prefix
+  commons/            synced to every consumer (setup-dev-env.sh,
+                      .claude/settings.json)
+  components/<c>/     synced to consumers whose Stack declares <c>; each
+                      Component ships its config files + a
+                      lefthook.fragment.yaml (composition input for the
+                      generated lefthook.yml). See
+                      docs/references/component-model.md
+  <stack>/            Stack-specific recipe: manifest.yaml (default
+                      Components) + optional lefthook.fragment.yaml +
+                      any Stack-specific files
+  render/             render templates (NOT synced — used by CI to
+                      produce per-release artifacts like brew formulae)
+orchestrator/         🚧 Python harness for local multi-repo
+                      orchestration via Claude Agent SDK
+env/                  cloud-session setup.sh + user-level CLAUDE.md
+skills/               canonical portfolio Claude Code skills, cloned
+                      to ~/.claude/skills/ in cloud sessions via
+                      env/setup.sh:
+                      - gh-pr-review-loop  (drive a PR through the
+                        canonical arthur-debert/* PR pipeline)
+                      - gh-repo-setup      (onboard a new repo to the
+                        canonical .github/ + RELEASE_TOKEN setup)
+                      - pr-review-respond  (Copilot/Gemini triage
+                        without bin/ helpers)
+                      - release-issue-relay (file infra bugs against
+                        release/ from inside a consumer)
+                      - lex-primer         (writing valid .lex content)
+                      - lex-multirepo      (cross-repo work in lex-fmt/*)
+                      - padz-for-agents    (use padz for notes across
+                        agent sessions)
+                      - electron-e2e-testing (canonical window.__e2e
+                        runtime contract for electron Stacks)
+                      - macos-signing-notarization (mac code-signing +
+                        notarization in CI for electron Stacks)
+                      Personal/user-only skills (gws-*, recipe-*,
+                      persona-*) stay under ~/.claude/skills/ — not
+                      portfolio-canonical.
+docs/
+  per-category/       input shapes per Stack
+  proposals/          spec docs + rollout plans
+  references/         design notes
 tests/
-  cloud-env-check/            # local Docker harness — approximates cloud
-                              # Ubuntu base, runs env/setup.sh + a consumer's
-                              # setup-dev-env.sh + lefthook + tests; reports
-                              # the first failing step
-  fixtures/                   # tiny synthetic projects per category,
-                              # exercised by _ci.yml
-skills/                       # standalone Claude Code skills (one dir per
-                              # skill, name = dir; cloned into
-                              # ~/.claude/skills/ in cloud sessions by
-                              # env/setup.sh)
-env/                          # cloud-session env helpers — setup.sh +
-                              # CLAUDE.md; paste-into-Cloud-UI script +
-                              # user-level prompt
-docs/                         # consumer guide, secrets, breaking-changes
-                              # log, proposals/ for spec docs and rollout
-                              # plans
-examples/                     # paste-ready consumer release.yml files
+  cloud-env-check/    local Docker harness approximating cloud Ubuntu
+  fixtures/           tiny synthetic projects per Stack
+examples/             paste-ready consumer release.yml files
 ```
 
-The path convention is `~/h/release/`. Per-machine portability is not a
-goal — this is single-developer infrastructure, and the path is
-recorded in agent memories so tools can find scripts here without
-re-discovery.
+Path convention is `~/h/release/`. Per-machine portability is not a
+goal — this is single-developer infrastructure.
 
 ## See also
 
-- [Secrets and onboarding](docs/secrets.md)
+- [Vision: agentic dev workflow](docs/proposals/agentic-dev-workflow.lex)
+- [Phased rollout](docs/proposals/phased-rollout.lex)
 - [Per-category input shapes](docs/per-category/)
 - [Breaking changes log](docs/breaking-changes.md)
-- [Agentic dev-workflow vision](docs/proposals/agentic-dev-workflow.lex)
-- [Phased rollout plan](docs/proposals/phased-rollout.lex)
+- [Artifacts schema](docs/artifacts-schema.md)
+- [Lex release cascade](docs/lex-release-cascade.md)
+- [`CLAUDE.md`](CLAUDE.md) — working on this repo itself

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Anchor at repo root so `gofmt -l .` works whether invoked from
+# `bin/check-fmt` (cwd=repo) or `bin/` (cwd=bin/). Doesn't disturb
+# callers that already cd'd to the right place — the cd is a no-op
+# if SCRIPT_DIR/.. is already cwd.
+cd "$(cd "$(dirname "$0")/.." && pwd)"
+
 echo "Checking formatting..."
 # gofmt -l emits one filename per unformatted file. We can't use the exit
 # code as the gate — it exits 0 even when files are unformatted; the

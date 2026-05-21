@@ -1,0 +1,198 @@
+name: mkdocs (build + deploy)
+
+# Reusable workflow: build mkdocs site with --strict (always), deploy
+# to GitHub Pages on pushes to the default branch. Plugin-agnostic —
+# uses whatever the consumer's `requirements` file installs.
+#
+# Typical thin caller in a consumer:
+#
+#   name: Docs
+#   on:
+#     push:
+#       branches: [main]
+#       paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+#     pull_request:
+#       paths: ['docs/**', 'mkdocs.yml']
+#     workflow_dispatch:
+#   permissions:                  # ALL THREE required even for build-only
+#     contents: read              # callers — GitHub validates callee
+#     pages: write                # permissions upfront, including jobs
+#     id-token: write             # that won't run due to `if:` guards.
+#   jobs:
+#     docs:
+#       uses: arthur-debert/release/.github/workflows/mkdocs.yml@v1
+#       with:
+#         requirements: docs/requirements.txt   # consumer's pin file
+#         # deploy: 'false'      # opt-out of deploy; build runs anyway
+#
+# Deploy only fires on `push` to the default branch. PRs and non-main
+# branches just exercise the build (strict) for verification.
+#
+# Why all three permissions: GitHub validates that caller permissions
+# are ≥ callee permissions at workflow-load time, BEFORE evaluating
+# `if:` conditions. The deploy job's `pages: write` + `id-token: write`
+# trigger the check even when `deploy: false` means it won't run.
+# Granting all three on the caller is the price; missing any → startup
+# failure with "workflow file issue" (no further detail in the UI).
+
+on:
+  workflow_call:
+    inputs:
+      config-file:
+        description: 'Path to mkdocs.yml. Default: ./mkdocs.yml at repo root.'
+        type: string
+        required: false
+        default: 'mkdocs.yml'
+
+      requirements:
+        description: |
+          Path to the python requirements file that pins mkdocs + theme
+          + plugins. Default `docs/requirements.txt` (dodot pattern).
+          Set to '' if the consumer installs deps another way
+          (overridden by `pre-install-cmd`).
+        type: string
+        required: false
+        default: 'docs/requirements.txt'
+
+      pre-install-cmd:
+        description: |
+          Optional shell command to run before the build (e.g. `uv sync`,
+          `poetry install --only docs`). When set, `requirements` is
+          ignored and this command is used instead.
+        type: string
+        required: false
+        default: ''
+
+      site-dir:
+        description: 'Build output directory. Default `site`.'
+        type: string
+        required: false
+        default: 'site'
+
+      python-version:
+        description: 'Python version to install.'
+        type: string
+        required: false
+        default: '3.x'
+
+      runner:
+        description: 'Runner label (passed through as `runs-on`).'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+      timeout:
+        description: 'Job timeout in minutes (each job; passed through as `timeout-minutes`).'
+        type: number
+        required: false
+        default: 15
+
+      deploy:
+        description: |
+          Override the default deploy behavior. Default (empty) means
+          "deploy on push to main, otherwise just build". Set `false`
+          to never deploy (build-only); set `true` to force deploy
+          even on PR (rarely useful — typically for restoring after a
+          regression).
+        type: string
+        required: false
+        default: ''
+
+      strict:
+        description: |
+          Pass `--strict` to `mkdocs build` so warnings (broken refs,
+          missing nav entries, unparseable links) fail the build.
+          Default true — the canonical posture. Consumers carrying
+          historical warnings can opt out (`strict: false`) during
+          initial adoption and flip back to true once their docs are
+          clean. Don't keep `false` permanently — it silently lets
+          docs rot.
+        type: boolean
+        required: false
+        default: true
+
+# Per-job permissions so build-only callers can grant only
+# `contents: read` without inheriting pages/id-token (which would
+# otherwise force every caller to grant those even when not
+# deploying — GitHub's reusable-workflow rule: caller permissions
+# must be ≥ callee declaration).
+
+# Per-ref concurrency: a second push to main shouldn't fight an
+# in-flight deploy. `cancel-in-progress: false` lets the current
+# deploy finish; the second run waits.
+concurrency:
+  group: mkdocs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    outputs:
+      site-dir: ${{ inputs.site-dir }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history for git-revision-date plugins
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+          # Don't fail when the consumer doesn't have a requirements file —
+          # `pre-install-cmd` may handle the install differently.
+          cache-dependency-path: ${{ inputs.requirements }}
+
+      - name: Install docs dependencies
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.pre-install-cmd }}" ]; then
+            echo "Running pre-install-cmd: ${{ inputs.pre-install-cmd }}"
+            bash -c "${{ inputs.pre-install-cmd }}"
+          elif [ -n "${{ inputs.requirements }}" ] && [ -f "${{ inputs.requirements }}" ]; then
+            echo "Installing from ${{ inputs.requirements }}"
+            pip install -r "${{ inputs.requirements }}"
+          else
+            echo "::warning::No requirements file at ${{ inputs.requirements }} and no pre-install-cmd. Installing bare mkdocs only — likely to fail if the consumer's mkdocs.yml uses plugins/theme."
+            pip install mkdocs
+          fi
+
+      - name: Build
+        run: |
+          # `--strict` default true; consumer-overridable for initial
+          # adoption when historical warnings exist.
+          strict_flag=""
+          if [ "${{ inputs.strict }}" = "true" ]; then
+            strict_flag="--strict"
+          fi
+          mkdocs build $strict_flag --config-file "${{ inputs.config-file }}"
+
+      - name: Upload site artifact
+        if: |
+          inputs.deploy == 'true' ||
+          (inputs.deploy != 'false' && github.event_name == 'push' &&
+           github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ inputs.site-dir }}
+
+  deploy:
+    needs: build
+    if: |
+      inputs.deploy == 'true' ||
+      (inputs.deploy != 'false' && github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

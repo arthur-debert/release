@@ -1,0 +1,35 @@
+# shell-quality lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only (no auto-fix and re-stage).
+
+pre-commit:
+  commands:
+    markdownlint:
+      glob: "**/*.md"
+      run: markdownlint {staged_files}
+      priority: 2
+    yamllint:
+      glob: "**/*.{yml,yaml}"
+      run: yamllint {staged_files}
+      priority: 2
+    shellcheck:
+      # Extensionless executables under scripts/ and bin/ are the
+      # portfolio convention (`scripts/check`, `bin/release-create`,
+      # `scripts/release/publish`, etc.). Recursive `**` so nested
+      # subdirectories are covered too.
+      #
+      # exclude: list filters out common non-shell file types that
+      # may legitimately live under scripts/ or bin/ (README.md, a
+      # tool's .json config, a Python helper). Shell-extension files
+      # (*.sh / *.bash) anywhere in the tree still match via the
+      # first glob entry. False positives from less common types (a
+      # Lua script in scripts/, say) will fail shellcheck loudly —
+      # acceptable signal to rename or move.
+      glob:
+        - "**/*.{sh,bash}"
+        - "scripts/**"
+        - "bin/**"
+      exclude:
+        - "**/*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
+      run: shellcheck {staged_files}
+      priority: 2

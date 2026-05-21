@@ -1,0 +1,252 @@
+name: Rust CI
+
+# Reusable PR-time check workflow for rust-cli / rust-lib consumers.
+#
+# Closes the "CI workflow reusability gap" called out in README.md.
+# Where `rust-cli.yml` covers the release path, this workflow covers
+# every push / pull_request: run the canonical `bin/check` umbrella,
+# optionally build a release binary, optionally run bats e2e against
+# that binary.
+#
+# Design choices worth knowing:
+#
+#  * **`bin/check` is the canonical call.** Consumers that have adopted
+#    the take-iii Component model already ship `bin/check` (synced by
+#    release-sync from the rust-quality + shell-quality Components).
+#    Fix-once-propagate works because the script lives in the consumer
+#    tree and is the same shape across the fleet.
+#
+#  * **Minimal permissions, declared at both levels.** Top-level
+#    `permissions: contents: read` is the union; per-job blocks repeat
+#    `contents: read` for explicitness — GitHub validates
+#    reusable-workflow permission compatibility at workflow-load time
+#    against every job in the callee, even ones gated by `if:` (see
+#    feedback_reusable_workflow_permissions_upfront). The caller can
+#    mirror with a single `contents: read` at workflow level.
+#
+#  * **`Swatinem/rust-cache@v2` via the shared `setup-rust` composite.**
+#    Caching is mandatory per CLAUDE.md ("without it a 2-minute Rust
+#    job balloons to 10").
+#
+#  * **`binary-name` + `bats` are tied by convention.** When
+#    `binary-name` is set, the check job uploads
+#    `<binary-name>-linux`. When `bats: true` and `binary-name` is set,
+#    the e2e job downloads that artifact and exports
+#    `<BINARY_NAME_UPPER>_BIN` (e.g. `DODOT_BIN`) pointing at the
+#    workspace-relative binary. This matches dodot's hand-rolled
+#    pattern verbatim so the migration is a no-op behaviorally.
+#
+#  * **Sparse checkout for e2e.** Only `tests/e2e` and `bin` are
+#    needed once the binary is downloaded — keeps the e2e job fast.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/rust-ci.yml@v1
+#       with:
+#         binary-name: my-cli   # optional
+#         bats: true            # optional
+#         # extra-targets: 'wasm32-wasip2'   # for zed-lex-style projects
+#         # pre-test: scripts/prep-fixtures  # if you need a build hook
+#
+# See docs/per-stack/rust-ci.md for the full input reference.
+
+on:
+  workflow_call:
+    inputs:
+      extra-targets:
+        description: |
+          Space-separated additional rustup targets to install. Passed
+          through to the shared `setup-rust` composite, which forwards
+          to dtolnay/rust-toolchain `targets:` AND re-runs
+          `rustup target add <value>` — the latter is strictly
+          space-separated, so commas will fail there. Example:
+          `wasm32-wasip2` for the zed-lex extension. Most consumers
+          only need a single target. Empty (default) skips.
+        type: string
+        required: false
+        default: ''
+
+      pre-test:
+        description: |
+          Optional path to a script the consumer runs before `bin/check`
+          (e.g. grammar download, fixture prep, codegen). Empty (default)
+          skips the pre-step.
+        type: string
+        required: false
+        default: ''
+
+      bats:
+        description: |
+          Opt into a second `e2e` job that installs bats-core and calls
+          the consumer's `bin/check-e2e` (canonical bats runner from the
+          `bats` Component). When true, the e2e job runs after `check`.
+        type: boolean
+        required: false
+        default: false
+
+      binary-name:
+        description: |
+          When set, the check job runs `cargo build --release -p
+          <binary-name>` (cargo `-p` = workspace PACKAGE, not bin
+          target). Convention across the fleet: the package name and
+          the produced binary file name are the same string (dodot,
+          padz, lex, supage all line up this way; matches what
+          rust-cli.yml's release workflow assumes via `bin-name`).
+          The compiled binary is uploaded as `<binary-name>-linux`.
+          The e2e job (if `bats: true`) downloads that artifact and
+          exposes it via `<BINARY_NAME_UPPER>_BIN` (e.g. `DODOT_BIN`).
+          If your package name and binary name diverge, this input
+          isn't the right shape for you — file an issue.
+          Empty (default) skips the build + upload.
+        type: string
+        required: false
+        default: ''
+
+      runner:
+        description: 'GitHub runner label for both jobs.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+      timeout:
+        description: 'Per-job timeout in minutes.'
+        type: number
+        required: false
+        default: 30
+
+      fetch-depth:
+        description: |
+          Forwarded to `actions/checkout`'s `fetch-depth`. Default `1`
+          (shallow, matches checkout's own default). Set `0` (full
+          history) when the consumer's checks need git history —
+          e.g. a "diff since N commits ago" test (rustloc#57 surfaced
+          this) or any rustdoc / changelog tooling that walks tags.
+          Only affects the `check` job's checkout. The `e2e` job uses
+          a sparse checkout that doesn't need this knob.
+        type: number
+        required: false
+        default: 1
+
+      submodules:
+        description: |
+          Forwarded to `actions/checkout`'s `submodules`. Default
+          `false`. Set `true` for "first-level submodules" or
+          `'recursive'` for nested submodules. lex-fmt/lex needs
+          `recursive`; most consumers don't have submodules.
+        type: string
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: ${{ inputs.fetch-depth }}
+          submodules: ${{ inputs.submodules }}
+
+      - name: Setup Rust (toolchain + cache)
+        uses: arthur-debert/release/.github/actions/setup-rust@v1
+        with:
+          components: clippy, rustfmt
+          targets: ${{ inputs.extra-targets }}
+
+      - name: Install cargo-nextest
+        # Canonical test runner used by bin/check-tests across the fleet.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Run pre-test
+        if: inputs.pre-test != ''
+        run: bash "${{ inputs.pre-test }}"
+
+      - name: Run canonical checks (bin/check)
+        # THE point of this workflow: every consumer runs the same
+        # umbrella (fmt + lint + tests). Fix once in the rust-quality
+        # Component, propagate via release-sync, every consumer's CI
+        # picks it up on the next run.
+        run: bin/check
+
+      - name: Build release binary
+        if: inputs.binary-name != ''
+        run: cargo build --release -p ${{ inputs.binary-name }}
+
+      - name: Upload binary
+        if: inputs.binary-name != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-linux
+          path: target/release/${{ inputs.binary-name }}
+          # Fail loudly when the binary is missing — silent success
+          # masks misconfiguration (wrong binary-name, build skipped).
+          if-no-files-found: error
+
+  e2e:
+    if: inputs.bats
+    needs: check
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (sparse — e2e + bin only)
+        uses: actions/checkout@v6
+        with:
+          # Pulls just what `bin/check-e2e` needs: the bats suite and
+          # the canonical runner. Keeps the e2e job fast (the binary
+          # comes in via download-artifact, not from source).
+          sparse-checkout: |
+            tests/e2e
+            bin
+          # Submodules forwarded here too — some e2e suites need them
+          # (e.g. lex's bats tests reference comms submodule fixtures).
+          submodules: ${{ inputs.submodules }}
+
+      - name: Download binary
+        if: inputs.binary-name != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.binary-name }}-linux
+
+      - name: Install bats-core
+        # Canonical install via the bats-core marketplace action — same
+        # one used by bats-e2e.yml. Matches the `bats` Component docs.
+        uses: bats-core/bats-action@4.0.0
+
+      - name: Run E2E tests
+        env:
+          BINARY_NAME: ${{ inputs.binary-name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "$BINARY_NAME" ]; then
+            # Convention: when binary-name is set, expose it as
+            # <BINARY_NAME_UPPER>_BIN for the bats suite to consume.
+            # dodot's suite reads DODOT_BIN; lex would read LEX_BIN; etc.
+            chmod +x "$BINARY_NAME"
+            VAR_NAME="$(echo "$BINARY_NAME" | tr '[:lower:]-' '[:upper:]_')_BIN"
+            export "$VAR_NAME=${GITHUB_WORKSPACE}/${BINARY_NAME}"
+            echo "Exposed ${VAR_NAME}=${GITHUB_WORKSPACE}/${BINARY_NAME}"
+          fi
+          bin/check-e2e

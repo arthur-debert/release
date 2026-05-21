@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# List open release/beta/* branches in $RELEASE_HOME with age + commits
+# ahead of main. Convention is delete-on-merge; this is the report that
+# makes stale betas visible.
+#
+# Usage:
+#   release-beta-list
+#
+# Reads $RELEASE_HOME (default $HOME/release). Fetches origin first so
+# the output reflects the remote, not stale local refs.
+#
+# Output columns:
+#   branch         age   ahead-of-main
+#
+# Exit codes:
+#   0  — listed (no open betas is still success; prints "(none)")
+#   1  — fatal error
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+case "${1:-}" in
+  -h|--help) show_help; exit 0 ;;
+  '') : ;;
+  *) echo "unknown arg: $1" >&2; show_help >&2; exit 64 ;;
+esac
+
+RELEASE_HOME=${RELEASE_HOME:-$HOME/release}
+if [ ! -d "$RELEASE_HOME/.git" ]; then
+  echo "release-beta-list: \$RELEASE_HOME='$RELEASE_HOME' is not a git clone" >&2
+  exit 1
+fi
+
+git -C "$RELEASE_HOME" fetch --quiet --prune origin
+
+# Collect betas with their relative age, tab-separated.
+betas=$(git -C "$RELEASE_HOME" for-each-ref \
+  --sort=-committerdate \
+  --format='%(refname:short)%09%(committerdate:relative)' \
+  refs/remotes/origin/release/beta/ 2>/dev/null || true)
+
+if [ -z "$betas" ]; then
+  echo "(none)"
+  exit 0
+fi
+
+printf '%-44s  %-18s  %s\n' "branch" "age" "ahead-of-main"
+printf '%-44s  %-18s  %s\n' "------" "---" "-------------"
+
+while IFS=$'\t' read -r ref age; do
+  short=${ref#origin/}
+  ahead=$(git -C "$RELEASE_HOME" rev-list --count "origin/main..$ref" 2>/dev/null || echo "?")
+  printf '%-44s  %-18s  %s\n' "$short" "$age" "$ahead"
+done <<< "$betas"

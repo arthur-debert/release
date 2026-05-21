@@ -1,0 +1,35 @@
+# rust-quality lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only.
+#
+# rust-quality intentionally ships no config files — rustfmt's defaults
+# match the portfolio (0/21 repos override). Add a templates/components/
+# rust-quality/rustfmt.toml here if defaults need to change for everyone.
+
+pre-commit:
+  commands:
+    cargo-fmt:
+      # rustfmt.toml in the glob so format-config changes trigger a
+      # re-check of formatting against the new rules.
+      glob:
+        - "**/*.rs"
+        - "**/rustfmt.toml"
+      run: cargo fmt --all -- --check
+      priority: 2
+    cargo-clippy:
+      # Match any Rust source OR Cargo manifest OR Cargo.lock. Dependency
+      # / feature changes trigger clippy the same as code edits — and
+      # Cargo.lock specifically because new dep versions can introduce
+      # new clippy warnings (deprecations, lint upgrades). Other TOMLs
+      # (clippy.toml, tooling configs) are intentionally NOT in the
+      # glob — they don't affect what clippy reports.
+      glob:
+        - "**/*.rs"
+        - "**/Cargo.toml"
+        - "**/Cargo.lock"
+      # --workspace + --all-features matches what every rust-cli /
+      # rust-lib consumer's CI runs (scripts/check-lint). Pre-commit
+      # signal needs to mirror CI; otherwise commits pass hooks but
+      # fail CI, which is the failure mode we're trying to eliminate.
+      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      priority: 2

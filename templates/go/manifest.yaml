@@ -1,0 +1,7 @@
+# Stack default manifest for `go` (detected via go.mod).
+# Consumers can override with `.release-sync.yaml` at their repo root.
+
+stack: go
+components:
+  - shell-quality
+  - go-quality
