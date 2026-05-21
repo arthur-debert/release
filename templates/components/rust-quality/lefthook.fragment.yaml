@@ -27,9 +27,17 @@ pre-commit:
         - "**/*.rs"
         - "**/Cargo.toml"
         - "**/Cargo.lock"
-      # --workspace + --all-features matches what every rust-cli /
-      # rust-lib consumer's CI runs (scripts/check-lint). Pre-commit
-      # signal needs to mirror CI; otherwise commits pass hooks but
-      # fail CI, which is the failure mode we're trying to eliminate.
-      run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # No `--workspace` flag: clippy without it lints the workspace's
+      # `[workspace.default-members]` (which defaults to ALL members when
+      # not set). Consumers with target-specific crates that can't
+      # host-compile (e.g. lex-fmt/lex's `lex-wasm`) declare
+      # `default-members` in their root Cargo.toml excluding those
+      # crates, and the host hook stops trying to lint them. Consumers
+      # without `default-members` get the same coverage as before.
+      # See release#128 for the design rationale (option C).
+      #
+      # `--all-features` exercises every feature-gated path that clippy
+      # could find, matching what bin/check-tests does — pre-commit
+      # signal mirrors CI, no "passes locally fails in CI" surprise.
+      run: cargo clippy --all-targets --all-features -- -D warnings
       priority: 2
