@@ -68,9 +68,10 @@ Same regardless of Stack:
   `.github/workflows/copilot-review.yml`. Synced via the propagation
   model below.
 - **Pre-commit hooks** — thin husky / pre-commit-framework /
-  lefthook config that shells out to release scripts. Local hooks
-  call exactly the same checks CI calls; no divergence by
-  construction.
+  lefthook config that shells out to Component-supplied scripts
+  (`bin/check-fmt`, `bin/check-lint`, `bin/check-tests`). Local
+  hooks ARE the canonical interface. **Whether CI also calls these
+  is per-repo today** — see "CI workflow reusability gap" below.
 - **Session-start bootstrap** — `scripts/setup-dev-env.sh` runs on
   every Claude Code session start (cloud and local). Handles
   submodules, deps, NSS cert import, venv PATH exposure, lefthook
@@ -221,9 +222,37 @@ until their per-stack `manifest.yaml` lands ([#106](https://github.com/arthur-de
 
 See `docs/per-component/{bats,mkdocs}.md` for adoption details.
 
+## CI workflow reusability gap (unflinching)
+
+**The "fix once, propagate everywhere" model below applies to the
+RELEASE path only today.** Every consumer's `release.yml` is a thin
+caller of `arthur-debert/release/.github/workflows/<stack>.yml@v1`
+— that part is real and works.
+
+**The CI / PR-time check path is NOT reusable yet.** release/ ships
+no reusable check-time workflow (no `rust-ci.yml`, no `go-ci.yml`).
+So every consumer hand-rolls `ci.yml` / `test.yml`. Some adopted
+consumers call the Component-supplied `bin/check` from their
+bespoke CI (dodot, burgertocow, clapfig, supage); others duplicate
+the canonical clippy/test invocations inline (padz, rustloc); one
+has a fully bespoke pipeline (standout — no `ci.yml` at all,
+different layout).
+
+Net effect: a fix to canonical clippy flags propagates to consumers
+that call `bin/check` from CI. A fix to setup-rust, cache config,
+toolchain version pin, or the matrix shape does NOT propagate to
+anyone — there's no reusable workflow tying these together.
+
+Tracked as part of #103 / #107. Until `rust-ci.yml` (+ siblings)
+land, "fleet-adopted" in the matrices below means "uses release/'s
+reusable RELEASE workflow + has the Component model files synced",
+not "all of CI flows through release/".
+
 ## Adoption matrix — Stack × Repo
 
-Where each consumer actually sits. Four states:
+Where each consumer actually sits on the **release** path. Four
+states (note: this matrix is about release reusability — CI
+reusability is the gap called out above):
 
 - **planned** — repo identified for this Stack; no work yet.
 - **implemented** — workflow caller wired; release path not
@@ -266,6 +295,14 @@ Component model (release-sync + generated `lefthook.yml` from
 shell-quality + rust-quality fragments + `.release-sync-state.yaml`).
 This is precommit-gate territory, not release-path adoption — the
 two flip independently.
+
+**Important distinction (the CI gap, restated):** "adopted" here
+means **files are present in the consumer's tree**. Whether CI
+actually CALLS `bin/check` is separate. Current state across the 7
+adopted rust consumers: 4 wire CI to `bin/check` (dodot,
+burgertocow, clapfig, supage); 2 duplicate the canonical invocation
+inline in `ci.yml` (padz, rustloc); 1 has no `ci.yml` (standout).
+A reusable `rust-ci.yml` is the missing piece.
 
 | Stack | Adopted | Pending |
 |---|---|---|
