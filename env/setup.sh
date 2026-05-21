@@ -242,6 +242,33 @@ if command -v luarocks >/dev/null 2>&1; then
   fi
 fi
 
+# Google Cloud SDK + Firestore emulator — required by supage's
+# hermetic-emulator BATS integration suite (per supage/.github/workflows/ci.yml's
+# `integration` job; supage PR #12).
+#
+# Java 21 (also required by the emulator binary) already ships with
+# the Anthropic cloud base image — don't reinstall.
+#
+# Best-effort install: if the env-setup phase's egress blocks
+# packages.cloud.google.com (the agent sandbox does, per supage PR #12's
+# verification notes — env-setup phase may share the same allowlist),
+# warn but don't fail the env setup. supage CI still covers the
+# integration path end-to-end; cloud-session local verification is
+# the convenience this section enables.
+if ! command -v gcloud >/dev/null 2>&1; then
+  if curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg 2>/dev/null \
+      | gpg --dearmor -o /usr/share/keyrings/cloud-google.gpg 2>/dev/null; then
+    echo "deb [signed-by=/usr/share/keyrings/cloud-google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" \
+      > /etc/apt/sources.list.d/google-cloud-sdk.list
+    apt update || true
+    apt install -y google-cloud-cli google-cloud-cli-firestore-emulator google-cloud-cli-beta \
+      || echo "warning: google-cloud-cli install failed (apt-side egress to packages.cloud.google.com probably blocked)" >&2
+    command -v gcloud >/dev/null 2>&1 && echo "installed gcloud: $(gcloud --version 2>/dev/null | head -1)"
+  else
+    echo "warning: gcloud apt key fetch failed (env-setup egress to packages.cloud.google.com blocked); supage Firestore emulator will not be available in cloud sessions" >&2
+  fi
+fi
+
 # --- 2. Clone arthur-debert/release and install skills + CLAUDE.md --------
 
 SRC_REPO="https://github.com/arthur-debert/release.git"
