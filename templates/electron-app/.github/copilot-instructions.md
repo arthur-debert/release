@@ -1,0 +1,55 @@
+# Copilot Instructions
+
+This is an Electron application (typically TypeScript + Vite + a UI
+framework like React/Svelte/Vue, packaged with electron-builder).
+
+## Before suggesting a fix
+
+- Run the project's umbrella check script if one exists (`bin/check`
+  in the take-iii Component model; otherwise look under `scripts/` for
+  `check`, `pre-commit`, or `ci.sh`). The umbrella runs the same steps
+  CI runs — format, lint, typecheck, unit tests. If your suggestion
+  doesn't pass it, it won't merge — check `.github/workflows/` for
+  the source of truth.
+- Never propose changes that leave tests failing. Unit tests run via
+  vitest; e2e tests run via Playwright against the packaged Electron
+  build.
+- Update the changelog's `Unreleased` section for user-visible changes
+  (`CHANGELOG_UNRELEASED.md` if the project has one, otherwise the
+  `## [Unreleased]` section of `CHANGELOG.md`).
+
+## Style and scope
+
+- Keep changes minimal. Don't add features, refactor, or introduce abstractions
+  beyond what the task requires.
+- No backwards-compatibility hacks: no `// removed` comments, no renaming unused
+  vars to `_var`, no shim modules. If something is unused, delete it.
+- No fallbacks, defaults, or feature flags unless the PR explicitly asks for them.
+- Default to no comments. Well-named identifiers carry the *what*. Reserve
+  comments for non-obvious *why* (hidden constraint, workaround, surprising
+  invariant).
+- Trust internal code and framework guarantees. Only validate at system
+  boundaries (user input, IPC messages, filesystem entry, network).
+
+## Electron-specific guidance
+
+- Main-process code lives under `electron/` (sometimes `src-electron/`);
+  renderer code under `src/`. Keep the IPC surface narrow and typed.
+- Don't reach for Node APIs in renderer code unless `contextIsolation`
+  is intentionally disabled (it usually isn't — preload scripts are the
+  right boundary).
+- Playwright E2E suites in this repo use the canonical `window.__e2e`
+  runtime contract — see the `electron-e2e-testing` skill / docs for
+  shape if you're touching e2e harness code.
+
+## What will get pushed back on
+
+- Suggestions that ignore content under `docs/`.
+- Style nits in code that already follows the project's style.
+- Comments that restate what the code does.
+- Pinning org-internal reusable workflows (e.g. `arthur-debert/release`)
+  to SHA — the reusable pattern is "fix once, propagate", and same-owner
+  supply-chain risk is negligible.
+- Adding `npm` to `.github/dependabot.yml` — application-dependency
+  freshness is deliberately disabled per portfolio policy. Only
+  `github-actions` is enabled.

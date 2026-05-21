@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Detect the project stack of a directory by inspecting its filesystem.
-# Prints one of: rust, electron, vsce-ext, nvim-plugin, tree-sitter,
+# Prints one of: rust, go, electron-app, vsce-ext, nvim-plugin, tree-sitter,
 # static-site, brew-tap, github-action — or exits 1 if undetermined.
 #
 # Usage: detect-stack [<dir>]   (defaults to current dir)
@@ -33,7 +33,7 @@ fi
 # javascript-side
 if [ -f package.json ]; then
   if grep -q '"electron-builder"' package.json 2>/dev/null || grep -q '"electron"' package.json 2>/dev/null; then
-    echo electron; exit 0
+    echo electron-app; exit 0
   fi
   if grep -q '"@vscode/vsce"' package.json 2>/dev/null || grep -q '"vsce"' package.json 2>/dev/null; then
     echo vsce-ext; exit 0

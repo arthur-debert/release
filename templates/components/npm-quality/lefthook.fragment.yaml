@@ -1,0 +1,42 @@
+# npm-quality lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only (no auto-fix and re-stage).
+#
+# Frontend hygiene shared across npm-based Stacks (electron-app,
+# tauri-app, vscode-ext, anything with a package.json front end).
+# Prefers `npm run <script>` when the consumer defines a canonical
+# script — falls back to `npx <tool>` so the hook still works on
+# packages that haven't wired the script alias yet.
+#
+# Each tool's run line is wrapped in `bash -c` so the conditional
+# `(npm run script || npx tool)` shell expression executes in the
+# right shell. Lefthook's default runner doesn't evaluate `||`
+# itself; without `bash -c` the `||` would be passed as a literal
+# arg to the first command.
+
+pre-commit:
+  commands:
+    eslint:
+      # Catch ESLint config edits too — a rule change should re-lint
+      # everything staged. mjs/cjs included for tooling files written
+      # in modern module syntax (vite.config.mjs, eslint.config.mjs).
+      glob:
+        - "**/*.{js,jsx,ts,tsx,vue,mjs,cjs}"
+        - "**/.eslintrc*"
+        - "**/eslint.config.*"
+      run: bash -c 'if npm run --silent lint --if-present -- {staged_files} 2>/dev/null; then :; else npx --no-install eslint {staged_files}; fi'
+      priority: 2
+    prettier:
+      glob:
+        - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
+      run: bash -c 'if npm run --silent format:check --if-present -- {staged_files} 2>/dev/null; then :; else npx --no-install prettier --check {staged_files}; fi'
+      priority: 2
+    typecheck:
+      # tsc operates on the project as a whole — no per-file invocation.
+      # The glob exists so the hook only fires when TS files are staged;
+      # editing only a README.md shouldn't trigger a full typecheck.
+      glob:
+        - "**/*.{ts,tsx}"
+        - "**/tsconfig*.json"
+      run: npm run --silent typecheck --if-present
+      priority: 2

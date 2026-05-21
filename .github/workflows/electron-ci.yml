@@ -1,0 +1,176 @@
+name: Electron CI
+
+# Reusable PR-time check workflow for electron-app consumers.
+#
+# Sibling to `rust-ci.yml` / `go-ci.yml`: collapses each consumer's
+# hand-rolled "setup-node + npm ci + (build shared) + typecheck + lint
+# + test" sequence down to a thin caller. The canonical umbrella is
+# `bin/check` — shipped by the electron-app Stack template + the
+# npm-quality Component, both synced via release-sync.
+#
+# Design choices worth knowing:
+#
+#  * **`bin/check` is the canonical call.** Consumers that have adopted
+#    the take-iii Component model already ship `bin/check`. Same
+#    fix-once-propagate guarantee as the rust fleet.
+#
+#  * **No e2e job.** Electron e2e is Playwright-driven and the
+#    orchestration (fetch sibling artifacts, xvfb, packaged-mode env
+#    flags) varies per consumer. We deliberately do NOT try to fold
+#    that into this workflow — consumers keep their own playwright
+#    job. A `playwright` input is provided only to install browsers
+#    when the consumer wants to extend the `check` job to cover a
+#    light smoke, but the typical pattern is: `check` here, plus a
+#    bespoke `e2e` job in the consumer's caller.
+#
+#  * **`shared-build-dir` covers the lexed-style monorepo.** lexed has
+#    a `shared/` package the renderer + main both consume; without
+#    building it first, the typecheck step explodes. The input is a
+#    relative path; if set we `cd` into it, `npm ci`, `npm run build`,
+#    then `cd -` back.
+#
+#  * **`pre-test`** is the generic escape hatch — any shell command
+#    that needs to run after deps are installed but before `bin/check`
+#    fires (fetch sibling binaries, download grammars, codegen).
+#
+#  * **Minimal permissions, declared at both levels.** Same rationale
+#    as rust-ci.yml — GitHub validates reusable-workflow permission
+#    compatibility at workflow-load time, so we declare contents:read
+#    at workflow level AND per-job for explicitness.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     check:
+#       uses: arthur-debert/release/.github/workflows/electron-ci.yml@v1
+#       with:
+#         node-version: '22'              # default
+#         shared-build-dir: shared        # if you have one
+#         submodules: 'true'              # if you have submodules
+#
+# See docs/per-stack/electron-ci.md for the full input reference.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: |
+          Node.js version passed to actions/setup-node. Match the
+          consumer's `engines.node` pin. Default `22` (the LTS line
+          most electron-app consumers are on).
+        type: string
+        required: false
+        default: '22'
+
+      pre-test:
+        description: |
+          Optional shell command run after `npm ci` (and after the
+          optional `shared-build-dir` step) but BEFORE `bin/check`.
+          Use for fetching sibling release binaries, downloading
+          grammars, codegen, fixture prep. Empty (default) skips.
+        type: string
+        required: false
+        default: ''
+
+      shared-build-dir:
+        description: |
+          Optional relative path to a sub-package the renderer/main
+          depends on (e.g. `shared` in lexed's monorepo). When set,
+          this directory's deps are installed and built before
+          running `bin/check`. Empty (default) skips.
+        type: string
+        required: false
+        default: ''
+
+      playwright:
+        description: |
+          When `true`, install Playwright browsers (`npx playwright
+          install --with-deps`) after `npm ci`. Does NOT add an e2e
+          job — the install hook only exists so the check job's
+          environment has browsers available if the consumer's
+          `bin/check` indirectly needs them. Most consumers keep
+          their playwright e2e in a separate bespoke job in their
+          own caller workflow.
+        type: boolean
+        required: false
+        default: false
+
+      runner:
+        description: 'GitHub runner label for the check job.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+      timeout:
+        description: 'Per-job timeout in minutes.'
+        type: number
+        required: false
+        default: 30
+
+      submodules:
+        description: |
+          Forwarded to `actions/checkout`'s `submodules`. Default
+          `'false'`. Set `'true'` for first-level submodules or
+          `'recursive'` for nested submodules.
+        type: string
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared package
+        if: inputs.shared-build-dir != ''
+        # The shared package commonly has its own lockfile — `npm ci`
+        # is the right call (deterministic, fails on lockfile drift).
+        # If a consumer's shared package doesn't have its own
+        # package-lock.json, they should add one; falling back to
+        # `npm install` here would mask the drift.
+        run: |
+          cd "${{ inputs.shared-build-dir }}"
+          npm ci
+          npm run build
+
+      - name: Install Playwright browsers
+        if: inputs.playwright
+        run: npx playwright install --with-deps
+
+      - name: Run pre-test
+        if: inputs.pre-test != ''
+        shell: bash
+        run: ${{ inputs.pre-test }}
+
+      - name: Run canonical checks (bin/check)
+        # THE point of this workflow: every consumer runs the same
+        # umbrella (fmt + lint + typecheck + unit tests). Fix once in
+        # the npm-quality Component, propagate via release-sync, every
+        # consumer's CI picks it up on the next run.
+        run: bin/check
