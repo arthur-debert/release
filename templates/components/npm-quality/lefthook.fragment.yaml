@@ -4,14 +4,24 @@
 #
 # Frontend hygiene shared across npm-based Stacks (electron-app,
 # tauri-app, vscode-ext, anything with a package.json front end).
-# Prefers `npm run <script>` when the consumer defines a canonical
-# script — falls back to `npx <tool>` so the hook still works on
-# packages that haven't wired the script alias yet.
 #
-# Script-presence detection uses `node -p` over package.json (cheap,
-# no deps beyond node which the consumer already has). The run lines
-# are YAML folded scalars (`>-`) so embedded shell colons / quotes
-# don't break the YAML parser the way an inline scalar would.
+# Design: pre-commit hooks run the tool DIRECTLY (npx) against the
+# staged files only. The portfolio convention is that
+# `npm run lint` / `npm run format:check` lint the WHOLE project
+# (the right shape for CI), so plumbing {staged_files} through them
+# either (a) widens the scope back to "everything" because the
+# project glob is hard-coded in the script (lexed pattern) or
+# (b) defeats the point. The umbrella `bin/check-lint` /
+# `bin/check-fmt` calls the npm scripts — pre-commit calls the
+# tool directly. Two layers, two scopes.
+#
+# typecheck has no per-file form (tsc operates on the project), so
+# it goes through `npm run typecheck` when staged TS changes.
+#
+# `npx --no-install` so the tool resolves to the consumer's pinned
+# version in package-lock.json. If the tool isn't a declared dep,
+# the hook fails loudly — that's correct (a project staging *.ts
+# files without eslint installed is misconfigured).
 
 pre-commit:
   commands:
@@ -19,39 +29,23 @@ pre-commit:
       # Catch ESLint config edits too — a rule change should re-lint
       # everything staged. mjs/cjs included for tooling files written
       # in modern module syntax (vite.config.mjs, eslint.config.mjs).
-      #
-      # Detect script presence via `node -p` on package.json, NOT
-      # `npm run --if-present`: --if-present exits 0 when the script
-      # is missing, so it cannot drive an "if script then A else B"
-      # branch. Explicit presence check makes the branching read the
-      # way it's written.
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,mjs,cjs}"
         - "**/.eslintrc*"
         - "**/eslint.config.*"
-      run: >-
-        bash -c 'has=$(node -p "require(\"./package.json\").scripts &&
-        require(\"./package.json\").scripts.lint ? 1 : 0" 2>/dev/null
-        || echo 0); if [ "$has" = "1" ]; then npm run --silent lint --
-        {staged_files}; else npx --no-install eslint {staged_files}; fi'
+      run: npx --no-install eslint {staged_files}
       priority: 2
     prettier:
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
-      run: >-
-        bash -c 'has=$(node -p "require(\"./package.json\").scripts &&
-        require(\"./package.json\").scripts[\"format:check\"] ? 1 : 0"
-        2>/dev/null || echo 0); if [ "$has" = "1" ]; then npm run
-        --silent format:check -- {staged_files}; else npx --no-install
-        prettier --check {staged_files}; fi'
+      run: npx --no-install prettier --check {staged_files}
       priority: 2
     typecheck:
       # tsc operates on the project as a whole — no per-file invocation.
       # The glob exists so the hook only fires when TS files are staged;
       # editing only a README.md shouldn't trigger a full typecheck.
-      # --if-present is the right shape here because there's no
-      # fallback path — if the consumer hasn't wired `typecheck`,
-      # the hook silently no-ops, which is acceptable.
+      # --if-present so a consumer that hasn't wired `typecheck`
+      # silently no-ops (acceptable — projects without TS exist).
       glob:
         - "**/*.{ts,tsx}"
         - "**/tsconfig*.json"

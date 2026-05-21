@@ -14,19 +14,25 @@ Synced by `release-sync` when a consumer's Stack manifest lists
 - **`lefthook.fragment.yaml`** — three pre-commit hooks (priority 2,
   check-only):
   - `eslint` — globs `**/*.{js,jsx,ts,tsx,vue,mjs,cjs}` plus
-    `.eslintrc*` / `eslint.config.*` configs.
+    `.eslintrc*` / `eslint.config.*` configs. Runs
+    `npx --no-install eslint {staged_files}` (per-file scope).
   - `prettier` — globs the same plus styling files
     (`.svelte`, `.json`, `.html`, `.css`, `.scss`, `.md`, `.yml`,
-    `.yaml`).
+    `.yaml`). Runs `npx --no-install prettier --check
+    {staged_files}` (per-file scope).
   - `typecheck` — fires when any `.ts` / `.tsx` / `tsconfig*.json`
-    is staged. Invokes `npm run typecheck` (no per-file argument —
-    tsc operates on the project).
+    is staged. Invokes `npm run --silent typecheck --if-present`
+    (no per-file argument — tsc operates on the project).
 
-  Each hook prefers a consumer-defined npm script alias (`lint`,
-  `format:check`, `typecheck`) and falls back to a direct `npx`
-  invocation if the alias isn't wired. This matches the bats
-  Component's "no script, no failure" pattern at hook level: a
-  consumer that hasn't wired prettier yet doesn't block commits.
+  Hooks call the tool directly via `npx --no-install`, NOT via
+  `npm run lint` / `npm run format:check`. The portfolio convention
+  is that those npm scripts target the WHOLE project (the right
+  shape for CI's `bin/check-lint` and `bin/check-fmt`); plumbing
+  `{staged_files}` through them either widens the scope back to
+  "everything" because the project glob is hard-coded in the
+  script, or appends staged files to that glob rather than
+  restricting it. Two layers, two scopes: pre-commit = per-file
+  via npx; umbrella = whole-project via npm script.
 
 - **No `bin/` scripts at Component level.** The Stack-level
   `bin/check-fmt`, `bin/check-lint`, `bin/check-tests` (shipped by
@@ -90,9 +96,18 @@ from the corresponding `bin/check-*` script and a silent fallback
 to `npx <tool>` at hook level. Wire them in `package.json` to
 upgrade the hook from "best effort" to "first-class".
 
-## Why the `bash -c` wrapper in the fragment
+## Why the `bin/check-*` scripts still probe for npm scripts
 
-Lefthook's default runner doesn't evaluate `||` itself; without
-`bash -c` the fallback expression `(npm run ... || npx ...)` would
-be passed as literal args to the first command. Wrapping each line
-in `bash -c '...'` makes the conditional behave as written.
+The Stack-level `bin/check-fmt` / `bin/check-lint` /
+`bin/check-tests` (shipped by `templates/electron-app/bin/`)
+**do** prefer the consumer's npm script alias when present —
+because those scripts run the whole-project check the consumer
+defines (their lint config, their prettier glob, their test
+selection). The umbrella's job is "run the project's check the
+way the project wants it run." The pre-commit hook's job is
+"check these N staged files, fast." Different jobs, different
+mechanisms.
+
+If a `bin/check-*` script falls back to `npx` (no npm-script
+alias wired), it's a graceful default — but adding the alias is
+the recommended setup.
