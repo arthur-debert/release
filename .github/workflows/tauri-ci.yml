@@ -1,4 +1,4 @@
-name: Tauri CI
+name: Tauri CI (reusable)
 
 # Reusable PR-time check workflow for tauri-app consumers.
 #
@@ -156,19 +156,7 @@ on:
 
     secrets:
       gh_token:
-        description: |
-          Optional `GH_TOKEN` exposed (step-scoped, not job-wide) to
-          the `pre-test`, `bin/check`, and `tauri-build` smoke steps.
-          Plumb this when the pre-test (or any check script) calls
-          `gh release download` / `gh api` against a
-          private sibling repo — `GITHUB_TOKEN` from the default
-          job context only has access to the calling repo, so
-          fetching artifacts from a separate private repo (e.g.
-          arami-app pulling WASM from a private `arami-core`)
-          needs a PAT. arami-app passes `${{ secrets.RELEASE_TOKEN }}`
-          here. Falls back to the default `GITHUB_TOKEN` when not
-          set. Name matches the convention used in
-          `copilot-review.yml`.
+        description: 'Optional PAT exposed as GH_TOKEN on consumer-controlled steps (pre-test, bin/check, tauri-build smoke). Required when those scripts shell to gh against a private sibling repo — GITHUB_TOKEN only sees the calling repo. Falls back to github.token when absent. Name matches copilot-review.yml convention.'
         required: false
 
 permissions:
