@@ -46,6 +46,32 @@ jobs:
 [`arthur-debert/dodot/.github/workflows/ci.yml`](https://github.com/arthur-debert/dodot/blob/main/.github/workflows/ci.yml).
 Its hand-rolled ci.yml went from ~75 lines to ~12.
 
+## Required-checks rename (do this in the same PR)
+
+Reusable-workflow callee jobs are ALWAYS prefixed by the caller's
+job ID — there is no way to suppress the prefix. So when a
+consumer migrates from a hand-rolled `ci.yml` (jobs named `check`,
+`e2e`) to a thin caller (`jobs: ci: uses: …/rust-ci.yml@v1`), the
+check names GitHub reports change:
+
+- before: `check`, `e2e`
+- after:  `ci / check`, `ci / e2e`
+
+If the repo's `main-branch-protection` ruleset still requires the
+OLD names, the migration PR hangs forever on "Waiting for status
+to be reported". Update the ruleset in the same PR sweep:
+
+```sh
+cd <consumer-repo>
+# Use --checks explicitly — apply-ruleset's auto-detect reads the
+# latest main-branch run, which still has the OLD names until the
+# migration PR merges. Explicit override avoids the chicken-and-egg.
+apply-ruleset --checks "ci / check,ci / e2e"
+```
+
+If the caller's job ID isn't `ci`, adjust the prefix accordingly
+(e.g. `jobs: tests: uses: …` produces `tests / check`, `tests / e2e`).
+
 ## Inputs
 
 All inputs are optional.
