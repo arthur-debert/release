@@ -8,11 +8,10 @@
 # script — falls back to `npx <tool>` so the hook still works on
 # packages that haven't wired the script alias yet.
 #
-# Each tool's run line is wrapped in `bash -c` so the conditional
-# `(npm run script || npx tool)` shell expression executes in the
-# right shell. Lefthook's default runner doesn't evaluate `||`
-# itself; without `bash -c` the `||` would be passed as a literal
-# arg to the first command.
+# Script-presence detection uses `node -p` over package.json (cheap,
+# no deps beyond node which the consumer already has). The run lines
+# are YAML folded scalars (`>-`) so embedded shell colons / quotes
+# don't break the YAML parser the way an inline scalar would.
 
 pre-commit:
   commands:
@@ -21,22 +20,30 @@ pre-commit:
       # everything staged. mjs/cjs included for tooling files written
       # in modern module syntax (vite.config.mjs, eslint.config.mjs).
       #
-      # Detect script presence via node -e on package.json, not
+      # Detect script presence via `node -p` on package.json, NOT
       # `npm run --if-present`: --if-present exits 0 when the script
-      # is missing, which would let the fallback path never trigger
-      # (and would flip the intent of the else-branch to "script
-      # exists but failed"). Explicit presence check makes the
-      # branching read the way it's written.
+      # is missing, so it cannot drive an "if script then A else B"
+      # branch. Explicit presence check makes the branching read the
+      # way it's written.
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,mjs,cjs}"
         - "**/.eslintrc*"
         - "**/eslint.config.*"
-      run: bash -c 'if [ -f package.json ] && node -e "process.exit(require(\"./package.json\").scripts && require(\"./package.json\").scripts.lint ? 0 : 1)" 2>/dev/null; then npm run --silent lint -- {staged_files}; else npx --no-install eslint {staged_files}; fi'
+      run: >-
+        bash -c 'has=$(node -p "require(\"./package.json\").scripts &&
+        require(\"./package.json\").scripts.lint ? 1 : 0" 2>/dev/null
+        || echo 0); if [ "$has" = "1" ]; then npm run --silent lint --
+        {staged_files}; else npx --no-install eslint {staged_files}; fi'
       priority: 2
     prettier:
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
-      run: bash -c 'if [ -f package.json ] && node -e "process.exit(require(\"./package.json\").scripts && require(\"./package.json\").scripts[\"format:check\"] ? 0 : 1)" 2>/dev/null; then npm run --silent format:check -- {staged_files}; else npx --no-install prettier --check {staged_files}; fi'
+      run: >-
+        bash -c 'has=$(node -p "require(\"./package.json\").scripts &&
+        require(\"./package.json\").scripts[\"format:check\"] ? 1 : 0"
+        2>/dev/null || echo 0); if [ "$has" = "1" ]; then npm run
+        --silent format:check -- {staged_files}; else npx --no-install
+        prettier --check {staged_files}; fi'
       priority: 2
     typecheck:
       # tsc operates on the project as a whole — no per-file invocation.
