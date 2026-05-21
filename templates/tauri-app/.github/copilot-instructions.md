@@ -4,8 +4,9 @@ This is a Tauri 2.x desktop application. It has two halves:
 
 - A **Rust core** under `src-tauri/` (Cargo workspace; `tauri build`
   produces the native binary + platform bundles).
-- A **frontend** at the repo root (`package.json`, typically TypeScript
-  + Vite + a UI framework like Svelte/React/Vue).
+- A **frontend** at the repo root (`package.json`, typically a
+  TypeScript / Vite stack with a UI framework like Svelte, React, or
+  Vue).
 
 Both halves are exercised by every PR. The canonical umbrella is
 `bin/check` — it runs frontend checks (prettier, eslint, typecheck,
