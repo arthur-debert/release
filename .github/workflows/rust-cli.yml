@@ -65,6 +65,19 @@ on:
         required: false
         default: true
 
+      publish-crates:
+        description: |
+          Publish each workspace crate listed in `crates:` to crates.io.
+          Default `true`. Set `false` for private workspaces (no
+          crates.io account, no CRATES_IO_KEY secret) or for repos that
+          want only the binary/brew artifacts. When false, the
+          `publish-crates` job is skipped; the `crates:` input is still
+          consulted for build ordering by the prepare step but no
+          publish occurs. wave-term is the first private adopter.
+        type: boolean
+        required: false
+        default: true
+
       brew-tap:
         description: 'Tap repo to push the formula to (owner/repo).'
         type: string
@@ -473,7 +486,7 @@ jobs:
 
   publish-crates:
     needs: [prepare, create-release]
-    if: always() && !failure() && !cancelled()
+    if: always() && !failure() && !cancelled() && inputs.publish-crates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
