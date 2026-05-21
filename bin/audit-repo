@@ -38,6 +38,10 @@
 #                            setup-dev-env.sh + project extras
 #  11. workflows_canonical — count of workflows that are NOT thin callers of
 #                            arthur-debert/release/* (legacy / bespoke surface)
+#  12. ci_calls_bin_check    — does ANY workflow file (typically ci.yml /
+#                              test.yml) actually invoke `bin/check`? If not,
+#                              the Component-supplied canonical interface is
+#                              dead weight on disk — CI bypasses it.
 
 set -uo pipefail
 
@@ -302,6 +306,49 @@ check_workflows_canonical() {
   fi
 }
 
+# --- Conformance check 12: CI calls bin/check ---
+# Component model ships `bin/check` as the canonical local+CI umbrella.
+# If the consumer has release_sync adoption (.release-sync-state.yaml)
+# but NO workflow file actually runs `bin/check`, the canonical
+# interface is dead weight — CI duplicates the invocation inline
+# (worse: silently diverges over time). Surfaces the CI workflow
+# reusability gap per-repo.
+check_ci_calls_bin_check() {
+  # Only meaningful if Component-model adoption has happened. Skip otherwise.
+  local sync_body
+  sync_body=$(gh api "repos/$repo/contents/.release-sync-state.yaml" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
+  if [ -z "$sync_body" ]; then
+    record SKIP ci_calls_bin_check "no Component model — N/A"
+    return
+  fi
+  local listing
+  listing=$(gh api "repos/$repo/contents/.github/workflows" 2>/dev/null \
+    | jq -r 'if type == "array" then .[] | select(.type=="file") | .name else empty end')
+  if [ -z "$listing" ]; then
+    record SKIP ci_calls_bin_check "no .github/workflows/"
+    return
+  fi
+  local found=""
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    local body
+    body=$(gh api "repos/$repo/contents/.github/workflows/$f" --jq .content 2>/dev/null | base64 -d 2>/dev/null)
+    # Match `run: bin/check` (the umbrella) or `run: bin/check-e2e` etc.
+    # but not `bin/check-fmt` invoked alone (those are atomic Tasks the
+    # umbrella composes — invoking only one is a smell worth its own
+    # warning if we ever surface it).
+    if printf '%s\n' "$body" | grep -qE '^[[:space:]]*run:[[:space:]]*bin/check([[:space:]]|$)'; then
+      found="$found, $f"
+    fi
+  done <<<"$listing"
+  found=${found#, }
+  if [ -n "$found" ]; then
+    record PASS ci_calls_bin_check "called in: $found"
+  else
+    record WARN ci_calls_bin_check "Component model adopted but no workflow calls bin/check (CI duplicates invocation)"
+  fi
+}
+
 # Run all checks
 check_ruleset
 check_release_token
@@ -314,6 +361,7 @@ check_private_mod_auth
 check_release_sync
 check_scripts_inventory
 check_workflows_canonical
+check_ci_calls_bin_check
 
 # --- Output ---
 if [ "$json_mode" = "1" ]; then
