@@ -234,8 +234,11 @@ caller of `arthur-debert/release/.github/workflows/<stack>.yml@v1`
 [#130](https://github.com/arthur-debert/release/pull/130),
 `rust-ci.yml` exists and is piloted on `dodot`
 ([dodot#192](https://github.com/arthur-debert/dodot/pull/192)).
-Other rust consumers still hand-roll `ci.yml` / `test.yml`.
-`go-ci.yml` and siblings are not built yet. Some adopted
+`electron-ci.yml` shipped via #139 and is piloted on `lexed` /
+`simple-gal-ui`. `tauri-ci.yml` shipped alongside the tauri-app
+Stack template and is piloted on `arami-app`. Other rust consumers
+still hand-roll `ci.yml` / `test.yml`. `go-ci.yml` and siblings are
+not built yet. Some adopted
 consumers call the Component-supplied `bin/check` from their
 bespoke CI (dodot, burgertocow, clapfig, supage); others
 duplicate the canonical clippy/test invocations inline (padz,

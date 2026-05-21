@@ -1,0 +1,333 @@
+name: Tauri CI
+
+# Reusable PR-time check workflow for tauri-app consumers.
+#
+# Sibling to `rust-ci.yml` / `electron-ci.yml`: collapses each
+# consumer's hand-rolled "setup-node + setup-rust + npm ci + cargo
+# fmt/clippy/test + frontend lint/typecheck/test" sequence down to a
+# thin caller. The canonical umbrella is `bin/check` — shipped by the
+# tauri-app Stack template + the npm-quality Component, both synced
+# via release-sync.
+#
+# Design choices worth knowing:
+#
+#  * **`bin/check` is the canonical call.** It runs BOTH halves of a
+#    Tauri repo: frontend (prettier + eslint + typecheck + unit
+#    tests) and rust (cargo fmt --check + cargo clippy + cargo
+#    test, scoped to src-tauri/). Same fix-once-propagate guarantee
+#    as the rust / electron fleets.
+#
+#  * **Auto-detect package manager from lockfile.** pnpm-lock.yaml →
+#    pnpm, yarn.lock → yarn, default → npm. Same logic as
+#    electron-ci.yml (Tauri apps follow the same npm-stack
+#    convention; arami-app uses pnpm).
+#
+#  * **`Swatinem/rust-cache@v2` scoped to src-tauri/.** Caching is
+#    mandatory per CLAUDE.md. The `workspaces: src-tauri` input
+#    tells rust-cache to walk the right Cargo.lock — without it
+#    the action looks for Cargo.toml at root and either skips
+#    caching entirely or warns.
+#
+#  * **No e2e job.** Tauri e2e is Playwright-driven and the
+#    orchestration (fetch sibling artifacts, xvfb, packaged-mode env
+#    flags) varies per consumer — same rationale as electron-ci.yml.
+#    A `playwright` input is provided only to install browsers when
+#    the consumer wants to extend the `check` job to cover a light
+#    smoke; the typical pattern is `check` here, plus a bespoke
+#    `e2e` job in the consumer's caller.
+#
+#  * **Optional `tauri-build` smoke gate.** When true, runs
+#    `pnpm tauri build` (or the lockfile-detected equivalent) after
+#    `bin/check`. Off by default — full tauri builds are slow and
+#    happen at release time via `tauri-app.yml`. Opt in when you
+#    want to gate every PR on "the bundle still produces" (rare —
+#    most teams accept that release-time is the right place).
+#
+#  * **`pre-test`** is the generic escape hatch — any shell command
+#    that needs to run after deps are installed but before
+#    `bin/check` fires (fetch sibling binaries, download upstream
+#    WASM, codegen). arami-app uses this for `pnpm fetch:wasm`.
+#
+#  * **Minimal permissions, declared at both levels.** Same rationale
+#    as rust-ci.yml — GitHub validates reusable-workflow permission
+#    compatibility at workflow-load time, so we declare contents:read
+#    at workflow level AND per-job for explicitness.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     check:
+#       uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v1
+#       with:
+#         node-version: '22'              # default
+#         # rust-toolchain: 'stable'      # default
+#         # tauri-build: true             # opt-in smoke gate
+#         # pre-test: 'pnpm fetch:wasm'   # if you need a build hook
+#
+# See docs/per-stack/tauri-ci.md for the full input reference.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: |
+          Node.js version passed to actions/setup-node. Match the
+          consumer's `engines.node` pin. Default `22` (the LTS line
+          most Tauri-app consumers are on).
+        type: string
+        required: false
+        default: '22'
+
+      rust-toolchain:
+        description: |
+          Rust toolchain channel. If empty (default), the workflow
+          honors `rust-toolchain.toml` at repo root when present
+          (arami-app pins this way) and falls back to `stable`
+          otherwise. Set explicitly (e.g. `'1.85.0'`, `'nightly'`,
+          `'stable'`) to override the file. Default empty.
+        type: string
+        required: false
+        default: ''
+
+      tauri-build:
+        description: |
+          When true, runs `<pm> tauri build` after `bin/check` as a
+          smoke gate. False by default — full Tauri builds are slow
+          and happen at release time via `tauri-app.yml`. Opt in
+          only when you want every PR to gate on "the bundle still
+          produces". When enabled on Linux runners, the workflow
+          also installs the Tauri system dependencies
+          (libwebkit2gtk, etc.).
+        type: boolean
+        required: false
+        default: false
+
+      pre-test:
+        description: |
+          Optional shell command run after deps are installed but
+          BEFORE `bin/check`. Use for upstream WASM fetches, fixture
+          prep, codegen. Empty (default) skips. arami-app's value is
+          `pnpm fetch:wasm` (its frontend tests import from a WASM
+          package that's not in the lockfile).
+        type: string
+        required: false
+        default: ''
+
+      playwright:
+        description: |
+          When `true`, install Playwright browsers (`npx playwright
+          install --with-deps`) after deps are installed. Does NOT
+          add an e2e job — the install hook only exists so the check
+          job's environment has browsers available if the consumer's
+          `bin/check` indirectly needs them. Most consumers keep
+          their playwright e2e in a separate bespoke job in their
+          own caller workflow.
+        type: boolean
+        required: false
+        default: false
+
+      runner:
+        description: 'GitHub runner label for the check job.'
+        type: string
+        required: false
+        default: 'ubuntu-latest'
+
+      timeout:
+        description: 'Per-job timeout in minutes.'
+        type: number
+        required: false
+        default: 30
+
+      submodules:
+        description: |
+          Forwarded to `actions/checkout`'s `submodules`. Default
+          `'false'`. Set `'true'` for first-level submodules or
+          `'recursive'` for nested submodules.
+        type: string
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules }}
+
+      - name: Detect package manager
+        # Auto-detect from lockfile presence: pnpm-lock.yaml → pnpm,
+        # yarn.lock → yarn, default → npm. Avoids requiring a consumer
+        # input; the lockfile IS the canonical signal of which manager
+        # is in use, and every consumer commits exactly one.
+        id: pm
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "install=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=yarn" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "install=npm ci" >> "$GITHUB_OUTPUT"
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.pm.outputs.pm == 'pnpm'
+        # Must run BEFORE setup-node so `cache: pnpm` on setup-node
+        # finds pnpm's store correctly.
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Enable corepack (yarn)
+        if: steps.pm.outputs.pm == 'yarn'
+        # yarn isn't on PATH by default on the GH runner. corepack
+        # (bundled with Node ≥16.10) provisions yarn from the project's
+        # packageManager field if set, else a default modern release.
+        # Must run BEFORE setup-node so `cache: yarn` finds the install.
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ steps.pm.outputs.cache }}
+
+      - name: Resolve Rust toolchain channel
+        # Tauri's Cargo workspace lives at src-tauri/, not at repo
+        # root. Consumers that pin their toolchain put
+        # rust-toolchain.toml at the REPO ROOT (arami-app does this).
+        # When the `rust-toolchain` input is empty, honor the file;
+        # otherwise the input wins. Mirrors the resolution logic in
+        # the shared `setup-rust` composite — but kept inline here
+        # because we also need a different rust-cache config
+        # (workspaces: src-tauri) than the composite ships.
+        id: rust-channel
+        shell: bash
+        env:
+          INPUT_CHANNEL: ${{ inputs.rust-toolchain }}
+        run: |
+          if [ -n "${INPUT_CHANNEL}" ]; then
+            CHANNEL="${INPUT_CHANNEL}"
+          elif [ -f rust-toolchain.toml ]; then
+            CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
+          else
+            CHANNEL=stable
+          fi
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-channel.outputs.channel }}
+          components: clippy, rustfmt
+
+      - name: Cache Rust (src-tauri)
+        # Swatinem/rust-cache@v2's `workspaces:` input lets us point
+        # at a non-root Cargo workspace. Without this the action
+        # looks for Cargo.toml at the repo root, doesn't find one,
+        # and either warns or silently skips caching. Caching is
+        # mandatory per CLAUDE.md — without it a 2-minute Rust job
+        # balloons to 10.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install cargo-nextest
+        # Canonical test runner used by bin/check-tests when nextest
+        # is present. Matches rust-ci.yml.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
+      - name: Install Linux Tauri system deps
+        # Tauri's Linux build links against libwebkit2gtk, libgtk-3,
+        # libsoup, libayatana-appindicator, librsvg2. Only required
+        # when `tauri-build: true` (the `bin/check` umbrella never
+        # invokes `tauri build` — it just runs cargo on the Tauri
+        # crate, which compiles fine without these). Skipped on
+        # non-Linux runners and when tauri-build is off — keeps the
+        # default check path fast.
+        if: inputs.tauri-build && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Install dependencies
+        run: ${{ steps.pm.outputs.install }}
+
+      - name: Install Playwright browsers
+        if: inputs.playwright
+        # `npx --no-install` so we use the playwright CLI version
+        # pinned in the consumer's lockfile instead of letting npx
+        # fetch a potentially newer release. If playwright isn't a
+        # consumer dep, the step fails loudly — opting into the
+        # `playwright: true` input but not declaring the dep is
+        # misconfiguration, not a fallback case.
+        run: npx --no-install playwright install --with-deps
+
+      - name: Run pre-test
+        if: inputs.pre-test != ''
+        shell: bash
+        run: ${{ inputs.pre-test }}
+
+      - name: Run canonical checks (bin/check)
+        # THE point of this workflow: every consumer runs the same
+        # umbrella across BOTH halves (frontend: fmt + lint +
+        # typecheck + unit tests; rust: cargo fmt --check + clippy +
+        # test, scoped to src-tauri/). Fix once in the Stack
+        # template / npm-quality Component, propagate via
+        # release-sync, every consumer's CI picks it up on the next
+        # run.
+        run: bin/check
+
+      - name: Tauri build (smoke)
+        if: inputs.tauri-build
+        # Off by default — release-time only. When opted in, this
+        # uses the auto-detected package manager. Each manager
+        # invokes the local tauri CLI differently:
+        #   * pnpm / yarn — `pnpm tauri build` / `yarn tauri build`
+        #     resolve `tauri` from node_modules/.bin transparently.
+        #   * npm — `npm tauri build` is NOT a valid invocation
+        #     (npm has no "run a node_modules binary by name"
+        #     subcommand). Use `npx --no-install tauri build`,
+        #     which picks up the locally installed CLI without
+        #     fetching from the registry.
+        shell: bash
+        env:
+          PM: ${{ steps.pm.outputs.pm }}
+        run: |
+          if [ "${PM}" = "npm" ]; then
+            npx --no-install tauri build
+          else
+            "${PM}" tauri build
+          fi
