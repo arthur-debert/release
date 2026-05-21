@@ -63,6 +63,9 @@ projects:
   supage:
     - arthur-debert/supage
 
+  wave-term:
+    - arthur-debert/wave-term
+
 # NOT managed even though they carry the main-branch-protection
 # ruleset (which was applied broadly across arthur-debert/* for
 # unrelated reasons). Listed here so audit-portfolio's old auto-discover

@@ -100,7 +100,7 @@ load-bearing piece.
 
 ## Managed repos
 
-Canonical list of repos this release/ portfolio covers. 21 repos
+Canonical list of repos this release/ portfolio covers. 22 repos
 across 3 multi-repo "projects" (lex, arami, simple-gal) plus
 single-repo projects.
 
@@ -127,6 +127,7 @@ single-repo projects.
 | simple-gal | `arthur-debert/simple-gal-ui` | `~/h/simple-gal/simple-gal-ui` |
 | standout | `arthur-debert/standout` | `~/h/standout` |
 | supage | `arthur-debert/supage` | `~/h/supage` |
+| wave-term | `arthur-debert/wave-term` | `~/h/wave-term` |
 
 Repos NOT in this list are out of scope, even if they happen to
 carry the `main-branch-protection` ruleset (which was applied
