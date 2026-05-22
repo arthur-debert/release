@@ -1,0 +1,47 @@
+# zed-extension stack-level lefthook fragment.
+# Merged into the consumer's lefthook.yml by release-sync.
+# Priority 2 = check-only (no auto-fix and re-stage).
+#
+# Why a Stack-level fragment instead of reusing the rust-quality
+# Component:
+#
+# rust-quality's clippy hook runs `cargo clippy --all-targets
+# --all-features -- -D warnings` against the host target. A Zed
+# extension depends on `zed_extension_api`, which only links against
+# wasm32-wasip2 — host clippy can't resolve the extension entry points
+# and fails with target-cfg errors. The fix is to pin the target on
+# the clippy hook: same tool, same flags as rust-quality, just rooted
+# at wasm32-wasip2. Same pattern as tauri-app's src-tauri/-scoped
+# override (Stack-level fragment is the right home for one-off
+# target/layout variations).
+#
+# `cargo fmt` is target-agnostic and doesn't need overriding, but
+# rust-quality isn't loaded as a default Component (see manifest.yaml)
+# so we ship the fmt hook here too. That way the consumer's
+# lefthook.yml has the full Rust pre-commit story from a single Stack
+# fragment.
+
+pre-commit:
+  commands:
+    cargo-fmt:
+      glob:
+        - "**/*.rs"
+        - "**/rustfmt.toml"
+      run: cargo fmt --all -- --check
+      priority: 2
+    cargo-clippy-wasm:
+      # Match any Rust source OR Cargo manifest OR Cargo.lock. Dependency
+      # / feature changes trigger clippy the same as code edits — and
+      # Cargo.lock specifically because new dep versions can introduce
+      # new clippy warnings (deprecations, lint upgrades).
+      glob:
+        - "**/*.rs"
+        - "**/Cargo.toml"
+        - "**/Cargo.lock"
+      # `--target wasm32-wasip2`: the canonical (and only) target for a
+      # Zed extension. The host can't resolve `zed_extension_api`'s
+      # wasm-only ABI; running clippy without this flag fails at link
+      # check. `--release` matches what bin/build does in CI — same
+      # profile, same warnings.
+      run: cargo clippy --release --target wasm32-wasip2 -- -D warnings
+      priority: 2

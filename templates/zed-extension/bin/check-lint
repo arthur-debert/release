@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Zed extensions depend on `zed_extension_api`, whose ABI only links
+# against wasm32-wasip2. Running clippy without `--target wasm32-wasip2`
+# fails at link check on the host. `--release` matches what bin/build
+# does in CI — same profile, same warnings.
+#
+# No `--workspace`: a Zed extension is a single cdylib crate, and the
+# rust-cli precedent (rely on `[workspace.default-members]` for
+# multi-crate layouts) carries over for any consumer that grows into
+# a workspace.
+echo "Running clippy (wasm32-wasip2)..."
+cargo clippy --release --target wasm32-wasip2 --all-features -- -D warnings
+echo "Clippy OK"

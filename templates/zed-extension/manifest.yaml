@@ -1,0 +1,19 @@
+# Stack default manifest for `zed-extension` (detected via extension.toml
+# at repo root + Cargo.toml — Zed extensions are Rust crates compiled to
+# wasm32-wasip2; the wasm IS the published artifact).
+# Consumers can override with `.release-sync.yaml` at their repo root.
+
+stack: zed-extension
+components:
+  - shell-quality
+# Opt-in Components (bats, mkdocs) are not listed here. Consumers that
+# want them ship a .release-sync.yaml that includes them in addition to
+# the defaults above.
+#
+# Note: there is NO rust-quality Component in the defaults. The
+# rust-quality Component's `cargo clippy` hook doesn't pass
+# `--target wasm32-wasip2`, but a Zed extension built for the host
+# target won't link against `zed_extension_api`'s wasm-only ABI. The
+# clippy hook lives in this Stack's lefthook.fragment.yaml with the
+# wasm target wired in — same pattern as tauri-app's src-tauri/-scoped
+# override. See lefthook.fragment.yaml.

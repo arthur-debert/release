@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical zed-extension build entry point. Same script local + CI.
+#
+# Zed extensions don't ship native binaries — the published artifact
+# IS the WASM (under target/wasm32-wasip2/release/*.wasm), which Zed
+# loads at extension install time. So "build" here means: compile to
+# wasm32-wasip2 in release profile.
+#
+# Usage:
+#   bin/build                            # cargo build --release --target wasm32-wasip2
+#   bin/build --features foo,bar         # build with specific features
+#   bin/build -- <extra cargo args>      # pass-through after `--`
+#
+# All args forward to `cargo build` verbatim after the fixed
+# `--release --target wasm32-wasip2`. `bin/build` is the canonical
+# release-build entry point — `--release` and the wasm target are
+# hardcoded; for a local debug build, invoke `cargo build` directly.
+#
+# CWD: respects the caller's working directory. Cargo resolves the
+# nearest Cargo.toml from CWD upward, matching cargo's own behavior.
+#
+# Source of truth: arthur-debert/release templates/zed-extension/bin/build.
+
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "bin/build: cargo not found on \$PATH" >&2
+    echo "  install: https://rustup.rs (or your package manager)" >&2
+    exit 1
+fi
+
+# The wasm32-wasip2 target needs to be installed via rustup before
+# cargo can compile to it. Surface a clear error if it's missing rather
+# than letting cargo's "the target may not be installed" half-message
+# trail off into a wall of cc errors. The check is cheap (rustup
+# target list is a local-file read).
+if command -v rustup >/dev/null 2>&1; then
+    if ! rustup target list --installed 2>/dev/null | grep -q '^wasm32-wasip2$'; then
+        echo "bin/build: rust target wasm32-wasip2 is not installed" >&2
+        echo "  install: rustup target add wasm32-wasip2" >&2
+        exit 1
+    fi
+fi
+
+exec cargo build --release --target wasm32-wasip2 "$@"

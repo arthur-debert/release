@@ -1,0 +1,61 @@
+# Copilot Instructions
+
+This is a Zed extension — a Rust crate (cdylib) compiled to
+`wasm32-wasip2`. The wasm is the published artifact; Zed loads it at
+extension install time. The extension entry points depend on
+`zed_extension_api`, whose ABI only links against wasm32-wasip2 — host
+clippy/check will fail with target-cfg errors, so all Rust tooling
+must pass `--target wasm32-wasip2`.
+
+## Before suggesting a fix
+
+- Run the project's umbrella check — `bin/check` (canonical, dispatches
+  to `bin/check-fmt`, `bin/check-lint`, `bin/check-tests`). Bare
+  equivalent:
+  `cargo fmt --all -- --check && cargo clippy --release --target wasm32-wasip2 --all-features -- -D warnings && bats test/`
+  (the canonical `bin/check-tests` discovers the consumer's bats
+  layout and skips with a notice if none is present).
+- The release-build invocation is
+  `cargo build --release --target wasm32-wasip2` (also wrapped by
+  `bin/build`). Never propose a host-target build for an extension —
+  it won't link.
+- CI runs the same; if your suggestion doesn't pass, it won't merge —
+  check `.github/workflows/` for the source of truth.
+- Never propose changes that leave tests failing.
+- Update the changelog's `Unreleased` section for user-visible changes
+  (`CHANGELOG_UNRELEASED.md` if the project has one, otherwise the
+  `## [Unreleased]` section of `CHANGELOG.md`).
+
+## Version sync
+
+Zed extensions carry a version in TWO files that must stay in
+lockstep:
+
+- `extension.toml` — the manifest Zed reads. `version = "X.Y.Z"`.
+- `Cargo.toml` — the Rust crate metadata. `[package] version = "X.Y.Z"`.
+
+Any version bump must touch both. The release workflow asserts they
+match; a mismatch is a release-blocker, not a warning.
+
+## Style and scope
+
+- Keep changes minimal. Don't add features, refactor, or introduce abstractions
+  beyond what the task requires.
+- No backwards-compatibility hacks: no `// removed` comments, no renaming unused
+  vars to `_var`, no shim modules. If something is unused, delete it.
+- No fallbacks, defaults, or feature flags unless the PR explicitly asks for them.
+- Default to no comments. Well-named identifiers carry the *what*. Reserve
+  comments for non-obvious *why* (hidden constraint, workaround, surprising
+  invariant).
+- Trust internal code and framework guarantees. Only validate at system
+  boundaries (user input, external commands, filesystem entry).
+
+## What will get pushed back on
+
+- Suggestions that ignore content under `docs/`.
+- Style nits in code that already follows the project's style.
+- Defensive error handling for invariants the type system already enforces.
+- Comments that restate what the code does.
+- Pinning org-internal reusable workflows (e.g. `arthur-debert/release`)
+  to SHA — the reusable pattern is "fix once, propagate", and same-owner
+  supply-chain risk is negligible.
