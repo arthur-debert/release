@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Zed extensions are cdylib crates compiled to wasm32-wasip2 — there's
+# no host target for `cargo test` to run against, and wasm tests don't
+# execute on a developer machine without a wasm runtime. The canonical
+# test surface for an extension is its grammar manifest + tree-sitter
+# queries, exercised via bats.
+#
+# Discovery order:
+#   1. ./scripts/check-tests        consumer override (full control)
+#   2. bats ./test/                  zed-lex convention: manifest +
+#                                   queries .bats live at test/*.bats
+#   3. bats ./tests/                 alternate plural form
+#
+# Missing all of the above: exit 0 with a notice. Repos still
+# scaffolding tests should not fail the umbrella `bin/check`.
+#
+# `"$@"` forwards extra args to bats so the script can be invoked like:
+#   bin/check-tests --filter manifest
+
+echo "Running tests..."
+
+if [ -x scripts/check-tests ]; then
+    echo "Running tests via scripts/check-tests (consumer override)..."
+    exec scripts/check-tests "$@"
+fi
+
+run_bats_dir() {
+    local dir="$1"
+    if ! command -v bats >/dev/null 2>&1; then
+        echo "::error::bats not installed. Run \`brew install bats-core\` to enable extension tests." >&2
+        exit 1
+    fi
+    echo "Running bats $dir ..."
+    exec bats "$dir" "$@"
+}
+
+if find test -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
+    run_bats_dir test "$@"
+fi
+
+if find tests -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
+    run_bats_dir tests "$@"
+fi
+
+echo "No .bats tests under test/ or tests/ — skipping."
+echo "Tests OK"
