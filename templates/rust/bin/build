@@ -27,4 +27,10 @@ set -euo pipefail
 #
 # Source of truth: arthur-debert/release templates/rust/bin/build.
 
+if ! command -v cargo >/dev/null 2>&1; then
+    echo "bin/build: cargo not found on \$PATH" >&2
+    echo "  install: https://rustup.rs (or your package manager)" >&2
+    exit 1
+fi
+
 exec cargo build --release "$@"
