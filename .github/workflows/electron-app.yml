@@ -69,10 +69,20 @@ on:
         default: 'dist'
       notarize:
         description: |
-          Force enable/disable macOS notarization, overriding `build.mac.notarize`
-          in package.json via `-c.mac.notarize=<value>`. Default empty = respect
-          package.json. Set `true` to force notarization (requires
-          ASC_API_KEY_* secrets); `false` to force-skip.
+          Control macOS notarization. Notarization is handled by this
+          workflow via `xcrun notarytool submit` → poll → `stapler
+          staple` (NOT by electron-builder — `build.mac.notarize`
+          should be `false` in package.json).
+
+          Values:
+            - `true`  → notarize (requires APPLE_CERTIFICATE_P12_BASE64,
+                        APPLE_CERTIFICATE_PASSWORD, ASC_API_KEY_BASE64,
+                        ASC_API_KEY_ID, ASC_API_ISSUER_ID secrets;
+                        fails fast if missing).
+            - `false` → skip notarization (DMG is still signed if the
+                        APPLE_CERTIFICATE_* secrets are configured).
+            - ``      → auto: notarize iff signing cert AND ASC key are
+                        both configured; otherwise skip.
         type: string
         required: false
         default: ''
@@ -103,12 +113,14 @@ permissions:
 # Note on customizing the build for sign-invalidating work (e.g. signing
 # helper bundles like .appex extensions that electron-builder doesn't
 # recurse into): do NOT do this in a post-build step in this workflow —
-# electron-builder signs AND notarizes inside the build step, and any
-# subsequent file modification invalidates the notarization, shipping a
-# broken artifact. Instead, use electron-builder's own `afterPack`
-# lifecycle hook (a JS function declared in package.json
-# `build.afterPack`), which runs BETWEEN pack and sign. That's the
-# canonical entry point for re-signing nested bundles.
+# electron-builder signs inside the build step, and any subsequent file
+# modification on the .app would invalidate that signature. Instead, use
+# electron-builder's own `afterPack` lifecycle hook (a JS function
+# declared in package.json `build.afterPack`), which runs BETWEEN pack
+# and sign. That's the canonical entry point for re-signing nested
+# bundles. (Notarization runs AFTER the build but only modifies the
+# .dmg by appending a stapled ticket — that's fine and doesn't
+# invalidate the signature on the .app inside.)
 
 jobs:
   # -------------------------------------------------------------------
@@ -190,95 +202,92 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # Use electron-builder's NATIVE signing + notarization flow rather
-      # than post-build sign-mac/notarize-mac. electron-builder produces
-      # the .dmg with the .app already embedded; signing the .app
-      # afterwards doesn't re-embed it, so a post-build sign-mac would
-      # leave the released DMG carrying an unsigned bundle and fail
-      # notarization/Gatekeeper. electron-builder's native pass signs
-      # the .app, embeds the signed bundle in the DMG, AND notarizes
-      # in one go when these env vars are set:
+      # SIGNING + NOTARIZATION strategy
+      # --------------------------------
+      # We split this into two passes for visibility:
+      #   1. electron-builder signs the .app and packages the .dmg
+      #      (using CSC_LINK + CSC_KEY_PASSWORD).
+      #   2. We submit the .dmg to Apple via `xcrun notarytool submit`,
+      #      poll for the verdict, then `xcrun stapler staple`.
       #
-      #   CSC_LINK              — path to .p12 cert (decoded from
-      #                           APPLE_CERTIFICATE_P12_BASE64)
-      #   CSC_KEY_PASSWORD      — password for the .p12
-      #   APPLE_API_KEY         — path to .p8 (decoded from
-      #                           ASC_API_KEY_BASE64)
-      #   APPLE_API_KEY_ID      — App Store Connect key ID
-      #   APPLE_API_KEY_ISSUER  — App Store Connect issuer UUID
+      # Why not electron-builder's native single-pass `notarize: true`?
+      # It blocks the whole build step with no visibility into Apple's
+      # queue — if the queue stalls, the runner just sits and eventually
+      # times out at 6h with no useful log. The submit/poll/staple split
+      # is the pattern documented in skills/macos-signing-notarization
+      # and proven on simple-gal-ui v0.10.1 (shipped clean 2026-05-17);
+      # electron-app.yml's native single-pass has never produced a
+      # successful release in this org.
       #
-      # Missing vars → electron-builder skips signing/notarization with
-      # warnings on stderr (graceful degradation matching the rust-cli
-      # pipeline's behaviour).
-      - name: Decode signing/notarization credentials
-        env:
-          CSC_B64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
-          CSC_PASS: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          ASC_KEY_B64: ${{ secrets.ASC_API_KEY_BASE64 }}
-          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: |
-          set -euo pipefail
-          creds_dir="${RUNNER_TEMP}/electron-creds"
-          mkdir -p "${creds_dir}"
-          chmod 700 "${creds_dir}"
-          if [ -n "${CSC_B64}" ] && [ -n "${CSC_PASS}" ]; then
-            echo "${CSC_B64}" | base64 -d > "${creds_dir}/csc.p12"
-            {
-              echo "CSC_LINK=${creds_dir}/csc.p12"
-              echo "CSC_KEY_PASSWORD=${CSC_PASS}"
-            } >> "${GITHUB_ENV}"
-            echo "macOS code-signing configured"
-          else
-            echo "::warning::No macOS signing cert configured — electron-builder will produce an unsigned bundle."
-          fi
-          if [ -n "${ASC_KEY_B64}" ] && [ -n "${ASC_KEY_ID}" ] && [ -n "${ASC_ISSUER}" ]; then
-            echo "${ASC_KEY_B64}" | base64 -d > "${creds_dir}/AuthKey.p8"
-            {
-              echo "APPLE_API_KEY=${creds_dir}/AuthKey.p8"
-              echo "APPLE_API_KEY_ID=${ASC_KEY_ID}"
-              echo "APPLE_API_KEY_ISSUER=${ASC_ISSUER}"
-            } >> "${GITHUB_ENV}"
-            echo "macOS notarization configured"
-          else
-            echo "::warning::No App Store Connect API key configured — electron-builder will skip notarization."
-          fi
-
+      # Consumer-side prerequisite: `build.mac.notarize` MUST be false
+      # (or unset) in package.json. We FORCE it to false at the CLI
+      # via `-c.mac.notarize=false` so a consumer that left it true
+      # doesn't double-notarize (electron-builder + this workflow).
       - name: Validate notarize input
         shell: bash
         env:
-          NOTARIZE_OVERRIDE: ${{ inputs.notarize }}
+          NOTARIZE_INPUT: ${{ inputs.notarize }}
           ASC_KEY_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
         run: |
           # Whitelist: true | false | empty. Anything else is a
-          # caller-side typo that electron-builder would silently
-          # accept or fail on confusingly — fail early instead.
-          case "${NOTARIZE_OVERRIDE}" in
+          # caller-side typo — fail early.
+          case "${NOTARIZE_INPUT}" in
             ''|true|false) ;;
             *)
-              echo "::error::inputs.notarize must be 'true', 'false', or empty (got: '${NOTARIZE_OVERRIDE}')"
+              echo "::error::inputs.notarize must be 'true', 'false', or empty (got: '${NOTARIZE_INPUT}')"
               exit 1
               ;;
           esac
           # Fail fast when notarize is forced on without ASC secrets —
           # otherwise the build runs, "notarization" silently no-ops,
-          # and the released DMG hits a bad-UX Gatekeeper prompt on
-          # user machines.
-          if [ "${NOTARIZE_OVERRIDE}" = "true" ] && [ "${ASC_KEY_PRESENT}" = "no" ]; then
-            echo "::error::inputs.notarize=true but ASC_API_KEY_BASE64 secret is missing. Either configure the ASC_API_KEY_* secrets on this repo or set notarize='' (respect package.json) / 'false'."
+          # and the released DMG hits a Gatekeeper prompt on user
+          # machines.
+          if [ "${NOTARIZE_INPUT}" = "true" ] && [ "${ASC_KEY_PRESENT}" = "no" ]; then
+            echo "::error::inputs.notarize=true but ASC_API_KEY_BASE64 secret is missing. Either configure the ASC_API_KEY_* secrets on this repo or set notarize='' (auto-detect) / 'false'."
             exit 1
           fi
+
+      - name: Resolve effective notarize flag
+        id: notarize-flag
+        shell: bash
+        env:
+          NOTARIZE_INPUT: ${{ inputs.notarize }}
+          CSC_PRESENT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && 'yes' || 'no' }}
+          ASC_KEY_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
+        run: |
+          # Effective behaviour:
+          #   notarize='true'  → notarize (already validated above)
+          #   notarize='false' → skip
+          #   notarize=''      → auto: notarize iff signing cert AND
+          #                            ASC key are both configured.
+          case "${NOTARIZE_INPUT}" in
+            true)  effective=true ;;
+            false) effective=false ;;
+            *)
+              if [ "${CSC_PRESENT}" = "yes" ] && [ "${ASC_KEY_PRESENT}" = "yes" ]; then
+                effective=true
+              else
+                effective=false
+              fi
+              ;;
+          esac
+          echo "effective=${effective}" >> "${GITHUB_OUTPUT}"
+          echo "Effective notarize=${effective}"
 
       - name: Build (electron-builder, mac --${{ matrix.arch }})
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
-          NOTARIZE_OVERRIDE: ${{ inputs.notarize }}
+          # electron-builder reads CSC_LINK as either a path OR a base64
+          # string. Passing the base64 directly avoids writing the .p12
+          # to disk on the runner.
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
-          args=(--mac "--${ARCH}" --publish never)
-          if [ -n "${NOTARIZE_OVERRIDE}" ]; then
-            args+=("-c.mac.notarize=${NOTARIZE_OVERRIDE}")
-          fi
+          # Force-disable electron-builder's native notarization. We
+          # handle notarization in dedicated submit/poll/staple steps
+          # below for queue visibility.
+          args=(--mac "--${ARCH}" --publish never -c.mac.notarize=false)
           # Prefer canonical bin/build (release-sync managed via the
           # electron-app stack). Falls back to direct `npm run build`
           # for consumers that haven't adopted release-sync yet.
@@ -288,20 +297,115 @@ jobs:
             npm run build -- "${args[@]}"
           fi
 
+      # ---- Notarization: submit / poll / staple --------------------
+      # Per skills/macos-signing-notarization. Each step is separately
+      # logged so Apple's queue position and timing is visible in CI.
+      - name: Write App Store Connect API key
+        id: write-asc-key
+        if: steps.notarize-flag.outputs.effective == 'true'
+        shell: bash
+        env:
+          ASC_API_KEY_BASE64: ${{ secrets.ASC_API_KEY_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ASC_API_KEY_BASE64}" ]; then
+            echo "::error::ASC_API_KEY_BASE64 secret is empty but notarize is enabled."
+            exit 1
+          fi
+          key_path="${RUNNER_TEMP}/AuthKey.p8"
+          printf '%s' "${ASC_API_KEY_BASE64}" | base64 --decode > "${key_path}"
+          chmod 600 "${key_path}"
+          echo "key-path=${key_path}" >> "${GITHUB_OUTPUT}"
+
+      - name: Submit DMG for notarization
+        id: notarize-submit
+        if: steps.notarize-flag.outputs.effective == 'true'
+        shell: bash
+        env:
+          OUTPUT_DIR: ${{ inputs.output-dir }}
+          ASC_KEY_PATH: ${{ steps.write-asc-key.outputs.key-path }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          DMG=$(find "${OUTPUT_DIR}" -maxdepth 1 -name '*.dmg' -print -quit)
+          if [ -z "${DMG}" ]; then
+            echo "::error::No DMG found under ${OUTPUT_DIR}/ — electron-builder produced no artifact."
+            exit 1
+          fi
+          echo "Submitting ${DMG} to notarytool..."
+          RESULT=$(xcrun notarytool submit "${DMG}" \
+            --key "${ASC_KEY_PATH}" \
+            --key-id "${ASC_KEY_ID}" \
+            --issuer "${ASC_ISSUER}" \
+            --output-format json \
+            --no-wait)
+          echo "${RESULT}"
+          ID=$(printf '%s' "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          echo "submission-id=${ID}" >> "${GITHUB_OUTPUT}"
+          echo "dmg-path=${DMG}" >> "${GITHUB_OUTPUT}"
+          echo "Submission ID: ${ID}"
+
+      - name: Wait for notarization
+        if: steps.notarize-submit.outcome == 'success'
+        shell: bash
+        env:
+          SUBMISSION_ID: ${{ steps.notarize-submit.outputs.submission-id }}
+          ASC_KEY_PATH: ${{ steps.write-asc-key.outputs.key-path }}
+          ASC_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_ISSUER: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -uo pipefail
+          echo "Polling notarization status for ${SUBMISSION_ID}..."
+          for i in $(seq 1 60); do
+            RESULT=$(xcrun notarytool info "${SUBMISSION_ID}" \
+              --key "${ASC_KEY_PATH}" \
+              --key-id "${ASC_KEY_ID}" \
+              --issuer "${ASC_ISSUER}" \
+              --output-format json 2>&1) || true
+            STATUS=$(printf '%s' "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','Unknown'))" 2>/dev/null || echo "Unknown")
+            echo "  [${i}/60] status=${STATUS} ($(date -u +%H:%M:%S))"
+            if [ "${STATUS}" = "Accepted" ]; then
+              echo "Notarization accepted."
+              exit 0
+            fi
+            if [ "${STATUS}" = "Invalid" ] || [ "${STATUS}" = "Rejected" ]; then
+              echo "::error::Notarization failed with status: ${STATUS}"
+              xcrun notarytool log "${SUBMISSION_ID}" \
+                --key "${ASC_KEY_PATH}" \
+                --key-id "${ASC_KEY_ID}" \
+                --issuer "${ASC_ISSUER}" 2>&1 || true
+              exit 1
+            fi
+            sleep 30
+          done
+          echo "::warning::Timed out waiting for notarization after 30 minutes. The DMG is signed but not notarized — staple manually once Apple finishes processing (submission ID: ${SUBMISSION_ID})."
+
+      - name: Staple notarization ticket
+        if: steps.notarize-submit.outcome == 'success'
+        shell: bash
+        env:
+          DMG_PATH: ${{ steps.notarize-submit.outputs.dmg-path }}
+        run: |
+          set -uo pipefail
+          echo "Stapling ${DMG_PATH}..."
+          xcrun stapler staple "${DMG_PATH}" \
+            || echo "::warning::Staple failed — notarization may not be complete yet. DMG is still signed."
+          xcrun stapler validate "${DMG_PATH}" || true
+
       # Smoke test (convention): scripts/smoke.sh. Catches catastrophic
       # build issues (wrong binary path, dylib missing, Windows path
-      # quirks, etc.) that no other test can — the only way to know
-      # the packaged build doesn't crash on launch is to launch it.
-      # PLATFORM/ARCH/PACKAGE_DIR env vars are exposed; consumer's
-      # script handles xvfb-run on linux, binary-path resolution per
-      # arch, etc.
+      # quirks, etc.) — the only way to know the packaged build doesn't
+      # crash on launch is to launch it. PLATFORM/ARCH/PACKAGE_DIR env
+      # vars are exposed; consumer's script handles xvfb-run on linux,
+      # binary-path resolution per arch, etc.
       #
       # Smoke runs AFTER signing+notarization. Any modification to the
       # artifact in this step would invalidate notarization — keep it
       # read-only (launch the binary, check exit / output; don't
       # rewrite files).
       - name: Smoke test (mac)
-        if: hashFiles('scripts/smoke.sh') != ''
+        if: always() && !cancelled() && hashFiles('scripts/smoke.sh') != ''
         shell: bash
         env:
           PLATFORM: mac
@@ -309,7 +413,10 @@ jobs:
           PACKAGE_DIR: ${{ inputs.output-dir }}
         run: bash scripts/smoke.sh
 
+      # Upload runs `if: always() && !cancelled()` so a notarization
+      # timeout (warning, not failure) still publishes the signed DMG.
       - name: Upload mac artifacts
+        if: always() && !cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: electron-app-mac-${{ matrix.arch }}
