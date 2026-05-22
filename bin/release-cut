@@ -91,9 +91,12 @@ case "$arg" in
         # Reads the first `version = "..."` line — works for
         # `[workspace.package]` at repo-root Cargo.toml (the canonical
         # shape across our fleet), single-crate Cargo.toml, or any
-        # other [tool.foo] section that puts version first.
-        current=$(grep -E '^version = ' "$manifest" \
-            | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+        # other [tool.foo] section that puts version first. Tolerates
+        # leading indentation. `|| true` so a no-match doesn't trip
+        # `set -e` before the explicit empty check below.
+        current=$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' "$manifest" \
+            | head -1 \
+            | sed -E 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/') || true
         if [ -z "$current" ]; then
             echo "release-cut: couldn't parse current version from $manifest" >&2
             exit 1
@@ -133,5 +136,5 @@ cat <<EOF
 
 Workflow queued. Follow with:
   gh run watch
-  gh run list --workflow=${workflow} --limit=1
+  gh run list --workflow="${workflow}" --limit=1
 EOF
