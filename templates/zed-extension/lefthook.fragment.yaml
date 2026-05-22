@@ -41,7 +41,15 @@ pre-commit:
       # `--target wasm32-wasip2`: the canonical (and only) target for a
       # Zed extension. The host can't resolve `zed_extension_api`'s
       # wasm-only ABI; running clippy without this flag fails at link
-      # check. `--release` matches what bin/build does in CI — same
-      # profile, same warnings.
-      run: cargo clippy --release --target wasm32-wasip2 -- -D warnings
+      # check.
+      #
+      # Flag deltas vs rust-quality's `cargo clippy --all-targets
+      # --all-features -- -D warnings`:
+      #   * `--all-features`: KEPT — exercise every feature-gated path
+      #     for max lint coverage (same philosophy as rust-quality).
+      #   * `--all-targets`: DROPPED — zed extensions are a single
+      #     cdylib target; there are no tests/benches/examples that
+      #     `--all-targets` would expand to. Including it would force
+      #     clippy to look for non-existent target kinds.
+      run: cargo clippy --all-features --target wasm32-wasip2 -- -D warnings
       priority: 2
