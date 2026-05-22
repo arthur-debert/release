@@ -17,7 +17,13 @@ set -euo pipefail
 #   bin/build                            # full bundle, all platforms in tauri.conf
 #   bin/build --bundles dmg              # restrict to specific bundle target(s)
 #   bin/build --debug                    # debug profile (faster compile, no signing)
-#   bin/build -- <extra tauri build args>    # pass-through after `--`
+#   bin/build -- --features foo          # pass-through to the cargo invocation
+#                                        # (tauri build forwards args after `--`)
+#
+# CWD: respects the caller's working directory. tauri-app.yml's build
+# job `cd`s into TAURI_DIR before invoking bin/build, so monorepo
+# consumers with tauri at a subpath work correctly. Locally, the user
+# typically invokes from repo root (or the tauri subdir).
 #
 # Source of truth: arthur-debert/release templates/tauri-app/bin/build.
 
@@ -46,30 +52,15 @@ build_with_pm() {
     local pm="$1"
     shift
     if [ "${pm}" = "npm" ]; then
-        npx --no-install tauri build "$@"
+        exec npx --no-install tauri build "$@"
     else
-        "${pm}" tauri build "$@"
+        exec "${pm}" tauri build "$@"
     fi
 }
 
-cd "$(git rev-parse --show-toplevel)"
-
 PM=$(detect_pm)
-exec_args=()
-passthrough=()
-saw_dashdash=false
-
-for arg in "$@"; do
-    if [ "${saw_dashdash}" = "true" ]; then
-        passthrough+=("${arg}")
-    elif [ "${arg}" = "--" ]; then
-        saw_dashdash=true
-    else
-        exec_args+=("${arg}")
-    fi
-done
-
-# nullglob-safe array expansion for bash 3.2 (macOS default).
-build_with_pm "${PM}" \
-    ${exec_args[@]+"${exec_args[@]}"} \
-    ${passthrough[@]+"${passthrough[@]}"}
+# Forward all args verbatim. `"$@"` is natively safe under `set -u`
+# (empty case doesn't trip unbound) AND preserves the `--` separator
+# `tauri build` uses to pass remaining args to its underlying cargo
+# invocation (e.g., `bin/build -- --features foo`).
+build_with_pm "${PM}" "$@"
