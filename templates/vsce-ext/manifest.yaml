@@ -1,0 +1,19 @@
+# Stack default manifest for `vsce-ext` (detected via package.json
+# containing `"@vscode/vsce"` or `"vsce"` — the publisher CLI is the
+# canonical signal for a VS Code extension repo).
+# Consumers can override with `.release-sync.yaml` at their repo root.
+
+stack: vsce-ext
+components:
+  - shell-quality
+  - npm-quality
+# Opt-in Components (bats, mkdocs, playwright-eventually) are not
+# listed here. Consumers that want them ship a .release-sync.yaml
+# that includes them in addition to the defaults above.
+#
+# Note: vsce-ext deliberately does NOT add a Stack-level
+# lefthook.fragment.yaml — the shell-quality + npm-quality Components
+# cover prettier / eslint / typecheck / shellcheck / yamllint /
+# markdownlint, which is the full pre-commit surface for a typical
+# extension repo. The umbrella `bin/check` adds typecheck + tests on
+# top in CI.

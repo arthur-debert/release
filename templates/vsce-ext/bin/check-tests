@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical npm-stack unit test runner for vsce-ext.
+#
+# VS Code extensions commonly have NO unit test harness (the
+# @vscode/test-electron integration suite is slow, host-dependent, and
+# lives behind a separate `test:integration` script). The umbrella
+# `bin/check` should NOT fail a repo just because it skipped wiring a
+# unit-test runner — so skip-with-notice is the default behavior when
+# no candidate script exists.
+#
+# Probe order:
+#
+#   1. `test:unit` — explicit unit-only alias (vitest / mocha-direct
+#      convention). Forwards `-- --run` so vitest runs once instead of
+#      entering watch mode (harmless if the consumer's runner isn't
+#      vitest — mocha/jasmine/jest ignore unknown flags via npm's
+#      `--` pass-through).
+#   2. `test` — generic alias (npm default). Passed through verbatim;
+#      the consumer's script is expected to terminate.
+#
+# Skip-with-notice if neither exists.
+#
+# `"$@"` forwards extra args to npm so the runner can be invoked like:
+#   bin/check-tests --reporter=verbose
+#   bin/check-tests -- some-test-name
+
+echo "Running unit tests..."
+
+if [ ! -f package.json ]; then
+    echo "No package.json — skipping unit tests."
+    exit 0
+fi
+
+if node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts['test:unit'] ? 0 : 1)" 2>/dev/null; then
+    # Vitest convention: `--run` disables watch mode. Use `-- --run` so
+    # the flag is forwarded to vitest rather than swallowed by npm.
+    npm run --silent test:unit -- --run "$@"
+elif node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.test ? 0 : 1)" 2>/dev/null; then
+    npm test --silent -- "$@"
+else
+    echo "No 'test:unit' or 'test' script — skipping unit tests."
+    exit 0
+fi
+
+echo "Tests OK"
