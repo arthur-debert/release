@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical tauri-app build entry point. Same script local + CI.
+#
+# Runs `tauri build` — produces the native binary + the configured
+# bundles (.app / .dmg on macOS, .deb / .AppImage / .rpm on Linux,
+# .msi / .exe on Windows, per tauri.conf.json's `bundle.targets`).
+#
+# Tauri's `beforeBuildCommand` (from tauri.conf.json) runs the
+# frontend build first (typically `pnpm build` / `npm run build`),
+# which in this repo's pattern often invokes `pnpm fetch:wasm` first
+# to pull pinned upstream artifacts. The frontend output is then
+# embedded into the bundle by Tauri's bundler.
+#
+# Usage:
+#   bin/build                            # full bundle, all platforms in tauri.conf
+#   bin/build --bundles dmg              # restrict to specific bundle target(s)
+#   bin/build --debug                    # debug profile (faster compile, no signing)
+#   bin/build -- --features foo          # pass-through to the cargo invocation
+#                                        # (tauri build forwards args after `--`)
+#
+# CWD: respects the caller's working directory. tauri-app.yml's build
+# job `cd`s into TAURI_DIR before invoking bin/build, so monorepo
+# consumers with tauri at a subpath work correctly. Locally, the user
+# typically invokes from repo root (or the tauri subdir).
+#
+# Source of truth: arthur-debert/release templates/tauri-app/bin/build.
+
+# Resolve package manager from the lockfile (matches tauri-ci.yml and
+# tauri-app.yml's auto-detect convention). The lockfile IS the
+# canonical signal; consumers commit exactly one.
+detect_pm() {
+    if [ -f pnpm-lock.yaml ]; then
+        echo "pnpm"
+    elif [ -f yarn.lock ]; then
+        echo "yarn"
+    else
+        echo "npm"
+    fi
+}
+
+# Build the `tauri build` invocation for the detected pm.
+#   * pnpm / yarn: `<pm> tauri build [args]` — `tauri` resolves from
+#     node_modules/.bin transparently.
+#   * npm: `npm tauri build` is NOT valid (npm has no "run a
+#     node_modules binary by name" subcommand). Use
+#     `npx --no-install tauri build` to pick up the locally installed
+#     CLI without fetching from the registry. Mirrors tauri-ci.yml's
+#     smoke step.
+build_with_pm() {
+    local pm="$1"
+    shift
+    if [ "${pm}" = "npm" ]; then
+        exec npx --no-install tauri build "$@"
+    else
+        exec "${pm}" tauri build "$@"
+    fi
+}
+
+PM=$(detect_pm)
+# Forward all args verbatim. `"$@"` is natively safe under `set -u`
+# (empty case doesn't trip unbound) AND preserves the `--` separator
+# `tauri build` uses to pass remaining args to its underlying cargo
+# invocation (e.g., `bin/build -- --features foo`).
+build_with_pm "${PM}" "$@"
