@@ -67,14 +67,19 @@ if [ -f lefthook.yml ] && [ -n "${_lefthook}" ]; then
   # codes don't propagate `set -e` from a conditional context, but the
   # explicit `|| true` makes the empty-when-unset intent unambiguous.
   _hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
-  if [ "${_hooks_path}" = ".husky" ]; then
+  # Unset core.hooksPath if set to ANY value (not just .husky). Any
+  # custom hooksPath redirects git away from .git/hooks/, which is
+  # where `lefthook install` writes its pre-commit shim — so a leftover
+  # config from any prior hook manager (husky, pre-commit framework,
+  # custom) makes the install silently no-op.
+  if [ -n "${_hooks_path}" ]; then
     # Don't suppress unset failures with `|| true` — if the unset
-    # fails (e.g. unwritable .git/config), `core.hooksPath=.husky`
-    # stays in place and the subsequent `lefthook install` is
-    # effectively a no-op (git still routes hooks to .husky/pre-commit).
-    # The user needs to know that, not have it silently swallowed.
+    # fails (e.g. unwritable .git/config), the custom redirect stays
+    # in place and the subsequent `lefthook install` is effectively
+    # a no-op. The user needs to know that, not have it silently
+    # swallowed.
     if ! git config --unset core.hooksPath; then
-      echo "warning: failed to unset core.hooksPath (=.husky); husky redirect still active — lefthook install will not take effect" >&2
+      echo "warning: failed to unset core.hooksPath (=${_hooks_path}); custom redirect still active — lefthook install will not take effect" >&2
     fi
   fi
   if ! "${_lefthook}" install >/dev/null; then
@@ -89,9 +94,20 @@ elif [ -x scripts/pre-commit ]; then
   # already-set `core.hooksPath` if present — fallback consumers
   # may have configured one deliberately. Use an absolute symlink
   # target so it resolves correctly from any hooks-dir depth.
+  #
+  # Best-effort: warn-and-continue on failure (matches the rest of
+  # the script's continue-on-transient-errors stance — a failed
+  # mkdir/symlink on an unusual worktree layout shouldn't abort the
+  # entire dev-env setup).
   _hooks_dir="$(git config --get core.hooksPath 2>/dev/null || git rev-parse --git-path hooks)"
-  mkdir -p "${_hooks_dir}"
-  ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit"
+  # Best-effort with full diagnostics: don't suppress mkdir/ln stderr —
+  # if either fails, the user needs the underlying error to fix it
+  # (e.g. "Permission denied" pinpoints the actual issue).
+  if ! mkdir -p "${_hooks_dir}"; then
+    echo "warning: failed to mkdir -p \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
+  elif ! ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit"; then
+    echo "warning: failed to symlink scripts/pre-commit into \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
+  fi
 fi
 
 # Cloud-only gate. Everything below is cloud-only — local sessions
