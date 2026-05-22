@@ -220,8 +220,9 @@ jobs:
         #
         # No explicit `version:` — pnpm/action-setup reads the
         # `packageManager` field from package.json when available
-        # (npm corepack convention; e.g. `"packageManager":
-        # "pnpm@10.29.3"`). Setting `version:` HERE while the
+        # (Corepack convention — Node-level, applies to pnpm/yarn/npm
+        # alike; e.g. `"packageManager": "pnpm@10.29.3"`). Setting
+        # `version:` HERE while the
         # consumer's package.json also pins triggers
         # ERR_PNPM_BAD_PM_VERSION ("Multiple versions of pnpm
         # specified") on the runner. arami-app surfaced this on
