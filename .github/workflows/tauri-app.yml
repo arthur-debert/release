@@ -38,14 +38,24 @@ name: tauri-app release
 #   toolchain; different bindings.
 # - Three version files (npm + Cargo + tauri.conf), not just one.
 #
-# Consumer convention hook
-# ------------------------
-# `scripts/build-tauri.sh` at the repo root, executed in place of a
-# raw `pnpm tauri build`. Use this when the build needs upstream
-# artifacts pre-fetched (e.g. arami-app pre-fetches its WASM
-# upstream before the bundle step). If the hook isn't present, the
-# workflow falls back to `pnpm tauri build` or `npm run tauri
-# build` based on lockfile detection.
+# Build entry (release-sync canonical)
+# ------------------------------------
+# `bin/build` at the repo root — shipped by the tauri-app stack
+# template via release-sync. Auto-detects pm (pnpm/yarn/npm), runs
+# `<pm> tauri build`. Same script local + CI; consumers that have
+# adopted release-sync get this automatically.
+#
+# Fallbacks (in order):
+#   1. `scripts/build-tauri.sh` — legacy convention hook, kept during
+#      the take-iii transition. Consumers adopting release-sync should
+#      delete their copy.
+#   2. `npx tauri build` — minimal fallback for consumers that haven't
+#      adopted either yet.
+#
+# Any pre-fetch / pre-build steps (upstream WASM, codegen) belong in
+# tauri.conf.json's `beforeBuildCommand` — that's tauri's own
+# pre-build hook, runs uniformly regardless of which build entry
+# fires. arami-app uses this pattern for `pnpm fetch:wasm`.
 #
 # Optional `prep-script` input
 # ----------------------------
@@ -684,31 +694,32 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: |
           set -euo pipefail
-          # Both branches `cd "${TAURI_DIR}"` so the hook starts at
-          # the same CWD as the fallback — monorepo consumers don't
-          # have to guess where their hook runs. The hook receives
-          # the (now-resolved) TAURI_DIR via env if it needs to make
-          # decisions based on it.
+          # Build entry resolution (in preference order):
+          #   1. bin/build at repo root — the canonical take-iii entry,
+          #      release-sync managed via the tauri-app stack template.
+          #      Auto-detects pm (pnpm/yarn/npm), runs `<pm> tauri build`.
+          #   2. scripts/build-tauri.sh at repo root — legacy convention
+          #      hook, kept for the transition window. Consumers that
+          #      adopt release-sync get bin/build automatically and
+          #      should delete their scripts/build-tauri.sh.
+          #   3. fallback: npx tauri build (auto-resolves the
+          #      consumer-installed tauri CLI).
+          # All branches `cd "${TAURI_DIR}"` so the entry starts at the
+          # same CWD — monorepo consumers don't have to guess.
           cd "${TAURI_DIR}"
-          if [ -f "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" ]; then
-            # Convention hook: if the consumer ships
-            # scripts/build-tauri.sh (at repo root), run it. The
-            # consumer is responsible for invoking `tauri build`
-            # plus any pre-fetch steps (upstream WASM, codegen,
-            # etc.).
-            extra=()
-            if [ -n "${BUNDLES}" ]; then
-              # The hook may not honor this — but most builds will
-              # exec `tauri build "$@"` and pass args through.
-              extra=(--bundles "${BUNDLES}")
-            fi
+          extra=()
+          if [ -n "${BUNDLES}" ]; then
+            extra=(--bundles "${BUNDLES}")
+          fi
+          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
+            "${GITHUB_WORKSPACE}/bin/build" "${extra[@]+"${extra[@]}"}"
+          elif [ -f "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" ]; then
+            # Legacy convention hook (pre-take-iii). The hook may not
+            # honor --bundles — but most builds `exec tauri build "$@"`
+            # and pass args through.
             bash "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" "${extra[@]+"${extra[@]}"}"
           else
-            if [ -n "${BUNDLES}" ]; then
-              npx tauri build --bundles "${BUNDLES}"
-            else
-              npx tauri build
-            fi
+            npx tauri build "${extra[@]+"${extra[@]}"}"
           fi
 
       - name: Collect bundles

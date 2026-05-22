@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical tauri-app build entry point. Same script local + CI.
+#
+# Runs `tauri build` — produces the native binary + the configured
+# bundles (.app / .dmg on macOS, .deb / .AppImage / .rpm on Linux,
+# .msi / .exe on Windows, per tauri.conf.json's `bundle.targets`).
+#
+# Tauri's `beforeBuildCommand` (from tauri.conf.json) runs the
+# frontend build first (typically `pnpm build` / `npm run build`),
+# which in this repo's pattern often invokes `pnpm fetch:wasm` first
+# to pull pinned upstream artifacts. The frontend output is then
+# embedded into the bundle by Tauri's bundler.
+#
+# Usage:
+#   bin/build                            # full bundle, all platforms in tauri.conf
+#   bin/build --bundles dmg              # restrict to specific bundle target(s)
+#   bin/build --debug                    # debug profile (faster compile, no signing)
+#   bin/build -- <extra tauri build args>    # pass-through after `--`
+#
+# Source of truth: arthur-debert/release templates/tauri-app/bin/build.
+
+# Resolve package manager from the lockfile (matches tauri-ci.yml and
+# tauri-app.yml's auto-detect convention). The lockfile IS the
+# canonical signal; consumers commit exactly one.
+detect_pm() {
+    if [ -f pnpm-lock.yaml ]; then
+        echo "pnpm"
+    elif [ -f yarn.lock ]; then
+        echo "yarn"
+    else
+        echo "npm"
+    fi
+}
+
+# Build the `tauri build` invocation for the detected pm.
+#   * pnpm / yarn: `<pm> tauri build [args]` — `tauri` resolves from
+#     node_modules/.bin transparently.
+#   * npm: `npm tauri build` is NOT valid (npm has no "run a
+#     node_modules binary by name" subcommand). Use
+#     `npx --no-install tauri build` to pick up the locally installed
+#     CLI without fetching from the registry. Mirrors tauri-ci.yml's
+#     smoke step.
+build_with_pm() {
+    local pm="$1"
+    shift
+    if [ "${pm}" = "npm" ]; then
+        npx --no-install tauri build "$@"
+    else
+        "${pm}" tauri build "$@"
+    fi
+}
+
+cd "$(git rev-parse --show-toplevel)"
+
+PM=$(detect_pm)
+exec_args=()
+passthrough=()
+saw_dashdash=false
+
+for arg in "$@"; do
+    if [ "${saw_dashdash}" = "true" ]; then
+        passthrough+=("${arg}")
+    elif [ "${arg}" = "--" ]; then
+        saw_dashdash=true
+    else
+        exec_args+=("${arg}")
+    fi
+done
+
+# nullglob-safe array expansion for bash 3.2 (macOS default).
+build_with_pm "${PM}" \
+    ${exec_args[@]+"${exec_args[@]}"} \
+    ${passthrough[@]+"${passthrough[@]}"}
