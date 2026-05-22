@@ -50,8 +50,24 @@ cd "${REPO_ROOT}"
 # lefthook. We do NOT delete `.husky/` itself; that's a consumer-side
 # cleanup (committed file, belongs in a PR).
 
-if [ -f lefthook.yml ] && command -v lefthook >/dev/null 2>&1; then
-  if [ "$(git config --get core.hooksPath 2>/dev/null)" = ".husky" ]; then
+# Resolve lefthook binary. npm/pnpm consumers commonly have lefthook
+# installed at `node_modules/.bin/lefthook` (via `prepare: lefthook install`
+# in package.json) — `command -v lefthook` doesn't find that location, so
+# without this check the script silently falls through to the
+# scripts/pre-commit branch in cloud sessions for npm consumers.
+_lefthook=""
+if [ -x node_modules/.bin/lefthook ]; then
+  _lefthook="node_modules/.bin/lefthook"
+elif command -v lefthook >/dev/null 2>&1; then
+  _lefthook="lefthook"
+fi
+
+if [ -f lefthook.yml ] && [ -n "${_lefthook}" ]; then
+  # `git config --get` returns 1 when unset. Command substitution exit
+  # codes don't propagate `set -e` from a conditional context, but the
+  # explicit `|| true` makes the empty-when-unset intent unambiguous.
+  _hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
+  if [ "${_hooks_path}" = ".husky" ]; then
     # Don't suppress unset failures with `|| true` — if the unset
     # fails (e.g. unwritable .git/config), `core.hooksPath=.husky`
     # stays in place and the subsequent `lefthook install` is
@@ -61,7 +77,7 @@ if [ -f lefthook.yml ] && command -v lefthook >/dev/null 2>&1; then
       echo "warning: failed to unset core.hooksPath (=.husky); husky redirect still active — lefthook install will not take effect" >&2
     fi
   fi
-  if ! lefthook install >/dev/null; then
+  if ! "${_lefthook}" install >/dev/null; then
     echo "warning: lefthook install failed — pre-commit hook NOT wired" >&2
   fi
 elif [ -x scripts/pre-commit ]; then

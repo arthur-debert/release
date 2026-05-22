@@ -30,10 +30,22 @@ set -euo pipefail
 # Resolve package manager from the lockfile (matches tauri-ci.yml and
 # tauri-app.yml's auto-detect convention). The lockfile IS the
 # canonical signal; consumers commit exactly one.
+#
+# Look up lockfile via repo root (`git rev-parse --show-toplevel`) so
+# detection works regardless of caller CWD — the workflow's build job
+# `cd`s into TAURI_DIR before invoking bin/build (for monorepo
+# layouts), and the lockfile lives at repo root, not inside the tauri
+# subdir.
 detect_pm() {
-    if [ -f pnpm-lock.yaml ]; then
+    # Check both CWD and repo root — handles the common case (lockfile
+    # at root, invoked from anywhere) AND monorepo configs with a
+    # subdir-local lockfile (e.g. per-workspace pnpm/npm setups). CWD
+    # match wins if both exist.
+    local root
+    root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+    if [ -f pnpm-lock.yaml ] || [ -f "${root}/pnpm-lock.yaml" ]; then
         echo "pnpm"
-    elif [ -f yarn.lock ]; then
+    elif [ -f yarn.lock ] || [ -f "${root}/yarn.lock" ]; then
         echo "yarn"
     else
         echo "npm"
