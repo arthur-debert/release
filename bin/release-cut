@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# release-cut — canonical "cut a release" CLI for the rust-cli + cargo-
+# workspace consumers across arthur-debert/* and lex-fmt/* fleets.
+#
+# Everything runs in CI. This script just figures out the new version
+# locally (so you can see "Bumping minor: 1.4.2 -> 1.5.0" before
+# committing to it) and dispatches the release workflow.
+#
+# Usage:
+#   release-cut <new-version>          # e.g. release-cut 1.8.0
+#   release-cut <bump-level>           # e.g. release-cut minor
+#                                      #   (one of: major, minor, patch)
+#
+# Pre-releases: pass a semver pre-release suffix to cut an RC or beta,
+# e.g. `release-cut 1.8.0-rc.1`. CI marks the GitHub Release as
+# "pre-release" (so it isn't shown as Latest) and skips rolling
+# `## [Unreleased]` in CHANGELOG.md, so subsequent RCs / the final
+# release can still draw from the same unreleased entries.
+#
+# What CI does is per-consumer (see your repo's
+# `.github/workflows/release.yml` thin caller of one of
+# `arthur-debert/release`'s reusable release workflows: `rust-cli.yml`,
+# `tauri-app.yml`, `electron-app.yml`, etc.). At minimum CI bumps
+# version files, rolls CHANGELOG, commits + tags, builds, and creates
+# the GitHub Release. Per-stack add-ons (crates.io publish, Homebrew
+# formula push, .deb packages, codesigning) are wired in the workflow.
+#
+# Preconditions (checked by CI before mutating anything):
+#   - version is MAJOR.MINOR.PATCH[-PRERELEASE]
+#   - tag vX.Y.Z does not already exist
+#   - version differs from the manifest's current version
+#   - CHANGELOG.md has entries under `## [Unreleased]`
+#
+# After dispatch:
+#   gh run watch
+#   gh run list --workflow=release.yml --limit=1
+#
+# Per-repo overrides (env vars; usually unset):
+#   RELEASE_CUT_MANIFEST   path to manifest holding current version
+#                          (default: <repo-root>/Cargo.toml)
+#   RELEASE_CUT_WORKFLOW   workflow file name dispatched via gh
+#                          (default: release.yml)
+
+usage() {
+    cat <<EOF >&2
+usage: $(basename "$0") <major|minor|patch|X.Y.Z[-PRERELEASE]>
+
+Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
+pre-release suffix is stripped before bumping; to step from
+1.0.0-rc.1 to 1.0.0, type the version literally).
+EOF
+}
+
+# Parse a MAJOR.MINOR.PATCH core (no pre-release suffix) and assign
+# to the three nameref outputs. Bash builtins only, no eval/sed.
+parse_semver_core() {
+    local input="$1"
+    local -n major_out="$2" minor_out="$3" patch_out="$4"
+    IFS='.' read -r major_out minor_out patch_out _ <<< "$input"
+    if ! [[ "$major_out" =~ ^[0-9]+$ ]] \
+        || ! [[ "$minor_out" =~ ^[0-9]+$ ]] \
+        || ! [[ "$patch_out" =~ ^[0-9]+$ ]]; then
+        echo "release-cut: couldn't parse semver core: $input" >&2
+        return 1
+    fi
+}
+
+if [ $# -ne 1 ]; then
+    usage
+    exit 2
+fi
+case "$1" in
+    -h|--help) usage; exit 0 ;;
+esac
+
+arg="$1"
+repo_root=$(git rev-parse --show-toplevel)
+manifest="${RELEASE_CUT_MANIFEST:-$repo_root/Cargo.toml}"
+workflow="${RELEASE_CUT_WORKFLOW:-release.yml}"
+
+if [ ! -f "$manifest" ]; then
+    echo "release-cut: manifest not found: $manifest" >&2
+    echo "  (override with RELEASE_CUT_MANIFEST=<path>)" >&2
+    exit 1
+fi
+
+case "$arg" in
+    major|minor|patch)
+        # Reads the first `version = "..."` line — works for
+        # `[workspace.package]` at repo-root Cargo.toml (the canonical
+        # shape across our fleet), single-crate Cargo.toml, or any
+        # other [tool.foo] section that puts version first. Tolerates
+        # leading indentation. `|| true` so a no-match doesn't trip
+        # `set -e` before the explicit empty check below.
+        current=$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' "$manifest" \
+            | head -1 \
+            | sed -E 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/') || true
+        if [ -z "$current" ]; then
+            echo "release-cut: couldn't parse current version from $manifest" >&2
+            exit 1
+        fi
+        # Strip any pre-release suffix before bumping. The shortcuts
+        # operate on the core MAJOR.MINOR.PATCH; if you want to step
+        # from 1.0.0-rc.1 to 1.0.0, type the version literally.
+        current_core="${current%%-*}"
+        MAJOR=0; MINOR=0; PATCH=0
+        parse_semver_core "$current_core" MAJOR MINOR PATCH
+        case "$arg" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH + 1)) ;;
+        esac
+        new_version="${MAJOR}.${MINOR}.${PATCH}"
+        echo "Bumping ${arg}: ${current} -> ${new_version}"
+        ;;
+    *)
+        if ! [[ "$arg" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "release-cut: version must be MAJOR.MINOR.PATCH[-PRERELEASE] or one of: major, minor, patch (got: $arg)" >&2
+            exit 2
+        fi
+        new_version="$arg"
+        ;;
+esac
+
+if ! command -v gh >/dev/null 2>&1; then
+    echo "release-cut: gh CLI not found — install from https://cli.github.com/" >&2
+    exit 1
+fi
+
+echo "Triggering ${workflow} for v${new_version}..."
+gh workflow run "$workflow" -f version="$new_version"
+
+cat <<EOF
+
+Workflow queued. Follow with:
+  gh run watch
+  gh run list --workflow="${workflow}" --limit=1
+EOF
