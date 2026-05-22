@@ -37,11 +37,15 @@ set -euo pipefail
 # layouts), and the lockfile lives at repo root, not inside the tauri
 # subdir.
 detect_pm() {
+    # Check both CWD and repo root — handles the common case (lockfile
+    # at root, invoked from anywhere) AND monorepo configs with a
+    # subdir-local lockfile (e.g. per-workspace pnpm/npm setups). CWD
+    # match wins if both exist.
     local root
     root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
-    if [ -f "${root}/pnpm-lock.yaml" ]; then
+    if [ -f pnpm-lock.yaml ] || [ -f "${root}/pnpm-lock.yaml" ]; then
         echo "pnpm"
-    elif [ -f "${root}/yarn.lock" ]; then
+    elif [ -f yarn.lock ] || [ -f "${root}/yarn.lock" ]; then
         echo "yarn"
     else
         echo "npm"
