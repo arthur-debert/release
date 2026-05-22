@@ -100,10 +100,13 @@ elif [ -x scripts/pre-commit ]; then
   # mkdir/symlink on an unusual worktree layout shouldn't abort the
   # entire dev-env setup).
   _hooks_dir="$(git config --get core.hooksPath 2>/dev/null || git rev-parse --git-path hooks)"
-  if ! mkdir -p "${_hooks_dir}" 2>/dev/null; then
-    echo "warning: failed to mkdir -p ${_hooks_dir} — pre-commit hook NOT wired" >&2
-  elif ! ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit" 2>/dev/null; then
-    echo "warning: failed to symlink scripts/pre-commit into ${_hooks_dir} — pre-commit hook NOT wired" >&2
+  # Best-effort with full diagnostics: don't suppress mkdir/ln stderr —
+  # if either fails, the user needs the underlying error to fix it
+  # (e.g. "Permission denied" pinpoints the actual issue).
+  if ! mkdir -p "${_hooks_dir}"; then
+    echo "warning: failed to mkdir -p \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
+  elif ! ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit"; then
+    echo "warning: failed to symlink scripts/pre-commit into \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
   fi
 fi
 
