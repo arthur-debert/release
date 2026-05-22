@@ -70,9 +70,10 @@ A Stack is *done at the fleet level* when it is *fleet-adopted* — the
 canonical works across ≥80% of its consumers.
 
 **Enforcement:** `bin/done-check <consumer>` (🚧 not yet built — see
-[#XXX]) reports the state for each Stack the consumer participates in,
-listing missing verbs / unverified Flows. Until that lands, the
-adoption matrix below is the manual proxy.
+[#178](https://github.com/arthur-debert/release/issues/178)) reports
+the state for each Stack the consumer participates in, listing
+missing verbs / unverified Flows. Until that lands, the adoption
+matrix below is the manual proxy.
 
 ### The "really done" rule
 
@@ -138,7 +139,7 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 |---------------|:----------:|:---------:|:------------:|:--------------:|:--------------:|:-------------:|:-----------:|:------------:|:-------------:|:----:|:---------:|:------:|:------------:|
 | rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | ✅ | ✅ |
 | rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
-| go-cli        | ✅ | ✅ | —⁴ | 🚧³ | ✅ | — | — | — | ✅⁵ | 🚧 | — | 🚧 | 📋 |
+| go-cli        | ✅ | ✅ | —⁴ | — | ✅ | — | — | — | ✅⁵ | 🚧 | — | 🚧 | 📋 |
 | electron-app  | ✅ | ✅ | ✅ | ✅³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
 | tauri-app     | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
 | vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
@@ -198,26 +199,27 @@ how complete the local files look.
 
 | Stack         | Repos (state) |
 |---------------|---|
-| rust-cli      | `padz` — **pilot-running** (canonical release shipped); `dodot`, `lex-fmt/lex`, `rustloc`, `burgertocow`, `simple-gal` — **implemented**¹ |
-| rust-lib      | `clapfig` — **pilot-running**; `standout` — **implemented**¹ |
-| electron-app  | `lex-fmt/lexed` — **pilot-running** (v0.10.6 shipped 2026-05-22 via `electron-app.yml@v1`, notarized DMG + AppImage + Setup.exe); `simple-gal-ui` — **implemented**¹ |
+| rust-cli      | `padz` — **pilot-running** (canonical release shipped); `dodot`, `lex-fmt/lex`, `rustloc`, `burgertocow`, `simple-gal` — **implemented**ᵃ |
+| rust-lib      | `clapfig` — **pilot-running**; `standout` — **implemented**ᵃ |
+| electron-app  | `lex-fmt/lexed` — **pilot-running** (v0.10.6 shipped 2026-05-22 via `electron-app.yml@v1`, notarized DMG + AppImage + Setup.exe); `simple-gal-ui` — **implemented**ᵃ |
 | tauri-app     | `arami-app` — **pilot-running** (v0.1.7 shipped 2026-05-19 via `tauri-app.yml@v1`, Gatekeeper-accepted DMG) |
-| vscode-ext    | `lex-fmt/vscode` — **pilot-running**³ |
-| nvim-plugin   | `lex-fmt/nvim` — **implemented**¹ |
-| tree-sitter   | `lex-fmt/tree-sitter-lex` — **implemented**¹ |
+| vscode-ext    | `lex-fmt/vscode` — **pilot-running**ᵇ |
+| nvim-plugin   | `lex-fmt/nvim` — **implemented**ᵃ |
+| tree-sitter   | `lex-fmt/tree-sitter-lex` — **implemented**ᵃ |
 | zed-extension | `lex-fmt/zed-lex` — **implemented** (template landed; no canonical CI/release workflow yet) |
 | go-cli        | `supage` — **pilot-running** (`0.0.1` + `0.0.2` cut through canonical incl. brew-private-repo) |
 | gh-action     | `release` (dogfooded), `simple-gal-action` — **planned** |
 | brew-tap      | `homebrew-tools` — **planned** |
 | python-pkg    | (no managed-portfolio repos yet) |
 
-¹ Canonical wired locally and CI passes `bin/check`, but no real
+ᵃ Canonical wired locally and CI passes `bin/check`, but no real
 release-through-canonical has been confirmed in the current quarter.
 **Per the "really done" rule, this is *implemented*, not
-*pilot-running*** — verify with `bin/done-check` (🚧 pending) before
-upgrading the state.
+*pilot-running*** — verify with `bin/done-check`
+([#178](https://github.com/arthur-debert/release/issues/178), 🚧
+pending) before upgrading the state.
 
-³ Pilot-running for the Marketplace half — `lex-fmt/vscode` v0.10.7 +
+ᵇ Pilot-running for the Marketplace half — `lex-fmt/vscode` v0.10.7 +
 v0.10.8 were dispatched through `vscode-ext.yml@v1` and shipped to VS
 Code Marketplace. The Open VSX half is broken (OVSX_PAT fails
 `verify-pat`, plus first-publish under the restricted-namespace path
@@ -338,7 +340,11 @@ Consumers call them with a thin caller:
 jobs:
   release:
     uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1
-    with: ...
+    secrets: inherit
+    with:
+      # …per-stack inputs; see .github/workflows/<stack>.yml
+      # `on.workflow_call.inputs` for the canonical list.
+      crate-name: my-cli
 ```
 
 `v1` is a floating branch that always points at the latest
@@ -477,7 +483,10 @@ Per-tag history: [`docs/breaking-changes.md`](docs/breaking-changes.md).
 
 ```
 .github/
-  workflows/          reusable workflows (one per Stack + per-stack ci.yml)
+  workflows/          reusable workflows — one release workflow per
+                      Stack, plus a *-ci.yml for the Stacks that have
+                      one (currently rust, electron, tauri; others use
+                      bespoke CI in the consumer pending #107)
   actions/            composite actions (Tasks called inside workflows)
 bin/                  human-runnable tooling, on $PATH via dodot:
                       apply-ruleset, sweep-github-policy,
