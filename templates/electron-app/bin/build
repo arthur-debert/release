@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical electron-app build entry point. Same script local + CI.
+#
+# Delegates to the consumer's `npm run build` script (or pnpm/yarn
+# equivalent), preserving whatever build chain the consumer has wired
+# in package.json. The typical chain includes:
+#   * prebuild hooks (e.g. theme:check, icons, build:quicklook)
+#   * dep provisioning (fetch-deps, download-* scripts)
+#   * tsc / vite build (TypeScript + frontend bundle)
+#   * electron-builder (the final platform bundle)
+#
+# Args (after `--`, or as positional) are forwarded to the underlying
+# build script — most commonly to electron-builder via npm's `--` arg
+# convention. Matches electron-app.yml's release-time pattern:
+#   bin/build -- --linux --x64 --publish never
+#   bin/build -- --mac --arm64
+#
+# Usage:
+#   bin/build                          # default build (whatever
+#                                      # `<pm> run build` runs)
+#   bin/build -- --linux --x64         # forward platform flags to
+#                                      # electron-builder
+#   bin/build --publish never          # if your build script accepts
+#                                      # the flag directly (no `--`)
+#
+# CWD: respects the caller's working directory. Lockfile detection
+# falls back to repo root (matches the tauri-app pattern).
+#
+# Source of truth: arthur-debert/release templates/electron-app/bin/build.
+
+# Resolve package manager from the lockfile. Check CWD first
+# (monorepo with subdir-local lockfile), fall back to repo root.
+# Lockfile IS the canonical signal; consumers commit exactly one.
+detect_pm() {
+    local root
+    root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+    if [ -f pnpm-lock.yaml ] || [ -f "${root}/pnpm-lock.yaml" ]; then
+        echo "pnpm"
+    elif [ -f yarn.lock ] || [ -f "${root}/yarn.lock" ]; then
+        echo "yarn"
+    else
+        echo "npm"
+    fi
+}
+
+PM=$(detect_pm)
+
+if ! command -v "${PM}" >/dev/null 2>&1; then
+    echo "bin/build: ${PM} not found on \$PATH" >&2
+    echo "  install: see https://nodejs.org / https://pnpm.io / https://yarnpkg.com" >&2
+    exit 1
+fi
+
+# Delegate to the consumer's `<pm> run build` script. All args
+# forward verbatim — npm/pnpm/yarn handle their own `--` semantics
+# for forwarding to the underlying script.
+exec "${PM}" run build "$@"

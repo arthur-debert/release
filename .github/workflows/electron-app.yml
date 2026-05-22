@@ -279,7 +279,14 @@ jobs:
           if [ -n "${NOTARIZE_OVERRIDE}" ]; then
             args+=("-c.mac.notarize=${NOTARIZE_OVERRIDE}")
           fi
-          npm run build -- "${args[@]}"
+          # Prefer canonical bin/build (release-sync managed via the
+          # electron-app stack). Falls back to direct `npm run build`
+          # for consumers that haven't adopted release-sync yet.
+          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
+            "${GITHUB_WORKSPACE}/bin/build" -- "${args[@]}"
+          else
+            npm run build -- "${args[@]}"
+          fi
 
       # Smoke test (convention): scripts/smoke.sh. Catches catastrophic
       # build issues (wrong binary path, dylib missing, Windows path
@@ -338,7 +345,13 @@ jobs:
 
       - name: Build (electron-builder, linux --${{ matrix.arch }})
         run: |
-          npm run build -- --linux --${{ matrix.arch }} --publish never
+          # Prefer canonical bin/build (release-sync managed); fall
+          # back to direct `npm run build` for consumers pre-adoption.
+          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
+            "${GITHUB_WORKSPACE}/bin/build" -- --linux --${{ matrix.arch }} --publish never
+          else
+            npm run build -- --linux --${{ matrix.arch }} --publish never
+          fi
 
       - name: Smoke test (linux)
         if: hashFiles('scripts/smoke.sh') != ''
@@ -401,7 +414,13 @@ jobs:
         # produced binary is unsigned — flag this in release notes for
         # any consumer enabling windows-archs.
         run: |
-          npm run build -- --win --${{ matrix.arch }} --publish never
+          # Prefer canonical bin/build (release-sync managed); fall
+          # back to direct `npm run build` for consumers pre-adoption.
+          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
+            "${GITHUB_WORKSPACE}/bin/build" -- --win --${{ matrix.arch }} --publish never
+          else
+            npm run build -- --win --${{ matrix.arch }} --publish never
+          fi
         shell: bash
 
       - name: Smoke test (windows)
