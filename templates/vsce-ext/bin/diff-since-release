@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Show commits on the current branch since the last final release.
+#
+# Identical semantics to the rust Stack version: skips pre-release tags
+# (e.g. `v1.0.0-rc.1`) so the diff is against the last *final* release.
+# VS Code extensions share the same `v<MAJOR>.<MINOR>.<PATCH>` tag scheme.
+#
+# Usage: diff-since-release
+# Exits 1 if no release tags exist yet.
+
+set -euo pipefail
+
+all_tags=$(git tag --list 'v*' --sort=-version:refname --merged HEAD)
+
+latest_tag=""
+if [ -n "$all_tags" ]; then
+    latest_tag=$(printf '%s\n' "$all_tags" | grep -v -- '-' | head -n1 || true)
+fi
+
+if [ -z "$latest_tag" ]; then
+    echo "No release tags found (on this branch)" >&2
+    exit 1
+fi
+
+echo "Changes since $latest_tag:"
+echo "---"
+git --no-pager log --oneline "$latest_tag"..HEAD

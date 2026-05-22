@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Shared checks used by both pre-commit hook and CI.
+# Each step is its own script so they can be run individually.
+#
+# For vsce-ext the umbrella is: fmt + lint + typecheck + tests.
+# Typecheck has no per-file analogue (tsc operates on the project)
+# so it's invoked inline rather than as a separate bin/check-typecheck
+# script — matching the existing rust/go/electron pattern of "one
+# script per tool, but a single tsc call is the tool".
+#
+# Tests are optional for VS Code extensions — many extensions ship
+# without a unit-test harness (the @vscode/test-electron integration
+# tests live behind a separate `test:integration` script that takes
+# minutes and needs a windowing system). bin/check-tests probes for
+# `test` / `test:unit` and skip-with-notices if neither exists.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+"$SCRIPT_DIR/check-fmt"
+"$SCRIPT_DIR/check-lint"
+
+# Typecheck (tsc --noEmit). Skip with a notice if the consumer hasn't
+# wired a `typecheck` npm script. Most VS Code extensions are
+# TypeScript and ship a `build` script that runs `tsc -p .` — but
+# `build` emits output, which is wrong for a check. The portfolio
+# convention is to add a `typecheck` alias that runs `tsc --noEmit`.
+# If absent, we fall back to `npx --no-install tsc --noEmit` when
+# TypeScript is a declared dep.
+if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.typecheck ? 0 : 1)" 2>/dev/null; then
+    echo "Running typecheck..."
+    npm run --silent typecheck
+    echo "Typecheck OK"
+elif [ -f package.json ] && [ -f tsconfig.json ] && node -e "process.exit(require('./package.json').devDependencies && require('./package.json').devDependencies.typescript ? 0 : (require('./package.json').dependencies && require('./package.json').dependencies.typescript ? 0 : 1))" 2>/dev/null; then
+    echo "Running typecheck (tsc --noEmit)..."
+    npx --no-install tsc --noEmit
+    echo "Typecheck OK"
+else
+    echo "No 'typecheck' script and no typescript dependency — skipping typecheck."
+fi
+
+"$SCRIPT_DIR/check-tests"
+
+echo ""
+echo "All checks passed!"

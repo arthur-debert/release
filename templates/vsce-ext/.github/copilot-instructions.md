@@ -1,0 +1,79 @@
+# Copilot Instructions
+
+This is a Visual Studio Code extension (TypeScript, packaged as a
+`.vsix` via `@vscode/vsce`). The repo ships one or more VSIX bundles
+to the VS Code Marketplace and (optionally) the Open VSX registry on
+release.
+
+Some extensions are universal (one platform-agnostic VSIX); others
+bundle a native binary (e.g. an LSP server, tree-sitter grammars) and
+ship per-target VSIXes (`darwin-arm64`, `linux-x64`, `win32-x64`, …)
+via the `vsce-targets` input on the reusable release workflow.
+
+## Before suggesting a fix
+
+- Run the project's umbrella check script: `bin/check` (the take-iii
+  Component model canonical umbrella). It runs the same steps CI runs
+  — format (prettier), lint (eslint), typecheck (tsc), unit tests. If
+  your suggestion doesn't pass it, it won't merge — check
+  `.github/workflows/` for the source of truth.
+- Never propose changes that leave tests failing. Unit tests typically
+  run via vitest or a direct `node ./out/test/unit/index.js` entry.
+  Integration tests (`@vscode/test-electron`) live behind a separate
+  `test:integration` script — they boot a real VS Code Insiders host
+  and are slow; not part of the default `bin/check`.
+- Update the changelog's `Unreleased` section for user-visible changes
+  (`CHANGELOG.md`'s `## [Unreleased]` section, or `UNRELEASED.md` if
+  the repo uses the split-file pattern).
+
+## Style and scope
+
+- Keep changes minimal. Don't add features, refactor, or introduce abstractions
+  beyond what the task requires.
+- No backwards-compatibility hacks: no `// removed` comments, no renaming unused
+  vars to `_var`, no shim modules. If something is unused, delete it.
+- No fallbacks, defaults, or feature flags unless the PR explicitly asks for them.
+- Default to no comments. Well-named identifiers carry the *what*. Reserve
+  comments for non-obvious *why* (hidden constraint, workaround, surprising
+  invariant).
+- Trust internal code and framework guarantees. Only validate at system
+  boundaries (user input, IPC messages, filesystem entry, network).
+
+## VS Code extension-specific guidance
+
+- `package.json` `contributes` is the **public contract** of the
+  extension (commands, languages, grammars, themes, configuration
+  schema). Renaming a command id, changing a configuration key, or
+  removing a language alias is a breaking change for users with
+  existing keybindings / settings / workspace configs — call it out
+  explicitly in the changelog.
+- `activationEvents` controls when the extension loads. Prefer narrow
+  events (`onLanguage:lex`, `onCommand:lex.foo`) over `*` — broad
+  activation slows VS Code startup for every user, not just those who
+  use this extension.
+- Native binaries (LSP servers, tree-sitter parsers) bundled into the
+  VSIX must be fetched per-target by `scripts/pre-vsce-package.sh` (the
+  convention hook the reusable `vscode-ext.yml` workflow invokes). The
+  script runs once per matrix entry with `VSCE_TARGET`, `PLATFORM`,
+  `ARCH`, and `RUST_TARGET` exposed in the env. Don't fetch binaries
+  in `vscode:prepublish` — that fires on every developer's local
+  `vsce package` and shouldn't reach the network on a build machine
+  without secrets.
+- `.vscodeignore` controls what ships in the VSIX. When adding test
+  fixtures, sample workspaces, or sourcemaps, verify they're either
+  intentionally shipped or excluded — the marketplace size budget is
+  small and `vsce` will warn on large bundles.
+
+## What will get pushed back on
+
+- Suggestions that ignore content under `docs/` or `comms/`.
+- Style nits in code that already follows the project's style.
+- Comments that restate what the code does.
+- Pinning org-internal reusable workflows (e.g. `arthur-debert/release`)
+  to SHA — the reusable pattern is "fix once, propagate", and same-owner
+  supply-chain risk is negligible.
+- Adding `npm` to `.github/dependabot.yml` — application-dependency
+  freshness is deliberately disabled per portfolio policy. Only
+  `github-actions` is enabled.
+- Adding `vscode:prepublish` steps that fetch network resources — that
+  hook fires on local `vsce package` too, breaking offline dev.

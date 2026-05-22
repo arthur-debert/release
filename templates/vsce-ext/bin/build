@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical vsce-ext build entry point. Same script local + CI.
+#
+# Produces a .vsix bundle via `vsce package`. The package manager
+# (npm / pnpm / yarn) is auto-detected from the lockfile, matching
+# electron-app/tauri-app's convention. The consumer's
+# `vscode:prepublish` lifecycle script (if any) runs automatically as
+# part of `vsce package` — that's where bundle / minify / asset copy
+# steps live in a typical extension's package.json.
+#
+# Probe order for the build invocation:
+#
+#   1. `<pm> run package` — the portfolio convention for vsce-ext
+#      consumers that wrap `vsce package` in a package.json script
+#      (often to inject pre-flight steps like fetching native binaries
+#      or copying WASM artifacts).
+#   2. Direct `vsce package` via npx (npm) or `<pm> exec` (pnpm/yarn) —
+#      resolves to the @vscode/vsce CLI in node_modules without
+#      requiring a custom script.
+#
+# All args (e.g. `--target darwin-arm64`, `--out path/to/foo.vsix`)
+# forward verbatim to the underlying invocation. The reusable
+# vscode-ext.yml workflow uses this script via:
+#   bin/build --target ${{ matrix.vsce-target }} --out lex-vscode-${{ matrix.vsce-target }}.vsix
+#
+# Usage:
+#   bin/build                                # default package
+#   bin/build --target darwin-arm64          # platform-specific VSIX
+#   bin/build --target linux-x64 --out foo.vsix
+#
+# Source of truth: arthur-debert/release templates/vsce-ext/bin/build.
+
+# Resolve package manager from the lockfile. Check CWD first
+# (monorepo with subdir-local lockfile), fall back to repo root.
+# Lockfile IS the canonical signal; consumers commit exactly one.
+detect_pm() {
+    local root
+    root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+    if [ -f pnpm-lock.yaml ] || [ -f "${root}/pnpm-lock.yaml" ]; then
+        echo "pnpm"
+    elif [ -f yarn.lock ] || [ -f "${root}/yarn.lock" ]; then
+        echo "yarn"
+    else
+        echo "npm"
+    fi
+}
+
+PM=$(detect_pm)
+
+if ! command -v "${PM}" >/dev/null 2>&1; then
+    echo "bin/build: ${PM} not found on \$PATH" >&2
+    echo "  install: see https://nodejs.org / https://pnpm.io / https://yarnpkg.com" >&2
+    exit 1
+fi
+
+# Prefer `<pm> run package` if the consumer has wired the wrapper
+# script. Detect via node — same probe pattern bin/check-fmt uses.
+if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.package ? 0 : 1)" 2>/dev/null; then
+    exec "${PM}" run package "$@"
+fi
+
+# Direct vsce invocation. `npx --no-install` resolves the locally
+# installed @vscode/vsce without a registry fetch (mirrors the
+# tauri-app/build pattern for `tauri`).
+if [ "${PM}" = "npm" ]; then
+    exec npx --no-install vsce package "$@"
+else
+    exec "${PM}" exec vsce package "$@"
+fi
