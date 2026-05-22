@@ -175,8 +175,11 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
   # -------------------------------------------------------------------
-  # 2. Build matrices — one job per OS. Each job sets up Node, runs
-  #    `npm ci && npm run build`, and uploads the dist/ artifacts.
+  # 2. Build matrices — one job per OS. Each job auto-detects the
+  #    consumer's package manager (pnpm-lock.yaml → pnpm, yarn.lock →
+  #    yarn, default → npm), sets up Node + the matching pm, runs
+  #    `<pm> install` and `<pm> run build`, and uploads the dist/
+  #    artifacts.
   # -------------------------------------------------------------------
   build-mac:
     needs: prepare
@@ -193,14 +196,48 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
+      - name: Detect package manager
+        # Lockfile IS the canonical signal; consumers commit exactly
+        # one of pnpm-lock.yaml / yarn.lock / package-lock.json.
+        # Same pattern as electron-ci.yml + tauri-ci.yml.
+        id: pm
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "install=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=yarn" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "install=npm ci" >> "$GITHUB_OUTPUT"
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.pm.outputs.pm == 'pnpm'
+        # Must run BEFORE setup-node so `cache: pnpm` finds the store.
+        # No explicit `version:` — pnpm/action-setup reads
+        # `packageManager` from package.json (Corepack convention);
+        # specifying version: here while the consumer pins one triggers
+        # ERR_PNPM_BAD_PM_VERSION. Same workaround as electron-ci.yml.
+        uses: pnpm/action-setup@v4
+
+      - name: Enable corepack (yarn)
+        if: steps.pm.outputs.pm == 'yarn'
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
+          cache: ${{ steps.pm.outputs.cache }}
 
       - name: Install deps
-        run: npm ci
+        run: ${{ steps.pm.outputs.install }}
 
       # SIGNING + NOTARIZATION strategy
       # --------------------------------
@@ -299,12 +336,12 @@ jobs:
           # below for queue visibility.
           args=(--mac "--${ARCH}" --publish never -c.mac.notarize=false)
           # Prefer canonical bin/build (release-sync managed via the
-          # electron-app stack). Falls back to direct `npm run build`
+          # electron-app stack). Falls back to direct `<pm> run build`
           # for consumers that haven't adopted release-sync yet.
           if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
             "${GITHUB_WORKSPACE}/bin/build" -- "${args[@]}"
           else
-            npm run build -- "${args[@]}"
+            ${{ steps.pm.outputs.pm }} run build -- "${args[@]}"
           fi
 
       # ---- Notarization: submit / poll / staple --------------------
@@ -463,23 +500,49 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "install=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=yarn" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "install=npm ci" >> "$GITHUB_OUTPUT"
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.pm.outputs.pm == 'pnpm'
+        uses: pnpm/action-setup@v4
+
+      - name: Enable corepack (yarn)
+        if: steps.pm.outputs.pm == 'yarn'
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
+          cache: ${{ steps.pm.outputs.cache }}
 
       - name: Install deps
-        run: npm ci
+        run: ${{ steps.pm.outputs.install }}
 
       - name: Build (electron-builder, linux --${{ matrix.arch }})
         run: |
           # Prefer canonical bin/build (release-sync managed); fall
-          # back to direct `npm run build` for consumers pre-adoption.
+          # back to direct `<pm> run build` for consumers pre-adoption.
           if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
             "${GITHUB_WORKSPACE}/bin/build" -- --linux --${{ matrix.arch }} --publish never
           else
-            npm run build -- --linux --${{ matrix.arch }} --publish never
+            ${{ steps.pm.outputs.pm }} run build -- --linux --${{ matrix.arch }} --publish never
           fi
 
       - name: Smoke test (linux)
@@ -529,14 +592,42 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "install=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=yarn" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "install=npm ci" >> "$GITHUB_OUTPUT"
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.pm.outputs.pm == 'pnpm'
+        uses: pnpm/action-setup@v4
+
+      - name: Enable corepack (yarn)
+        if: steps.pm.outputs.pm == 'yarn'
+        shell: bash
+        run: corepack enable
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          cache: npm
+          cache: ${{ steps.pm.outputs.cache }}
 
       - name: Install deps
-        run: npm ci
+        shell: bash
+        run: ${{ steps.pm.outputs.install }}
 
       - name: Build (electron-builder, win --${{ matrix.arch }})
         # Windows code-signing not yet integrated in this workflow. The
@@ -544,11 +635,11 @@ jobs:
         # any consumer enabling windows-archs.
         run: |
           # Prefer canonical bin/build (release-sync managed); fall
-          # back to direct `npm run build` for consumers pre-adoption.
+          # back to direct `<pm> run build` for consumers pre-adoption.
           if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
             "${GITHUB_WORKSPACE}/bin/build" -- --win --${{ matrix.arch }} --publish never
           else
-            npm run build -- --win --${{ matrix.arch }} --publish never
+            ${{ steps.pm.outputs.pm }} run build -- --win --${{ matrix.arch }} --publish never
           fi
         shell: bash
 
