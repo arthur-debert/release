@@ -223,11 +223,16 @@ jobs:
       # (or unset) in package.json. We FORCE it to false at the CLI
       # via `-c.mac.notarize=false` so a consumer that left it true
       # doesn't double-notarize (electron-builder + this workflow).
-      - name: Validate notarize input
+      - name: Validate notarize input and resolve effective flag
+        id: notarize-flag
         shell: bash
         env:
           NOTARIZE_INPUT: ${{ inputs.notarize }}
-          ASC_KEY_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
+          CSC_B64_PRESENT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && 'yes' || 'no' }}
+          CSC_PASS_PRESENT: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' && 'yes' || 'no' }}
+          ASC_KEY_B64_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
+          ASC_KEY_ID_PRESENT: ${{ secrets.ASC_API_KEY_ID != '' && 'yes' || 'no' }}
+          ASC_ISSUER_PRESENT: ${{ secrets.ASC_API_ISSUER_ID != '' && 'yes' || 'no' }}
         run: |
           # Whitelist: true | false | empty. Anything else is a
           # caller-side typo — fail early.
@@ -238,33 +243,38 @@ jobs:
               exit 1
               ;;
           esac
-          # Fail fast when notarize is forced on without ASC secrets —
-          # otherwise the build runs, "notarization" silently no-ops,
-          # and the released DMG hits a Gatekeeper prompt on user
-          # machines.
-          if [ "${NOTARIZE_INPUT}" = "true" ] && [ "${ASC_KEY_PRESENT}" = "no" ]; then
-            echo "::error::inputs.notarize=true but ASC_API_KEY_BASE64 secret is missing. Either configure the ASC_API_KEY_* secrets on this repo or set notarize='' (auto-detect) / 'false'."
+
+          # "All required" = every secret the submit/poll/staple flow
+          # actually consumes. Missing any one of these causes a late
+          # failure during signing or `xcrun notarytool submit`, so
+          # check them all up front.
+          all_present=yes
+          missing=""
+          for var in CSC_B64_PRESENT CSC_PASS_PRESENT ASC_KEY_B64_PRESENT ASC_KEY_ID_PRESENT ASC_ISSUER_PRESENT; do
+            if [ "$(eval echo "\$$var")" = "no" ]; then
+              all_present=no
+              missing="${missing} ${var%_PRESENT}"
+            fi
+          done
+
+          # Fail fast when notarize is forced on but any required
+          # secret is missing — otherwise the build runs and either
+          # signing or `notarytool submit` fails confusingly.
+          if [ "${NOTARIZE_INPUT}" = "true" ] && [ "${all_present}" = "no" ]; then
+            echo "::error::inputs.notarize=true but required secrets are missing:${missing}. Need all of: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, ASC_API_KEY_BASE64, ASC_API_KEY_ID, ASC_API_ISSUER_ID. Either configure them or set notarize='' (auto) / 'false'."
             exit 1
           fi
 
-      - name: Resolve effective notarize flag
-        id: notarize-flag
-        shell: bash
-        env:
-          NOTARIZE_INPUT: ${{ inputs.notarize }}
-          CSC_PRESENT: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 != '' && 'yes' || 'no' }}
-          ASC_KEY_PRESENT: ${{ secrets.ASC_API_KEY_BASE64 != '' && 'yes' || 'no' }}
-        run: |
           # Effective behaviour:
-          #   notarize='true'  → notarize (already validated above)
+          #   notarize='true'  → notarize (validated above)
           #   notarize='false' → skip
-          #   notarize=''      → auto: notarize iff signing cert AND
-          #                            ASC key are both configured.
+          #   notarize=''      → auto: notarize iff ALL required
+          #                            secrets are configured.
           case "${NOTARIZE_INPUT}" in
             true)  effective=true ;;
             false) effective=false ;;
             *)
-              if [ "${CSC_PRESENT}" = "yes" ] && [ "${ASC_KEY_PRESENT}" = "yes" ]; then
+              if [ "${all_present}" = "yes" ]; then
                 effective=true
               else
                 effective=false
@@ -272,7 +282,7 @@ jobs:
               ;;
           esac
           echo "effective=${effective}" >> "${GITHUB_OUTPUT}"
-          echo "Effective notarize=${effective}"
+          echo "Effective notarize=${effective} (all_present=${all_present}, missing:${missing:-none})"
 
       - name: Build (electron-builder, mac --${{ matrix.arch }})
         shell: bash
@@ -341,7 +351,15 @@ jobs:
             --output-format json \
             --no-wait)
           echo "${RESULT}"
-          ID=$(printf '%s' "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
+          # Parse defensively: missing/renamed 'id' field shouldn't
+          # produce a Python KeyError traceback — emit a clear error
+          # annotation with the raw response so an Apple API change
+          # is debuggable from the CI log.
+          ID=$(printf '%s' "${RESULT}" | python3 -c "import sys,json; print(json.load(sys.stdin).get('id',''))" 2>/dev/null || echo "")
+          if [ -z "${ID}" ]; then
+            echo "::error::Could not extract submission id from notarytool output. Raw response: ${RESULT}"
+            exit 1
+          fi
           echo "submission-id=${ID}" >> "${GITHUB_OUTPUT}"
           echo "dmg-path=${DMG}" >> "${GITHUB_OUTPUT}"
           echo "Submission ID: ${ID}"
@@ -405,7 +423,11 @@ jobs:
       # read-only (launch the binary, check exit / output; don't
       # rewrite files).
       - name: Smoke test (mac)
-        if: always() && !cancelled() && hashFiles('scripts/smoke.sh') != ''
+        # Default `success()` semantics: only run if every prior step
+        # in this job succeeded. Notarization timeout / staple failure
+        # emit `::warning::` (not failure), so this still runs in
+        # those degraded cases. Skips cleanly if signing failed.
+        if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
         env:
           PLATFORM: mac
