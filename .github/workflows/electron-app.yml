@@ -199,7 +199,7 @@ jobs:
       - name: Detect package manager
         # Lockfile IS the canonical signal; consumers commit exactly
         # one of pnpm-lock.yaml / yarn.lock / package-lock.json.
-        # Same pattern as electron-ci.yml + tauri-app.yml.
+        # Same pattern as electron-ci.yml + tauri-ci.yml.
         id: pm
         shell: bash
         run: |
