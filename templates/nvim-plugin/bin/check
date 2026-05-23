@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical nvim-plugin check entry point. Same script local + CI.
+#
+# Delegates to the consumer's scripts/test-all if present (the
+# common pattern for Lua plugins with bats-driven tests), else
+# falls back to invoking busted directly on tests/.
+#
+# Most nvim-plugin consumers in this portfolio use bats to drive
+# Neovim under test (matches the shell-subshell isolation pattern
+# used by other Bash-tested stacks). scripts/test-all is the
+# canonical entry point for that.
+#
+# Usage:
+#   bin/check                # full suite
+#   bin/check --filter foo   # consumer-side scripts/test-all forwards
+#
+# Source of truth: arthur-debert/release templates/nvim-plugin/bin/check.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [ -x scripts/test-all ]; then
+    exec scripts/test-all "$@"
+fi
+
+if [ -d tests ] && command -v busted >/dev/null 2>&1; then
+    exec busted tests "$@"
+fi
+
+echo "bin/check: no scripts/test-all and no busted+tests/ — nothing to do."
+echo "  Wire scripts/test-all in this repo to give bin/check something to delegate to."
