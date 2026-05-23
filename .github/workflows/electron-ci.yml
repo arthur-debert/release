@@ -14,14 +14,14 @@ name: Electron CI
 #    the take-iii Component model already ship `bin/check`. Same
 #    fix-once-propagate guarantee as the rust fleet.
 #
-#  * **No e2e job.** Electron e2e is Playwright-driven and the
-#    orchestration (fetch sibling artifacts, xvfb, packaged-mode env
-#    flags) varies per consumer. We deliberately do NOT try to fold
-#    that into this workflow — consumers keep their own playwright
-#    job. A `playwright` input is provided only to install browsers
-#    when the consumer wants to extend the `check` job to cover a
-#    light smoke, but the typical pattern is: `check` here, plus a
-#    bespoke `e2e` job in the consumer's caller.
+#  * **E2E job — opt-in.** Pass `e2e: true` to add a separate `e2e`
+#    job that runs after `check`. It reuses the same setup chain
+#    (checkout + pm detect + Node + install deps), auto-installs
+#    Playwright browsers, then runs `<pm> run <e2e-script>` (default
+#    `test:e2e`). On failure, `playwright-report/` uploads as a CI
+#    artifact. The `playwright: true` input is still available for
+#    consumers that need browsers inside the `check` job itself
+#    (e.g. integration tests folded into bin/check).
 #
 #  * **`shared-build-dir` covers the lexed-style monorepo.** lexed has
 #    a `shared/` package the renderer + main both consume; without
@@ -92,15 +92,47 @@ on:
       playwright:
         description: |
           When `true`, install Playwright browsers (`npx playwright
-          install --with-deps`) after `npm ci`. Does NOT add an e2e
-          job — the install hook only exists so the check job's
-          environment has browsers available if the consumer's
-          `bin/check` indirectly needs them. Most consumers keep
-          their playwright e2e in a separate bespoke job in their
-          own caller workflow.
+          install --with-deps`) in the check job. Useful when
+          `bin/check` itself needs browsers available (e.g. some
+          consumers run Playwright-based integration tests inside
+          check). For real e2e suites, prefer the `e2e: true` input
+          below — it adds a dedicated e2e job and auto-installs
+          browsers.
         type: boolean
         required: false
         default: false
+
+      e2e:
+        description: |
+          When `true`, add a separate `e2e` job that runs AFTER
+          `check` succeeds. The job re-uses the same setup
+          (checkout + detect-pm + setup-node + install deps),
+          installs Playwright browsers, then runs `<pm> run
+          <e2e-script>` (see input below). On failure, the
+          `playwright-report/` directory is uploaded as a CI
+          artifact for debugging.
+
+          Consumer requirements (when opting in):
+          * `tests/e2e/` (or equivalent) under the repo
+          * a `test:e2e` (or other) npm script in package.json
+          * `@playwright/test` in devDependencies
+
+          When `false` (default), no e2e job exists. Consumers can
+          still keep a bespoke e2e job in their caller, but the
+          managed-portfolio standard is to use this input so the
+          gate is consistent across the fleet.
+        type: boolean
+        required: false
+        default: false
+
+      e2e-script:
+        description: |
+          npm script name to invoke for the e2e job. Default
+          `test:e2e`. Override only when the consumer's
+          package.json uses a different name.
+        type: string
+        required: false
+        default: 'test:e2e'
 
       runner:
         description: 'GitHub runner label for the check job.'
@@ -122,6 +154,20 @@ on:
         type: string
         required: false
         default: 'false'
+
+    secrets:
+      gh_token:
+        description: |
+          Optional `GH_TOKEN` exposed (step-scoped, not job-wide) to
+          the `pre-test`, `bin/check`, and `e2e` script steps. Plumb
+          this when any of those scripts calls `gh release download`
+          / `gh api` against a private sibling repo — `GITHUB_TOKEN`
+          from the default job context only has access to the
+          calling repo, so fetching artifacts from a separate
+          private repo needs a PAT. Falls back to the default
+          `GITHUB_TOKEN` when not set. Matches the convention used
+          in `tauri-ci.yml` + `copilot-review.yml`.
+        required: false
 
 permissions:
   contents: read
@@ -218,6 +264,13 @@ jobs:
       - name: Run pre-test
         if: inputs.pre-test != ''
         shell: bash
+        env:
+          # Step-scoped (not job-wide) so the PAT — when the caller
+          # passes one — is only visible to consumer-controlled
+          # commands, not third-party setup actions. Falls back to
+          # `github.token` (calling repo only) when no PAT is plumbed.
+          # Same convention as tauri-ci.yml.
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: ${{ inputs.pre-test }}
 
       - name: Run canonical checks (bin/check)
@@ -225,4 +278,95 @@ jobs:
         # umbrella (fmt + lint + typecheck + unit tests). Fix once in
         # the npm-quality Component, propagate via release-sync, every
         # consumer's CI picks it up on the next run.
+        env:
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: bin/check
+
+  # -------------------------------------------------------------------
+  # E2E job — opt-in via `e2e: true`. Runs the consumer's Playwright
+  # suite after `check` passes. Auto-installs browsers; uploads the
+  # Playwright report on failure for debugging. Setup mirrors the
+  # check job; a future refactor could extract the shared chain into
+  # a composite action (see #178's done-check work).
+  # -------------------------------------------------------------------
+  e2e:
+    if: inputs.e2e
+    needs: check
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules }}
+
+      - name: Detect package manager
+        id: pm
+        shell: bash
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "install=pnpm install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=pnpm" >> "$GITHUB_OUTPUT"
+          elif [ -f yarn.lock ]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+            echo "install=yarn install --frozen-lockfile" >> "$GITHUB_OUTPUT"
+            echo "cache=yarn" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "install=npm ci" >> "$GITHUB_OUTPUT"
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup pnpm
+        if: steps.pm.outputs.pm == 'pnpm'
+        uses: pnpm/action-setup@v4
+
+      - name: Enable corepack (yarn)
+        if: steps.pm.outputs.pm == 'yarn'
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ steps.pm.outputs.cache }}
+
+      - name: Install dependencies
+        run: ${{ steps.pm.outputs.install }}
+
+      - name: Build shared package
+        if: inputs.shared-build-dir != ''
+        working-directory: ${{ inputs.shared-build-dir }}
+        run: |
+          ${{ steps.pm.outputs.install }}
+          ${{ steps.pm.outputs.pm }} run build
+
+      - name: Install Playwright browsers
+        # `e2e: true` implies Playwright. If the consumer doesn't
+        # declare @playwright/test in devDependencies this fails
+        # loudly — misconfiguration, not a fallback case.
+        run: npx --no-install playwright install --with-deps
+
+      - name: Run pre-test
+        if: inputs.pre-test != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
+        run: ${{ inputs.pre-test }}
+
+      - name: Run e2e suite
+        env:
+          GH_TOKEN: ${{ secrets.gh_token || github.token }}
+        run: ${{ steps.pm.outputs.pm }} run ${{ inputs.e2e-script }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
