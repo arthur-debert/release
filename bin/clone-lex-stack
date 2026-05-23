@@ -130,7 +130,9 @@ mkdir -p "$target"
 
 # --- Per-repo work ---------------------------------------------------
 clone_one() {
-  local repo="$1" dir="$target/$repo" status=""
+  local repo="$1"
+  local dir="$target/$repo"
+  local status=""
   local lockfile="$target/.${repo}.lock"
 
   exec 9>"$lockfile"
