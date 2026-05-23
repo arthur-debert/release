@@ -122,10 +122,9 @@ jobs:
               found_any=true
               echo "shellcheck $f"
               # Match the severity gate used by actionlint's bundled
-              # shellcheck above — only error + warning fail; style +
-              # info findings are advisory. Otherwise this standalone
-              # pass is stricter than the inline pass, which is
-              # confusing.
+              # check above (only error + warning fail; style + info
+              # findings are advisory). Otherwise this standalone pass
+              # is stricter than the inline pass, which is confusing.
               shellcheck --severity=warning "$f"
             done < <(find "$dir" -maxdepth 3 -type f \( -perm -u+x -o -name '*.sh' -o -name '*.bash' \) -print0)
           done
