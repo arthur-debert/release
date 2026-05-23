@@ -38,7 +38,7 @@
 #   - the "e2e (L/C)" column for stacks without an e2e flow
 #   - per-component checks (audit-repo covers those)
 
-set -uo pipefail
+set -euo pipefail
 
 repo=""
 json_mode=0
@@ -93,21 +93,28 @@ workflow_to_stack() {
 detect_stack_remote() {
   local r=$1
 
-  # Primary: release.yml uses-line.
+  # Primary: release.yml uses-line. `Accept: application/vnd.github.raw`
+  # returns the file body directly — no base64 round-trip, and no
+  # macOS/linux `base64 -d` vs `-D` portability gotcha.
   local rel_yml
-  rel_yml=$(gh api "repos/$r/contents/.github/workflows/release.yml" --jq .content 2>/dev/null | base64 -d 2>/dev/null) || rel_yml=""
+  rel_yml=$(gh api "repos/$r/contents/.github/workflows/release.yml" \
+    -H 'Accept: application/vnd.github.raw' 2>/dev/null) || rel_yml=""
   if [ -n "$rel_yml" ]; then
     local wf_name
+    # `|| true` on the pipeline: with `set -euo pipefail`, a no-match
+    # grep exits 1 and pipefail propagates — `|| true` lets a missing
+    # canonical uses-line fall through to the self-call lookup below
+    # (or eventually the filesystem fallback).
     wf_name=$(printf '%s\n' "$rel_yml" \
       | grep -oE 'arthur-debert/release/\.github/workflows/[a-z-]+\.yml' \
       | head -1 \
-      | sed -E 's|.*/||')
+      | sed -E 's|.*/||' || true)
     if [ -z "$wf_name" ]; then
       # self-call (release/'s own release.yml uses ./.github/workflows/gh-action.yml)
       wf_name=$(printf '%s\n' "$rel_yml" \
         | grep -oE '\./\.github/workflows/[a-z-]+\.yml' \
         | head -1 \
-        | sed -E 's|.*/||')
+        | sed -E 's|.*/||' || true)
     fi
     if [ -n "$wf_name" ]; then
       local stack
@@ -118,8 +125,10 @@ detect_stack_remote() {
   fi
 
   # Fallback: filesystem heuristics (matches bin/detect-stack).
+  # `--paginate` ensures we see every file in repos with a large root
+  # listing (default page is 100 entries).
   local contents
-  contents=$(gh api "repos/$r/contents" --jq '.[] | .name' 2>/dev/null) || {
+  contents=$(gh api --paginate "repos/$r/contents" --jq '.[] | .name' 2>/dev/null) || {
     echo "could not read repo contents (auth? rate limit?)" >&2
     return 1
   }
@@ -139,7 +148,8 @@ detect_stack_remote() {
   fi
   if printf '%s\n' "$contents" | grep -qx 'package.json'; then
     local pkg
-    pkg=$(gh api "repos/$r/contents/package.json" --jq .content 2>/dev/null | base64 -d 2>/dev/null) || pkg=""
+    pkg=$(gh api "repos/$r/contents/package.json" \
+      -H 'Accept: application/vnd.github.raw' 2>/dev/null) || pkg=""
     if printf '%s\n' "$pkg" | grep -qE '"electron"|"electron-builder"'; then
       echo electron-app; return 0
     fi
@@ -231,7 +241,8 @@ check_local() {
 check_ci() {
   local r=$1
   local default_branch
-  default_branch=$(gh api "repos/$r" --jq .default_branch 2>/dev/null) || default_branch=main
+  default_branch=$(gh api "repos/$r" --jq '.default_branch // empty' 2>/dev/null) || default_branch=""
+  [ -z "$default_branch" ] && default_branch=main
   for wf in ci.yml test.yml; do
     # Pull last 10 runs and pick the most recent COMPLETED one — the
     # very latest may be queued/in-progress, which would otherwise
@@ -288,18 +299,23 @@ check_release() {
   # Read release.yml at the tag's SHA — if it's a thin caller of
   # <stack>.yml@vN, the release we're looking at came from canonical.
   local rel_yml
-  rel_yml=$(gh api "repos/$r/contents/.github/workflows/release.yml?ref=$latest_tag" --jq .content 2>/dev/null | base64 -d 2>/dev/null) || rel_yml=""
+  rel_yml=$(gh api "repos/$r/contents/.github/workflows/release.yml?ref=$latest_tag" \
+    -H 'Accept: application/vnd.github.raw' 2>/dev/null) || rel_yml=""
   if [ -z "$rel_yml" ]; then
     echo "FAIL|no release.yml at tag $latest_tag (release source unknown)"
     return
   fi
 
-  if printf '%s\n' "$rel_yml" | grep -qE "uses:[[:space:]]+arthur-debert/release/\.github/workflows/${stack_wf}@"; then
+  # Escape dots in the workflow filename — without escaping, the `.`
+  # inside e.g. `rust-cli.yml` would be a regex wildcard and falsely
+  # match `rust-clixyml`.
+  local stack_wf_re=${stack_wf//./\\.}
+  if printf '%s\n' "$rel_yml" | grep -qE "uses:[[:space:]]+arthur-debert/release/\.github/workflows/${stack_wf_re}@"; then
     echo "PASS|$latest_tag via $stack_wf"
   else
     # Special case: release/ itself's release.yml uses gh-action.yml@v1
     # via its OWN reusable workflow — still counts as canonical.
-    if printf '%s\n' "$rel_yml" | grep -qE "uses:[[:space:]]+\./\.github/workflows/${stack_wf}"; then
+    if printf '%s\n' "$rel_yml" | grep -qE "uses:[[:space:]]+\./\.github/workflows/${stack_wf_re}"; then
       echo "PASS|$latest_tag via self-call $stack_wf"
     else
       echo "FAIL|$latest_tag was NOT cut by ${stack_wf}@v1 (release.yml is bespoke)"
