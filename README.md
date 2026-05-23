@@ -214,10 +214,10 @@ how complete the local files look.
 | vscode-ext    | **fleet-adopted (1/1)** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX is downstream config — see ᵇ and [#189](https://github.com/arthur-debert/release/issues/189) |
 | nvim-plugin   | **fleet-adopted (1/1)**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107)) |
 | tree-sitter   | **fleet-adopted (1/1)**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
-| zed-extension | `lex-fmt/zed-lex` v0.1.0 — **implemented** (template landed; no canonical CI/release workflow yet — see [#172](https://github.com/arthur-debert/release/issues/172)) |
+| zed-extension | **fleet-adopted (1/1)**: `lex-fmt/zed-lex` v0.1.1 (2026-05-23) via `zed-extension.yml@v1` — canonical authored same day in [#190](https://github.com/arthur-debert/release/pull/190); validates both `extension.toml` and `Cargo.toml` are in sync at the tag |
 | go-cli        | **fleet-adopted (1/1)**: `arthur-debert/supage` `0.0.1` + `0.0.2` via `go-cli.yml@v1` incl. brew-private-repo |
-| gh-action     | `release` (dogfooded), `simple-gal-action` — **planned** (no canonical workflow yet — see [#174](https://github.com/arthur-debert/release/issues/174)) |
-| brew-tap      | `homebrew-tools` — **planned** (no canonical workflow yet — see [#175](https://github.com/arthur-debert/release/issues/175)) |
+| gh-action     | **fleet-adopted (1/1 eligible)**: `arthur-debert/release` (dogfood) v1.7.1 → v1.7.5 (2026-05-19) via `gh-action.yml@v1`; `simple-gal-action` excluded per `audit-exclude.yml` (minimal active development) |
+| brew-tap      | **out-of-scope**: `homebrew-tools` is a passive registry (formulas pushed by rust-cli/go-cli `push-brew-tap`); no release semantics. CI canonicalization deferred to [#107](https://github.com/arthur-debert/release/issues/107) |
 | python-pkg    | (no managed-portfolio repos yet) |
 
 ᵇ Pilot-running for the Marketplace half — `lex-fmt/vscode` v0.10.7 +
