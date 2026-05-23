@@ -341,7 +341,7 @@ jobs:
           if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
             "${GITHUB_WORKSPACE}/bin/build" -- "${args[@]}"
           else
-            ${{ steps.pm.outputs.pm }} run build -- "${args[@]}"
+            ${{ steps.pm.outputs.pm }} run build "${args[@]}"
           fi
 
       # ---- Notarization: submit / poll / staple --------------------
@@ -542,7 +542,7 @@ jobs:
           if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
             "${GITHUB_WORKSPACE}/bin/build" -- --linux --${{ matrix.arch }} --publish never
           else
-            ${{ steps.pm.outputs.pm }} run build -- --linux --${{ matrix.arch }} --publish never
+            ${{ steps.pm.outputs.pm }} run build --linux --${{ matrix.arch }} --publish never
           fi
 
       - name: Smoke test (linux)
@@ -639,7 +639,7 @@ jobs:
           if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
             "${GITHUB_WORKSPACE}/bin/build" -- --win --${{ matrix.arch }} --publish never
           else
-            ${{ steps.pm.outputs.pm }} run build -- --win --${{ matrix.arch }} --publish never
+            ${{ steps.pm.outputs.pm }} run build --win --${{ matrix.arch }} --publish never
           fi
         shell: bash
 

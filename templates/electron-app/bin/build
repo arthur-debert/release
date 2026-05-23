@@ -53,7 +53,29 @@ if ! command -v "${PM}" >/dev/null 2>&1; then
     exit 1
 fi
 
-# Delegate to the consumer's `<pm> run build` script. All args
-# forward verbatim — npm/pnpm/yarn handle their own `--` semantics
-# for forwarding to the underlying script.
+# Strip a leading `--` from $@. Caller-side convention is
+# `bin/build -- <inner args>` ('end of bin/build options, what follows
+# is for the underlying build tool'). We forward $@ to `<pm> run
+# build`, and the `--` semantics diverge across package managers:
+#
+#   * npm 7+: strips a leading `--` before forwarding to the script.
+#   * pnpm 10: KEEPS the literal `--` in the script's argv. When the
+#     consumer's build script is a `&&`-chain ending in
+#     `electron-builder`, pnpm appends only to the last command, so
+#     the chain becomes `... && electron-builder -- --linux ...`.
+#     electron-builder reads the first `--` as end-of-options, then
+#     interprets `--linux`, `--publish never`, etc. as positional
+#     args — which means `--publish never` is silently dropped,
+#     CI-implicit publish kicks in, and the build dies needing
+#     GH_TOKEN. (Real failure: simple-gal-ui v0.1.0 build-linux,
+#     run 26317707960.)
+#
+# Stripping the `--` ourselves makes the forward unambiguous across
+# all three pms.
+if [ "$#" -gt 0 ] && [ "$1" = "--" ]; then
+    shift
+fi
+
+# Delegate to the consumer's `<pm> run build` script. Args forward
+# without the caller-side `--` separator (see above).
 exec "${PM}" run build "$@"
