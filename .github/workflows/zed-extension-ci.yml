@@ -1,0 +1,155 @@
+name: Zed Extension CI
+
+# Reusable PR-time check workflow for zed-extension consumers.
+#
+# Closes part of #107. Where `zed-extension.yml` covers the release
+# path (wasm build + canonical bundle tarball + GH release), this
+# workflow covers every push / pull_request: install Rust with the
+# wasm32-wasip2 target, optionally install Node + bats, run the
+# canonical `bin/check` umbrella (or scripts/test-all fallback).
+#
+# What's distinct
+# ---------------
+# - `wasm32-wasip2` target installed by default — Zed extensions don't
+#   build for the host. clippy must run against the wasm target
+#   because the extension links against `zed_extension_api`'s wasm-only
+#   ABI (host-target clippy emits link errors that aren't real on
+#   wasm). See `templates/zed-extension/lefthook.fragment.yaml` for
+#   the same pattern in the pre-commit gate.
+# - bats opt-in (most Zed extensions test through bats — same shell-
+#   subshell isolation pattern as padz/dodot).
+# - Node opt-in for consumers whose `bin/check` invokes JS helpers
+#   (e.g. lex-fmt/zed-lex has `scripts/gen-theme.py` and JS-based
+#   highlights validators that node tooling drives).
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/zed-extension-ci.yml@v1
+#       with:
+#         bats: true              # optional
+#         node: true              # optional
+
+on:
+  workflow_call:
+    inputs:
+      rust-components:
+        description: |
+          Comma-separated rustup components beyond stable toolchain.
+          Default `clippy,rustfmt` — Zed extensions universally lint
+          + format-check via these.
+        type: string
+        required: false
+        default: 'clippy,rustfmt'
+      extra-targets:
+        description: |
+          Space-separated additional rustup targets beyond the default
+          `wasm32-wasip2`. Empty unless a consumer needs a second
+          target (e.g. a debug build on the host for tests that don't
+          link `zed_extension_api`).
+        type: string
+        required: false
+        default: ''
+      node:
+        description: 'Install Node.js (for consumers whose check uses JS tooling).'
+        type: boolean
+        required: false
+        default: false
+      node-version:
+        description: 'Node.js version (only used when `node: true`).'
+        type: string
+        required: false
+        default: '20'
+      bats:
+        description: 'Install bats-core.'
+        type: boolean
+        required: false
+        default: false
+      cache-shared-key:
+        description: |
+          Cache key shared across runs of this workflow. Default
+          `zed-extension-wasm`; consumers with a unique cache profile
+          can override.
+        type: string
+        required: false
+        default: 'zed-extension-wasm'
+      pre-check:
+        description: |
+          Optional path to a script the consumer runs before
+          `bin/check` (e.g. regenerating a theme JSON from a template).
+        type: string
+        required: false
+        default: ''
+      check-command:
+        description: |
+          The canonical umbrella check entry point. Defaults to
+          `bin/check`; override (e.g. `scripts/test-all`) for
+          consumers still mid-take-iii.
+        type: string
+        required: false
+        default: 'bin/check'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Install Rust toolchain (wasm32-wasip2)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+          components: ${{ inputs.rust-components }}
+
+      - name: Install extra rustup targets
+        if: inputs.extra-targets != ''
+        shell: bash
+        run: |
+          for t in ${{ inputs.extra-targets }}; do
+            rustup target add "$t"
+          done
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ inputs.cache-shared-key }}
+
+      - name: Install Node.js
+        if: inputs.node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Install bats
+        if: inputs.bats
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Pre-check hook
+        if: inputs.pre-check != ''
+        shell: bash
+        run: bash "${{ inputs.pre-check }}"
+
+      - name: Run umbrella check
+        shell: bash
+        run: ${{ inputs.check-command }}

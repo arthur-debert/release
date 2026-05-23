@@ -1,0 +1,120 @@
+name: VS Code Extension CI
+
+# Reusable PR-time check workflow for vsce-ext consumers.
+#
+# Closes part of #107. Where `vscode-ext.yml` covers the release path,
+# this workflow covers every push / pull_request: install Node, install
+# deps, run the canonical `bin/check` umbrella (or the consumer's
+# scripts/test-all fallback).
+#
+# What's distinct
+# ---------------
+# - `package-manager` input switches between npm / pnpm / yarn install
+#   commands. Default `npm`. Caching is conditional on the matching
+#   lockfile being present (setup-node hard-fails when cache: 'npm' is
+#   set but no package-lock.json is present — same gotcha that bit
+#   tree-sitter / vscode-ext consumers; see memory
+#   `feedback_setup_tool_cache_hardfail`).
+# - Optional `pre-check` hook for consumers that need to build a
+#   shared module first (lex-fmt/vscode has a `shared/` directory it
+#   needs to `npm run build` before the main check runs).
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/vscode-ext-ci.yml@v1
+#       with:
+#         pre-check: scripts/build-shared.sh   # optional
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version.'
+        type: string
+        required: false
+        default: '20'
+      package-manager:
+        description: 'npm | pnpm | yarn.'
+        type: string
+        required: false
+        default: 'npm'
+      pre-check:
+        description: |
+          Optional path to a script the consumer runs before
+          `bin/check` (e.g. building a shared workspace module).
+        type: string
+        required: false
+        default: ''
+      check-command:
+        description: |
+          The canonical umbrella check entry point. Defaults to
+          `bin/check`; override (e.g. `npm run check`) for consumers
+          still mid-take-iii migration.
+        type: string
+        required: false
+        default: 'bin/check'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          # Gate the cache on a matching lockfile existing —
+          # setup-node@v6 with `cache: 'npm'` (or pnpm/yarn) hard-fails
+          # if no lockfile is found.
+          cache: ${{ (inputs.package-manager == 'npm' && hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '') && 'npm' || (inputs.package-manager == 'pnpm' && hashFiles('pnpm-lock.yaml') != '') && 'pnpm' || (inputs.package-manager == 'yarn' && hashFiles('yarn.lock') != '') && 'yarn' || '' }}
+
+      - name: Enable corepack (pnpm / yarn)
+        if: inputs.package-manager != 'npm'
+        shell: bash
+        run: corepack enable
+
+      - name: Install deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ inputs.package-manager }}" in
+            npm)
+              if [ -f package-lock.json ]; then npm ci; else npm install; fi ;;
+            pnpm)
+              pnpm install --frozen-lockfile ;;
+            yarn)
+              yarn install --frozen-lockfile ;;
+            *)
+              echo "::error::unknown package-manager: ${{ inputs.package-manager }}"
+              exit 1 ;;
+          esac
+
+      - name: Pre-check hook
+        if: inputs.pre-check != ''
+        shell: bash
+        run: bash "${{ inputs.pre-check }}"
+
+      - name: Run umbrella check
+        shell: bash
+        run: ${{ inputs.check-command }}

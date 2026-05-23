@@ -1,0 +1,108 @@
+name: tree-sitter CI
+
+# Reusable PR-time check workflow for tree-sitter grammar consumers.
+#
+# Closes part of #107. Where `tree-sitter.yml` covers the release path
+# (corpus test + wasm bundle), this workflow covers every push /
+# pull_request: install Node + tree-sitter CLI deps, run the canonical
+# `bin/check` umbrella (or scripts/test-all fallback).
+#
+# What's distinct
+# ---------------
+# - Node-based even though the output is C: tree-sitter generate and
+#   tree-sitter test are npx-driven.
+# - Cache gating on package-lock.json existence (setup-node@v6 with
+#   cache: 'npm' hard-fails when no lockfile; many tree-sitter repos
+#   use `npm install` without one).
+# - `regenerate-parser` opt-in runs `npx tree-sitter generate` before
+#   the umbrella check — most consumers commit the generated
+#   src/parser.c so this is off by default, but consumers that gitignore
+#   it can opt in.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/tree-sitter-ci.yml@v1
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version.'
+        type: string
+        required: false
+        default: '20'
+      regenerate-parser:
+        description: |
+          Run `npx tree-sitter generate` before the umbrella check.
+          Default false — most consumers commit `src/parser.c` and
+          treat it as a build artifact; consumers that gitignore it
+          should opt in.
+        type: boolean
+        required: false
+        default: false
+      pre-check:
+        description: |
+          Optional path to a script the consumer runs before
+          `bin/check` (e.g. a smoke-grammars sanity step).
+        type: string
+        required: false
+        default: ''
+      check-command:
+        description: |
+          The canonical umbrella check entry point. Defaults to
+          `bin/check`; override (e.g. `scripts/test-all`) for
+          consumers still mid-take-iii.
+        type: string
+        required: false
+        default: 'bin/check'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' && 'npm' || '' }}
+
+      - name: Install deps
+        shell: bash
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Regenerate parser
+        if: inputs.regenerate-parser
+        shell: bash
+        run: npx tree-sitter generate
+
+      - name: Pre-check hook
+        if: inputs.pre-check != ''
+        shell: bash
+        run: bash "${{ inputs.pre-check }}"
+
+      - name: Run umbrella check
+        shell: bash
+        run: ${{ inputs.check-command }}
