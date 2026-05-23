@@ -95,6 +95,10 @@ jobs:
       - name: Pre-check hook
         if: inputs.pre-check != ''
         shell: bash
+        env:
+          # Make `gh` usable inside the consumer's pre-check script
+          # (e.g. `gh release download` for fetching pinned deps).
+          GH_TOKEN: ${{ github.token }}
         run: bash "${{ inputs.pre-check }}"
 
       - name: Run umbrella check
