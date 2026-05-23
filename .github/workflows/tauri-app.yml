@@ -399,11 +399,25 @@ jobs:
           fi
 
           # Surgical version-string replacement for a JSON file.
-          # Mutates ONLY the value of the first top-level `"version"`
-          # key — preserves indent style (tab vs space, any width),
-          # inline array formatting, trailing comments-in-JSON-style,
-          # field order, and trailing whitespace. Everything else in
-          # the file stays byte-identical.
+          # Format-preserving: changes ONLY the value between the
+          # quotes on the first matching `"version": "..."` line.
+          # Preserves indent style (tab vs space, any width), inline
+          # array formatting, field order, and intra-line whitespace.
+          # Caveat: awk's `print` always emits a trailing newline, so
+          # an input file that lacked one will gain one — typically a
+          # non-issue (most editors auto-add one) but it's a one-byte
+          # delta in that edge case.
+          #
+          # Match heuristic: `^[[:space:]]+"version"[[:space:]]*:` —
+          # requires the key to appear on a line that starts with
+          # indent whitespace (i.e. NOT on the opening `{` line, NOT
+          # in a nested object's serialized form on a single line).
+          # In strict JSON this picks up the top-level `version`
+          # field for both package.json and tauri.conf.json across
+          # the managed portfolio. Consumers with a more exotic
+          # layout (multi-line value, escaped `\"version\"` inside a
+          # string preceding the real key) would need a different
+          # tool — this workflow targets strict JSON only.
           #
           # Why not jq: jq is a reformatter, not a surgical editor.
           # It always rewrites with its own indent flag AND expands
@@ -418,7 +432,7 @@ jobs:
             local file="$1"
             local new_v="$2"
             awk -v v="${new_v}" '
-              !bumped && /"version"[[:space:]]*:[[:space:]]*"/ {
+              !bumped && /^[[:space:]]+"version"[[:space:]]*:[[:space:]]*"/ {
                 match($0, /"version"[[:space:]]*:[[:space:]]*"/)
                 head_len = RSTART + RLENGTH - 1
                 rest = substr($0, head_len + 1)
@@ -431,7 +445,7 @@ jobs:
               { print }
               END {
                 if (!bumped) {
-                  print "::error::no \"version\" key found in " FILENAME > "/dev/stderr"
+                  print "::error::no top-level \"version\" key found in " FILENAME > "/dev/stderr"
                   exit 1
                 }
               }
