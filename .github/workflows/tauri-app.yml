@@ -398,11 +398,50 @@ jobs:
             fi
           fi
 
-          # Bump package.json (jq for safety — preserves field order
-          # less faithfully than `npm version` but doesn't need a
-          # working npm install just for the bump).
-          jq --arg v "${NEW_VERSION}" '.version = $v' "${pkg}" > "${pkg}.tmp"
-          mv "${pkg}.tmp" "${pkg}"
+          # Surgical version-string replacement for a JSON file.
+          # Mutates ONLY the value of the first top-level `"version"`
+          # key — preserves indent style (tab vs space, any width),
+          # inline array formatting, trailing comments-in-JSON-style,
+          # field order, and trailing whitespace. Everything else in
+          # the file stays byte-identical.
+          #
+          # Why not jq: jq is a reformatter, not a surgical editor.
+          # It always rewrites with its own indent flag AND expands
+          # inline arrays into multi-line form regardless. Consumers
+          # with hand-formatted JSON (arami's tauri.conf.json:
+          # tab-indented + inline icon arrays) would see the
+          # post-bump file fail their prettier/eslint pre-commit
+          # gate, which aborts the canonical's bot commit.
+          # (Real failure: arami-app v0.1.8 dispatch
+          # https://github.com/arthur-debert/arami-app/actions/runs/26317444019)
+          bump_json_version() {
+            local file="$1"
+            local new_v="$2"
+            awk -v v="${new_v}" '
+              !bumped && /"version"[[:space:]]*:[[:space:]]*"/ {
+                match($0, /"version"[[:space:]]*:[[:space:]]*"/)
+                head_len = RSTART + RLENGTH - 1
+                rest = substr($0, head_len + 1)
+                closing = index(rest, "\"")
+                if (closing > 0) {
+                  $0 = substr($0, 1, head_len) v substr($0, head_len + closing)
+                  bumped = 1
+                }
+              }
+              { print }
+              END {
+                if (!bumped) {
+                  print "::error::no \"version\" key found in " FILENAME > "/dev/stderr"
+                  exit 1
+                }
+              }
+            ' "$file" > "${file}.tmp"
+            mv "${file}.tmp" "$file"
+          }
+
+          # Bump package.json — preserves every byte except the
+          # version string itself.
+          bump_json_version "${pkg}" "${NEW_VERSION}"
 
           # Bump src-tauri/Cargo.toml — scoped to the [package] table
           # (Cargo files have other version = entries under [dependencies]).
@@ -443,12 +482,13 @@ jobs:
           ' "${cargo}" > "${cargo}.tmp"
           mv "${cargo}.tmp" "${cargo}"
 
-          # Bump src-tauri/tauri.conf.json — jq again. The `.version`
-          # field is optional in tauri.conf.json (defaults to
-          # package.json) — only bump it if present.
+          # Bump src-tauri/tauri.conf.json. The `.version` field is
+          # optional in tauri.conf.json (defaults to package.json) —
+          # only bump if the file actually carries one. Use jq just
+          # to detect presence (read-only); the bump itself is
+          # surgical via bump_json_version.
           if [ "$(jq -r '.version // empty' "${tauri_conf}")" != "" ]; then
-            jq --arg v "${NEW_VERSION}" '.version = $v' "${tauri_conf}" > "${tauri_conf}.tmp"
-            mv "${tauri_conf}.tmp" "${tauri_conf}"
+            bump_json_version "${tauri_conf}" "${NEW_VERSION}"
           fi
 
           # Roll changelog when present + extract notes. The
