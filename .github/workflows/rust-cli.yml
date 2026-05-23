@@ -111,19 +111,46 @@ on:
         default: 'CHANGELOG.md'
 
       wasm-package:
-        description: 'Workspace member with a wasm-bindgen crate to build via wasm-pack and publish to npm. Empty = no WASM build (default).'
+        description: |
+          Single workspace member with a wasm-bindgen crate to build
+          via wasm-pack and (optionally) publish to npm. Empty = no
+          WASM build (default). DEPRECATED in favor of
+          `wasm-packages` (multiline list); kept for backward
+          compatibility — `wasm-package: foo` is treated as
+          `wasm-packages: foo`. When BOTH are set, `wasm-packages`
+          takes precedence.
+        type: string
+        required: false
+        default: ''
+
+      wasm-packages:
+        description: |
+          Multiline list of workspace members with wasm-bindgen
+          crates to build via wasm-pack. One member per line; blank
+          lines ignored. Each member is built + tarballed + attached
+          to the GH release, and (if NPM_TOKEN is set) published to
+          npm. Use this for workspaces with >1 wasm crate (arami-core
+          ships arami-color-wasm + arami-editor-wasm +
+          arami-viewer-wasm under a single release). Empty = falls
+          back to `wasm-package` (single) or no WASM build.
+
+          Example:
+            wasm-packages: |
+              arami-color-wasm
+              arami-editor-wasm
+              arami-viewer-wasm
         type: string
         required: false
         default: ''
 
       wasm-pack-target:
-        description: 'wasm-pack --target value: bundler|web|nodejs|no-modules. Only consulted when wasm-package is set.'
+        description: 'wasm-pack --target value: bundler|web|nodejs|no-modules. Only consulted when wasm-package(s) is set.'
         type: string
         required: false
         default: 'bundler'
 
       wasm-npm-scope:
-        description: 'npm org scope (publishes as @<scope>/<wasm-package>). Empty = unscoped publish. Only consulted when wasm-package is set.'
+        description: 'npm org scope (publishes each member as @<scope>/<package>). Empty = unscoped publish. Only consulted when wasm-package(s) is set.'
         type: string
         required: false
         default: ''
@@ -614,13 +641,59 @@ jobs:
           formula-path: out/${{ inputs.bin-name }}.rb
           version: ${{ needs.prepare.outputs.version }}
 
+  wasm-setup:
+    # Compute the effective wasm-package list from either input:
+    #   * `wasm-packages` (multiline) wins when set
+    #   * `wasm-package` (single, deprecated) is the backward-compat
+    #     fallback
+    # Emits a JSON array consumed by build-wasm + publish-npm matrices.
+    # Skips downstream if neither is set (no wasm work at all).
+    needs: prepare
+    if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - name: Build wasm packages list
+        id: list
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.wasm-package }}
+          PACKAGES: ${{ inputs.wasm-packages }}
+        run: |
+          set -euo pipefail
+          # `wasm-packages` (multiline) wins. Strip blank + comment
+          # lines; emit JSON array. When unset, fall back to the
+          # single `wasm-package` value (also single-element array).
+          if [ -n "${PACKAGES}" ]; then
+            json=$(printf '%s\n' "${PACKAGES}" \
+              | sed 's/[[:space:]]*$//' \
+              | grep -vE '^\s*(#|$)' \
+              | jq -R . | jq -s -c .)
+          else
+            json=$(jq -c -n --arg p "${PACKAGE}" '[$p]')
+          fi
+          if [ "$(jq 'length' <<<"${json}")" -eq 0 ]; then
+            echo "::error::wasm-packages parsed to empty list — check input formatting"
+            exit 1
+          fi
+          echo "Effective wasm-packages list: ${json}"
+          echo "packages=${json}" >> "$GITHUB_OUTPUT"
+
   build-wasm:
     # Build a wasm-bindgen workspace member via wasm-pack and attach the
     # tarball to the GH release alongside native binaries. Downstream
-    # publish-npm pulls the same artifact instead of rebuilding.
-    needs: [prepare, create-release]
-    if: always() && !failure() && !cancelled() && inputs.wasm-package != ''
+    # publish-npm pulls the same artifact instead of rebuilding. Matrix
+    # over the wasm-packages list so workspaces with multiple wasm
+    # members (arami-core: arami-color-wasm + arami-editor-wasm +
+    # arami-viewer-wasm) all build + attach in one release.
+    needs: [prepare, create-release, wasm-setup]
+    if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ${{ fromJSON(needs.wasm-setup.outputs.packages) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -640,7 +713,7 @@ jobs:
         id: build
         shell: bash
         env:
-          WASM_PACKAGE: ${{ inputs.wasm-package }}
+          WASM_PACKAGE: ${{ matrix.pkg }}
           WASM_TARGET: ${{ inputs.wasm-pack-target }}
           WASM_SCOPE: ${{ inputs.wasm-npm-scope }}
           TAG_VERSION: ${{ needs.prepare.outputs.version }}
@@ -685,24 +758,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.prepare.outputs.version }}
-          WASM_PACKAGE: ${{ inputs.wasm-package }}
+          WASM_PACKAGE: ${{ matrix.pkg }}
         run: |
           gh release upload "v$VERSION" "${WASM_PACKAGE}-wasm.tar.gz" --clobber
 
       - name: Upload wasm pkg as workflow artifact (consumed by publish-npm)
         uses: actions/upload-artifact@v4
         with:
-          name: wasm-pkg
+          # Per-package artifact name. publish-npm's matrix downloads
+          # by the same name so each member gets its own pkg/ tree.
+          name: wasm-pkg-${{ matrix.pkg }}
           path: ${{ steps.build.outputs.crate-path }}/pkg/
           if-no-files-found: error
           retention-days: 7
 
   publish-npm:
-    # Publish the wasm-pack output to npm. Pulls the prebuilt pkg/ from
-    # the build-wasm artifact rather than reinstalling Rust + recompiling.
-    needs: [prepare, build-wasm]
-    if: always() && !failure() && !cancelled() && inputs.wasm-package != ''
+    # Publish each wasm-pack output to npm. Pulls the prebuilt pkg/ from
+    # the build-wasm matrix's artifacts rather than reinstalling Rust +
+    # recompiling. Matrix-ed over the same wasm-packages list so each
+    # member is published independently (failures don't take siblings
+    # down — `fail-fast: false`).
+    needs: [prepare, build-wasm, wasm-setup]
+    if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ${{ fromJSON(needs.wasm-setup.outputs.packages) }}
     steps:
       - name: Check npm token
         id: guard
@@ -710,7 +792,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -z "$NPM_TOKEN" ]; then
-            echo "::warning::NPM_TOKEN not configured — skipping npm publish. The wasm tarball is still attached to the GH release."
+            echo "::warning::NPM_TOKEN not configured — skipping npm publish for ${{ matrix.pkg }}. The wasm tarball is still attached to the GH release."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
@@ -726,7 +808,7 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         uses: actions/download-artifact@v4
         with:
-          name: wasm-pkg
+          name: wasm-pkg-${{ matrix.pkg }}
           path: pkg
 
       - name: Publish to npm
