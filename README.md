@@ -141,7 +141,7 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 | rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
 | go-cli        | ✅ | ✅ | —⁴ | — | ✅ | — | — | — | ✅⁵ | 🚧 | — | 🚧 | 📋 |
 | electron-app  | ✅ | ✅ | ✅ | ✅³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
-| tauri-app     | ✅ | ✅ | ✅ | 🚧³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
+| tauri-app     | ✅ | ✅ | ✅ | ✅³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
 | vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
 | nvim-plugin   | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
 | tree-sitter   | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
@@ -150,9 +150,14 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 | gh-action     | ✅ | ✅ | — | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
 | brew-tap      | — | — | — | — | ✅ | — | — | — | (is tap) | 🚧 | — | 🚧 | 📋 |
 
-¹ Opt-in `wasm-package` slot — Rust workspace with a wasm-bindgen
-member publishes both the crate and an npm tarball of the wasm build.
-Used by `arami-core` and `lex-fmt/lex`.
+¹ Opt-in `wasm-packages` slot (multiline list as of #187) — Rust
+workspace with one or more wasm-bindgen members. Each member is
+built via wasm-pack, tarballed, attached to the GH release, and
+(if `NPM_TOKEN` is set) published to npm. Pairs with
+`publish-crates: false` for workspaces that ship only wasm
+artifacts. Proven on `arami-core` (3 wasm members + arami-cli
+binaries shipped 2026-05-23 via v0.4.1) and `lex-fmt/lex` (single
+wasm member via the deprecated `wasm-package` input).
 
 ² VS Code Marketplace + Open VSX. Marketplace path validated through
 v0.10.8 (lex-fmt/vscode). Open VSX `lex` namespace granted
@@ -161,21 +166,24 @@ v0.10.8 (lex-fmt/vscode). Open VSX `lex` namespace granted
 "Extension Not Found" under the restricted-namespace first-publish
 path. Token regen + Open VSX support follow-up pending.
 
-³ Status as of 2026-05-22:
+³ Status as of 2026-05-23:
 
 - `electron-app.yml@v1` uses the submit/poll/staple notarize path
   (port of the previously working bespoke `release.yml` from
-  `simple-gal-ui`, landed in #176). **Pilot-running** — `lex-fmt/lexed`
-  v0.10.6 shipped 2026-05-22
-  ([run](https://github.com/lex-fmt/lexed/actions/runs/26315148328)),
-  notarized arm64 DMG + Linux AppImage + Windows Setup.exe published
-  in ~5.7 min. Closed [#167](https://github.com/arthur-debert/release/issues/167).
-- `tauri-app.yml` uses `npx tauri build` with `APPLE_*` env vars
-  (Tauri's own signing path, NOT electron-builder). **Pilot-running**
-  — `arami-app` v0.1.7 shipped through the canonical 2026-05-19
-  ([run](https://github.com/arthur-debert/arami-app/actions/runs/26113270868)),
-  Gatekeeper-accepted DMG with stapled notarization ticket.
+  `simple-gal-ui`, landed in #176). **Fleet-adopted** — both
+  consumers shipped: `lex-fmt/lexed` v0.10.6 (npm) on 2026-05-22
+  ([run](https://github.com/lex-fmt/lexed/actions/runs/26315148328))
+  and `arthur-debert/simple-gal-ui` v0.1.3 (pnpm) on 2026-05-23
+  ([run](https://github.com/arthur-debert/simple-gal-ui/actions/runs/26320100468)),
+  each with notarized arm64 DMG + Linux AppImage + Windows Setup.exe.
+- `tauri-app.yml@v1` uses `tauri build` with `APPLE_*` env vars
+  (Tauri's own signing path, NOT electron-builder). **Fleet-adopted**
+  — `arami-app` shipped v0.1.7 (2026-05-19), v0.1.8 + v0.1.9
+  (2026-05-23 post-canonical fixes #180/#182), all Gatekeeper-
+  accepted DMGs with stapled notarization tickets.
 
+Closed: [#167](https://github.com/arthur-debert/release/issues/167)
++ [#168](https://github.com/arthur-debert/release/issues/168).
 Tracked at [#122](https://github.com/arthur-debert/release/issues/122).
 
 ⁴ **go-cli — version-bump and tag-driven distribution.** Go modules
@@ -199,25 +207,18 @@ how complete the local files look.
 
 | Stack         | Repos (state) |
 |---------------|---|
-| rust-cli      | `padz` — **pilot-running** (canonical release shipped); `dodot`, `lex-fmt/lex`, `rustloc`, `burgertocow`, `simple-gal` — **implemented**ᵃ |
-| rust-lib      | `clapfig` — **pilot-running**; `standout` — **implemented**ᵃ |
-| electron-app  | `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both shipped via `electron-app.yml@v1` — **fleet-adopted** (2/2) |
-| tauri-app     | `arami-app` v0.1.8 shipped 2026-05-23 via `tauri-app.yml@v1` (2nd canonical release, post-fixes #180/#182) — **fleet-adopted** (1/1) |
-| vscode-ext    | `lex-fmt/vscode` — **pilot-running**ᵇ |
-| nvim-plugin   | `lex-fmt/nvim` — **implemented**ᵃ |
-| tree-sitter   | `lex-fmt/tree-sitter-lex` — **implemented**ᵃ |
-| zed-extension | `lex-fmt/zed-lex` — **implemented** (template landed; no canonical CI/release workflow yet) |
-| go-cli        | `supage` — **pilot-running** (`0.0.1` + `0.0.2` cut through canonical incl. brew-private-repo) |
-| gh-action     | `release` (dogfooded), `simple-gal-action` — **planned** |
-| brew-tap      | `homebrew-tools` — **planned** |
+| rust-cli      | **pilot-running** for all confirmed-on-canonical consumers: `lex-fmt/lex` v0.14.1, `arthur-debert/rustloc` v0.16.0, `arthur-debert/simple-gal` v0.20.4, `arthur-debert/padz` v1.8.2, `arthur-debert/burgertocow` v0.4.0, `arthur-debert/arami-core` v0.4.1 (multi-wasm, 2026-05-23). `arthur-debert/dodot` v5.0.0 shipped via `docs-check.yml` (not `release.yml`) — likely a Mode-B cascade pattern; recheck. **6/7 = 86% → fleet-adopted** if dodot confirms or is excluded |
+| rust-lib      | **fleet-adopted (2/2)**: `arthur-debert/clapfig` v0.21.4 + `arthur-debert/standout` v7.6.3 (first canonical release, 8 workspace crates, 2026-05-23) |
+| electron-app  | **fleet-adopted (2/2)**: `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both via `electron-app.yml@v1` + both gating on canonical `e2e: true` in `electron-ci.yml@v1` |
+| tauri-app     | **fleet-adopted (1/1)**: `arami-app` v0.1.7 (2026-05-19) + v0.1.8 + v0.1.9 (2026-05-23) via `tauri-app.yml@v1`, gating on canonical `e2e: true` + per-platform `scripts/smoke.sh` |
+| vscode-ext    | **pilot-running** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX half: blocked on downstream `OVSX_PAT` regen — see ᵇ |
+| nvim-plugin   | **pilot-running**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107)) |
+| tree-sitter   | **pilot-running**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
+| zed-extension | `lex-fmt/zed-lex` v0.1.0 — **implemented** (template landed; no canonical CI/release workflow yet — see [#172](https://github.com/arthur-debert/release/issues/172)) |
+| go-cli        | **fleet-adopted (1/1)**: `arthur-debert/supage` `0.0.1` + `0.0.2` via `go-cli.yml@v1` incl. brew-private-repo |
+| gh-action     | `release` (dogfooded), `simple-gal-action` — **planned** (no canonical workflow yet — see [#174](https://github.com/arthur-debert/release/issues/174)) |
+| brew-tap      | `homebrew-tools` — **planned** (no canonical workflow yet — see [#175](https://github.com/arthur-debert/release/issues/175)) |
 | python-pkg    | (no managed-portfolio repos yet) |
-
-ᵃ Canonical wired locally and CI passes `bin/check`, but no real
-release-through-canonical has been confirmed in the current quarter.
-**Per the "really done" rule, this is *implemented*, not
-*pilot-running*** — verify with `bin/done-check`
-([#178](https://github.com/arthur-debert/release/issues/178), 🚧
-pending) before upgrading the state.
 
 ᵇ Pilot-running for the Marketplace half — `lex-fmt/vscode` v0.10.7 +
 v0.10.8 were dispatched through `vscode-ext.yml@v1` and shipped to VS
@@ -226,8 +227,14 @@ Code Marketplace. The Open VSX half is broken (OVSX_PAT fails
 left a stuck entry). The canonical workflow itself is proven; the Open
 VSX gap is downstream config, not in the canonical.
 
-**electron-app + tauri-app are now *fleet-adopted*** (100% pilot-running each). Other stacks will flip when ≥80%
-of its consumers clear step 4 of the "How work flows" sequence.
+**Fleet-adopted as of 2026-05-23:** electron-app (2/2), tauri-app
+(1/1), rust-lib (2/2), go-cli (1/1), rust-cli (6/7 or 7/7 pending
+dodot recheck). Remaining stacks (vscode-ext, nvim-plugin,
+tree-sitter, zed-extension, gh-action, brew-tap) will flip when ≥80%
+of their consumers clear step 4 of the "How work flows" sequence —
+the editor stacks (vscode/nvim/tree-sitter) are blocked only on the
+CI-reusable half (release path is already adopted); zed/gh-action/
+brew-tap need their canonical workflows written first.
 
 ## Managed repos
 
