@@ -1,0 +1,381 @@
+name: Zed extension release
+
+# Reusable release workflow for Zed extensions. Consumers call this
+# from their .github/workflows/release.yml as a thin caller pinned at
+# @v1. See README §Stack matrix row "zed-extension" and tracking
+# issue #172.
+#
+# What this stack ships
+# ---------------------
+# A `<extension-name>-<version>.tar.gz` artifact attached to the GH
+# release, containing the canonical bundle layout:
+#
+#     extension.toml          (Zed manifest — version source of truth)
+#     extension.wasm          (compiled wasm32-wasip2, renamed from
+#                              target/wasm32-wasip2/release/<crate>.wasm)
+#     Cargo.toml              (kept for reproducibility)
+#     Cargo.lock              (kept for reproducibility)
+#     src/                    (kept for reproducibility — Zed users
+#                              can rebuild the wasm from the tarball)
+#     languages/              (per-language config + queries; if present)
+#     themes/                 (theme JSON; if present)
+#     snippets/               (Zed snippets; if present)
+#     LICENSE, README.md,
+#     CHANGELOG.md            (if present)
+#
+# The shape of this bundle is the contract with downstream Zed
+# installs. Changes to it are a MAJOR for this stack.
+#
+# What's distinct about this stack
+# --------------------------------
+# 1. Two version sources. Zed extensions carry the version in BOTH
+#    `extension.toml` (Zed reads this at install time) and `Cargo.toml`
+#    (cargo reads this at build time). They MUST stay in sync. The
+#    prepare job bumps both atomically.
+# 2. No package index. Zed installs an extension directly from the
+#    GH release tarball (via the Zed extensions registry, which
+#    indexes from `https://github.com/zed-industries/extensions` — a
+#    follow-on slice can wire that PR, currently out of scope).
+# 3. No native binaries. The wasm IS the published artifact. Zed
+#    loads it via the `zed_extension_api` ABI at extension install
+#    time. Built with `cargo build --release --target wasm32-wasip2`.
+#
+# Convention hooks
+# ----------------
+# - `scripts/zed-package-extras.sh` — runs AFTER the standard bundle
+#   is assembled in `${GITHUB_WORKSPACE}/dist/`, BEFORE the tarball
+#   is created. Use to add consumer-specific files (e.g.
+#   `shared/embedded-grammars.json`). Working dir at hook time is
+#   the repo root; the bundle is at `${GITHUB_WORKSPACE}/dist/`.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to release (bare semver, e.g. 0.2.0 or 1.0.0-rc.1). No leading v.'
+        type: string
+        required: true
+      changelog-path:
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`). Empty to skip changelog handling.'
+        type: string
+        required: false
+        default: 'CHANGELOG.md'
+      extension-name:
+        description: 'Bare extension name (used for the tarball filename, e.g. `lex` → `lex-0.2.0.tar.gz`). Defaults to the value of `id` in extension.toml.'
+        type: string
+        required: false
+        default: ''
+      cargo-wasm-name:
+        description: 'The wasm artifact filename cargo produces (e.g. `zed_lex.wasm` for crate name `zed_lex`). Defaults to deriving from Cargo.toml `[package].name` with `-` rewritten to `_` and `.wasm` appended.'
+        type: string
+        required: false
+        default: ''
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout (for repos that vendor tree-sitter grammars or shared modules).'
+        type: boolean
+        required: false
+        default: false
+
+    secrets:
+      RELEASE_TOKEN:
+        description: 'PAT with repo scope for default-branch push (bypasses ruleset). Falls back to GITHUB_TOKEN.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  # -------------------------------------------------------------------
+  # 1. Prepare: validate version, bump extension.toml + Cargo.toml(s)
+  #    in lockstep, roll changelog, commit + tag + push.
+  # -------------------------------------------------------------------
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.prep.outputs.version }}
+      release-sha: ${{ steps.prep.outputs.release-sha }}
+      prerelease: ${{ steps.prep.outputs.prerelease }}
+      extension-name: ${{ steps.meta.outputs.extension-name }}
+      cargo-wasm-name: ${{ steps.meta.outputs.cargo-wasm-name }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+
+      # Bump extension.toml's version BEFORE prepare-release runs. The
+      # prepare-release action bumps Cargo.toml(s) and tags; if we
+      # bump extension.toml after the tag is cut, the tag's tree
+      # carries the OLD extension.toml version and the published
+      # release is internally inconsistent. Order: write
+      # extension.toml first, then prepare-release stages both files
+      # into its tag commit.
+      - name: Bump extension.toml version
+        shell: bash
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [ ! -f extension.toml ]; then
+            echo "::error::extension.toml not found at repo root — not a Zed extension?"
+            exit 1
+          fi
+          # Replace the `version = "..."` line. Anchored on
+          # start-of-line + `version` to avoid clobbering other
+          # version-like fields (e.g. schema_version).
+          if ! grep -qE '^version = "' extension.toml; then
+            echo "::error::extension.toml has no top-level 'version = \"...\"' line"
+            exit 1
+          fi
+          # sed -i differs on macOS vs GNU; we're on ubuntu so GNU is fine
+          sed -i -E "s/^version = \"[^\"]*\"/version = \"${NEW_VERSION}\"/" extension.toml
+          echo "extension.toml after bump:"
+          grep -E '^(id|name|version) =' extension.toml
+
+          # Pre-stage extension.toml so the bump survives prepare-release's
+          # commit step. prepare-release/action.yml only stages Cargo.{toml,lock}
+          # and the changelog (line 152-156); it does NOT know about
+          # extension.toml. Without this pre-stage, the bumped extension.toml
+          # only lands in the tag commit if a lefthook pre-commit gate happens
+          # to sweep it up via `git add -u`. Pre-staging here makes the
+          # behavior robust regardless of consumer hook framework.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension.toml
+
+      - uses: arthur-debert/release/.github/actions/prepare-release@v1
+        id: prep
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+
+      # Resume-case guard: if prepare-release resumed from a pre-existing
+      # tag (didn't make a new commit), the extension.toml at that tag's
+      # SHA may have been written by an older canonical without the
+      # staging fix above and could be stale. Validate the tag's
+      # extension.toml carries the requested version; fail fast otherwise
+      # — a silent shipped-with-wrong-version is worse than a re-dispatch
+      # failure.
+      - name: Validate extension.toml at release-sha matches input version
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ steps.prep.outputs.release-sha }}
+          NEW_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag_ext_version="$(git show "${RELEASE_SHA}:extension.toml" \
+            | grep -E '^version = "' | head -1 \
+            | sed -E 's/^version = "([^"]*)".*/\1/')"
+          if [ "${tag_ext_version}" != "${NEW_VERSION}" ]; then
+            echo "::error::extension.toml at release-sha ${RELEASE_SHA} has version='${tag_ext_version}' but workflow was dispatched with version='${NEW_VERSION}'. This usually means a prior release attempt tagged the version but failed to bump extension.toml (the staging fix at the top of this job didn't exist yet). Re-tag manually with the correct extension.toml committed, or delete the tag and re-dispatch."
+            exit 1
+          fi
+          echo "extension.toml at ${RELEASE_SHA}: version=${tag_ext_version} ✓ matches input"
+
+      - name: Resolve extension metadata
+        id: meta
+        shell: bash
+        env:
+          INPUT_EXT_NAME: ${{ inputs.extension-name }}
+          INPUT_WASM_NAME: ${{ inputs.cargo-wasm-name }}
+        run: |
+          set -euo pipefail
+
+          # extension-name: explicit input wins; else read extension.toml `id`.
+          if [ -n "${INPUT_EXT_NAME}" ]; then
+            ext_name="${INPUT_EXT_NAME}"
+          else
+            ext_name="$(grep -E '^id = "' extension.toml | head -1 | sed -E 's/^id = "([^"]*)".*/\1/')"
+            if [ -z "${ext_name}" ]; then
+              echo "::error::extension-name input is empty and extension.toml has no top-level 'id = \"...\"' line"
+              exit 1
+            fi
+          fi
+          echo "extension-name=${ext_name}" >> "${GITHUB_OUTPUT}"
+
+          # cargo-wasm-name: explicit input wins; else derive from Cargo.toml
+          # [package].name by replacing `-` with `_` and appending `.wasm`.
+          if [ -n "${INPUT_WASM_NAME}" ]; then
+            wasm_name="${INPUT_WASM_NAME}"
+          else
+            crate_name="$(grep -E '^name = "' Cargo.toml | head -1 | sed -E 's/^name = "([^"]*)".*/\1/')"
+            if [ -z "${crate_name}" ]; then
+              echo "::error::cargo-wasm-name input is empty and Cargo.toml has no top-level 'name = \"...\"' line"
+              exit 1
+            fi
+            wasm_name="${crate_name//-/_}.wasm"
+          fi
+          echo "cargo-wasm-name=${wasm_name}" >> "${GITHUB_OUTPUT}"
+
+          echo "Resolved: extension-name=${ext_name}, cargo-wasm-name=${wasm_name}"
+
+  # -------------------------------------------------------------------
+  # 2. Build the wasm + assemble + tar the canonical bundle.
+  # -------------------------------------------------------------------
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Install Rust toolchain (wasm32-wasip2)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: zed-extension-wasm
+
+      - name: Build wasm (release)
+        run: cargo build --release --target wasm32-wasip2
+
+      - name: Assemble standard bundle
+        shell: bash
+        env:
+          WASM_OUT: target/wasm32-wasip2/release/${{ needs.prepare.outputs.cargo-wasm-name }}
+        run: |
+          set -euo pipefail
+          dist="${GITHUB_WORKSPACE}/dist"
+          rm -rf "${dist}"
+          mkdir -p "${dist}"
+
+          # Manifest + compiled wasm — both required.
+          if [ ! -f extension.toml ]; then
+            echo "::error::extension.toml missing — not a Zed extension?"
+            exit 1
+          fi
+          if [ ! -f "${WASM_OUT}" ]; then
+            echo "::error::expected wasm artifact at ${WASM_OUT} but did not find it (check cargo-wasm-name input)"
+            ls -la target/wasm32-wasip2/release/ || true
+            exit 1
+          fi
+          cp extension.toml "${dist}/"
+          cp "${WASM_OUT}" "${dist}/extension.wasm"
+
+          # Reproducibility: include the source so users can rebuild
+          # the wasm from the tarball. Always present in a Cargo crate
+          # so no `-f` guards needed.
+          cp Cargo.toml "${dist}/"
+          [ -f Cargo.lock ] && cp Cargo.lock "${dist}/"
+          cp -R src "${dist}/"
+
+          # Standard Zed extension content dirs — copied if present.
+          for dir in languages themes snippets; do
+            [ -d "${dir}" ] && cp -R "${dir}" "${dist}/"
+          done
+
+          # Standard docs — copied if present.
+          for f in LICENSE LICENSE.md LICENSE.txt README.md CHANGELOG.md; do
+            [ -f "${f}" ] && cp "${f}" "${dist}/"
+          done
+
+          echo "Bundle contents:"
+          ls -la "${dist}/"
+
+      # Optional consumer extras. Hook runs at repo root; bundle is
+      # at ${GITHUB_WORKSPACE}/dist. Use to add files the standard
+      # layout doesn't carry (e.g. shared/*.json).
+      - name: Bundle-extras hook (consumer)
+        if: hashFiles('scripts/zed-package-extras.sh') != ''
+        shell: bash
+        env:
+          BUNDLE_DIR: ${{ github.workspace }}/dist
+          EXTENSION_NAME: ${{ needs.prepare.outputs.extension-name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: bash scripts/zed-package-extras.sh
+
+      - name: Tar the bundle
+        shell: bash
+        env:
+          EXT_NAME: ${{ needs.prepare.outputs.extension-name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/dist"
+          tarball="${GITHUB_WORKSPACE}/${EXT_NAME}-${VERSION}.tar.gz"
+          # tar from inside dist/ with entries having no leading
+          # `./` or `dist/` prefix, matching tree-sitter.yml's
+          # convention so downstream extractors find files at the
+          # paths they expect.
+          shopt -s nullglob dotglob
+          entries=(*)
+          shopt -u nullglob dotglob
+          tar -czf "${tarball}" "${entries[@]}"
+          ls -la "${tarball}"
+          echo "Tarball contents:"
+          tar -tzf "${tarball}"
+          echo "tarball=${tarball}" >> "${GITHUB_ENV}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zed-extension-bundle
+          path: ${{ env.tarball }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 3. GH release. Gated on build success. Same partial-release-
+  #    prevention pattern as tree-sitter / vscode-ext.
+  # -------------------------------------------------------------------
+  release:
+    needs: [prepare, build]
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+
+      - name: Download release notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: .
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: zed-extension-bundle
+          path: .
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          TAG: v${{ needs.prepare.outputs.version }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          EXT_NAME: ${{ needs.prepare.outputs.extension-name }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          tarball="${EXT_NAME}-${VERSION}.tar.gz"
+          if [ ! -f "${tarball}" ]; then
+            echo "::error::expected ${tarball} from build artifact but not found"
+            ls -la
+            exit 1
+          fi
+          prerelease_flag=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            prerelease_flag="--prerelease"
+          fi
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} exists — updating notes + re-uploading bundle"
+            gh release edit "${TAG}" --notes-file release-notes.md
+            gh release upload "${TAG}" "${tarball}" --clobber
+          else
+            gh release create "${TAG}" \
+              ${prerelease_flag} \
+              --title "${TAG}" \
+              --notes-file release-notes.md \
+              "${tarball}"
+          fi
