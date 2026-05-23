@@ -845,6 +845,34 @@ jobs:
           ls -la "${out}"
           echo "dir=${out}" >> "${GITHUB_OUTPUT}"
 
+      # Smoke test (convention): scripts/smoke.sh. Mirrors
+      # electron-app.yml's smoke pattern. Catches catastrophic build
+      # issues (wrong binary path, dylib missing, Windows path quirks)
+      # — the only way to know the packaged bundle doesn't crash on
+      # launch is to launch it. Skipped cleanly when the file is
+      # absent (hashFiles returns empty string).
+      #
+      # Env vars exposed to the consumer script:
+      #   PLATFORM    mac | linux | windows
+      #   BUNDLE_DIR  absolute path to the collected bundles dir
+      #               (steps.bundles.outputs.dir) — contains every
+      #               distributable artifact for the platform.
+      #   TAURI_DIR   pass-through of the workflow input (so a
+      #               monorepo script can resolve relative paths if
+      #               needed).
+      #
+      # Smoke runs AFTER signing+notarization on macOS — the script
+      # must NOT rewrite bundle contents (would invalidate the
+      # stapled notarization ticket). Launch-only + read-only checks.
+      - name: Smoke test
+        if: hashFiles('scripts/smoke.sh') != ''
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.t.platform }}
+          BUNDLE_DIR: ${{ steps.bundles.outputs.dir }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash scripts/smoke.sh
+
       - name: Upload platform bundle
         uses: actions/upload-artifact@v4
         with:
