@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical tree-sitter check entry point. Same script local + CI.
+#
+# Delegates to the consumer's scripts/test-all if present (the
+# common pattern), else falls back to `npx tree-sitter generate`
+# + `npx tree-sitter test`.
+#
+# scripts/test-all is the canonical entry point most tree-sitter
+# consumers wire — it typically chains generate + test + linting
+# + smoke checks.
+#
+# Source of truth: arthur-debert/release templates/tree-sitter/bin/check.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+if [ -x scripts/test-all ]; then
+    exec scripts/test-all "$@"
+fi
+
+# Fallback: standard tree-sitter test cycle.
+if ! command -v npx >/dev/null 2>&1; then
+    echo "bin/check: npx not found on \$PATH (tree-sitter CLI is npm-based)" >&2
+    exit 1
+fi
+
+npx tree-sitter generate
+exec npx tree-sitter test "$@"

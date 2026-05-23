@@ -222,7 +222,7 @@ sync_one() {
   if [ "$dest" = "scripts/setup-dev-env.sh" ]; then
     local tmp_composed
     tmp_composed=$(mktemp)
-    # shellcheck disable=SC2064 — early expansion of $tmp_composed is intentional
+    # shellcheck disable=SC2064  # early expansion of $tmp_composed is intentional
     trap "rm -f '$tmp_composed'" RETURN
     compose_setup_dev_env "$(git -C "$RELEASE_HOME" show "$ref:$rel")" "$dest" > "$tmp_composed"
     # cmp/redirect avoids the $(cat) trailing-newline stripping trap.
@@ -326,6 +326,7 @@ lefthook_out="$lefthook_tmp/lefthook.yml"
   # Deep-merge all fragments, then strip the head/line/foot comments
   # that each fragment carries (otherwise the merged file inherits a
   # mess of "this is the X fragment" docstrings).
+  # shellcheck disable=SC2016  # $i here is yq's variable, not bash's
   yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""' "${frags[@]}"
 } > "$lefthook_out"
 

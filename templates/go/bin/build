@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical go-cli build entry point. Same script local + CI.
+#
+# Runs `go build ./...` from the repo root. Compiles every package
+# (cmd/ binaries + libraries) without installing. Build artifacts
+# land under each package's default output (cmd/<name>/<name>);
+# clean by removing the binary files individually or via `go clean`.
+#
+# go.mod's `module` declaration controls the package path; the
+# build acts on all packages reachable from the module root.
+#
+# Usage:
+#   bin/build                       # go build ./...
+#   bin/build -tags=integration     # forward build tags
+#   bin/build -o /tmp/myapp ./cmd/myapp   # build a single binary
+#
+# All args forward to `go build` verbatim. For matrix cross-builds
+# in CI (GOOS/GOARCH), set the env vars before invoking.
+#
+# Source of truth: arthur-debert/release templates/go/bin/build.
+
+if ! command -v go >/dev/null 2>&1; then
+    echo "bin/build: go not found on \$PATH" >&2
+    echo "  install: https://go.dev/dl/ (or your package manager)" >&2
+    exit 1
+fi
+
+# Default to building every package; consumer-supplied args override.
+if [ "$#" -eq 0 ]; then
+    set -- ./...
+fi
+exec go build "$@"

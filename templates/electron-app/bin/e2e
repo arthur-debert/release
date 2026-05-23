@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical electron-app e2e runner. Same script local + CI.
+#
+# Delegates to the consumer's `npm run test:e2e` script (or pnpm/yarn
+# equivalent). The consumer's package.json owns what e2e actually
+# means: typically `playwright test tests/e2e` (often gated on a
+# pre-built binary via E2E_USE_BUILD / E2E_HIDE_WINDOW / similar env
+# vars). The electron-ci.yml@v1 workflow's `e2e: true` job runs this
+# script after the packaged build is available.
+#
+# Skip-with-notice if the consumer hasn't wired a `test:e2e` script —
+# repos still scaffolding e2e shouldn't fail the umbrella when the
+# tests don't exist yet.
+#
+# Usage:
+#   bin/e2e                          # default invocation
+#   bin/e2e --grep "some name"       # forward args to the test runner
+#
+# `"$@"` forwards extra args to the underlying script (npm passes them
+# verbatim after `--`; pnpm/yarn forward natively).
+#
+# Source of truth: arthur-debert/release templates/electron-app/bin/e2e.
+
+detect_pm() {
+    local root
+    root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"
+    if [ -f pnpm-lock.yaml ] || [ -f "${root}/pnpm-lock.yaml" ]; then
+        echo "pnpm"
+    elif [ -f yarn.lock ] || [ -f "${root}/yarn.lock" ]; then
+        echo "yarn"
+    else
+        echo "npm"
+    fi
+}
+
+if [ ! -f package.json ]; then
+    echo "No package.json — skipping e2e."
+    exit 0
+fi
+
+if ! node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts['test:e2e'] ? 0 : 1)" 2>/dev/null; then
+    echo "No 'test:e2e' script in package.json — skipping e2e."
+    exit 0
+fi
+
+PM=$(detect_pm)
+echo "Running e2e tests via ${PM} run test:e2e..."
+case "${PM}" in
+    npm)        exec npm run --silent test:e2e -- "$@" ;;
+    pnpm|yarn)  exec "${PM}" test:e2e "$@" ;;
+esac

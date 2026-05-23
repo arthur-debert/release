@@ -121,7 +121,11 @@ jobs:
             while IFS= read -r -d '' f; do
               found_any=true
               echo "shellcheck $f"
-              shellcheck "$f"
+              # Match the severity gate used by actionlint's bundled
+              # check above (only error + warning fail; style + info
+              # findings are advisory). Otherwise this standalone pass
+              # is stricter than the inline pass, which is confusing.
+              shellcheck --severity=warning "$f"
             done < <(find "$dir" -maxdepth 3 -type f \( -perm -u+x -o -name '*.sh' -o -name '*.bash' \) -print0)
           done
           if [ "$found_any" = false ]; then
