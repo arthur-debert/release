@@ -96,7 +96,15 @@ jobs:
 
       - name: Run actionlint
         shell: bash
-        run: actionlint -color
+        # Pass `-S warning` to actionlint's bundled shellcheck so style
+        # + info-level findings (SC2129 "consider grouped redirects",
+        # SC2015 "A && B || C", etc.) don't fail CI. Errors and
+        # warnings still gate. Without this, the first repo to adopt
+        # gh-action-ci.yml@v1 floods on style nits in pre-existing
+        # workflows that haven't been audited (release/'s own
+        # dogfood adoption surfaced 40+ such findings on its first
+        # PR with no real bugs).
+        run: actionlint -shellcheck '-S warning' -color
 
       - name: Run shellcheck (standalone)
         if: inputs.shellcheck-paths != ''
@@ -123,6 +131,10 @@ jobs:
       - name: Pre-check hook
         if: inputs.pre-check != ''
         shell: bash
+        env:
+          # Make `gh` usable inside the consumer's pre-check script
+          # (e.g. `gh release download` for fetching pinned deps).
+          GH_TOKEN: ${{ github.token }}
         run: bash "${{ inputs.pre-check }}"
 
       - name: Run umbrella check
