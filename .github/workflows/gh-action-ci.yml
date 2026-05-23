@@ -1,0 +1,131 @@
+name: GH Action CI
+
+# Reusable PR-time check workflow for gh-action consumers.
+#
+# Closes part of #107. Where `gh-action.yml` covers the release path
+# (tag + advance-major-branch + GH release), this workflow covers
+# every push / pull_request: actionlint over `.github/workflows/` +
+# `.github/actions/`, shellcheck over `bin/` + any composite-action
+# `run:` shell blocks (via actionlint's bundled shellcheck), and the
+# consumer's umbrella check if it has one.
+#
+# What's distinct
+# ---------------
+# - Pure-YAML stack — no language toolchain to set up. The whole job
+#   is lint.
+# - actionlint is the centerpiece. It validates workflow syntax,
+#   expression syntax, and (when shellcheck is on PATH) the shell
+#   inside `run:` blocks. Catches the kind of bugs that, before they
+#   shipped, manifested as `startup_failure` with zero log lines
+#   (see memory `feedback_workflow_call_description_expressions`).
+# - Composite-action-only consumers (no root `action.yml`, e.g.
+#   release/ itself with many `.github/actions/<name>/action.yml`)
+#   are valid — `actionlint` recurses both `.github/workflows/` and
+#   `.github/actions/`.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/gh-action-ci.yml@v1
+
+on:
+  workflow_call:
+    inputs:
+      shellcheck-paths:
+        description: |
+          Space-separated paths to additionally shellcheck (beyond
+          what actionlint's bundled shellcheck covers inside workflow
+          `run:` blocks). Default `bin scripts` — checks any shell
+          scripts in those dirs. Pass `""` to skip standalone
+          shellcheck and rely on actionlint only.
+        type: string
+        required: false
+        default: 'bin scripts'
+      pre-check:
+        description: |
+          Optional path to a script the consumer runs before lint.
+        type: string
+        required: false
+        default: ''
+      check-command:
+        description: |
+          Optional umbrella check entry point. Default empty — the
+          gh-action stack often has no `bin/check` (the workflow IS
+          the deliverable; there's no source to lint beyond YAML +
+          shell). Consumers that DO have a `bin/check` can set this
+          to `bin/check` and it'll run after actionlint.
+        type: string
+        required: false
+        default: ''
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Install actionlint + shellcheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          # actionlint installer per upstream README.
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) >/dev/null
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Run actionlint
+        shell: bash
+        run: actionlint -color
+
+      - name: Run shellcheck (standalone)
+        if: inputs.shellcheck-paths != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          found_any=false
+          for dir in ${{ inputs.shellcheck-paths }}; do
+            [ -d "$dir" ] || continue
+            # Find executable scripts (or files with a shebang) and
+            # lint them. The find here is conservative: only files
+            # Git considers executable AND in a configured path get
+            # checked.
+            while IFS= read -r -d '' f; do
+              found_any=true
+              echo "shellcheck $f"
+              shellcheck "$f"
+            done < <(find "$dir" -maxdepth 3 -type f \( -perm -u+x -o -name '*.sh' -o -name '*.bash' \) -print0)
+          done
+          if [ "$found_any" = false ]; then
+            echo "(no shell scripts under: ${{ inputs.shellcheck-paths }})"
+          fi
+
+      - name: Pre-check hook
+        if: inputs.pre-check != ''
+        shell: bash
+        run: bash "${{ inputs.pre-check }}"
+
+      - name: Run umbrella check
+        if: inputs.check-command != ''
+        shell: bash
+        run: ${{ inputs.check-command }}

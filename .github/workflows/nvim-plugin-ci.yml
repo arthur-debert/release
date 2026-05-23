@@ -1,0 +1,102 @@
+name: Neovim Plugin CI
+
+# Reusable PR-time check workflow for nvim-plugin consumers.
+#
+# Closes part of #107. Where `nvim-plugin.yml` covers the release path
+# (tag + GH release), this workflow covers every push / pull_request:
+# install Neovim, optionally install bats / luacheck / stylua, run the
+# canonical `bin/check` umbrella (or the consumer's existing
+# scripts/test-all).
+#
+# What's distinct
+# ---------------
+# - Neovim version pinned via `neovim-version` input (default `stable`).
+# - bats install is opt-in via `bats: true` (most nvim plugins use
+#   busted/vusted instead).
+# - Consumer-specific deps (downloading lexd-lsp / tree-sitter grammar
+#   tarballs in lex-fmt/nvim's case) stay in the consumer's pre-check
+#   hook — not in the canonical.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/nvim-plugin-ci.yml@v1
+#       with:
+#         bats: true                       # optional
+#         pre-check: scripts/install-deps  # optional
+
+on:
+  workflow_call:
+    inputs:
+      neovim-version:
+        description: 'Neovim version to install (passed to rhysd/action-setup-vim).'
+        type: string
+        required: false
+        default: 'stable'
+      bats:
+        description: 'Install bats-core before running checks.'
+        type: boolean
+        required: false
+        default: false
+      pre-check:
+        description: |
+          Optional path to a script the consumer runs before
+          `bin/check` (e.g. downloading a pinned LSP binary). Empty
+          (default) skips.
+        type: string
+        required: false
+        default: ''
+      check-command:
+        description: |
+          The canonical umbrella check entry point. Defaults to
+          `bin/check`; override for consumers still mid-take-iii
+          (e.g. `scripts/test-all`).
+        type: string
+        required: false
+        default: 'bin/check'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - name: Install Neovim
+        uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ inputs.neovim-version }}
+
+      - name: Install bats
+        if: inputs.bats
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Pre-check hook
+        if: inputs.pre-check != ''
+        shell: bash
+        run: bash "${{ inputs.pre-check }}"
+
+      - name: Run umbrella check
+        shell: bash
+        run: ${{ inputs.check-command }}

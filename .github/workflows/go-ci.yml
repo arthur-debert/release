@@ -1,0 +1,104 @@
+name: Go CI
+
+# Reusable PR-time check workflow for go-cli consumers.
+#
+# Closes part of #107 (CI workflow reusability gap). Where
+# `go-cli.yml` covers the release path, this workflow covers every
+# push / pull_request: install Go, optionally install golangci-lint,
+# run the canonical `bin/check` umbrella.
+#
+# What's distinct
+# ---------------
+# - go.mod is the source of truth for Go version (the `setup-go`
+#   composite reads it).
+# - golangci-lint is opt-in via the `golangci-lint-version` input
+#   (defaults to disabled — consumers without a .golangci.yml don't
+#   need it). When set, installs at the pinned version.
+#
+# Caller shape (paste-ready):
+#
+#   name: CI
+#   on:
+#     push:
+#       branches: ['**']
+#     pull_request:
+#   permissions:
+#     contents: read
+#   jobs:
+#     ci:
+#       uses: arthur-debert/release/.github/workflows/go-ci.yml@v1
+#       with:
+#         golangci-lint-version: v2.5.0   # optional
+
+on:
+  workflow_call:
+    inputs:
+      golangci-lint-version:
+        description: |
+          Pinned golangci-lint version to install (e.g. `v2.5.0`).
+          Empty (default) skips installing it — for consumers without
+          a `.golangci.yml` or whose `bin/check` doesn't invoke it.
+        type: string
+        required: false
+        default: ''
+      go-version:
+        description: |
+          Override the Go version. Empty (default) reads from go.mod
+          via the setup-go composite.
+        type: string
+        required: false
+        default: ''
+      pre-check:
+        description: |
+          Optional path to a script the consumer runs before
+          `bin/check` (e.g. `scripts/gen-fixtures`). Empty (default)
+          skips.
+        type: string
+        required: false
+        default: ''
+      check-command:
+        description: |
+          The canonical umbrella check entry point. Defaults to
+          `bin/check`; override for consumers still mid-take-iii
+          migration (e.g. `scripts/test-all`).
+        type: string
+        required: false
+        default: 'bin/check'
+      submodules:
+        description: 'Pass `submodules: recursive` on checkout.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: arthur-debert/release/.github/actions/setup-go@v1
+        with:
+          go-version: ${{ inputs.go-version }}
+
+      - name: Install golangci-lint
+        if: inputs.golangci-lint-version != ''
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: ${{ inputs.golangci-lint-version }}
+          install-mode: binary
+
+      - name: Pre-check hook
+        if: inputs.pre-check != ''
+        shell: bash
+        run: bash "${{ inputs.pre-check }}"
+
+      - name: Run umbrella check
+        shell: bash
+        run: ${{ inputs.check-command }}
