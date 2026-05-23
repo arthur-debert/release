@@ -134,6 +134,17 @@ jobs:
           echo "extension.toml after bump:"
           grep -E '^(id|name|version) =' extension.toml
 
+          # Pre-stage extension.toml so the bump survives prepare-release's
+          # commit step. prepare-release/action.yml only stages Cargo.{toml,lock}
+          # and the changelog (line 152-156); it does NOT know about
+          # extension.toml. Without this pre-stage, the bumped extension.toml
+          # only lands in the tag commit if a lefthook pre-commit gate happens
+          # to sweep it up via `git add -u`. Pre-staging here makes the
+          # behavior robust regardless of consumer hook framework.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add extension.toml
+
       - uses: arthur-debert/release/.github/actions/prepare-release@v1
         id: prep
         with:
