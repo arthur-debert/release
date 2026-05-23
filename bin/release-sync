@@ -326,6 +326,7 @@ lefthook_out="$lefthook_tmp/lefthook.yml"
   # Deep-merge all fragments, then strip the head/line/foot comments
   # that each fragment carries (otherwise the merged file inherits a
   # mess of "this is the X fragment" docstrings).
+  # shellcheck disable=SC2016  # $i here is yq's variable, not bash's
   yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""' "${frags[@]}"
 } > "$lefthook_out"
 
