@@ -104,6 +104,17 @@ Pre-installed by the env setup script — don't reinstall:
 - **Tauri (GTK system libs):** `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`,
   `libsoup-3.0-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
   `libjavascriptcoregtk-4.1-dev`
+- **Playwright Chromium deps:** `libnspr4`, `libgbm1`, `libxkbcommon0`,
+  `libxcomposite1`, `libxdamage1`, `libxrandr2`, `libasound2t64` —
+  plus the rest pulled in transitively by the Tauri/GTK libs above.
+  **Do NOT run `npx playwright install --with-deps`** in cloud
+  sessions — the system deps are already installed and `--with-deps`
+  invokes `apt update` internally, which 403s on the
+  deadsnakes/ondrej PPAs in the sandbox and fails. Just run
+  `npx playwright install` (browser download only; HTTPS to
+  playwright.azureedge.net is in the default allowlist). Most
+  consumers' `npm install` runs Playwright's postinstall
+  automatically — explicit `playwright install` is rarely needed.
 - **Misc:** `uuidgen` (via uuid-runtime)
 - **Cross-repo artifact fetcher:** `fetch-artifact` (installed at
   `/usr/local/bin/fetch-artifact`). Reads `./artifacts.json` (canonical

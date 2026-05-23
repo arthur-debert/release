@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-20-supage-firestore-emulator
+# version: 2026-05-23-playwright-system-deps
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -209,6 +209,30 @@ TAURI_PKGS="libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev \
 # shellcheck disable=SC2086  # intentional word-splitting of TAURI_PKGS
 apt install -y ${TAURI_PKGS} \
   || echo "warning: Tauri/GTK system libs install failed" >&2
+
+# Playwright Chromium system deps — what `npx playwright install
+# --with-deps` would install on a fresh Ubuntu, minus the packages
+# already provided transitively by libgtk-3-dev / libwebkit2gtk-4.1-dev
+# / libnss3-tools (installed above). Pre-installing them here is the
+# fix for arami-app's cloud-session e2e flow: `playwright install
+# --with-deps` invokes `apt update` internally, which 403s on the
+# deadsnakes/ondrej PPAs in the sandbox and fails the whole step —
+# even though every required package is already on disk.
+#
+# After this section the sandbox is ready for Playwright tests:
+#   * Browsers download per-project via `npm install` (Playwright's
+#     postinstall) and live in node_modules/.local-chromium/ — that
+#     flow uses HTTPS to playwright.azureedge.net + cdn.playwright.dev,
+#     both in the default Trusted allowlist; no apt involvement.
+#   * `--with-deps` becomes unnecessary; consumers / agents should
+#     invoke `npx playwright install` (no --with-deps) for browser
+#     provisioning OR rely on npm's automatic install. The cloud
+#     CLAUDE.md notes this so future sessions skip `--with-deps`.
+PLAYWRIGHT_PKGS="libnspr4 libgbm1 libxkbcommon0 libxcomposite1 \
+  libxdamage1 libxrandr2 libasound2t64"
+# shellcheck disable=SC2086  # intentional word-splitting
+apt install -y ${PLAYWRIGHT_PKGS} \
+  || echo "warning: Playwright system libs install failed" >&2
 
 # vsce + ovsx — VS Code extension packaging/publishing CLIs via npm
 if ! command -v vsce >/dev/null 2>&1; then
