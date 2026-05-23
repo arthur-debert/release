@@ -207,13 +207,13 @@ how complete the local files look.
 
 | Stack         | Repos (state) |
 |---------------|---|
-| rust-cli      | **pilot-running** for all confirmed-on-canonical consumers: `lex-fmt/lex` v0.14.1, `arthur-debert/rustloc` v0.16.0, `arthur-debert/simple-gal` v0.20.4, `arthur-debert/padz` v1.8.2, `arthur-debert/burgertocow` v0.4.0, `arthur-debert/arami-core` v0.4.1 (multi-wasm, 2026-05-23). `arthur-debert/dodot` v5.0.0 shipped via `docs-check.yml` (not `release.yml`) — likely a Mode-B cascade pattern; recheck. **6/7 = 86% → fleet-adopted** if dodot confirms or is excluded |
+| rust-cli      | **fleet-adopted (7/7)**: `arthur-debert/padz` v1.8.2, `arthur-debert/dodot` v5.0.0 (2026-05-15), `lex-fmt/lex` v0.14.1, `arthur-debert/rustloc` v0.16.0, `arthur-debert/simple-gal` v0.20.4, `arthur-debert/burgertocow` v0.4.0, `arthur-debert/arami-core` v0.4.1 (multi-wasm, 2026-05-23) — all shipped via `rust-cli.yml@v1` |
 | rust-lib      | **fleet-adopted (2/2)**: `arthur-debert/clapfig` v0.21.4 + `arthur-debert/standout` v7.6.3 (first canonical release, 8 workspace crates, 2026-05-23) |
 | electron-app  | **fleet-adopted (2/2)**: `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both via `electron-app.yml@v1` + both gating on canonical `e2e: true` in `electron-ci.yml@v1` |
 | tauri-app     | **fleet-adopted (1/1)**: `arami-app` v0.1.7 (2026-05-19) + v0.1.8 + v0.1.9 (2026-05-23) via `tauri-app.yml@v1`, gating on canonical `e2e: true` + per-platform `scripts/smoke.sh` |
-| vscode-ext    | **pilot-running** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX half: blocked on downstream `OVSX_PAT` regen — see ᵇ |
-| nvim-plugin   | **pilot-running**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107)) |
-| tree-sitter   | **pilot-running**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
+| vscode-ext    | **fleet-adopted (1/1)** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX is downstream config — see ᵇ and [#189](https://github.com/arthur-debert/release/issues/189) |
+| nvim-plugin   | **fleet-adopted (1/1)**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107)) |
+| tree-sitter   | **fleet-adopted (1/1)**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
 | zed-extension | `lex-fmt/zed-lex` v0.1.0 — **implemented** (template landed; no canonical CI/release workflow yet — see [#172](https://github.com/arthur-debert/release/issues/172)) |
 | go-cli        | **fleet-adopted (1/1)**: `arthur-debert/supage` `0.0.1` + `0.0.2` via `go-cli.yml@v1` incl. brew-private-repo |
 | gh-action     | `release` (dogfooded), `simple-gal-action` — **planned** (no canonical workflow yet — see [#174](https://github.com/arthur-debert/release/issues/174)) |
