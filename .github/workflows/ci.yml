@@ -1,0 +1,20 @@
+name: CI
+
+# Self-host of gh-action-ci.yml@v1. This repo IS the canonical
+# arthur-debert/release, so calling its own CI canonical from itself
+# is the dogfood loop: a regression in gh-action-ci.yml's actionlint
+# step fails its own PR.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: arthur-debert/release/.github/workflows/gh-action-ci.yml@v1
+    # No bin/check on release/ itself (it's a meta-repo of reusable
+    # workflows + composite actions; no umbrella verb). actionlint +
+    # shellcheck — the canonical's default surface — is what we want.
