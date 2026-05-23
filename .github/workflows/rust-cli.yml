@@ -666,9 +666,17 @@ jobs:
           # lines; emit JSON array. When unset, fall back to the
           # single `wasm-package` value (also single-element array).
           if [ -n "${PACKAGES}" ]; then
+            # Trim trailing whitespace per line, drop blank + comment
+            # lines, emit JSON array. `grep -v` returns exit 1 when
+            # it filters EVERY line (e.g. a wasm-packages value that
+            # is whitespace-only) — `|| true` keeps pipefail from
+            # aborting; the `length == 0` check below catches that
+            # case with a clearer error than grep's exit code.
+            # POSIX `[[:space:]]` for the comment/blank match —
+            # GNU grep's BRE/ERE doesn't recognize `\s`.
             json=$(printf '%s\n' "${PACKAGES}" \
               | sed 's/[[:space:]]*$//' \
-              | grep -vE '^\s*(#|$)' \
+              | { grep -vE '^[[:space:]]*(#|$)' || true; } \
               | jq -R . | jq -s -c .)
           else
             json=$(jq -c -n --arg p "${PACKAGE}" '[$p]')
