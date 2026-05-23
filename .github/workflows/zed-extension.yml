@@ -151,6 +151,29 @@ jobs:
           version: ${{ inputs.version }}
           changelog-path: ${{ inputs.changelog-path }}
 
+      # Resume-case guard: if prepare-release resumed from a pre-existing
+      # tag (didn't make a new commit), the extension.toml at that tag's
+      # SHA may have been written by an older canonical without the
+      # staging fix above and could be stale. Validate the tag's
+      # extension.toml carries the requested version; fail fast otherwise
+      # — a silent shipped-with-wrong-version is worse than a re-dispatch
+      # failure.
+      - name: Validate extension.toml at release-sha matches input version
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ steps.prep.outputs.release-sha }}
+          NEW_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          tag_ext_version="$(git show "${RELEASE_SHA}:extension.toml" \
+            | grep -E '^version = "' | head -1 \
+            | sed -E 's/^version = "([^"]*)".*/\1/')"
+          if [ "${tag_ext_version}" != "${NEW_VERSION}" ]; then
+            echo "::error::extension.toml at release-sha ${RELEASE_SHA} has version='${tag_ext_version}' but workflow was dispatched with version='${NEW_VERSION}'. This usually means a prior release attempt tagged the version but failed to bump extension.toml (the staging fix at the top of this job didn't exist yet). Re-tag manually with the correct extension.toml committed, or delete the tag and re-dispatch."
+            exit 1
+          fi
+          echo "extension.toml at ${RELEASE_SHA}: version=${tag_ext_version} ✓ matches input"
+
       - name: Resolve extension metadata
         id: meta
         shell: bash
