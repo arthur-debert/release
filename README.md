@@ -201,7 +201,7 @@ how complete the local files look.
 |---------------|---|
 | rust-cli      | `padz` — **pilot-running** (canonical release shipped); `dodot`, `lex-fmt/lex`, `rustloc`, `burgertocow`, `simple-gal` — **implemented**ᵃ |
 | rust-lib      | `clapfig` — **pilot-running**; `standout` — **implemented**ᵃ |
-| electron-app  | `lex-fmt/lexed` v0.10.6 + `arthur-debert/simple-gal-ui` v0.1.3 both shipped 2026-05-22/23 via `electron-app.yml@v1` — **fleet-adopted** (2/2) |
+| electron-app  | `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both shipped via `electron-app.yml@v1` — **fleet-adopted** (2/2) |
 | tauri-app     | `arami-app` v0.1.8 shipped 2026-05-23 via `tauri-app.yml@v1` (2nd canonical release, post-fixes #180/#182) — **fleet-adopted** (1/1) |
 | vscode-ext    | `lex-fmt/vscode` — **pilot-running**ᵇ |
 | nvim-plugin   | `lex-fmt/nvim` — **implemented**ᵃ |
