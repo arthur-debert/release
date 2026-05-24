@@ -301,7 +301,6 @@ check_workflows_canonical() {
   if [ -z "$bespoke_list" ]; then
     record PASS workflows_canonical "all $total workflows are thin callers of release/"
   else
-    local bespoke_count=$((total - canonical))
     record WARN workflows_canonical "$canonical/$total canonical; bespoke: ${bespoke_list}"
   fi
 }
