@@ -13,6 +13,13 @@ if [[ -z "$version" ]]; then
   exit 2
 fi
 
+# Strict semver — same shape changelog-render requires. Catches both
+# typos and any path-traversal attempt before it lands in a filename.
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+  echo "error: version must be semver X.Y.Z(-pre)? (got: $version)" >&2
+  exit 2
+fi
+
 if [[ ! -d CHANGELOG ]]; then
   echo "error: CHANGELOG/ directory not found" >&2
   exit 1

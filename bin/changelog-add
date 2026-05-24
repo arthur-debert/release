@@ -25,6 +25,12 @@ if [[ "$slug" =~ ^[0-9]+$ ]]; then
   slug="pr-$slug"
 fi
 
+# Reject slugs that would escape CHANGELOG/ or break the filename pattern.
+if [[ ! "$slug" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "error: slug must match [A-Za-z0-9][A-Za-z0-9._-]* (got: $slug)" >&2
+  exit 2
+fi
+
 mkdir -p CHANGELOG
 target="CHANGELOG/unreleased-${slug}.md"
 
@@ -33,11 +39,11 @@ if [[ -e "$target" && "$force" -eq 0 ]]; then
   exit 1
 fi
 
+# Direct redirection preserves stdin bytes exactly (no trailing-newline
+# stripping that $(cat) would cause).
 if [[ $# -gt 0 ]]; then
-  body="$*"
+  printf '%s\n' "$*" > "$target"
 else
-  body="$(cat)"
+  cat > "$target"
 fi
-
-printf '%s\n' "$body" > "$target"
 echo "wrote $target"

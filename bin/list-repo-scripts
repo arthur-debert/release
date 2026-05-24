@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# list-repo-scripts — for each managed repo, list the contents of its
+# scripts/ directory.
+#
+# The repo list is the canonical "managed by arthur-debert/release" set
+# (NOT auto-discovered from the main-branch-protection ruleset — that
+# signal includes unrelated repos). Update REPOS below when the
+# managed set changes.
+#
+# Usage:
+#   list-repo-scripts                 # all managed repos
+#   list-repo-scripts --only-present  # skip repos missing locally or without scripts/
+#   list-repo-scripts --owner lex-fmt # filter by owner prefix
+
+set -uo pipefail
+
+only_present=0
+owner_filter=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --only-present) only_present=1; shift ;;
+    --owner)        owner_filter=$2; shift 2 ;;
+    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+# repo<TAB>local-path. Keep aligned with
+# ~/.claude/projects/-Users-adebert-h-release/memory/project_managed_repos.md
+REPOS=(
+  "arthur-debert/release|$HOME/h/release"
+  "arthur-debert/arami-app|$HOME/h/arami/arami-app"
+  "arthur-debert/arami-core|$HOME/h/arami/arami-core"
+  "arthur-debert/burgertocow|$HOME/h/burgertocow"
+  "arthur-debert/clapfig|$HOME/h/clapfig"
+  "arthur-debert/dodot|$HOME/h/dodot"
+  "arthur-debert/homebrew-tools|$HOME/h/homebrew-tools"
+  "arthur-debert/padz|$HOME/h/padz"
+  "arthur-debert/rustloc|$HOME/h/rustloc"
+  "arthur-debert/simple-gal|$HOME/h/simple-gal/simple-gal"
+  "arthur-debert/simple-gal-action|$HOME/h/simple-gal/simple-gal-action"
+  "arthur-debert/simple-gal-ui|$HOME/h/simple-gal/simple-gal-ui"
+  "arthur-debert/standout|$HOME/h/standout"
+  "lex-fmt/comms|$HOME/h/lex-fmt/comms"
+  "lex-fmt/lex|$HOME/h/lex-fmt/lex"
+  "lex-fmt/lexed|$HOME/h/lex-fmt/lexed"
+  "lex-fmt/nvim|$HOME/h/lex-fmt/nvim"
+  "lex-fmt/tree-sitter-lex|$HOME/h/lex-fmt/tree-sitter-lex"
+  "lex-fmt/vscode|$HOME/h/lex-fmt/vscode"
+  "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
+)
+
+first=1
+for entry in "${REPOS[@]}"; do
+  repo=${entry%%|*}
+  path=${entry##*|}
+
+  if [ -n "$owner_filter" ] && [ "${repo%%/*}" != "$owner_filter" ]; then
+    continue
+  fi
+
+  scripts_dir="$path/scripts"
+
+  if [ ! -d "$path" ]; then
+    [ "$only_present" = "1" ] && continue
+    [ "$first" = "1" ] || echo
+    first=0
+    echo "=== $repo ($path) ==="
+    echo "(repo not cloned locally)"
+    continue
+  fi
+
+  if [ ! -d "$scripts_dir" ]; then
+    [ "$only_present" = "1" ] && continue
+    [ "$first" = "1" ] || echo
+    first=0
+    echo "=== $repo ($path) ==="
+    echo "(no scripts/ dir)"
+    continue
+  fi
+
+  [ "$first" = "1" ] || echo
+  first=0
+  echo "=== $repo ($path) ==="
+  # ls -1 with no args returns 0 even on empty dirs; handle that case.
+  contents=$(ls -1 "$scripts_dir")
+  if [ -z "$contents" ]; then
+    echo "(scripts/ is empty)"
+  else
+    printf '%s\n' "$contents"
+  fi
+done

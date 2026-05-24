@@ -90,7 +90,7 @@ shopt -s nullglob
 unreleased=(CHANGELOG/unreleased-*.md)
 
 target=CHANGELOG.md
-tmp="${target}.tmp.$$"
+tmp=$(mktemp "${target}.tmp.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
 {
