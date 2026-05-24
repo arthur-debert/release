@@ -17,6 +17,14 @@ export LC_ALL=C
 self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEMVER="$self_dir/../vendor/semver-tool/semver"
 
+# All changelog tooling operates on the repo-root CHANGELOG/ directory,
+# regardless of which subdir the caller invoked us from. Fixes #219.
+if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  echo "error: bin/changelog must be invoked inside a git repository" >&2
+  exit 1
+fi
+cd "$repo_root"
+
 if [[ ! -d CHANGELOG ]]; then
   echo "error: CHANGELOG/ directory not found" >&2
   exit 1
@@ -30,6 +38,8 @@ if ! sort -V </dev/null >/dev/null 2>&1; then
 fi
 
 # Validate every version filename via semver-tool, surface bad ones.
+# Also reject the v-prefix even though semver-tool accepts it (#220):
+# the rendered file convention is bare semver per the README contract.
 shopt -s nullglob
 bad=()
 versions=()
@@ -38,6 +48,10 @@ for f in CHANGELOG/*.md; do
   stem="${name%.md}"
   [[ "$stem" == "README" || "$stem" == "legacy" ]] && continue
   [[ "$stem" == unreleased-* ]] && continue
+  if [[ "$stem" =~ ^[vV] ]]; then
+    bad+=("$name")
+    continue
+  fi
   # semver-tool's validate always exits 0; check the stdout token.
   if [[ "$("$SEMVER" validate "$stem" 2>/dev/null)" == "valid" ]]; then
     versions+=("$stem")

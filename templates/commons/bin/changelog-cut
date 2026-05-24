@@ -16,6 +16,13 @@ if [[ -z "$version" ]]; then
   exit 2
 fi
 
+# Reject 'v' prefix per the documented contract (#220). semver-tool
+# accepts vX.Y.Z but the rendered file convention is bare semver.
+if [[ "$version" =~ ^[vV] ]]; then
+  echo "error: version must be bare semver without 'v' prefix (got: $version)" >&2
+  exit 2
+fi
+
 # Validate via vendored semver-tool (handles full semver §2/§9/§11
 # correctness — pre-release tags, build metadata, the lot). The tool
 # always exits 0 and emits "valid"/"invalid" on stdout — check that.
@@ -23,6 +30,14 @@ if [[ "$("$SEMVER" validate "$version" 2>/dev/null)" != "valid" ]]; then
   echo "error: version must be valid semver (got: $version)" >&2
   exit 2
 fi
+
+# All changelog tooling operates on the repo-root CHANGELOG/ directory,
+# regardless of which subdir the caller invoked us from. Fixes #219.
+if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  echo "error: bin/changelog must be invoked inside a git repository" >&2
+  exit 1
+fi
+cd "$repo_root"
 
 if [[ ! -d CHANGELOG ]]; then
   echo "error: CHANGELOG/ directory not found" >&2

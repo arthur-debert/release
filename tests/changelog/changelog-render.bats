@@ -134,3 +134,24 @@ load helper
   run grep -c '^## Unreleased$' CHANGELOG.md
   [ "$output" = "1" ]
 }
+
+@test "rejects v-prefixed version files (#220)" {
+  mkdir CHANGELOG
+  printf '## 1.0.0\n\n- v100\n' > CHANGELOG/1.0.0.md
+  printf '## v0.9.0\n\n- orphan\n' > CHANGELOG/v0.9.0.md
+  run "$BIN/changelog-render"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unparseable version filename"* ]]
+  [[ "$output" == *"v0.9.0.md"* ]]
+}
+
+@test "cwd-agnostic: works from a subdir (#219)" {
+  mkdir -p CHANGELOG crates/foo
+  printf '## 1.0.0\n\n- v100\n' > CHANGELOG/1.0.0.md
+  cd crates/foo
+  run "$BIN/changelog-render"
+  [ "$status" -eq 0 ]
+  # CHANGELOG.md written at REPO ROOT, not the subdir.
+  [ -f "$TMPDIR_TEST/CHANGELOG.md" ]
+  [ ! -f "$TMPDIR_TEST/crates/foo/CHANGELOG.md" ]
+}

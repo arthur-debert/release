@@ -7,6 +7,14 @@
 # overwrites.
 set -euo pipefail
 
+# All changelog tooling operates on the repo-root CHANGELOG/ directory,
+# regardless of which subdir the caller invoked us from. Fixes #219.
+if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+  echo "error: bin/changelog must be invoked inside a git repository" >&2
+  exit 1
+fi
+cd "$repo_root"
+
 force=0
 if [[ "${1:-}" == "--force" ]]; then
   force=1

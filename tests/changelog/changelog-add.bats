@@ -78,3 +78,20 @@ load helper
   "$BIN/changelog-add" first "- bullet"
   [ -d CHANGELOG ]
 }
+
+@test "cwd-agnostic: works from a subdir (#219)" {
+  mkdir -p crates/foo
+  cd crates/foo
+  "$BIN/changelog-add" 142 "- bullet from subdir"
+  # The fragment lands in the REPO-ROOT CHANGELOG/, not the subdir.
+  [ -f "$TMPDIR_TEST/CHANGELOG/unreleased-pr-142.md" ]
+  [ ! -d "$TMPDIR_TEST/crates/foo/CHANGELOG" ]
+}
+
+@test "errors when invoked outside a git repo (#219)" {
+  # Replace the git-initialized tmpdir with a non-git one for this test.
+  rm -rf .git
+  run "$BIN/changelog-add" 142 "- bullet"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"must be invoked inside a git repository"* ]]
+}
