@@ -102,12 +102,18 @@ jobs:
     env:
       VSCE_PAT_PRESENT: ${{ secrets.VSCE_PAT != '' && 'yes' || 'no' }}
       OVSX_PAT_PRESENT: ${{ secrets.OVSX_PAT != '' && 'yes' || 'no' }}
+      # Mirror the IS_PRERELEASE detection in prepare: a `-` anywhere
+      # in the version is the semver prerelease marker.
+      IS_PRERELEASE: ${{ contains(inputs.version, '-') && 'true' || 'false' }}
     steps:
       - name: Validate publish secrets
         run: |
           set -euo pipefail
           fail=0
-          if [ "${{ inputs.publish-marketplace }}" = "true" ] && [ "${VSCE_PAT_PRESENT}" = "no" ]; then
+          # Skip VSCE_PAT validation for prereleases — publish-marketplace
+          # is gated to non-prereleases (VS Marketplace rejects semver
+          # `-rc.N`), so the secret isn't needed for RC dispatches.
+          if [ "${{ inputs.publish-marketplace }}" = "true" ] && [ "${IS_PRERELEASE}" = "false" ] && [ "${VSCE_PAT_PRESENT}" = "no" ]; then
             echo "::error::publish-marketplace=true but VSCE_PAT secret is missing"
             fail=1
           fi

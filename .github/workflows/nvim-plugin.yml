@@ -151,17 +151,27 @@ jobs:
             TAG_SHA=$(git rev-list -n 1 "${TAG}")
             echo "tag ${TAG} already exists at ${TAG_SHA} — resuming"
 
-            # Reconstruct release notes from the existing CHANGELOG
-            # entry so the release job has something to upload.
-            # Fragment-dir resume case: the cut already happened on
-            # the tagged commit, so CHANGELOG/<version>.md exists.
+            # Reconstruct release notes for the resume case. Branches:
+            #  - fragment-dir + final release: CHANGELOG/<v>.md exists
+            #    (cut happened on the tagged commit) → read it.
+            #  - fragment-dir + prerelease: cut did NOT happen
+            #    (prereleases concat live fragments) → re-concat now.
+            #  - legacy single-file: extract from the file as before.
             if [ -z "${CHANGELOG:-}" ]; then
               echo "Release ${TAG}" > release-notes.md
             else
               CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
-              if [ -d "${CHANGELOG_DIR}" ] && [ -f "${CHANGELOG_DIR}/${NEW_VERSION}.md" ]; then
-                awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
-                  "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
+              if [ -d "${CHANGELOG_DIR}" ]; then
+                if [ -f "${CHANGELOG_DIR}/${NEW_VERSION}.md" ]; then
+                  awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
+                    "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
+                else
+                  # Prerelease resume: fragments still live at unreleased-*.md.
+                  mapfile -t fragments < <(LC_ALL=C ls "${CHANGELOG_DIR}"/unreleased-*.md 2>/dev/null || true)
+                  if [ "${#fragments[@]}" -gt 0 ]; then
+                    cat "${fragments[@]}" > release-notes.md
+                  fi
+                fi
               elif [ -f "${CHANGELOG}" ]; then
                 if [ "${IS_PRERELEASE}" = "true" ]; then
                   awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
@@ -259,7 +269,15 @@ jobs:
                   exit 1
                 fi
                 if [ "${IS_PRERELEASE}" != "true" ]; then
-                  bin/changelog new-version "${NEW_VERSION}"
+                  # bin/changelog walks up cwd for CHANGELOG/, so cd
+                  # next to the changelog file first — otherwise on
+                  # monorepos with multiple changelogs (root +
+                  # per-package) the wrong CHANGELOG/ gets cut. Same
+                  # pattern as scripts/roll-changelog.sh.
+                  (
+                    cd "$(dirname "${CHANGELOG}")"
+                    bin/changelog new-version "${NEW_VERSION}"
+                  )
                   awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
                     "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
                   git add "${CHANGELOG}" "${CHANGELOG_DIR}/"
