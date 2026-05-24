@@ -6,87 +6,88 @@
 #   1. prelude ("<!-- generated ... -->" + "# Changelog")
 #   2. "## Unreleased" + concatenated unreleased fragments (byte-sorted)
 #   3. one section per CHANGELOG/<version>.md, descending semver order
+#      with bare-release ABOVE its pre-releases (semver §11 in
+#      newest-first form)
 #   4. optional CHANGELOG/legacy.md appended verbatim
 #
 # Fails loud on unparseable CHANGELOG/<name>.md filenames.
 set -euo pipefail
 export LC_ALL=C
 
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SEMVER="$self_dir/../vendor/semver-tool/semver"
+
 if [[ ! -d CHANGELOG ]]; then
   echo "error: CHANGELOG/ directory not found" >&2
   exit 1
 fi
 
-# Use python3 for semver-correct sorting (handles pre-release per
-# semver §11). macOS ships python3; CI runners have it too.
-if ! command -v python3 >/dev/null 2>&1; then
-  echo "error: python3 required for semver-correct version sort" >&2
+# Precondition: sort with -V (version-aware). Available on modern BSD
+# sort (recent macOS) and GNU coreutils. Fail loud with guidance.
+if ! sort -V </dev/null >/dev/null 2>&1; then
+  echo "error: 'sort -V' not available — install GNU coreutils (brew install coreutils) or upgrade BSD sort" >&2
   exit 1
 fi
 
-sorted_versions() {
-  python3 - <<'PY'
-import os, re, sys
+# Validate every version filename via semver-tool, surface bad ones.
+shopt -s nullglob
+bad=()
+versions=()
+for f in CHANGELOG/*.md; do
+  name="${f##*/}"
+  stem="${name%.md}"
+  [[ "$stem" == "README" || "$stem" == "legacy" ]] && continue
+  [[ "$stem" == unreleased-* ]] && continue
+  # semver-tool's validate always exits 0; check the stdout token.
+  if [[ "$("$SEMVER" validate "$stem" 2>/dev/null)" == "valid" ]]; then
+    versions+=("$stem")
+  else
+    bad+=("$name")
+  fi
+done
 
-VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
+if [[ ${#bad[@]} -gt 0 ]]; then
+  printf 'error: unparseable version filename(s) in CHANGELOG/: %s\n' "${bad[*]}" >&2
+  exit 1
+fi
 
-versions = []
-errors = []
-for name in sorted(os.listdir("CHANGELOG")):
-    if not name.endswith(".md"):
-        continue
-    stem = name[:-3]
-    if stem in ("README", "legacy") or stem.startswith("unreleased-"):
-        continue
-    m = VERSION_RE.match(stem)
-    if not m:
-        errors.append(name)
-        continue
-    versions.append((stem, m))
-
-if errors:
-    sys.stderr.write(
-        "error: unparseable version filename(s) in CHANGELOG/: "
-        + ", ".join(errors) + "\n"
-    )
-    sys.exit(1)
-
-def prerelease_key(pre):
-    # Per semver §11: split on ".", numeric identifiers compare
-    # numerically and sort lower than non-numeric identifiers.
-    parts = pre.split(".")
-    key = []
-    for p in parts:
-        if p.isdigit():
-            key.append((0, int(p)))
-        else:
-            key.append((1, p))
-    return tuple(key)
-
-def sort_key(stem_match):
-    _, m = stem_match
-    rel = tuple(int(x) for x in m.group(1, 2, 3))
-    pre = m.group(4)
-    # No prerelease sorts ABOVE any prerelease at the same release.
-    # Use sentinel: (rel, 1, ()) for release, (rel, 0, prekey) for prerelease.
-    if pre is None:
-        return (rel, 1, ())
-    return (rel, 0, prerelease_key(pre))
-
-versions.sort(key=sort_key, reverse=True)
-for stem, _ in versions:
-    print(stem)
-PY
+# Sort descending. `sort -V -r` orders numeric components correctly
+# (1.2.10 > 1.2.2) and groups pre-releases with their release, but
+# places the BARE release at the BOTTOM of each group (i.e. after
+# its pre-releases in descending output). Per semver §11, the bare
+# release outranks its pre-releases; flip that one swap with awk.
+sort_versions() {
+  printf '%s\n' "${versions[@]}" | sort -V -r | awk '
+    function base(v,    p) { p = index(v, "-"); return (p ? substr(v, 1, p-1) : v) }
+    {
+      b = base($0)
+      if (index($0, "-")) {
+        pre_buf[++pre_n] = $0
+        pre_base = b
+      } else {
+        if (pre_n > 0 && pre_base == b) {
+          print $0
+          for (i = 1; i <= pre_n; i++) print pre_buf[i]
+        } else {
+          for (i = 1; i <= pre_n; i++) print pre_buf[i]
+          print $0
+        }
+        pre_n = 0
+        pre_base = ""
+      }
+    }
+    END {
+      for (i = 1; i <= pre_n; i++) print pre_buf[i]
+    }
+  '
 }
 
-# Compute version order first so any "unparseable filename" error
-# fails the whole render (process substitution would swallow it).
-if ! versions_output="$(sorted_versions)"; then
-  exit 1
+versions_output=""
+if [[ ${#versions[@]} -gt 0 ]]; then
+  versions_output=$(sort_versions)
 fi
 
 # Collect unreleased fragments in stable byte order
-shopt -s nullglob
 unreleased=(CHANGELOG/unreleased-*.md)
 
 target=CHANGELOG.md
