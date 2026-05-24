@@ -1,0 +1,71 @@
+name: changelog tests
+
+# BATS suite for bin/changelog* — runs against this repo's own bin/
+# on every push and PR. The scripts themselves get sweep-synced to
+# consumer repos via release-sync; we want regressions to surface
+# here before they ride out.
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'templates/commons/bin/changelog*'
+      - 'templates/commons/vendor/semver-tool/**'
+      - 'tests/changelog/**'
+      - 'tests/changelog-check-fixtures/**'
+      - '.github/actions/changelog-check/**'
+      - '.github/workflows/changelog-tests.yml'
+  pull_request:
+    paths:
+      - 'templates/commons/bin/changelog*'
+      - 'templates/commons/vendor/semver-tool/**'
+      - 'tests/changelog/**'
+      - 'tests/changelog-check-fixtures/**'
+      - '.github/actions/changelog-check/**'
+      - '.github/workflows/changelog-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/changelog/
+
+  changelog-check-smoke:
+    # Exercise .github/actions/changelog-check end-to-end against three
+    # fixtures: in-sync (pass), drifted (must fail), missing CHANGELOG/
+    # (pass with skip).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: good fixture — should pass
+        uses: ./.github/actions/changelog-check
+        with:
+          working-directory: tests/changelog-check-fixtures/good
+
+      - name: drift fixture — should fail
+        id: drift
+        continue-on-error: true
+        uses: ./.github/actions/changelog-check
+        with:
+          working-directory: tests/changelog-check-fixtures/drift
+
+      - name: assert drift fixture failed
+        run: |
+          if [ "${{ steps.drift.outcome }}" != "failure" ]; then
+            echo "::error::drift fixture should have failed but the action returned ${{ steps.drift.outcome }}"
+            exit 1
+          fi
+          echo "drift fixture correctly failed"
+
+      - name: skip fixture — should pass (no CHANGELOG/ present)
+        uses: ./.github/actions/changelog-check
+        with:
+          working-directory: tests/changelog-check-fixtures/skip
