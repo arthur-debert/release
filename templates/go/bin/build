@@ -27,8 +27,18 @@ if ! command -v go >/dev/null 2>&1; then
     exit 1
 fi
 
-# Default to building every package; consumer-supplied args override.
-if [ "$#" -eq 0 ]; then
-    set -- ./...
+# Default to building every package when no positional arg (package
+# path) is given. Flag-only invocations like `bin/build -v` or
+# `bin/build -tags=integration` should still build everything, not
+# just the current directory.
+has_positional=false
+for arg in "$@"; do
+    case "$arg" in
+        -*) ;;
+        *)  has_positional=true; break ;;
+    esac
+done
+if [ "$has_positional" = false ]; then
+    set -- "$@" ./...
 fi
 exec go build "$@"
