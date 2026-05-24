@@ -164,6 +164,15 @@ runs:
         done
         if [ "$IS_PRERELEASE" != "true" ] && [ -n "$CHANGELOG" ] && [ -f "$CHANGELOG" ]; then
           git add "$CHANGELOG"
+          # Fragment-dir convention (#201): roll-changelog.sh routes
+          # through bin/changelog when CHANGELOG/ exists. That creates
+          # CHANGELOG/<version>.md and deletes the unreleased-*.md
+          # fragments — stage both. Resolve sibling-of-changelog so
+          # this works even when CHANGELOG.md lives in a subdir.
+          CHANGELOG_DIR="$(dirname "$CHANGELOG")/CHANGELOG"
+          if [ -d "$CHANGELOG_DIR" ]; then
+            git add "$CHANGELOG_DIR/"
+          fi
         fi
 
         if git diff --cached --quiet; then
@@ -220,7 +229,15 @@ runs:
         fi
 
         git commit -m "chore: Release $TAG"
-        git tag -a "$TAG" -m "Release $TAG"
+        # Annotate the tag with the rolled release notes when available
+        # (per #201's "tag + GH release notes from the fragment" addendum).
+        # Falls back to a plain "Release vX.Y.Z" message for prereleases
+        # or when release-notes.md is missing/empty.
+        if [ -s release-notes.md ]; then
+          git tag -a "$TAG" -F release-notes.md
+        else
+          git tag -a "$TAG" -m "Release $TAG"
+        fi
         git push origin HEAD
         git push origin "$TAG"
 
