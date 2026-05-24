@@ -384,10 +384,12 @@ check_changelog_handling() {
     has_dir=1
   fi
 
+  # Use raw accept header — sidesteps the 1MB base64 limit on
+  # contents.content and avoids a base64 round-trip.
   local body
-  body=$(gh api "repos/$repo/contents/CHANGELOG.md" --jq .content 2>/dev/null \
-         | base64 -d 2>/dev/null)
-  if [ -n "$body" ] && printf '%s\n' "$body" | grep -qE '^##[[:space:]]+\[?Unreleased\]?'; then
+  body=$(gh api "repos/$repo/contents/CHANGELOG.md" \
+           -H "Accept: application/vnd.github.raw" 2>/dev/null)
+  if [ -n "$body" ] && grep -qE '^##[[:space:]]+\[?Unreleased\]?' <<<"$body"; then
     has_block=1
   fi
 
@@ -409,7 +411,7 @@ check_changelog_handling() {
   elif [ "$has_two_file" = 1 ]; then
     record WARN changelog_handling "two-file (CHANGELOG_UNRELEASED.md) — migrate per #201"
   else
-    record WARN changelog_handling "none — no CHANGELOG.md or CHANGELOG/ found"
+    record WARN changelog_handling "none — no recognized changelog convention detected"
   fi
 }
 

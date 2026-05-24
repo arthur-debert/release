@@ -92,7 +92,9 @@ unreleased=(CHANGELOG/unreleased-*.md)
 
 target=CHANGELOG.md
 tmp=$(mktemp "${target}.tmp.XXXXXX")
-trap 'rm -f "$tmp"' EXIT
+# ${tmp:-} guards against set -u: if mktemp failed and the script
+# exits before $tmp is set, the trap would error on the unbound var.
+trap 'rm -f "${tmp:-}"' EXIT
 
 {
   printf '<!-- generated - do not edit. See CHANGELOG/README.txt -->\n\n'
