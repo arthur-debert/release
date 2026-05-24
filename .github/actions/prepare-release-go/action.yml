@@ -105,6 +105,13 @@ runs:
         # tag-only prereleases (no changelog change) still push a tag.
         if [ "$IS_PRERELEASE" != "true" ] && [ -f "$CHANGELOG" ]; then
           git add "$CHANGELOG"
+          # Fragment-dir convention (#201): roll-changelog.sh routes
+          # through bin/changelog when CHANGELOG/ exists. That creates
+          # CHANGELOG/<version>.md and deletes the unreleased-*.md
+          # fragments — stage both.
+          if [ -d CHANGELOG ]; then
+            git add CHANGELOG/
+          fi
         fi
 
         if ! git diff --cached --quiet; then
@@ -149,7 +156,15 @@ runs:
           echo "No file changes to commit — tagging HEAD directly."
         fi
 
-        git tag -a "$TAG" -m "Release $TAG"
+        # Annotate the tag with the rolled release notes when available
+        # (per #201's "tag + GH release notes from the fragment" addendum).
+        # Falls back to a plain "Release vX.Y.Z" message for prereleases
+        # or when release-notes.md is missing/empty.
+        if [ -s release-notes.md ]; then
+          git tag -a "$TAG" -F release-notes.md
+        else
+          git tag -a "$TAG" -m "Release $TAG"
+        fi
         git push origin HEAD
         git push origin "$TAG"
 

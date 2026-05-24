@@ -159,11 +159,34 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            # Roll changelog + extract notes when CHANGELOG.md is
-            # present. Composite-action callers commonly maintain
-            # Keep-a-Changelog format; inline awk avoids the need
-            # to vendor a roll-changelog script.
-            if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+            # Roll changelog + extract notes. Three branches:
+            #   1. Fragment-dir (per #201): CHANGELOG/ directory exists
+            #      → delegate to bin/changelog (cut + render) and read
+            #      release notes from CHANGELOG/<version>.md.
+            #   2. Single-file Keep-a-Changelog: extract from
+            #      `## [Unreleased]` and roll into a versioned section.
+            #   3. No changelog: write a minimal "Release vX.Y.Z" stub.
+            CHANGELOG_DIR="$(dirname "${CHANGELOG:-CHANGELOG.md}")/CHANGELOG"
+            if [ -d "${CHANGELOG_DIR}" ] && [ -x bin/changelog ]; then
+              # Fragment-dir branch.
+              if [ "${IS_PRERELEASE}" != "true" ]; then
+                bin/changelog new-version "${NEW_VERSION}"
+                awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
+                  "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
+                git add "${CHANGELOG:-CHANGELOG.md}" "${CHANGELOG_DIR}/"
+              else
+                # Prereleases don't cut — just concat existing unreleased
+                # fragments for the release notes.
+                shopt -s nullglob
+                fragments=("${CHANGELOG_DIR}"/unreleased-*.md)
+                if [ "${#fragments[@]}" -gt 0 ]; then
+                  cat "${fragments[@]}" > release-notes.md
+                else
+                  echo "Release ${TAG}" > release-notes.md
+                fi
+              fi
+            elif [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+              # Single-file Keep-a-Changelog branch.
               awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
                 "${CHANGELOG}" > release-notes.md
               if [ "${IS_PRERELEASE}" != "true" ]; then
@@ -238,7 +261,14 @@ jobs:
             if ! git diff --cached --quiet; then
               git commit -m "chore: Release ${TAG}"
             fi
-            git tag -a "${TAG}" -m "Release ${TAG}"
+            # Annotate the tag with the rolled release notes when
+            # available (#201 addendum). Falls back to a plain
+            # "Release vX.Y.Z" if release-notes.md is empty.
+            if [ -s release-notes.md ]; then
+              git tag -a "${TAG}" -F release-notes.md
+            else
+              git tag -a "${TAG}" -m "Release ${TAG}"
+            fi
             git push origin HEAD
             git push origin "${TAG}"
             TAG_SHA=$(git rev-parse HEAD)
