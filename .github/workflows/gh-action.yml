@@ -159,50 +159,61 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            # Roll changelog + extract notes. Three branches:
-            #   1. Fragment-dir (per #201): CHANGELOG/ directory exists
-            #      → delegate to bin/changelog (cut + render) and read
-            #      release notes from CHANGELOG/<version>.md.
-            #   2. Single-file Keep-a-Changelog: extract from
+            # Roll changelog + extract notes. Four branches:
+            #   1. CHANGELOG input empty → user opted out; write stub.
+            #   2. Fragment-dir (per #201): CHANGELOG/ sibling dir exists
+            #      → delegate to bin/changelog (cut + render). Fails
+            #      loud if bin/changelog is missing — repo declared
+            #      fragment-dir intent but didn't release-sync the tools.
+            #   3. Single-file Keep-a-Changelog: extract from
             #      `## [Unreleased]` and roll into a versioned section.
-            #   3. No changelog: write a minimal "Release vX.Y.Z" stub.
-            CHANGELOG_DIR="$(dirname "${CHANGELOG:-CHANGELOG.md}")/CHANGELOG"
-            if [ -d "${CHANGELOG_DIR}" ] && [ -x bin/changelog ]; then
-              # Fragment-dir branch.
-              if [ "${IS_PRERELEASE}" != "true" ]; then
-                bin/changelog new-version "${NEW_VERSION}"
-                awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
-                  "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
-                git add "${CHANGELOG:-CHANGELOG.md}" "${CHANGELOG_DIR}/"
-              else
-                # Prereleases don't cut — just concat existing unreleased
-                # fragments for the release notes.
-                shopt -s nullglob
-                fragments=("${CHANGELOG_DIR}"/unreleased-*.md)
-                if [ "${#fragments[@]}" -gt 0 ]; then
-                  cat "${fragments[@]}" > release-notes.md
-                else
-                  echo "Release ${TAG}" > release-notes.md
-                fi
-              fi
-            elif [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
-              # Single-file Keep-a-Changelog branch.
-              awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
-                "${CHANGELOG}" > release-notes.md
-              if [ "${IS_PRERELEASE}" != "true" ]; then
-                # Bump the [Unreleased] header in-place. printf '\n'
-                # (not sed's \n) keeps the substitution portable
-                # across GNU + BSD sed.
-                today=$(date -u +%F)
-                replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
-                awk -v repl="${replacement}" '
-                  /^## \[Unreleased\]/ { print repl; next } { print }
-                ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
-                mv "${CHANGELOG}.tmp" "${CHANGELOG}"
-                git add "${CHANGELOG}"
-              fi
-            else
+            #   4. CHANGELOG specified but file missing → stub.
+            if [ -z "${CHANGELOG:-}" ]; then
               echo "Release ${TAG}" > release-notes.md
+            else
+              CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
+              if [ -d "${CHANGELOG_DIR}" ]; then
+                # Fragment-dir branch. Fail loud if the tooling isn't here.
+                if [ ! -x bin/changelog ]; then
+                  echo "::error::${CHANGELOG_DIR} exists (fragment-dir mode) but bin/changelog is missing or not executable."
+                  echo "::error::Run 'release-sync' to pull bin/changelog* and vendor/semver-tool/ into this repo."
+                  exit 1
+                fi
+                if [ "${IS_PRERELEASE}" != "true" ]; then
+                  bin/changelog new-version "${NEW_VERSION}"
+                  awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
+                    "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
+                  git add "${CHANGELOG}" "${CHANGELOG_DIR}/"
+                else
+                  # Prereleases don't cut — concat existing fragments.
+                  # LC_ALL=C keeps order deterministic across BSD + GNU.
+                  mapfile -t fragments < <(LC_ALL=C ls "${CHANGELOG_DIR}"/unreleased-*.md 2>/dev/null || true)
+                  if [ "${#fragments[@]}" -gt 0 ]; then
+                    cat "${fragments[@]}" > release-notes.md
+                  else
+                    echo "Release ${TAG}" > release-notes.md
+                  fi
+                fi
+              elif [ -f "${CHANGELOG}" ]; then
+                # Single-file Keep-a-Changelog branch.
+                awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
+                  "${CHANGELOG}" > release-notes.md
+                if [ "${IS_PRERELEASE}" != "true" ]; then
+                  # Bump the [Unreleased] header in-place. printf '\n'
+                  # (not sed's \n) keeps the substitution portable
+                  # across GNU + BSD sed.
+                  today=$(date -u +%F)
+                  replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
+                  awk -v repl="${replacement}" '
+                    /^## \[Unreleased\]/ { print repl; next } { print }
+                  ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
+                  mv "${CHANGELOG}.tmp" "${CHANGELOG}"
+                  git add "${CHANGELOG}"
+                fi
+              else
+                # CHANGELOG specified but neither file nor dir on disk.
+                echo "Release ${TAG}" > release-notes.md
+              fi
             fi
             [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
 

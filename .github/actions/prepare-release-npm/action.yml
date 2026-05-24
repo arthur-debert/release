@@ -167,9 +167,11 @@ runs:
           # Fragment-dir convention (#201): roll-changelog.sh routes
           # through bin/changelog when CHANGELOG/ exists. That creates
           # CHANGELOG/<version>.md and deletes the unreleased-*.md
-          # fragments — stage both.
-          if [ -d CHANGELOG ]; then
-            git add CHANGELOG/
+          # fragments — stage both. Resolve sibling-of-changelog so
+          # this works even when CHANGELOG.md lives in a subdir.
+          CHANGELOG_DIR="$(dirname "$CHANGELOG")/CHANGELOG"
+          if [ -d "$CHANGELOG_DIR" ]; then
+            git add "$CHANGELOG_DIR/"
           fi
         fi
 

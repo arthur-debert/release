@@ -32,6 +32,10 @@
 #       write the notes for that version to <out-notes>.
 
 set -euo pipefail
+# LC_ALL=C ensures the fragment glob below expands in stable byte
+# order on both BSD (macOS) and GNU (Linux) regardless of the caller's
+# locale — matches the convention in bin/changelog-render.
+export LC_ALL=C
 
 mode="${1:?mode required: extract|roll}"
 
@@ -41,7 +45,8 @@ mode="${1:?mode required: extract|roll}"
 detect_dir() {
   local file=$1
   local parent
-  parent=$(dirname -- "$file")
+  # dirname without `--` is POSIX-portable; the `--` form is GNU-only.
+  parent=$(dirname "$file")
   echo "$parent/CHANGELOG"
 }
 
@@ -83,7 +88,7 @@ extract_unreleased() {
     in_unreleased { print }
   ' "$file" | sed -E '/^[[:space:]]*$/{ N; /^\n[[:space:]]*$/D; }' > "$out"
 
-  if ! grep -qE '\S' "$out"; then
+  if ! grep -q '[^[:space:]]' "$out"; then
     echo "::error::CHANGELOG section [Unreleased] is missing or empty in $file" >&2
     echo "::error::Add a brief entry under ## [Unreleased] describing this release before re-running." >&2
     exit 1
@@ -113,7 +118,7 @@ case "$mode" in
         fi
         cat "${fragments[@]}" > "$out"
       fi
-      if ! grep -qE '\S' "$out"; then
+      if ! grep -q '[^[:space:]]' "$out"; then
         echo "::error::Extracted changelog body is empty (source: $dir)" >&2
         exit 1
       fi
