@@ -39,9 +39,10 @@ run_bats_dir() {
 
 if find test -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
     run_bats_dir test "$@"
+    echo "Tests OK"
 elif find tests -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
     run_bats_dir tests "$@"
+    echo "Tests OK"
 else
     echo "No .bats tests under test/ or tests/ — skipping."
 fi
-echo "Tests OK"
