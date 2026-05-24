@@ -1,0 +1,75 @@
+name: changelog-check
+description: |
+  Verify that <repo>/CHANGELOG.md is in sync with <repo>/CHANGELOG/*
+  fragments by re-running bin/changelog-render and comparing. Fails
+  loud (with a diff) if the committed rendered file has drifted from
+  the source fragments — i.e. someone added a fragment but forgot to
+  re-render.
+
+  Designed to be called from consumer PR-time CI (one step in any
+  existing check workflow). The scripts and the vendored semver-tool
+  must already be on disk via release-sync — this action only
+  invokes them.
+
+  ## Behavior
+
+  - **Skips cleanly** if CHANGELOG/ doesn't exist. Consumers on the
+    old single-file model (pre-#201 migration) don't see a failure;
+    the action becomes a no-op until they adopt the fragment-dir
+    convention.
+  - **Fails loud** if CHANGELOG/ exists but bin/changelog-render is
+    missing. That's a setup bug — release-sync didn't run, or
+    didn't run recently enough.
+  - **Fails loud** with a unified diff if rendering produces a
+    CHANGELOG.md different from what's committed. Author runs
+    `bin/changelog render` locally and commits the result.
+
+  Background: docs/proposals/changelog-handling.md, tracker #201.
+
+inputs:
+  working-directory:
+    description: 'Repo root to run the check from. Default is the workspace root.'
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: changelog-check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! -d CHANGELOG ]]; then
+          echo "changelog-check: CHANGELOG/ not present — repo not on the fragment-dir model yet, skipping."
+          exit 0
+        fi
+
+        if [[ ! -x bin/changelog-render ]]; then
+          echo "::error::bin/changelog-render not found or not executable. Run 'release-sync' to pull it down."
+          exit 1
+        fi
+
+        before=$(mktemp)
+        trap 'rm -f "${before:-}"' EXIT
+
+        if [[ -f CHANGELOG.md ]]; then
+          cp CHANGELOG.md "$before"
+        else
+          # No committed CHANGELOG.md yet — first migration. Compare
+          # against an empty file so render's output shows up as the
+          # full diff and the author commits the initial render.
+          : > "$before"
+        fi
+
+        bin/changelog-render >/dev/null
+
+        if ! diff -u "$before" CHANGELOG.md; then
+          echo
+          echo "::error::CHANGELOG.md is out of sync with CHANGELOG/* fragments."
+          echo "Run 'bin/changelog render' locally and commit the regenerated CHANGELOG.md."
+          exit 1
+        fi
+
+        echo "changelog-check: CHANGELOG.md is in sync."
