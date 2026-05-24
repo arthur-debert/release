@@ -17,6 +17,24 @@ export LC_ALL=C
 self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEMVER="$self_dir/../vendor/semver-tool/semver"
 
+# Resolve the CHANGELOG/ root regardless of which subdir we were
+# invoked from (#219). Walk up looking for an existing CHANGELOG/;
+# fall back to git root if not found (the next check catches the
+# "git root but no CHANGELOG/ either" case loudly).
+resolve_changelog_root() {
+  local dir=$PWD
+  while [[ "$dir" != "/" ]]; do
+    [[ -d "$dir/CHANGELOG" ]] && { echo "$dir"; return 0; }
+    dir=$(dirname "$dir")
+  done
+  git rev-parse --show-toplevel 2>/dev/null
+}
+if ! repo_root=$(resolve_changelog_root) || [[ -z "$repo_root" ]]; then
+  echo "error: no CHANGELOG/ found above cwd and not inside a git repository" >&2
+  exit 1
+fi
+cd "$repo_root"
+
 if [[ ! -d CHANGELOG ]]; then
   echo "error: CHANGELOG/ directory not found" >&2
   exit 1
@@ -30,6 +48,8 @@ if ! sort -V </dev/null >/dev/null 2>&1; then
 fi
 
 # Validate every version filename via semver-tool, surface bad ones.
+# Also reject the v-prefix even though semver-tool accepts it (#220):
+# the rendered file convention is bare semver per the README contract.
 shopt -s nullglob
 bad=()
 versions=()
@@ -38,6 +58,10 @@ for f in CHANGELOG/*.md; do
   stem="${name%.md}"
   [[ "$stem" == "README" || "$stem" == "legacy" ]] && continue
   [[ "$stem" == unreleased-* ]] && continue
+  if [[ "$stem" =~ ^[vV] ]]; then
+    bad+=("$name")
+    continue
+  fi
   # semver-tool's validate always exits 0; check the stdout token.
   if [[ "$("$SEMVER" validate "$stem" 2>/dev/null)" == "valid" ]]; then
     versions+=("$stem")

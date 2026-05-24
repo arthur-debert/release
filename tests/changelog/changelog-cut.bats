@@ -77,3 +77,32 @@ load helper
   [ "$status" -eq 2 ]
   [[ "$output" == *"usage:"* ]]
 }
+
+@test "rejects 'v' prefix on version arg (#220)" {
+  "$BIN/changelog-add" 1 "- bullet"
+  run "$BIN/changelog-cut" v1.2.3
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"bare semver"* ]]
+  [[ "$output" == *"v prefix"* ]] || [[ "$output" == *"'v' prefix"* ]]
+  # Fragment must NOT have been consumed.
+  [ -f CHANGELOG/unreleased-pr-1.md ]
+  [ ! -f CHANGELOG/v1.2.3.md ]
+}
+
+@test "rejects 'V' prefix on version arg (#220)" {
+  "$BIN/changelog-add" 1 "- bullet"
+  run "$BIN/changelog-cut" V1.2.3
+  [ "$status" -eq 2 ]
+  [ ! -f CHANGELOG/V1.2.3.md ]
+}
+
+@test "cwd-agnostic: works from a subdir (#219)" {
+  "$BIN/changelog-add" 1 "- bullet"
+  mkdir -p crates/foo
+  cd crates/foo
+  run "$BIN/changelog-cut" 0.1.0
+  [ "$status" -eq 0 ]
+  # Version file lands at repo root, not the subdir.
+  [ -f "$TMPDIR_TEST/CHANGELOG/0.1.0.md" ]
+  [ ! -f "$TMPDIR_TEST/crates/foo/CHANGELOG/0.1.0.md" ]
+}

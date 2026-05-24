@@ -7,6 +7,24 @@
 # overwrites.
 set -euo pipefail
 
+# Resolve the CHANGELOG/ root regardless of which subdir we were
+# invoked from (#219). Walk up looking for an existing CHANGELOG/;
+# fall back to git root for the first-migration case (no CHANGELOG/
+# anywhere yet — add will create it at git root). Error if neither.
+resolve_changelog_root() {
+  local dir=$PWD
+  while [[ "$dir" != "/" ]]; do
+    [[ -d "$dir/CHANGELOG" ]] && { echo "$dir"; return 0; }
+    dir=$(dirname "$dir")
+  done
+  git rev-parse --show-toplevel 2>/dev/null
+}
+if ! repo_root=$(resolve_changelog_root) || [[ -z "$repo_root" ]]; then
+  echo "error: no CHANGELOG/ found above cwd and not inside a git repository" >&2
+  exit 1
+fi
+cd "$repo_root"
+
 force=0
 if [[ "${1:-}" == "--force" ]]; then
   force=1
