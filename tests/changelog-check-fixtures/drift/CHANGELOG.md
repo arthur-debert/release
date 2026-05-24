@@ -4,5 +4,3 @@
 
 ## Unreleased
 
-- New feature
-
