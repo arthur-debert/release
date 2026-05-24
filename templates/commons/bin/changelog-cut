@@ -31,10 +31,20 @@ if [[ "$("$SEMVER" validate "$version" 2>/dev/null)" != "valid" ]]; then
   exit 2
 fi
 
-# All changelog tooling operates on the repo-root CHANGELOG/ directory,
-# regardless of which subdir the caller invoked us from. Fixes #219.
-if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
-  echo "error: bin/changelog must be invoked inside a git repository" >&2
+# Resolve the CHANGELOG/ root regardless of which subdir we were
+# invoked from (#219). Walk up looking for an existing CHANGELOG/;
+# fall back to git root if not found (the next check catches the
+# "git root but no CHANGELOG/ either" case loudly).
+resolve_changelog_root() {
+  local dir=$PWD
+  while [[ "$dir" != "/" ]]; do
+    [[ -d "$dir/CHANGELOG" ]] && { echo "$dir"; return 0; }
+    dir=$(dirname "$dir")
+  done
+  git rev-parse --show-toplevel 2>/dev/null
+}
+if ! repo_root=$(resolve_changelog_root) || [[ -z "$repo_root" ]]; then
+  echo "error: no CHANGELOG/ found above cwd and not inside a git repository" >&2
   exit 1
 fi
 cd "$repo_root"

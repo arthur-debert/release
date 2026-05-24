@@ -88,10 +88,11 @@ load helper
   [ ! -d "$TMPDIR_TEST/crates/foo/CHANGELOG" ]
 }
 
-@test "errors when invoked outside a git repo (#219)" {
-  # Replace the git-initialized tmpdir with a non-git one for this test.
+@test "errors when invoked with no CHANGELOG/ AND outside a git repo (#219)" {
+  # Replace the git-initialized tmpdir with a non-git one AND no
+  # CHANGELOG/ above cwd. Now the script has nothing to anchor to.
   rm -rf .git
   run "$BIN/changelog-add" 142 "- bullet"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"must be invoked inside a git repository"* ]]
+  [[ "$output" == *"no CHANGELOG/ found"* ]]
 }
