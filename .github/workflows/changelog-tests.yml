@@ -10,7 +10,7 @@ on:
     branches: ['**']
     paths:
       - 'templates/commons/bin/changelog*'
-      - 'templates/commons/vendor/semver-tool/**'
+      - 'templates/commons/bin/share/semver-tool/**'
       - 'tests/changelog/**'
       - 'tests/changelog-check-fixtures/**'
       - '.github/actions/changelog-check/**'
@@ -18,7 +18,7 @@ on:
   pull_request:
     paths:
       - 'templates/commons/bin/changelog*'
-      - 'templates/commons/vendor/semver-tool/**'
+      - 'templates/commons/bin/share/semver-tool/**'
       - 'tests/changelog/**'
       - 'tests/changelog-check-fixtures/**'
       - '.github/actions/changelog-check/**'
