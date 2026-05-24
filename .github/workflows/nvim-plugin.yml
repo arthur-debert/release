@@ -265,7 +265,7 @@ jobs:
               if [ -d "${CHANGELOG_DIR}" ]; then
                 if [ ! -x bin/changelog ]; then
                   echo "::error::${CHANGELOG_DIR} exists (fragment-dir mode) but bin/changelog is missing or not executable."
-                  echo "::error::Run 'release-sync' to pull bin/changelog* and vendor/semver-tool/ into this repo."
+                  echo "::error::Run 'release-sync' to pull bin/changelog* (with bin/share/semver-tool/) into this repo."
                   exit 1
                 fi
                 if [ "${IS_PRERELEASE}" != "true" ]; then

@@ -136,7 +136,7 @@ case "$mode" in
       # Fragment-dir mode: hand off to bin/changelog and post-process.
       cli=$(locate_changelog_cli) || {
         echo "::error::CHANGELOG/ directory present but bin/changelog not found." >&2
-        echo "::error::Run 'release-sync' to pull bin/changelog* and vendor/semver-tool/ into this repo." >&2
+        echo "::error::Run 'release-sync' to pull bin/changelog* (with bin/share/semver-tool/) into this repo." >&2
         exit 1
       }
       # `new-version` = cut + render. Cut requires unreleased fragments
