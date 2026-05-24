@@ -55,4 +55,4 @@ Conventions:
   pre-adoption history stays visible without retroactive per-version
   splitting.
 
-Background: docs/proposals/changelog-handling.md
+Background: https://github.com/arthur-debert/release/blob/main/docs/proposals/changelog-handling.md
