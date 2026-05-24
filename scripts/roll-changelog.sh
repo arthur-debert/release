@@ -142,8 +142,17 @@ case "$mode" in
       # `new-version` = cut + render. Cut requires unreleased fragments
       # to exist, so this enforces the same "Unreleased must be non-empty"
       # rule as the single-file path.
-      "$cli" new-version "$version"
-      # Pull body of the freshly-cut version file into release-notes.
+      #
+      # bin/changelog* resolve their root by walking up cwd for
+      # CHANGELOG/, so cd next to the user-specified changelog file
+      # first — otherwise on monorepos with multiple changelogs
+      # (root + per-package) the wrong one gets cut.
+      (
+        cd "$(dirname "$file")"
+        "$cli" new-version "$version"
+      )
+      # `cli` ran in a subshell, but it wrote files at the path we
+      # computed in $dir. Read the freshly-cut version file from there.
       fragment_body "$dir/$version.md" > "$out"
     else
       extract_unreleased "$file" "$out"
