@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# changelog-add [--force] <slug> [body...]
+#
+# Write CHANGELOG/unreleased-<slug>.md. Body comes from stdin when no
+# body args are passed, otherwise from the joined args. A numeric slug
+# is prefixed with "pr-". Fails if the target already exists; --force
+# overwrites.
+set -euo pipefail
+
+force=0
+if [[ "${1:-}" == "--force" ]]; then
+  force=1
+  shift
+fi
+
+slug="${1:-}"
+if [[ -z "$slug" ]]; then
+  echo "usage: changelog-add [--force] <slug> [body...]" >&2
+  exit 2
+fi
+shift
+
+# Numeric slug → prefixed with pr-
+if [[ "$slug" =~ ^[0-9]+$ ]]; then
+  slug="pr-$slug"
+fi
+
+mkdir -p CHANGELOG
+target="CHANGELOG/unreleased-${slug}.md"
+
+if [[ -e "$target" && "$force" -eq 0 ]]; then
+  echo "error: $target already exists (pass --force to overwrite)" >&2
+  exit 1
+fi
+
+if [[ $# -gt 0 ]]; then
+  body="$*"
+else
+  body="$(cat)"
+fi
+
+printf '%s\n' "$body" > "$target"
+echo "wrote $target"

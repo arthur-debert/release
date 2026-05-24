@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# changelog-render
+#
+# Regenerate CHANGELOG.md from CHANGELOG/* per the proposal's
+# Rendered format spec:
+#   1. prelude ("<!-- generated ... -->" + "# Changelog")
+#   2. "## Unreleased" + concatenated unreleased fragments (byte-sorted)
+#   3. one section per CHANGELOG/<version>.md, descending semver order
+#   4. optional CHANGELOG/legacy.md appended verbatim
+#
+# Fails loud on unparseable CHANGELOG/<name>.md filenames.
+set -euo pipefail
+export LC_ALL=C
+
+if [[ ! -d CHANGELOG ]]; then
+  echo "error: CHANGELOG/ directory not found" >&2
+  exit 1
+fi
+
+# Use python3 for semver-correct sorting (handles pre-release per
+# semver §11). macOS ships python3; CI runners have it too.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "error: python3 required for semver-correct version sort" >&2
+  exit 1
+fi
+
+sorted_versions() {
+  python3 - <<'PY'
+import os, re, sys
+
+VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
+
+versions = []
+errors = []
+for name in sorted(os.listdir("CHANGELOG")):
+    if not name.endswith(".md"):
+        continue
+    stem = name[:-3]
+    if stem in ("README", "legacy") or stem.startswith("unreleased-"):
+        continue
+    m = VERSION_RE.match(stem)
+    if not m:
+        errors.append(name)
+        continue
+    versions.append((stem, m))
+
+if errors:
+    sys.stderr.write(
+        "error: unparseable version filename(s) in CHANGELOG/: "
+        + ", ".join(errors) + "\n"
+    )
+    sys.exit(1)
+
+def prerelease_key(pre):
+    # Per semver §11: split on ".", numeric identifiers compare
+    # numerically and sort lower than non-numeric identifiers.
+    parts = pre.split(".")
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append((0, int(p)))
+        else:
+            key.append((1, p))
+    return tuple(key)
+
+def sort_key(stem_match):
+    _, m = stem_match
+    rel = tuple(int(x) for x in m.group(1, 2, 3))
+    pre = m.group(4)
+    # No prerelease sorts ABOVE any prerelease at the same release.
+    # Use sentinel: (rel, 1, ()) for release, (rel, 0, prekey) for prerelease.
+    if pre is None:
+        return (rel, 1, ())
+    return (rel, 0, prerelease_key(pre))
+
+versions.sort(key=sort_key, reverse=True)
+for stem, _ in versions:
+    print(stem)
+PY
+}
+
+# Compute version order first so any "unparseable filename" error
+# fails the whole render (process substitution would swallow it).
+if ! versions_output="$(sorted_versions)"; then
+  exit 1
+fi
+
+# Collect unreleased fragments in stable byte order
+shopt -s nullglob
+unreleased=(CHANGELOG/unreleased-*.md)
+
+target=CHANGELOG.md
+tmp="${target}.tmp.$$"
+trap 'rm -f "$tmp"' EXIT
+
+{
+  printf '<!-- generated - do not edit. See CHANGELOG/README.txt -->\n\n'
+  printf '# Changelog\n\n'
+
+  printf '## Unreleased\n\n'
+  if [[ ${#unreleased[@]} -gt 0 ]]; then
+    for f in "${unreleased[@]}"; do
+      cat "$f"
+    done
+    printf '\n'
+  fi
+
+  if [[ -n "$versions_output" ]]; then
+    while IFS= read -r v; do
+      [[ -z "$v" ]] && continue
+      cat "CHANGELOG/${v}.md"
+      printf '\n'
+    done <<< "$versions_output"
+  fi
+
+  if [[ -f CHANGELOG/legacy.md ]]; then
+    cat CHANGELOG/legacy.md
+  fi
+} > "$tmp"
+
+mv "$tmp" "$target"
+trap - EXIT
+echo "rendered $target"
