@@ -96,15 +96,22 @@ jobs:
 
       - name: Run actionlint
         shell: bash
-        # Pass `-S warning` to actionlint's bundled shellcheck so style
-        # + info-level findings (SC2129 "consider grouped redirects",
-        # SC2015 "A && B || C", etc.) don't fail CI. Errors and
-        # warnings still gate. Without this, the first repo to adopt
-        # gh-action-ci.yml@v1 floods on style nits in pre-existing
-        # workflows that haven't been audited (release/'s own
-        # dogfood adoption surfaced 40+ such findings on its first
-        # PR with no real bugs).
-        run: actionlint -shellcheck '-S warning' -color
+        # Severity gate goes via SHELLCHECK_OPTS env so actionlint's
+        # bundled shellcheck only flags warning + error findings —
+        # style + info (SC2129 "consider grouped redirects", SC2015
+        # "A && B || C") don't fail CI. Without this, the first repo
+        # to adopt gh-action-ci.yml@v1 floods on style nits in
+        # pre-existing workflows that haven't been audited
+        # (release/'s own dogfood adoption surfaced 40+ such
+        # findings on its first PR with no real bugs).
+        #
+        # Don't be tempted to use `-shellcheck '-S warning'` —
+        # actionlint's `-shellcheck` flag takes a binary path, not
+        # a command line, so that form silently disables the
+        # integration. See PR #202.
+        env:
+          SHELLCHECK_OPTS: '-S warning'
+        run: actionlint -color
 
       - name: Run shellcheck (standalone)
         if: inputs.shellcheck-paths != ''
@@ -127,7 +134,11 @@ jobs:
               case "$f" in
                 *.sh|*.bash) ;;
                 *)
-                  head -1 "$f" | grep -qE '^#!.*\b(bash|sh|dash|ksh)\b' || continue
+                  # POSIX ERE has no `\b`; explicit `/`-or-space
+                  # separators match identically under GNU and BSD
+                  # grep (relevant for consumers running this
+                  # workflow's pattern locally on macOS).
+                  head -1 "$f" | grep -qE '^#!.*[ /](bash|sh|dash|ksh)( |$)' || continue
                   ;;
               esac
               found_any=true

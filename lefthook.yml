@@ -3,8 +3,9 @@
 #
 # Bootstrap: `lefthook install` (one-time per clone).
 #
-# Skips silently if a tool is missing — the canonical CI run is still
-# the source of truth; lefthook is fast local feedback, not a hard gate.
+# Logs a one-liner and exits 0 if a tool is missing — the canonical
+# CI run is still the source of truth; lefthook is fast local
+# feedback, not a hard gate.
 
 pre-commit:
   parallel: true
@@ -25,7 +26,10 @@ pre-commit:
           case "$f" in
             *.sh|*.bash) ;;
             *)
-              head -1 "$f" | grep -qE '^#!.*\b(bash|sh|dash|ksh)\b' || continue
+              # POSIX ERE has no `\b`; use explicit `/`-or-space
+              # separators so BSD grep on macOS matches identically to
+              # GNU grep on Linux.
+              head -1 "$f" | grep -qE '^#!.*[ /](bash|sh|dash|ksh)( |$)' || continue
               ;;
           esac
           echo "shellcheck $f"
@@ -45,10 +49,9 @@ pre-commit:
           exit 0
         fi
         # Run actionlint over the whole tree (it needs cross-file
-        # context for reusable-workflow calls anyway). Match the
-        # severity gate CI uses so local and CI agree.
-        if command -v shellcheck >/dev/null 2>&1; then
-          actionlint -shellcheck '-S warning' -color
-        else
-          actionlint -color
-        fi
+        # context for reusable-workflow calls anyway). Severity gate
+        # for shellcheck integration goes via SHELLCHECK_OPTS env —
+        # actionlint's own `-shellcheck` flag takes a binary path,
+        # not a command line, so passing `-shellcheck '-S warning'`
+        # silently disables integration entirely.
+        SHELLCHECK_OPTS='-S warning' actionlint -color
