@@ -51,5 +51,10 @@ pre-commit:
       #     cdylib target; there are no tests/benches/examples that
       #     `--all-targets` would expand to. Including it would force
       #     clippy to look for non-existent target kinds.
-      run: cargo clippy --all-features --target wasm32-wasip2 -- -D warnings
+      #   * `--release`: ADDED — matches bin/check-lint and bin/build,
+      #     which build/lint the wasm extension in release profile.
+      #     Without it the pre-commit hook runs clippy in dev profile
+      #     and can disagree with CI (profile-dependent cfgs/warnings).
+      #     See release#228.
+      run: cargo clippy --release --all-features --target wasm32-wasip2 -- -D warnings
       priority: 2
