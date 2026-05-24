@@ -113,7 +113,7 @@ for repo in "${broken[@]}"; do
 
   cp "$template" "$clone_dir/.github/workflows/copilot-review.yml"
 
-  cd "$clone_dir"
+  cd "$clone_dir" || { prs_failed+=("$repo: cd failed"); continue; }
   branch="chore/migrate-copilot-review-pointer"
   git checkout -b "$branch" >/dev/null 2>&1
 

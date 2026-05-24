@@ -119,6 +119,17 @@ jobs:
             # Git considers executable AND in a configured path get
             # checked.
             while IFS= read -r -d '' f; do
+              # Skip non-shell scripts (e.g. Python tools that happen
+              # to be marked executable). Shellcheck reports SC1071 on
+              # those, which is correct but turns mixed-language tool
+              # dirs into a false-positive failure. Gate on either a
+              # `.sh`/`.bash` extension or a shell shebang.
+              case "$f" in
+                *.sh|*.bash) ;;
+                *)
+                  head -1 "$f" | grep -qE '^#!.*\b(bash|sh|dash|ksh)\b' || continue
+                  ;;
+              esac
               found_any=true
               echo "shellcheck $f"
               # Match the severity gate used by actionlint's bundled

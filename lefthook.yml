@@ -1,0 +1,47 @@
+# Lefthook pre-commit checks. Mirrors what CI runs in
+# .github/workflows/gh-action-ci.yml so failures surface before push.
+#
+# Bootstrap: `lefthook install` (one-time per clone).
+#
+# Skips silently if a tool is missing — the canonical CI run is still
+# the source of truth; lefthook is fast local feedback, not a hard gate.
+
+pre-commit:
+  parallel: true
+  commands:
+    shellcheck:
+      glob: "{bin/*,scripts/*.sh,scripts/*.bash}"
+      run: |
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          echo "shellcheck not installed; skipping (install: apt-get install shellcheck)"
+          exit 0
+        fi
+        fail=0
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          case "$f" in
+            *.sh|*.bash) ;;
+            *)
+              head -1 "$f" | grep -qE '^#!.*\b(bash|sh|dash|ksh)\b' || continue
+              ;;
+          esac
+          echo "shellcheck $f"
+          shellcheck --severity=warning "$f" || fail=1
+        done
+        exit $fail
+
+    actionlint:
+      glob: ".github/{workflows,actions}/**/*.{yml,yaml}"
+      run: |
+        if ! command -v actionlint >/dev/null 2>&1; then
+          echo "actionlint not installed; skipping (install: https://github.com/rhysd/actionlint)"
+          exit 0
+        fi
+        # Run actionlint over the whole tree (it needs cross-file
+        # context for reusable-workflow calls anyway). Match the
+        # severity gate CI uses so local and CI agree.
+        if command -v shellcheck >/dev/null 2>&1; then
+          actionlint -shellcheck '-S warning' -color
+        else
+          actionlint -color
+        fi

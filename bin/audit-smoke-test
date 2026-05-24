@@ -56,7 +56,7 @@ trap '[ "$keep" = "0" ] && rm -rf "$workdir"' EXIT
 echo "[smoke] cloning $repo into $workdir"
 git clone --depth=1 --branch="$base" "https://github.com/$repo" "$workdir/clone" 2>&1 | tail -2
 
-cd "$workdir/clone"
+cd "$workdir/clone" || { echo "[smoke] FAIL cd to clone" >&2; exit 1; }
 
 # Pick a smoke target: prefer a file that's safe to touch.
 target=""
@@ -104,7 +104,7 @@ trap 'cleanup_pr; [ "$keep" = "0" ] && rm -rf "$workdir"' EXIT
 # --- Check 1: Copilot Review workflow run created within 90s ---
 echo "[smoke] waiting for Copilot Review workflow run (up to 90s)..."
 copilot_run_id=""
-for i in $(seq 1 18); do
+for _ in $(seq 1 18); do
   copilot_run_id=$(gh api "repos/$repo/actions/runs?branch=$branch&per_page=20" \
     --jq '[.workflow_runs[] | select(.name=="Copilot Review")][0].id // empty' 2>/dev/null)
   [ -n "$copilot_run_id" ] && break
