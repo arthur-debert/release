@@ -80,19 +80,11 @@ fragment_body() {
   awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' "$file"
 }
 
-extract_unreleased() {
-  local file=$1 out=$2
-  awk '
-    /^## \[Unreleased\]/ { in_unreleased=1; next }
-    in_unreleased && /^## \[/ { exit }
-    in_unreleased { print }
-  ' "$file" | sed -E '/^[[:space:]]*$/{ N; /^\n[[:space:]]*$/D; }' > "$out"
-
-  if ! grep -q '[^[:space:]]' "$out"; then
-    echo "::error::CHANGELOG section [Unreleased] is missing or empty in $file" >&2
-    echo "::error::Add a brief entry under ## [Unreleased] describing this release before re-running." >&2
-    exit 1
-  fi
+legacy_error() {
+  echo "::error::Legacy single-file changelog mode has been retired." >&2
+  echo "::error::Migrate to the fragment-directory model: mkdir CHANGELOG && bin/changelog render." >&2
+  echo "::error::See https://github.com/arthur-debert/release/blob/main/docs/proposals/changelog-handling.md" >&2
+  exit 1
 }
 
 case "$mode" in
@@ -123,7 +115,7 @@ case "$mode" in
         exit 1
       fi
     else
-      extract_unreleased "$file" "$out"
+      legacy_error
     fi
     ;;
   roll)
@@ -139,10 +131,6 @@ case "$mode" in
         echo "::error::Run 'release-sync' to pull bin/changelog* (with bin/share/semver-tool/) into this repo." >&2
         exit 1
       }
-      # `new-version` = cut + render. Cut requires unreleased fragments
-      # to exist, so this enforces the same "Unreleased must be non-empty"
-      # rule as the single-file path.
-      #
       # bin/changelog* resolve their root by walking up cwd for
       # CHANGELOG/, so cd next to the user-specified changelog file
       # first — otherwise on monorepos with multiple changelogs
@@ -151,38 +139,9 @@ case "$mode" in
         cd "$(dirname "$file")"
         "$cli" new-version "$version"
       )
-      # `cli` ran in a subshell, but it wrote files at the path we
-      # computed in $dir. Read the freshly-cut version file from there.
       fragment_body "$dir/$version.md" > "$out"
     else
-      extract_unreleased "$file" "$out"
-
-      today=$(date -u +%Y-%m-%d)
-      body=$(cat "$out")
-      section=$(mktemp)
-      {
-        printf '## [Unreleased]\n\n'
-        printf '## [%s] - %s\n\n' "$version" "$today"
-        printf '%s\n' "$body"
-      } > "$section"
-
-      awk -v section_file="$section" '
-        !inserted && /^## \[Unreleased\]/ {
-            while ((getline line < section_file) > 0) print line
-            close(section_file)
-            inserted=1
-            # Skip past the original `## [Unreleased]` block — the new
-            # section already includes its own [Unreleased] header followed
-            # by the versioned section.
-            skip=1
-            next
-        }
-        skip && /^## \[/ { skip=0 }
-        skip { next }
-        { print }
-      ' "$file" > "$file.tmp"
-      mv "$file.tmp" "$file"
-      rm -f "$section"
+      legacy_error
     fi
     ;;
   *)
