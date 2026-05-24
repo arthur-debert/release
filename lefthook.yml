@@ -10,7 +10,10 @@ pre-commit:
   parallel: true
   commands:
     shellcheck:
-      glob: "{bin/*,scripts/*.sh,scripts/*.bash}"
+      glob:
+        - "bin/*"
+        - "scripts/*.sh"
+        - "scripts/*.bash"
       run: |
         if ! command -v shellcheck >/dev/null 2>&1; then
           echo "shellcheck not installed; skipping (install: apt-get install shellcheck)"
@@ -31,7 +34,11 @@ pre-commit:
         exit $fail
 
     actionlint:
-      glob: ".github/{workflows,actions}/**/*.{yml,yaml}"
+      glob:
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+        - ".github/actions/**/*.yml"
+        - ".github/actions/**/*.yaml"
       run: |
         if ! command -v actionlint >/dev/null 2>&1; then
           echo "actionlint not installed; skipping (install: https://github.com/rhysd/actionlint)"
