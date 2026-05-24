@@ -21,10 +21,10 @@ load helper
 
 @test "stdin preserves trailing blank line" {
   printf -- '- one\n- two\n\n' | "$BIN/changelog-add" trailing
-  # Trailing blank line means the file ends in two newlines (0x0a 0x0a).
-  run od -An -c CHANGELOG/unreleased-trailing.md
-  # Last visible characters should include the trailing blank line.
-  [[ "$output" == *"\n  \n"* ]] || [[ "$output" == *"  \n  \n"* ]]
+  # Trailing blank line ⇒ file ends in two newlines (0x0a 0x0a). Count
+  # newlines in the last two bytes — portable across BSD and GNU.
+  run bash -c "tail -c 2 CHANGELOG/unreleased-trailing.md | wc -l | tr -d ' '"
+  [ "$output" -eq 2 ]
 }
 
 @test "numeric slug is prefixed with pr-" {

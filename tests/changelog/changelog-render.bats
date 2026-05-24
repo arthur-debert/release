@@ -93,11 +93,11 @@ load helper
   mkdir -p CHANGELOG
   printf '## 1.0.0\n\n- v100\n' > CHANGELOG/1.0.0.md
   "$BIN/changelog-render"
-  cp CHANGELOG.md /tmp/render_first.$$.md
+  # Keep the snapshot inside the per-test sandbox; teardown cleans it.
+  cp CHANGELOG.md "$TMPDIR_TEST/render_first.md"
   "$BIN/changelog-render"
-  run diff /tmp/render_first.$$.md CHANGELOG.md
+  run diff "$TMPDIR_TEST/render_first.md" CHANGELOG.md
   [ "$status" -eq 0 ]
-  rm -f /tmp/render_first.$$.md
 }
 
 @test "unparseable version filename fails loud" {
