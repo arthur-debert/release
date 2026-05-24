@@ -42,6 +42,10 @@
 #                              test.yml) actually invoke `bin/check`? If not,
 #                              the Component-supplied canonical interface is
 #                              dead weight on disk — CI bypasses it.
+#  13. changelog_handling    — which changelog convention is in use:
+#                              fragment-dir (canonical, PASS) / single-file
+#                              (WARN, migrate per #201) / two-file (WARN) /
+#                              none (WARN) / mixed (FAIL).
 
 set -uo pipefail
 
@@ -363,6 +367,54 @@ check_ci_calls_bin_check() {
   fi
 }
 
+# --- Check 13: changelog convention ---
+check_changelog_handling() {
+  # Map the repo onto one of the proposal's variants:
+  #   fragment-dir  (canonical, PASS)
+  #   single-file   (## Unreleased in CHANGELOG.md, WARN — migrate per #201)
+  #   two-file      (CHANGELOG_UNRELEASED.md present, WARN)
+  #   none          (no CHANGELOG.md or CHANGELOG/ dir, WARN)
+  #   mixed         (more than one of the above, FAIL — needs cleanup)
+  local has_dir=0 has_block=0 has_two_file=0
+
+  local dir_listing
+  dir_listing=$(gh api "repos/$repo/contents/CHANGELOG" 2>/dev/null)
+  if [ -n "$dir_listing" ] \
+      && [ "$(printf '%s' "$dir_listing" | jq -r 'type' 2>/dev/null)" = "array" ]; then
+    has_dir=1
+  fi
+
+  # Use raw accept header — sidesteps the 1MB base64 limit on
+  # contents.content and avoids a base64 round-trip.
+  local body
+  body=$(gh api "repos/$repo/contents/CHANGELOG.md" \
+           -H "Accept: application/vnd.github.raw" 2>/dev/null)
+  if [ -n "$body" ] && grep -qE '^##[[:space:]]+\[?Unreleased\]?' <<<"$body"; then
+    has_block=1
+  fi
+
+  if gh api "repos/$repo/contents/CHANGELOG_UNRELEASED.md" >/dev/null 2>&1; then
+    has_two_file=1
+  fi
+
+  local active=$((has_dir + has_block + has_two_file))
+  if [ "$active" -gt 1 ]; then
+    local present=""
+    [ "$has_dir" = 1 ]      && present="$present fragment-dir"
+    [ "$has_block" = 1 ]    && present="$present single-file"
+    [ "$has_two_file" = 1 ] && present="$present two-file"
+    record FAIL changelog_handling "mixed conventions:${present} — pick one (#201)"
+  elif [ "$has_dir" = 1 ]; then
+    record PASS changelog_handling "fragment-dir (canonical)"
+  elif [ "$has_block" = 1 ]; then
+    record WARN changelog_handling "single-file (## Unreleased) — migrate per #201"
+  elif [ "$has_two_file" = 1 ]; then
+    record WARN changelog_handling "two-file (CHANGELOG_UNRELEASED.md) — migrate per #201"
+  else
+    record WARN changelog_handling "none — no recognized changelog convention detected"
+  fi
+}
+
 # Run all checks
 check_ruleset
 check_release_token
@@ -376,6 +428,7 @@ check_release_sync
 check_scripts_inventory
 check_workflows_canonical
 check_ci_calls_bin_check
+check_changelog_handling
 
 # --- Output ---
 if [ "$json_mode" = "1" ]; then

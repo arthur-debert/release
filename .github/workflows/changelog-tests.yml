@@ -9,15 +9,15 @@ on:
   push:
     branches: ['**']
     paths:
-      - 'bin/changelog*'
+      - 'templates/commons/bin/changelog*'
+      - 'templates/commons/vendor/semver-tool/**'
       - 'tests/changelog/**'
-      - 'vendor/semver-tool/**'
       - '.github/workflows/changelog-tests.yml'
   pull_request:
     paths:
-      - 'bin/changelog*'
+      - 'templates/commons/bin/changelog*'
+      - 'templates/commons/vendor/semver-tool/**'
       - 'tests/changelog/**'
-      - 'vendor/semver-tool/**'
       - '.github/workflows/changelog-tests.yml'
 
 permissions:
