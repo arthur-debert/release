@@ -28,21 +28,20 @@ fi
 
 run_bats_dir() {
     local dir="$1"
+    shift
     if ! command -v bats >/dev/null 2>&1; then
         echo "::error::bats not installed. Run \`brew install bats-core\` to enable extension tests." >&2
         exit 1
     fi
     echo "Running bats $dir ..."
-    exec bats "$dir" "$@"
+    bats "$dir" "$@"
 }
 
 if find test -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
     run_bats_dir test "$@"
-fi
-
-if find tests -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
+elif find tests -maxdepth 2 -name '*.bats' -print -quit 2>/dev/null | grep -q .; then
     run_bats_dir tests "$@"
+else
+    echo "No .bats tests under test/ or tests/ — skipping."
 fi
-
-echo "No .bats tests under test/ or tests/ — skipping."
 echo "Tests OK"
