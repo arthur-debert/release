@@ -180,7 +180,14 @@ jobs:
                   exit 1
                 fi
                 if [ "${IS_PRERELEASE}" != "true" ]; then
-                  bin/changelog new-version "${NEW_VERSION}"
+                  # bin/changelog walks up cwd for CHANGELOG/, so cd
+                  # next to the changelog file first — otherwise on
+                  # monorepos with multiple changelogs the wrong
+                  # CHANGELOG/ gets cut. Mirrors scripts/roll-changelog.sh.
+                  (
+                    cd "$(dirname "${CHANGELOG}")"
+                    bin/changelog new-version "${NEW_VERSION}"
+                  )
                   awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
                     "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
                   git add "${CHANGELOG}" "${CHANGELOG_DIR}/"

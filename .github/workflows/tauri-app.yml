@@ -350,18 +350,37 @@ jobs:
             if [ "${TAG_VERSION}" = "${NEW_VERSION}" ]; then
               echo "tag ${TAG} already exists at ${TAG_SHA} (${pkg} matches) — resuming"
               echo "release-sha=${TAG_SHA}" >> "${GITHUB_OUTPUT}"
-              # Re-extract release notes for the resume case
-              if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
-                if [ "${IS_PRERELEASE}" = "true" ]; then
-                  awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
-                    "${CHANGELOG}" > release-notes.md
-                else
-                  awk -v v="${NEW_VERSION}" '$0 ~ "^## \\[" v "\\]"{c=1;next} c&&/^## \[/{exit} c{print}' \
-                    "${CHANGELOG}" > release-notes.md
+              # Re-extract release notes for the resume case. Branches:
+              #  - fragment-dir + final release: CHANGELOG/<v>.md exists
+              #    (cut happened on the tagged commit) → read it.
+              #  - fragment-dir + prerelease: cut did NOT happen
+              #    (prereleases concat live fragments) → re-concat now.
+              #  - legacy single-file: extract from the file as before.
+              if [ -z "${CHANGELOG:-}" ]; then
+                echo "Release ${TAG}" > release-notes.md
+              else
+                CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
+                if [ -d "${CHANGELOG_DIR}" ]; then
+                  if [ -f "${CHANGELOG_DIR}/${NEW_VERSION}.md" ]; then
+                    awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
+                      "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
+                  else
+                    # Prerelease resume: fragments still live at unreleased-*.md.
+                    mapfile -t fragments < <(LC_ALL=C ls "${CHANGELOG_DIR}"/unreleased-*.md 2>/dev/null || true)
+                    if [ "${#fragments[@]}" -gt 0 ]; then
+                      cat "${fragments[@]}" > release-notes.md
+                    fi
+                  fi
+                elif [ -f "${CHANGELOG}" ]; then
+                  if [ "${IS_PRERELEASE}" = "true" ]; then
+                    awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
+                      "${CHANGELOG}" > release-notes.md
+                  else
+                    awk -v v="${NEW_VERSION}" '$0 ~ "^## \\[" v "\\]"{c=1;next} c&&/^## \[/{exit} c{print}' \
+                      "${CHANGELOG}" > release-notes.md
+                  fi
                 fi
                 [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
-              else
-                echo "Release ${TAG}" > release-notes.md
               fi
               echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
               echo "prerelease=${IS_PRERELEASE}" >> "${GITHUB_OUTPUT}"
@@ -505,25 +524,59 @@ jobs:
             bump_json_version "${tauri_conf}" "${NEW_VERSION}"
           fi
 
-          # Roll changelog when present + extract notes. The
-          # extraction uses `c{print}` (not `c&&/\S/`) so blank lines
-          # within the [Unreleased] section are preserved — matches
-          # the resume-path extraction above, so re-runs produce
-          # identical release notes.
-          if [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
-            awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
-              "${CHANGELOG}" > release-notes.md
-            if [ "${IS_PRERELEASE}" != "true" ]; then
-              today=$(date -u +%F)
-              replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
-              awk -v repl="${replacement}" '
-                /^## \[Unreleased\]/ { print repl; next } { print }
-              ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
-              mv "${CHANGELOG}.tmp" "${CHANGELOG}"
-              git add "${CHANGELOG}"
-            fi
-          else
+          # Roll changelog + extract notes. Four branches (mirrors
+          # gh-action.yml and nvim-plugin.yml).
+          if [ -z "${CHANGELOG:-}" ]; then
             echo "Release ${TAG}" > release-notes.md
+          else
+            CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
+            if [ -d "${CHANGELOG_DIR}" ]; then
+              # Fragment-dir (per #201): delegate to bin/changelog.
+              if [ ! -x bin/changelog ]; then
+                echo "::error::${CHANGELOG_DIR} exists (fragment-dir mode) but bin/changelog is missing or not executable."
+                echo "::error::Run 'release-sync' to pull bin/changelog* and vendor/semver-tool/ into this repo."
+                exit 1
+              fi
+              if [ "${IS_PRERELEASE}" != "true" ]; then
+                # bin/changelog walks up cwd for CHANGELOG/, so cd
+                # next to the changelog file first — otherwise on
+                # monorepos with multiple changelogs (root +
+                # per-package) the wrong CHANGELOG/ gets cut. Same
+                # pattern as scripts/roll-changelog.sh.
+                (
+                  cd "$(dirname "${CHANGELOG}")"
+                  bin/changelog new-version "${NEW_VERSION}"
+                )
+                awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
+                  "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
+                git add "${CHANGELOG}" "${CHANGELOG_DIR}/"
+              else
+                # Prereleases don't cut — concat fragments.
+                mapfile -t fragments < <(LC_ALL=C ls "${CHANGELOG_DIR}"/unreleased-*.md 2>/dev/null || true)
+                if [ "${#fragments[@]}" -gt 0 ]; then
+                  cat "${fragments[@]}" > release-notes.md
+                else
+                  echo "Release ${TAG}" > release-notes.md
+                fi
+              fi
+            elif [ -f "${CHANGELOG}" ]; then
+              # Legacy single-file Keep-a-Changelog. `c{print}` (not
+              # `c&&/\S/`) keeps blank lines within [Unreleased] so
+              # re-runs produce identical release notes.
+              awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
+                "${CHANGELOG}" > release-notes.md
+              if [ "${IS_PRERELEASE}" != "true" ]; then
+                today=$(date -u +%F)
+                replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
+                awk -v repl="${replacement}" '
+                  /^## \[Unreleased\]/ { print repl; next } { print }
+                ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
+                mv "${CHANGELOG}.tmp" "${CHANGELOG}"
+                git add "${CHANGELOG}"
+              fi
+            else
+              echo "Release ${TAG}" > release-notes.md
+            fi
           fi
           [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
 
@@ -597,7 +650,14 @@ jobs:
           fi
 
           git commit -m "chore: Release ${TAG}"
-          git tag -a "${TAG}" -m "Release ${TAG}"
+          # Annotate the tag with the rolled release notes when
+          # available (#201 addendum). Falls back to a plain
+          # "Release vX.Y.Z" if release-notes.md is empty.
+          if [ -s release-notes.md ]; then
+            git tag -a "${TAG}" -F release-notes.md
+          else
+            git tag -a "${TAG}" -m "Release ${TAG}"
+          fi
           git push origin HEAD
           git push origin "${TAG}"
 
