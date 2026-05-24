@@ -1,0 +1,57 @@
+# Lefthook pre-commit checks. Mirrors what CI runs in
+# .github/workflows/gh-action-ci.yml so failures surface before push.
+#
+# Bootstrap: `lefthook install` (one-time per clone).
+#
+# Logs a one-liner and exits 0 if a tool is missing — the canonical
+# CI run is still the source of truth; lefthook is fast local
+# feedback, not a hard gate.
+
+pre-commit:
+  parallel: true
+  commands:
+    shellcheck:
+      glob:
+        - "bin/*"
+        - "scripts/*.sh"
+        - "scripts/*.bash"
+      run: |
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          echo "shellcheck not installed; skipping (install: apt-get install shellcheck)"
+          exit 0
+        fi
+        fail=0
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          case "$f" in
+            *.sh|*.bash) ;;
+            *)
+              # POSIX ERE has no `\b`; use explicit `/`-or-space
+              # separators so BSD grep on macOS matches identically to
+              # GNU grep on Linux.
+              head -1 "$f" | grep -qE '^#!.*[ /](bash|sh|dash|ksh)( |$)' || continue
+              ;;
+          esac
+          echo "shellcheck $f"
+          shellcheck --severity=warning "$f" || fail=1
+        done
+        exit $fail
+
+    actionlint:
+      glob:
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+        - ".github/actions/**/*.yml"
+        - ".github/actions/**/*.yaml"
+      run: |
+        if ! command -v actionlint >/dev/null 2>&1; then
+          echo "actionlint not installed; skipping (install: https://github.com/rhysd/actionlint)"
+          exit 0
+        fi
+        # Run actionlint over the whole tree (it needs cross-file
+        # context for reusable-workflow calls anyway). Severity gate
+        # for shellcheck integration goes via SHELLCHECK_OPTS env —
+        # actionlint's own `-shellcheck` flag takes a binary path,
+        # not a command line, so passing `-shellcheck '-S warning'`
+        # silently disables integration entirely.
+        SHELLCHECK_OPTS='-S warning' actionlint -color
