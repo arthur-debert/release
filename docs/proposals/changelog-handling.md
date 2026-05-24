@@ -278,9 +278,29 @@ rather than retroactively splitting it into per-version files:
 3. Initialize:
    ```sh
    mkdir CHANGELOG
-   # capture the existing rendered history, stripping the top-level
-   # "# Changelog" header so the render output has exactly one.
-   sed '/^# Changelog$/d' CHANGELOG.md > CHANGELOG/legacy.md
+   # Capture the existing rendered history. Strip the top-level
+   # "# Changelog" header so the render output has exactly one, AND
+   # strip any "## Unreleased" / "## [Unreleased]" block — its
+   # content should land in a real fragment via `bin/changelog add`
+   # so it shows up under the rendered Unreleased section. Otherwise
+   # render produces TWO Unreleased sections (one synthesized, one
+   # in the legacy blob), which surprised the first two pilot
+   # consumers.
+   awk '
+     /^# Changelog$/ { next }
+     /^##[[:space:]]+\[?Unreleased\]?[[:space:]]*$/ { in_unreleased=1; next }
+     in_unreleased && /^## / { in_unreleased=0 }
+     in_unreleased { next }
+     { print }
+   ' CHANGELOG.md > CHANGELOG/legacy.md
+   ```
+   If the stripped Unreleased section had non-empty content,
+   capture it as a fragment first:
+   ```sh
+   # Optional, only if the existing [Unreleased] had bullets:
+   bin/changelog add pre-migration-unreleased <<'EOF'
+   <paste the old Unreleased bullets here>
+   EOF
    ```
    No per-version splitting, no copy of the whole file as a
    pseudo-"version." The render step appends `CHANGELOG/legacy.md`
