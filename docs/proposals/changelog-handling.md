@@ -222,6 +222,28 @@ Per-repo, one-shot, no fleet-wide coordination required:
 
 No flag day. Repos migrate when their next release goes out.
 
+## Adjacent opportunity: tag + GitHub release notes from the fragment
+
+Orthogonal but cheap to wire up at the same time. When
+`bin/changelog-cut <version>` produces `CHANGELOG/<version>.md`,
+that file is already exactly the right content for:
+
+- The annotated git tag message (`git tag -a v<version> -F CHANGELOG/<version>.md`).
+- The GitHub release notes body (`gh release create v<version> -F CHANGELOG/<version>.md`).
+
+Today most stacks either leave tag messages empty or generate
+auto-notes from commit titles, which is noisier than the curated
+fragment. Plumbing this through the release flow means:
+
+- Rust stacks: cargo-release can read the tag message from a hook
+  (`tag-message` setting), pointing at the freshly-cut file.
+- Non-Rust stacks: the release workflow's `gh release create` step
+  passes `-F CHANGELOG/<version>.md`.
+
+Net result: one authored artifact (the fragment) becomes the
+section in `CHANGELOG.md`, the annotated tag, and the GitHub
+release body — no copy-paste, no drift between them.
+
 ## Open questions
 
 - **Pre-commit drift check: in release/ or in consumers?** Probably
