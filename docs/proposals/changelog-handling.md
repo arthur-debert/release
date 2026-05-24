@@ -71,19 +71,20 @@ multi-stack and conflict problems together.
 ├── CHANGELOG.md                 # GENERATED — do not edit
 └── CHANGELOG/
     ├── README.txt               # explains the directory, points at bin/changelog
-    ├── unreleased-<slug>.md     # one per in-flight entry
-    ├── unreleased-<slug>.md
+    ├── legacy.md                # pre-adoption CHANGELOG.md verbatim (optional, see Migration)
+    ├── unreleased-pr-142.md     # one per in-flight entry
+    ├── unreleased-pr-145.md
     ├── 0.4.2.md                 # one per released version
     ├── 0.4.1.md
     └── 0.4.0.md
 ```
 
 - `CHANGELOG/` is the source of truth.
-- `CHANGELOG.md` at the repo root is **generated** by concatenating
-  the per-version files in descending semver order, prefixed with
-  a "do not edit" header. It is committed (so consumers, crates.io,
-  GitHub releases, and `cargo package` see the rendered file
-  without needing to run our tooling).
+- `CHANGELOG.md` at the repo root is **generated** with the
+  structure spelled out under *Rendered format* below. It is
+  committed (so consumers, crates.io, GitHub releases, and
+  `cargo package` see the rendered file without needing to run our
+  tooling).
 - `unreleased-<slug>.md` files are fragments. `<slug>` is the PR
   number when known (`unreleased-pr-142.md`) and a short
   kebab-case tag otherwise (`unreleased-fix-token-leak.md`). The
@@ -97,13 +98,32 @@ multi-stack and conflict problems together.
   - Fix tokenizer crash on empty input (#142)
   ```
 
+- `CHANGELOG/<version>.md` files contain the `## <version> - <date>`
+  header followed by the concatenated bullets. They are produced
+  by `bin/changelog-cut` and not edited by hand afterward.
+- `CHANGELOG/legacy.md` (optional) holds the pre-adoption
+  `CHANGELOG.md` content verbatim — see *Migration*.
+
 ### Rendered format
 
 `CHANGELOG.md` preserves the cargo-release-compatible format so
-nothing downstream breaks:
+nothing downstream breaks. The rendered file is exactly:
+
+1. Fixed prelude: `<!-- generated - do not edit. See CHANGELOG/README.txt -->` then a blank line then `# Changelog` then a blank line.
+2. `## Unreleased` section, with the concatenation of every
+   `CHANGELOG/unreleased-*.md` file (sorted by filename
+   ascending — stable, locale-independent).
+3. One section per `CHANGELOG/<version>.md` file, in descending
+   semver order (see *Ordering* below). Each file already
+   contains its own `## <version> - <date>` header, so render
+   just concatenates them with a blank line separator.
+4. If `CHANGELOG/legacy.md` exists, its contents are appended
+   verbatim at the end.
+
+Example output:
 
 ```markdown
-<!-- generated — do not edit. See CHANGELOG/README.txt -->
+<!-- generated - do not edit. See CHANGELOG/README.txt -->
 
 # Changelog
 
@@ -112,17 +132,34 @@ nothing downstream breaks:
 - Fix tokenizer crash on empty input (#142)
 - Add --json output to status (#145)
 
-## 0.4.2 — 2026-05-20
+## 0.4.2 - 2026-05-20
 
 - Fix race condition in cache invalidation (#138)
 
-## 0.4.1 — 2026-05-12
+## 0.4.1 - 2026-05-12
 ...
 ```
 
-The `## Unreleased` section is rendered from the `unreleased-*.md`
-fragments at generation time. Per-version sections come from
-`CHANGELOG/<version>.md`.
+### Ordering
+
+Render output must be stable across macOS (BSD) and Linux (GNU)
+runners. `sort -V` is GNU-only and `sort` lexicographic order
+breaks for `0.10.0` vs `0.9.0`, so we don't lean on shell sort
+for versions.
+
+- **Unreleased fragments**: plain ascending byte sort on filename
+  (`ls CHANGELOG/unreleased-*.md | LC_ALL=C sort`). Order
+  between fragments doesn't carry meaning; we just need it
+  stable.
+- **Version files**: parse `<major>.<minor>.<patch>(-<pre>)?` from
+  the filename and sort numerically (descending). Pre-releases
+  (`1.2.3-rc.1`) sort *below* their release (`1.2.3`), matching
+  semver §11. Implementation: a 15-line awk/sed pipeline or a
+  shelled-out `python3 -c "import packaging.version; ..."`.
+  Concrete choice deferred to implementation; the contract is
+  "semver-correct descending."
+- Render must fail loudly if a `CHANGELOG/<version>.md` filename
+  doesn't parse as semver, rather than silently dropping it.
 
 ### Scripts (in `bin/`)
 
@@ -132,28 +169,48 @@ top-level verb namespace:
 
 | Script | Purpose |
 |---|---|
-| `bin/changelog-add <slug> <content>` | Write `CHANGELOG/unreleased-<slug>.md` with `<content>` as the body. If `<slug>` is numeric, prefixes it with `pr-`. Re-running with the same slug overwrites. |
-| `bin/changelog-cut <version>` | Concat all `unreleased-*.md` into `CHANGELOG/<version>.md` (with `## <version> — <date>` header), then delete the unreleased fragments. |
+| `bin/changelog-add <slug> [content...]` | Write `CHANGELOG/unreleased-<slug>.md`. Body is read from stdin if no `content` args are given, otherwise from joined args. If `<slug>` is numeric, prefixes it with `pr-`. **Fails if the target file already exists**; pass `--force` to overwrite. |
+| `bin/changelog-cut <version>` | Concat all `unreleased-*.md` into `CHANGELOG/<version>.md` (with `## <version> - <date>` header), then delete the unreleased fragments. |
 | `bin/changelog-render` | Regenerate `CHANGELOG.md` from `CHANGELOG/*.md`. Idempotent. |
 | `bin/changelog` | Orchestrator. `bin/changelog new-version <version>` runs `cut` then `render`. `bin/changelog add ...` forwards to `changelog-add`. Single entry point for humans; the dash-suffixed variants are for hooks and scripts that want to be explicit. |
+
+Invocation patterns for `changelog-add`:
+
+```sh
+# inline single bullet
+bin/changelog-add pr-142 "- Fix tokenizer crash on empty input (#142)"
+
+# multi-line body via stdin (preferred in CI / for multi-bullet entries)
+bin/changelog-add pr-145 <<'EOF'
+- Add --json output to status (#145)
+- Bonus: --json also emits exit-code metadata
+EOF
+```
 
 Each script is ~10–30 lines of shell. No markdown parsing — only
 file concat, header prepending, and `rm`.
 
 ### cargo-release integration
 
-For Rust stacks, `release.toml` gets a pre-release hook:
+For Rust stacks, `release.toml` gets a pre-release hook *and*
+must disable cargo-release's built-in changelog promotion:
 
 ```toml
 pre-release-hook = ["bin/changelog", "new-version", "{{version}}"]
+
+# disable cargo-release's own CHANGELOG.md surgery — bin/changelog
+# already produced the final rendered file in the hook above.
+pre-release-replacements = []
 ```
 
 This runs *before* cargo-release stages files, so the freshly
 generated `CHANGELOG.md` and the new `CHANGELOG/<version>.md`
 land in the release commit alongside the `Cargo.toml` bump. The
 old "cargo-release parses the Unreleased section" mechanism is
-no longer needed — we generate the same shape, but from
-fragments.
+explicitly turned off — if left enabled, cargo-release would
+look for an `## Unreleased` section in our already-rendered file
+and either re-promote it (duplicating the section) or fail
+because we already emptied it.
 
 ### Non-Rust stacks
 
@@ -201,26 +258,45 @@ release) the rendered file regenerates. In practice the second
 write is automated, but it does mean fragments and rendered
 output exist in parallel between releases.
 
-**Con: Slug discipline.** If two PRs pick the same slug, the
-second overwrites the first silently. PR-number slugs avoid
-this; the freeform fallback needs reviewer attention.
+**Con: Slug discipline.** If two PRs pick the same slug,
+`changelog-add` fails fast (the file already exists, no
+`--force`), so the second author has to pick a new slug rather
+than silently clobbering the first entry. PR-number slugs make
+this a non-issue in the common case; the failure path only
+kicks in for the freeform fallback.
 
 ## Migration
 
-Per-repo, one-shot, no fleet-wide coordination required:
+Per-repo, one-shot, no fleet-wide coordination required. The key
+move is to treat the existing `CHANGELOG.md` as a **legacy blob**
+rather than retroactively splitting it into per-version files:
 
 1. Land `bin/changelog*` in release/ and add to the release-sync
    manifest.
 2. In each consumer repo, `release-sync` brings down the new
    scripts.
-3. Initialize: `mkdir CHANGELOG && cp CHANGELOG.md CHANGELOG/0.x.y.md`
-   for the most recent version, leaving the existing `CHANGELOG.md`
-   alone. Future versions render new files alongside the historical
-   blob; we do not retroactively split the history.
-4. Rust stacks: update `release.toml` pre-release hook.
-5. Non-Rust stacks: update the release workflow's first step.
+3. Initialize:
+   ```sh
+   mkdir CHANGELOG
+   # capture the existing rendered history, stripping the top-level
+   # "# Changelog" header so the render output has exactly one.
+   sed '/^# Changelog$/d' CHANGELOG.md > CHANGELOG/legacy.md
+   ```
+   No per-version splitting, no copy of the whole file as a
+   pseudo-"version." The render step appends `CHANGELOG/legacy.md`
+   verbatim at the end of the new `CHANGELOG.md`, so historical
+   content stays visible without being misclassified.
+4. Run `bin/changelog-render` to overwrite `CHANGELOG.md` with the
+   new format (which, at this point, is just the prelude + empty
+   Unreleased + legacy blob — identical history, new structure).
+5. Rust stacks: update `release.toml` pre-release hook and clear
+   `pre-release-replacements` (see *cargo-release integration*).
+6. Non-Rust stacks: update the release workflow's first step.
 
-No flag day. Repos migrate when their next release goes out.
+No flag day. Repos migrate when their next release goes out. The
+first post-migration release produces the first real
+`CHANGELOG/<version>.md`; everything older stays in `legacy.md`
+forever (no retroactive split needed).
 
 ## Adjacent opportunity: tag + GitHub release notes from the fragment
 
@@ -253,5 +329,5 @@ release body — no copy-paste, no drift between them.
   branches?** Tempting (you can't open a PR without a fragment)
   but probably out of scope for v1. Start with social
   convention + reviewer enforcement.
-- **Date format in `## <version> — <date>` headers.** ISO
+- **Date format in `## <version> - <date>` headers.** ISO
   `YYYY-MM-DD`, matching cargo-release defaults.
