@@ -1,31 +1,28 @@
 #!/usr/bin/env bash
-# Roll a changelog for a release. Supports two conventions:
+# Roll a changelog for a release using the fragment-directory model
+# (per docs/proposals/changelog-handling.md and tracker #201).
 #
-#  1. **Fragment-directory** (canonical, per docs/proposals/changelog-handling.md
-#     and tracker #201). Detected when a `CHANGELOG/` directory exists
-#     at the same level as <changelog>. Delegates to `bin/changelog`:
-#       - `roll` runs `bin/changelog new-version <version>` (cut + render),
-#         then copies the new CHANGELOG/<version>.md body (without the
-#         `## <version> - YYYY-MM-DD` header) to <out-notes>.
-#       - `extract` concatenates the current CHANGELOG/unreleased-*.md
-#         fragments into <out-notes>.
-#     Resume case (tag already exists): cut already ran on the tagged
-#     commit, so `extract` reads CHANGELOG/<version>.md instead of the
-#     unreleased fragments.
+# Requires a `CHANGELOG/` directory at the same level as <changelog>.
+# Delegates to `bin/changelog`:
+#   - `roll` runs `bin/changelog new-version <version>` (cut + render),
+#     then copies the new CHANGELOG/<version>.md body (without the
+#     `## <version> - YYYY-MM-DD` header) to <out-notes>.
+#   - `extract` concatenates the current CHANGELOG/unreleased-*.md
+#     fragments into <out-notes>.
+#   Resume case (tag already exists): cut already ran on the tagged
+#   commit, so `extract` reads CHANGELOG/<version>.md instead of the
+#   unreleased fragments.
 #
-#  2. **Keep-a-Changelog single-file** (legacy). Used when no
-#     `CHANGELOG/` directory is present. Reads/rewrites the
-#     `## [Unreleased]` section in <changelog>. The
-#     "[Unreleased] must be non-empty" rule forces a brief entry
-#     before cutting a patch immediately after a final release.
+# Legacy single-file mode is retired. Invoking this script without
+# a CHANGELOG/ directory exits with an error pointing at the
+# migration docs.
 #
 # Usage:
 #   roll-changelog.sh extract <changelog> <out-notes> [version]
 #       Write release notes to <out-notes>.
-#       Fragment-dir: notes come from CHANGELOG/unreleased-*.md, or from
-#       CHANGELOG/<version>.md if <version> is given and the cut already
-#       happened (resume case).
-#       Single-file: notes come from `## [Unreleased]`.
+#       Notes come from CHANGELOG/unreleased-*.md, or from
+#       CHANGELOG/<version>.md if <version> is given and the cut
+#       already happened (resume case).
 #
 #   roll-changelog.sh roll <changelog> <version> <out-notes>
 #       Cut the unreleased content into a versioned section, then
@@ -82,8 +79,10 @@ fragment_body() {
 
 legacy_error() {
   echo "::error::Legacy single-file changelog mode has been retired." >&2
-  echo "::error::Migrate to the fragment-directory model: mkdir CHANGELOG && bin/changelog render." >&2
-  echo "::error::See https://github.com/arthur-debert/release/blob/main/docs/proposals/changelog-handling.md" >&2
+  echo "::error::Migration: (1) move existing entries to CHANGELOG/legacy.md," >&2
+  echo "::error::(2) run 'release-sync' to pull bin/changelog* into the repo," >&2
+  echo "::error::(3) run 'bin/changelog render' to regenerate CHANGELOG.md." >&2
+  echo "::error::See docs/proposals/changelog-handling.md for details." >&2
   exit 1
 }
 
