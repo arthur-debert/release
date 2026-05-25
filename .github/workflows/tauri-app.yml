@@ -336,6 +336,8 @@ jobs:
 
       - name: Install JS deps
         shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/scripts/install-js-deps.sh
 
       - name: Set Apple signing env (macOS, signing only)

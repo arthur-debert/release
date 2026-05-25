@@ -189,7 +189,14 @@ for lock in pnpm-lock.yaml package-lock.json yarn.lock "${TAURI_DIR}/src-tauri/C
   fi
 done
 
-if git diff --cached --quiet; then
+version_files_changed=false
+for vf in "${pkg}" "${cargo}" "${tauri_conf}"; do
+  if ! git diff --cached --quiet -- "${vf}" 2>/dev/null; then
+    version_files_changed=true
+    break
+  fi
+done
+if [ "${version_files_changed}" = "false" ]; then
   echo "::error::no version-file changes after bump — was the version already at ${NEW_VERSION}?"
   exit 1
 fi

@@ -19,10 +19,19 @@ set -euo pipefail
 
 fail=0
 
+: "${APPLE_CERT_PRESENT:=no}"
+: "${APPLE_ID_PRESENT:=no}"
+: "${NOTARY_ID_PRESENT:=no}"
+: "${NOTARY_PASS_PRESENT:=no}"
+: "${NOTARY_TEAM_PRESENT:=no}"
+
 if [ "${BUILD_MAC:-false}" = "true" ]; then
   for v in APPLE_CERT_PRESENT APPLE_ID_PRESENT; do
     if [ "${!v}" = "no" ]; then
-      name="${v%_PRESENT}"
+      case "${v}" in
+        APPLE_CERT_PRESENT) name="APPLE_CERTIFICATE" ;;
+        APPLE_ID_PRESENT)   name="APPLE_SIGNING_IDENTITY" ;;
+      esac
       echo "::error::build-mac=true but ${name} secret is missing"
       fail=1
     fi
