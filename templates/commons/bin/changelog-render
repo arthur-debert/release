@@ -128,6 +128,7 @@ trap 'rm -f "${tmp:-}"' EXIT
   if [[ ${#unreleased[@]} -gt 0 ]]; then
     for f in "${unreleased[@]}"; do
       cat "$f"
+      [[ -s "$f" && "$(tail -c1 "$f")" != "" ]] && printf '\n'
     done
     printf '\n'
   fi

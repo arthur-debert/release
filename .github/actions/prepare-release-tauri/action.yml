@@ -11,7 +11,7 @@ inputs:
     description: 'Version to release (bare semver, e.g. 0.2.0 or 1.0.0-rc.1). No leading v.'
     required: true
   changelog-path:
-    description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`). Empty to skip.'
+    description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`).'
     required: false
     default: 'CHANGELOG.md'
   tauri-dir:

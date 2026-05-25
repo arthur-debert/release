@@ -10,7 +10,7 @@ inputs:
     description: 'Version to release (bare semver). No leading v.'
     required: true
   changelog-path:
-    description: 'Path to CHANGELOG.md. Empty to skip.'
+    description: 'Path to CHANGELOG.md.'
     required: false
     default: 'CHANGELOG.md'
   plugin-root:
@@ -18,7 +18,7 @@ inputs:
     required: false
     default: '.'
   version-file:
-    description: 'Lua file with M.version to bump. Empty to skip.'
+    description: 'Lua file with M.version to bump.'
     required: false
     default: ''
   prep-script:

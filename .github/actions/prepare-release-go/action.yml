@@ -33,6 +33,12 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Check changelog fragments
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+      run: bash "${{ github.action_path }}/../../../scripts/check-changelog-fragments.sh"
+
     - name: Validate and detect resume case
       id: detect
       shell: bash

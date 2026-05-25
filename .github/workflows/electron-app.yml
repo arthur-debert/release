@@ -48,7 +48,7 @@ on:
         required: false
         default: false
       changelog-path:
-        description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section). Empty to skip.'
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section).'
         type: string
         required: false
         default: 'CHANGELOG.md'

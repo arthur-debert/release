@@ -41,6 +41,11 @@ if [[ "${NEW_VERSION}" == *-* ]]; then
   IS_PRERELEASE=true
 fi
 
+# ── Early changelog validation ────────────────────────────────────
+if [ -n "${CHANGELOG}" ]; then
+  CHANGELOG="${CHANGELOG}" bash "${script_dir}/check-changelog-fragments.sh"
+fi
+
 # ── Plugin layout sanity check ────────────────────────────────────
 if [ ! -d "${PLUGIN_ROOT}/lua" ] && [ ! -d "${PLUGIN_ROOT}/plugin" ]; then
   echo "::error::plugin root ${PLUGIN_ROOT} has no lua/ or plugin/ directory. Is this a Neovim plugin?"

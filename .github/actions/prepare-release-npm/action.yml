@@ -12,7 +12,7 @@ inputs:
     description: 'Version to release (e.g. 0.18.0 or 1.0.0-rc.1). No leading v.'
     required: true
   changelog-path:
-    description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section). Empty to skip changelog handling.'
+    description: 'Path to CHANGELOG.md (Keep-a-Changelog format with `## [Unreleased]` section).'
     required: false
     default: 'CHANGELOG.md'
   manifest-path:
@@ -37,6 +37,12 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Check changelog fragments
+      shell: bash
+      env:
+        CHANGELOG: ${{ inputs.changelog-path }}
+      run: bash "${{ github.action_path }}/../../../scripts/check-changelog-fragments.sh"
+
     - name: Validate and detect resume case
       id: detect
       shell: bash
