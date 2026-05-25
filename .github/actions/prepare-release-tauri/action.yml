@@ -1,0 +1,52 @@
+name: 'Prepare Tauri release'
+description: |
+  Validate semver, bump the three Tauri version files (package.json,
+  Cargo.toml, tauri.conf.json), roll changelog, run pre-commit gate,
+  commit + tag + push. Resume-on-failure: if the tag already exists
+  with matching package.json version, skip the bump and emit the
+  tag's SHA so downstream jobs can re-run cleanly.
+
+inputs:
+  version:
+    description: 'Version to release (bare semver, e.g. 0.2.0 or 1.0.0-rc.1). No leading v.'
+    required: true
+  changelog-path:
+    description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`). Empty to skip.'
+    required: false
+    default: 'CHANGELOG.md'
+  tauri-dir:
+    description: 'Path to the Tauri project root (where src-tauri/ lives).'
+    required: false
+    default: '.'
+  prep-script:
+    description: 'Optional consumer prep-script path, run before the canonical bump.'
+    required: false
+    default: ''
+
+outputs:
+  version:
+    description: 'Validated version (no leading v)'
+    value: ${{ steps.prep.outputs.version }}
+  release-sha:
+    description: 'Commit SHA of the tag (for downstream jobs to checkout)'
+    value: ${{ steps.prep.outputs.release-sha }}
+  prerelease:
+    description: '"true" if version contains a pre-release suffix'
+    value: ${{ steps.prep.outputs.prerelease }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Tauri Linux build dependencies
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../scripts/install-tauri-linux-deps.sh"
+
+    - name: Prepare Tauri release
+      id: prep
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        TAURI_DIR: ${{ inputs.tauri-dir }}
+        CHANGELOG: ${{ inputs.changelog-path }}
+        PREP_SCRIPT: ${{ inputs.prep-script }}
+      run: bash "${{ github.action_path }}/../../../scripts/prepare-tauri-release.sh"

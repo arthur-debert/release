@@ -1,0 +1,44 @@
+name: 'Compute Tauri build matrix'
+description: |
+  Build a JSON matrix of {os, platform, bundles} entries from
+  the build-{mac,linux,windows} toggle inputs.
+
+inputs:
+  build-mac:
+    required: false
+    default: 'true'
+  build-linux:
+    required: false
+    default: 'true'
+  build-windows:
+    required: false
+    default: 'true'
+  bundle-targets-mac:
+    required: false
+    default: ''
+  bundle-targets-linux:
+    required: false
+    default: ''
+  bundle-targets-windows:
+    required: false
+    default: ''
+
+outputs:
+  targets:
+    description: 'JSON array of {os, platform, bundles} objects'
+    value: ${{ steps.matrix.outputs.targets }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Compute matrix
+      id: matrix
+      shell: bash
+      env:
+        BUILD_MAC: ${{ inputs.build-mac }}
+        BUILD_LINUX: ${{ inputs.build-linux }}
+        BUILD_WINDOWS: ${{ inputs.build-windows }}
+        BUNDLE_MAC: ${{ inputs.bundle-targets-mac }}
+        BUNDLE_LINUX: ${{ inputs.bundle-targets-linux }}
+        BUNDLE_WINDOWS: ${{ inputs.bundle-targets-windows }}
+      run: bash "${{ github.action_path }}/../../../scripts/compute-tauri-matrix.sh"
