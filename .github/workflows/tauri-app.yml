@@ -227,40 +227,7 @@ jobs:
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
     steps:
-      - name: Validate Apple secrets
-        run: |
-          set -euo pipefail
-          fail=0
-          # Note: APPLE_CERTIFICATE_PASSWORD intentionally NOT required.
-          # Passwordless .p12s are valid (the password is just the
-          # wrapping passphrase, optional per PKCS12 spec). Tauri /
-          # `security import` accept empty passwords; gating on
-          # password-presence would force consumers to set placeholder
-          # secrets, which is footgun-prone.
-          if [ "${BUILD_MAC}" = "true" ]; then
-            for v in APPLE_CERT_PRESENT APPLE_ID_PRESENT; do
-              if [ "${!v}" = "no" ]; then
-                name="${v%_PRESENT}"
-                echo "::error::build-mac=true but ${name} secret is missing"
-                fail=1
-              fi
-            done
-          fi
-          if [ "${BUILD_MAC}" = "true" ] && [ "${NOTARIZE}" = "true" ]; then
-            for v in NOTARY_ID_PRESENT NOTARY_PASS_PRESENT NOTARY_TEAM_PRESENT; do
-              if [ "${!v}" = "no" ]; then
-                # Map back to the actual secret name for the error msg.
-                case "${v}" in
-                  NOTARY_ID_PRESENT)   name="APPLE_ID" ;;
-                  NOTARY_PASS_PRESENT) name="APPLE_PASSWORD" ;;
-                  NOTARY_TEAM_PRESENT) name="APPLE_TEAM_ID" ;;
-                esac
-                echo "::error::notarize=true but ${name} secret is missing"
-                fail=1
-              fi
-            done
-          fi
-          exit "${fail}"
+      - uses: arthur-debert/release/.github/actions/validate-apple-secrets@v1
 
   # -------------------------------------------------------------------
   # 1. Prepare: bump all three version files (package.json,
@@ -282,390 +249,13 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - name: Install Tauri Linux build dependencies
-        # The pre-commit gate (inside the next step) runs the consumer's
-        # lefthook pre-commit hooks against the staged bump files. A
-        # tauri consumer's hook stack usually includes `cargo clippy`
-        # over `src-tauri/**/Cargo.toml`, which forces `glib-sys` (a
-        # transitive dep of `tauri`) to compile — and that needs
-        # `glib-2.0` + the rest of the Tauri Linux system deps. The
-        # build-linux job installs these before its own clippy/build;
-        # prepare needs the same surface available so the gate doesn't
-        # die at "Package 'glib-2.0' not found". Cheap (~20s); always
-        # run regardless of whether the consumer builds for Linux, so
-        # that consumers without `linux-archs` still get a healthy gate.
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
-
-      - name: Validate + bump three version files
+      - uses: arthur-debert/release/.github/actions/prepare-release-tauri@v1
         id: prep
-        shell: bash
-        env:
-          NEW_VERSION: ${{ inputs.version }}
-          TAURI_DIR: ${{ inputs.tauri-dir }}
-          CHANGELOG: ${{ inputs.changelog-path }}
-          PREP_SCRIPT: ${{ inputs.prep-script }}
-        run: |
-          set -euo pipefail
-
-          if ! [[ "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
-            echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: ${NEW_VERSION})"
-            exit 1
-          fi
-
-          IS_PRERELEASE=false
-          if [[ "${NEW_VERSION}" == *-* ]]; then
-            IS_PRERELEASE=true
-          fi
-
-          # Sanity-check the three version files exist before we
-          # start mutating any of them. Partial bumps are worse than
-          # no bump.
-          pkg="${TAURI_DIR}/package.json"
-          cargo="${TAURI_DIR}/src-tauri/Cargo.toml"
-          tauri_conf="${TAURI_DIR}/src-tauri/tauri.conf.json"
-          for f in "${pkg}" "${cargo}" "${tauri_conf}"; do
-            if [ ! -f "${f}" ]; then
-              echo "::error::expected file not found: ${f}"
-              exit 1
-            fi
-          done
-
-          TAG="v${NEW_VERSION}"
-          git fetch --tags origin >/dev/null 2>&1 || true
-
-          # Resume case: tag already exists. Cross-check package.json
-          # matches (the canonical version source) and resume.
-          if git rev-parse "${TAG}" >/dev/null 2>&1; then
-            TAG_SHA=$(git rev-list -n 1 "${TAG}")
-            TAG_VERSION="$(git show "${TAG}:${pkg}" 2>/dev/null | jq -r '.version // empty')"
-            if [ "${TAG_VERSION}" = "${NEW_VERSION}" ]; then
-              echo "tag ${TAG} already exists at ${TAG_SHA} (${pkg} matches) — resuming"
-              echo "release-sha=${TAG_SHA}" >> "${GITHUB_OUTPUT}"
-              # Re-extract release notes for the resume case. Branches:
-              #  - fragment-dir + final release: CHANGELOG/<v>.md exists
-              #    (cut happened on the tagged commit) → read it.
-              #  - fragment-dir + prerelease: cut did NOT happen
-              #    (prereleases concat live fragments) → re-concat now.
-              #  - legacy single-file: extract from the file as before.
-              if [ -z "${CHANGELOG:-}" ]; then
-                echo "Release ${TAG}" > release-notes.md
-              else
-                CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
-                if [ -d "${CHANGELOG_DIR}" ]; then
-                  if [ -f "${CHANGELOG_DIR}/${NEW_VERSION}.md" ]; then
-                    awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
-                      "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
-                  else
-                    # Prerelease resume: fragments still live at unreleased-*.md.
-                    mapfile -t fragments < <(LC_ALL=C ls "${CHANGELOG_DIR}"/unreleased-*.md 2>/dev/null || true)
-                    if [ "${#fragments[@]}" -gt 0 ]; then
-                      cat "${fragments[@]}" > release-notes.md
-                    fi
-                  fi
-                elif [ -f "${CHANGELOG}" ]; then
-                  if [ "${IS_PRERELEASE}" = "true" ]; then
-                    awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
-                      "${CHANGELOG}" > release-notes.md
-                  else
-                    awk -v v="${NEW_VERSION}" '$0 ~ "^## \\[" v "\\]"{c=1;next} c&&/^## \[/{exit} c{print}' \
-                      "${CHANGELOG}" > release-notes.md
-                  fi
-                fi
-                [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
-              fi
-              echo "version=${NEW_VERSION}" >> "${GITHUB_OUTPUT}"
-              echo "prerelease=${IS_PRERELEASE}" >> "${GITHUB_OUTPUT}"
-              exit 0
-            fi
-            echo "::error::tag ${TAG} exists but ${pkg} at that commit is '${TAG_VERSION}', not '${NEW_VERSION}'"
-            exit 1
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          # Optional consumer prep-script. Runs BEFORE the canonical
-          # three-file bump. The script gets NEW_VERSION + TAURI_DIR
-          # via env (already exported above) and is responsible for
-          # `git add`-ing whatever it mutates — the final
-          # `git diff --cached --quiet` check at the end of this
-          # step will fail loudly if nothing got staged across the
-          # prep-script + the standard bumps combined.
-          if [ -n "${PREP_SCRIPT:-}" ]; then
-            if [ ! -f "${PREP_SCRIPT}" ]; then
-              echo "::error::prep-script not found: ${PREP_SCRIPT}"
-              exit 1
-            fi
-            echo "→ running consumer prep-script: ${PREP_SCRIPT}"
-            bash "${PREP_SCRIPT}"
-            # Defend against prep-scripts that mutate files but
-            # forget to `git add` them. Unstaged mutations would
-            # be silently dropped at commit time.
-            if ! git diff --quiet; then
-              echo "::error::prep-script mutated files but didn't \`git add\` them. Stage the modifications in the script (use \`git add\` after each mutation), or \`git stash\` them if intentionally out-of-release-scope."
-              git diff --stat
-              exit 1
-            fi
-          fi
-
-          # Surgical version-string replacement for a JSON file.
-          # Format-preserving: changes ONLY the value between the
-          # quotes on the first matching `"version": "..."` line.
-          # Preserves indent style (tab vs space, any width), inline
-          # array formatting, field order, and intra-line whitespace.
-          # Caveat: awk's `print` always emits a trailing newline, so
-          # an input file that lacked one will gain one — typically a
-          # non-issue (most editors auto-add one) but it's a one-byte
-          # delta in that edge case.
-          #
-          # Match heuristic: `^[[:space:]]+"version"[[:space:]]*:` —
-          # requires the key to appear on a line that starts with
-          # indent whitespace (i.e. NOT on the opening `{` line, NOT
-          # in a nested object's serialized form on a single line).
-          # In strict JSON this picks up the top-level `version`
-          # field for both package.json and tauri.conf.json across
-          # the managed portfolio. Consumers with a more exotic
-          # layout (multi-line value, escaped `\"version\"` inside a
-          # string preceding the real key) would need a different
-          # tool — this workflow targets strict JSON only.
-          #
-          # Why not jq: jq is a reformatter, not a surgical editor.
-          # It always rewrites with its own indent flag AND expands
-          # inline arrays into multi-line form regardless. Consumers
-          # with hand-formatted JSON (arami's tauri.conf.json:
-          # tab-indented + inline icon arrays) would see the
-          # post-bump file fail their prettier/eslint pre-commit
-          # gate, which aborts the canonical's bot commit.
-          # (Real failure: arami-app v0.1.8 dispatch
-          # https://github.com/arthur-debert/arami-app/actions/runs/26317444019)
-          bump_json_version() {
-            local file="$1"
-            local new_v="$2"
-            awk -v v="${new_v}" '
-              !bumped && /^[[:space:]]+"version"[[:space:]]*:[[:space:]]*"/ {
-                match($0, /"version"[[:space:]]*:[[:space:]]*"/)
-                head_len = RSTART + RLENGTH - 1
-                rest = substr($0, head_len + 1)
-                closing = index(rest, "\"")
-                if (closing > 0) {
-                  $0 = substr($0, 1, head_len) v substr($0, head_len + closing)
-                  bumped = 1
-                }
-              }
-              { print }
-              END {
-                if (!bumped) {
-                  print "::error::no top-level \"version\" key found in " FILENAME > "/dev/stderr"
-                  exit 1
-                }
-              }
-            ' "$file" > "${file}.tmp"
-            mv "${file}.tmp" "$file"
-          }
-
-          # Bump package.json — preserves every byte except the
-          # version string itself.
-          bump_json_version "${pkg}" "${NEW_VERSION}"
-
-          # Bump src-tauri/Cargo.toml — scoped to the [package] table
-          # (Cargo files have other version = entries under [dependencies]).
-          # Reuses the same awk pattern as prepare-release-python's
-          # pyproject bump (single OR double quotes, indented or not,
-          # trailing comments preserved).
-          awk -v v="${NEW_VERSION}" '
-            BEGIN { q = "[\042\047]" }
-            {
-              sub(/\r$/, "")
-              if ($0 ~ /^[[:space:]]*\[/) {
-                h = $0
-                sub(/#.*/, "", h)
-                gsub(/[[:space:]]/, "", h)
-                in_pkg = (h == "[package]")
-                print
-                next
-              }
-              if (in_pkg && !bumped && $0 ~ ("^[[:space:]]*version[[:space:]]*=[[:space:]]*" q)) {
-                leading = $0
-                sub(/[^[:space:]].*/, "", leading)
-                trailing = ""
-                if (match($0, /[[:space:]]+#.*$/)) {
-                  trailing = substr($0, RSTART, RLENGTH)
-                }
-                print leading "version = \"" v "\"" trailing
-                bumped = 1
-                next
-              }
-              print
-            }
-            END {
-              if (!bumped) {
-                print "::error::no [package].version in Cargo.toml" > "/dev/stderr"
-                exit 1
-              }
-            }
-          ' "${cargo}" > "${cargo}.tmp"
-          mv "${cargo}.tmp" "${cargo}"
-
-          # Bump src-tauri/tauri.conf.json. The `.version` field is
-          # optional in tauri.conf.json (defaults to package.json) —
-          # only bump if the file actually carries one. Use jq just
-          # to detect presence (read-only); the bump itself is
-          # surgical via bump_json_version.
-          if [ "$(jq -r '.version // empty' "${tauri_conf}")" != "" ]; then
-            bump_json_version "${tauri_conf}" "${NEW_VERSION}"
-          fi
-
-          # Roll changelog + extract notes. Four branches (mirrors
-          # gh-action.yml and nvim-plugin.yml).
-          if [ -z "${CHANGELOG:-}" ]; then
-            echo "Release ${TAG}" > release-notes.md
-          else
-            CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
-            if [ -d "${CHANGELOG_DIR}" ]; then
-              # Fragment-dir (per #201): delegate to bin/changelog.
-              if [ ! -x bin/changelog ]; then
-                echo "::error::${CHANGELOG_DIR} exists (fragment-dir mode) but bin/changelog is missing or not executable."
-                echo "::error::Run 'release-sync' to pull bin/changelog* (with bin/share/semver-tool/) into this repo."
-                exit 1
-              fi
-              if [ "${IS_PRERELEASE}" != "true" ]; then
-                # bin/changelog walks up cwd for CHANGELOG/, so cd
-                # next to the changelog file first — otherwise on
-                # monorepos with multiple changelogs (root +
-                # per-package) the wrong CHANGELOG/ gets cut. Same
-                # pattern as scripts/roll-changelog.sh.
-                (
-                  cd "$(dirname "${CHANGELOG}")"
-                  bin/changelog new-version "${NEW_VERSION}"
-                )
-                awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
-                  "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md
-                git add "${CHANGELOG}" "${CHANGELOG_DIR}/"
-              else
-                # Prereleases don't cut — concat fragments.
-                mapfile -t fragments < <(LC_ALL=C ls "${CHANGELOG_DIR}"/unreleased-*.md 2>/dev/null || true)
-                if [ "${#fragments[@]}" -gt 0 ]; then
-                  cat "${fragments[@]}" > release-notes.md
-                else
-                  echo "Release ${TAG}" > release-notes.md
-                fi
-              fi
-            elif [ -f "${CHANGELOG}" ]; then
-              # Legacy single-file Keep-a-Changelog. `c{print}` (not
-              # `c&&/\S/`) keeps blank lines within [Unreleased] so
-              # re-runs produce identical release notes.
-              awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c{print}' \
-                "${CHANGELOG}" > release-notes.md
-              if [ "${IS_PRERELEASE}" != "true" ]; then
-                today=$(date -u +%F)
-                replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
-                awk -v repl="${replacement}" '
-                  /^## \[Unreleased\]/ { print repl; next } { print }
-                ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
-                mv "${CHANGELOG}.tmp" "${CHANGELOG}"
-                git add "${CHANGELOG}"
-              fi
-            else
-              echo "Release ${TAG}" > release-notes.md
-            fi
-          fi
-          [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
-
-          # Stage all three version files (+ lockfiles if they exist
-          # and were touched). Cargo.lock picks up new version
-          # automatically when cargo runs against the bumped
-          # Cargo.toml; commit any change to keep it consistent.
-          # Use an explicit conditional rather than a chained
-          # `&& ... || ...` (which has surprising precedence —
-          # `cmd1 && cmd2 || cmd3` runs cmd3 whenever cmd1 OR cmd2
-          # fails, not just when cmd1 fails).
-          git add "${pkg}" "${cargo}" "${tauri_conf}"
-          for lock in pnpm-lock.yaml package-lock.json yarn.lock "${TAURI_DIR}/src-tauri/Cargo.lock"; do
-            if [ -f "${lock}" ] && ! git diff --quiet -- "${lock}"; then
-              git add -- "${lock}"
-            fi
-          done
-
-          if git diff --cached --quiet; then
-            echo "::error::no version-file changes after bump — was the version already at ${NEW_VERSION}?"
-            exit 1
-          fi
-
-          # Pre-commit gate — hold the bot commit to the consumer's
-          # own gate. Equivalent to
-          # .github/actions/run-precommit-gate@v1 (canonical
-          # reference); inlined because this step is a single `run:`
-          # block. Set SKIP_PRECOMMIT_GATE=true to bypass.
-          if [ "${SKIP_PRECOMMIT_GATE:-false}" != "true" ]; then
-            mapfile -t staged_arr < <(git diff --cached --name-only)
-            if [ "${#staged_arr[@]}" -gt 0 ]; then
-              if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
-                echo "Pre-commit gate: lefthook"
-                lefthook_file_args=()
-                for f in "${staged_arr[@]}"; do
-                  lefthook_file_args+=(--file "$f")
-                done
-                if [ -f pnpm-lock.yaml ]; then
-                  corepack enable >/dev/null 2>&1 || true
-                  pnpm install --frozen-lockfile --ignore-scripts
-                  pnpm exec lefthook run pre-commit "${lefthook_file_args[@]}"
-                elif [ -f package-lock.json ]; then
-                  npm ci --ignore-scripts
-                  npx --no-install lefthook run pre-commit "${lefthook_file_args[@]}"
-                elif [ -f yarn.lock ]; then
-                  corepack enable >/dev/null 2>&1 || true
-                  yarn install --frozen-lockfile --ignore-scripts
-                  yarn exec lefthook run pre-commit "${lefthook_file_args[@]}"
-                elif command -v lefthook >/dev/null 2>&1; then
-                  lefthook run pre-commit "${lefthook_file_args[@]}"
-                else
-                  npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
-                fi
-              elif [ -f .pre-commit-config.yaml ] || [ -f .pre-commit-config.yml ]; then
-                echo "Pre-commit gate: pre-commit framework"
-                if command -v pipx >/dev/null 2>&1; then
-                  pipx run pre-commit run --files "${staged_arr[@]}"
-                else
-                  python3 -m pip install --user --quiet pre-commit
-                  "$(python3 -m site --user-base)/bin/pre-commit" run --files "${staged_arr[@]}"
-                fi
-              elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
-                echo "Pre-commit gate: husky"
-                bash .husky/pre-commit
-              fi
-              if ! git diff --quiet; then
-                echo "Pre-commit gate produced auto-fixes — re-staging."
-                git add -u
-              fi
-            fi
-          fi
-
-          git commit -m "chore: Release ${TAG}"
-          # Annotate the tag with the rolled release notes when
-          # available (#201 addendum). Falls back to a plain
-          # "Release vX.Y.Z" if release-notes.md is empty.
-          if [ -s release-notes.md ]; then
-            git tag -a "${TAG}" -F release-notes.md
-          else
-            git tag -a "${TAG}" -m "Release ${TAG}"
-          fi
-          git push origin HEAD
-          git push origin "${TAG}"
-
-          {
-            echo "version=${NEW_VERSION}"
-            echo "prerelease=${IS_PRERELEASE}"
-            echo "release-sha=$(git rev-parse HEAD)"
-          } >> "${GITHUB_OUTPUT}"
+        with:
+          version: ${{ inputs.version }}
+          changelog-path: ${{ inputs.changelog-path }}
+          tauri-dir: ${{ inputs.tauri-dir }}
+          prep-script: ${{ inputs.prep-script }}
 
       - name: Upload release notes
         uses: actions/upload-artifact@v4
@@ -687,41 +277,15 @@ jobs:
     outputs:
       targets: ${{ steps.matrix.outputs.targets }}
     steps:
-      - name: Compute matrix
+      - uses: arthur-debert/release/.github/actions/compute-tauri-matrix@v1
         id: matrix
-        env:
-          BUILD_MAC: ${{ inputs.build-mac }}
-          BUILD_LINUX: ${{ inputs.build-linux }}
-          BUILD_WINDOWS: ${{ inputs.build-windows }}
-          BUNDLE_MAC: ${{ inputs.bundle-targets-mac }}
-          BUNDLE_LINUX: ${{ inputs.bundle-targets-linux }}
-          BUNDLE_WINDOWS: ${{ inputs.bundle-targets-windows }}
-        run: |
-          set -euo pipefail
-          json='[]'
-          if [ "${BUILD_MAC}" = "true" ]; then
-            json="$(jq -c \
-              --arg b "${BUNDLE_MAC}" \
-              '. + [{os:"macos-latest", platform:"mac", bundles:$b}]' \
-              <<<"${json}")"
-          fi
-          if [ "${BUILD_LINUX}" = "true" ]; then
-            json="$(jq -c \
-              --arg b "${BUNDLE_LINUX}" \
-              '. + [{os:"ubuntu-latest", platform:"linux", bundles:$b}]' \
-              <<<"${json}")"
-          fi
-          if [ "${BUILD_WINDOWS}" = "true" ]; then
-            json="$(jq -c \
-              --arg b "${BUNDLE_WINDOWS}" \
-              '. + [{os:"windows-latest", platform:"windows", bundles:$b}]' \
-              <<<"${json}")"
-          fi
-          if [ "$(jq 'length' <<<"${json}")" -eq 0 ]; then
-            echo "::error::all build-{mac,linux,windows} inputs are false — nothing to build"
-            exit 1
-          fi
-          echo "targets=${json}" >> "${GITHUB_OUTPUT}"
+        with:
+          build-mac: ${{ inputs.build-mac }}
+          build-linux: ${{ inputs.build-linux }}
+          build-windows: ${{ inputs.build-windows }}
+          bundle-targets-mac: ${{ inputs.bundle-targets-mac }}
+          bundle-targets-linux: ${{ inputs.bundle-targets-linux }}
+          bundle-targets-windows: ${{ inputs.bundle-targets-windows }}
 
   build:
     needs: [prepare, build-matrix]
@@ -735,6 +299,13 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/checkout@v6
+        with:
+          repository: arthur-debert/release
+          ref: v1
+          path: .release
+          sparse-checkout: scripts
 
       # pnpm/action-setup MUST run before setup-node, because
       # setup-node@v6 with `cache: 'pnpm'` invokes `pnpm store path`
@@ -761,103 +332,39 @@ jobs:
 
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            patchelf
+        run: bash .release/scripts/install-tauri-linux-deps.sh
 
       - name: Install JS deps
         shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f pnpm-lock.yaml ]; then
-            pnpm install --frozen-lockfile
-          elif [ -f package-lock.json ]; then
-            npm ci
-          elif [ -f yarn.lock ]; then
-            yarn install --frozen-lockfile
-          else
-            npm install
-          fi
+        run: bash .release/scripts/install-js-deps.sh
 
-      # macOS code-signing setup. Tauri reads APPLE_SIGNING_IDENTITY
-      # to choose the identity and APPLE_CERTIFICATE +
-      # APPLE_CERTIFICATE_PASSWORD to install the cert into a
-      # temporary keychain Tauri sets up itself. We don't need to
-      # roll a keychain manually — Tauri does that during `tauri
-      # build`.
-      - name: Set Apple signing env (macOS)
-        if: matrix.t.platform == 'mac'
+      - name: Set Apple signing env (macOS, signing only)
+        if: matrix.t.platform == 'mac' && !inputs.notarize
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          {
-            echo "APPLE_CERTIFICATE=${APPLE_CERTIFICATE}"
-            echo "APPLE_CERTIFICATE_PASSWORD=${APPLE_CERTIFICATE_PASSWORD}"
-            echo "APPLE_SIGNING_IDENTITY=${APPLE_SIGNING_IDENTITY}"
-          } >> "${GITHUB_ENV}"
+          SIGNING_ONLY: 'true'
+        run: bash .release/scripts/setup-tauri-signing-env.sh
 
-      - name: Set Apple notarization env (macOS)
+      - name: Set Apple signing + notarization env (macOS)
         if: matrix.t.platform == 'mac' && inputs.notarize
         env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          {
-            echo "APPLE_ID=${APPLE_ID}"
-            echo "APPLE_PASSWORD=${APPLE_PASSWORD}"
-            echo "APPLE_TEAM_ID=${APPLE_TEAM_ID}"
-          } >> "${GITHUB_ENV}"
+        run: bash .release/scripts/setup-tauri-signing-env.sh
 
       - name: Build
         shell: bash
         env:
           BUNDLES: ${{ matrix.t.bundles }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
-          # Expose GH_TOKEN so consumer `scripts/build-tauri.sh`
-          # hooks (and any pre-build asset fetchers they shell to,
-          # e.g. `gh release download`, `fetch-artifact`) can
-          # authenticate. arami-app's scripts/fetch-wasm.sh hit
-          # `gh: To use GitHub CLI in a GitHub Actions workflow,
-          # set the GH_TOKEN environment variable` without this.
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: |
-          set -euo pipefail
-          # Build entry resolution (in preference order):
-          #   1. bin/build at repo root — the canonical take-iii entry,
-          #      release-sync managed via the tauri-app stack template.
-          #      Auto-detects pm (pnpm/yarn/npm), runs `<pm> tauri build`.
-          #   2. scripts/build-tauri.sh at repo root — legacy convention
-          #      hook, kept for the transition window. Consumers that
-          #      adopt release-sync get bin/build automatically and
-          #      should delete their scripts/build-tauri.sh.
-          #   3. fallback: npx tauri build (auto-resolves the
-          #      consumer-installed tauri CLI).
-          # All branches `cd "${TAURI_DIR}"` so the entry starts at the
-          # same CWD — monorepo consumers don't have to guess.
-          cd "${TAURI_DIR}"
-          extra=()
-          if [ -n "${BUNDLES}" ]; then
-            extra=(--bundles "${BUNDLES}")
-          fi
-          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
-            "${GITHUB_WORKSPACE}/bin/build" "${extra[@]+"${extra[@]}"}"
-          elif [ -f "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" ]; then
-            # Legacy convention hook (pre-take-iii). The hook may not
-            # honor --bundles — but most builds `exec tauri build "$@"`
-            # and pass args through.
-            bash "${GITHUB_WORKSPACE}/scripts/build-tauri.sh" "${extra[@]+"${extra[@]}"}"
-          else
-            npx tauri build "${extra[@]+"${extra[@]}"}"
-          fi
+        run: bash .release/scripts/build-tauri.sh
 
       - name: Collect bundles
         id: bundles
@@ -865,65 +372,8 @@ jobs:
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
           PLATFORM: ${{ matrix.t.platform }}
-        run: |
-          set -euo pipefail
-          # Tauri writes bundles to
-          # `<tauri-dir>/src-tauri/target/release/bundle/<format>/`.
-          # The exact subdirs vary per-platform; collect everything
-          # under bundle/ and let the upload step ship the lot.
-          bundle_root="${TAURI_DIR}/src-tauri/target/release/bundle"
-          if [ ! -d "${bundle_root}" ]; then
-            echo "::error::bundle root not found: ${bundle_root}"
-            exit 1
-          fi
-          out="${GITHUB_WORKSPACE}/bundle-${PLATFORM}"
-          mkdir -p "${out}"
-          # Copy distributable artifacts only — skip macOS `.app`
-          # source bundles, scripts, and intermediate files. Each
-          # platform's distributables:
-          #   mac:     .dmg, .app.tar.gz (for the updater)
-          #   linux:   .deb, .rpm, .AppImage
-          #   windows: .msi, .exe (NSIS)
-          #
-          # `find` instead of bash globstar — macOS runners ship
-          # bash 3.2 which doesn't support `shopt -s globstar`,
-          # so `**/*.ext` is treated as a literal `**` and no
-          # files match. `find -name` is portable across bash
-          # versions and POSIX find implementations.
-          while IFS= read -r f; do
-            cp "${f}" "${out}/"
-          done < <(find "${bundle_root}" -type f \
-                     \( -name '*.dmg' \
-                        -o -name '*.app.tar.gz' \
-                        -o -name '*.deb' \
-                        -o -name '*.rpm' \
-                        -o -name '*.AppImage' \
-                        -o -name '*.msi' \
-                        -o -name '*.exe' \))
-          count=$(find "${out}" -maxdepth 1 -type f | wc -l | tr -d ' ')
-          echo "Collected ${count} artifacts:"
-          ls -la "${out}"
-          echo "dir=${out}" >> "${GITHUB_OUTPUT}"
+        run: bash .release/scripts/collect-tauri-bundles.sh
 
-      # Smoke test (convention): scripts/smoke.sh. Mirrors
-      # electron-app.yml's smoke pattern. Catches catastrophic build
-      # issues (wrong binary path, dylib missing, Windows path quirks)
-      # — the only way to know the packaged bundle doesn't crash on
-      # launch is to launch it. Skipped cleanly when the file is
-      # absent (hashFiles returns empty string).
-      #
-      # Env vars exposed to the consumer script:
-      #   PLATFORM    mac | linux | windows
-      #   BUNDLE_DIR  absolute path to the collected bundles dir
-      #               (steps.bundles.outputs.dir) — contains every
-      #               distributable artifact for the platform.
-      #   TAURI_DIR   pass-through of the workflow input (so a
-      #               monorepo script can resolve relative paths if
-      #               needed).
-      #
-      # Smoke runs AFTER signing+notarization on macOS — the script
-      # must NOT rewrite bundle contents (would invalidate the
-      # stapled notarization ticket). Launch-only + read-only checks.
       - name: Smoke test
         if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
@@ -951,7 +401,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.prepare.outputs.release-sha }}
+          repository: arthur-debert/release
+          ref: v1
+          path: .release
+          sparse-checkout: scripts
 
       - name: Download release notes
         uses: actions/download-artifact@v4
@@ -971,21 +424,5 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           TAG: v${{ needs.prepare.outputs.version }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
-        run: |
-          set -euo pipefail
-          ls -la bundles/ || true
-          prerelease_flag=""
-          if [ "${PRERELEASE}" = "true" ]; then
-            prerelease_flag="--prerelease"
-          fi
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Release ${TAG} exists — updating notes and re-uploading bundles"
-            gh release edit "${TAG}" --notes-file release-notes.md
-            gh release upload "${TAG}" bundles/* --clobber
-          else
-            gh release create "${TAG}" \
-              ${prerelease_flag} \
-              --title "${TAG}" \
-              --notes-file release-notes.md \
-              bundles/*
-          fi
+          ASSETS_DIR: bundles
+        run: bash .release/scripts/create-github-release.sh
