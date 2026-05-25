@@ -21,6 +21,7 @@ VERSION_FILE="${VERSION_FILE:-}"
 PREP_SCRIPT="${PREP_SCRIPT:-}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SEMVER="$script_dir/../templates/commons/bin/share/semver-tool/semver"
 
 emit() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
@@ -31,13 +32,15 @@ emit() {
 }
 
 # ── Semver validation ──────────────────────────────────────────────
-if ! [[ "${NEW_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+if [[ "${NEW_VERSION}" =~ ^[vV] ]] \
+    || [[ "$("$SEMVER" validate "${NEW_VERSION}")" != "valid" ]] \
+    || [[ -n "$("$SEMVER" get build "${NEW_VERSION}")" ]]; then
   echo "::error::version must be MAJOR.MINOR.PATCH[-PRERELEASE] (got: ${NEW_VERSION})"
   exit 1
 fi
 
 IS_PRERELEASE=false
-if [[ "${NEW_VERSION}" == *-* ]]; then
+if [[ -n "$("$SEMVER" get prerel "${NEW_VERSION}")" ]]; then
   IS_PRERELEASE=true
 fi
 

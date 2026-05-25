@@ -43,6 +43,9 @@ set -euo pipefail
 #   RELEASE_CUT_WORKFLOW   workflow file name dispatched via gh
 #                          (default: release.yml)
 
+self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SEMVER="$self_dir/../templates/commons/bin/share/semver-tool/semver"
+
 usage() {
     cat <<EOF >&2
 usage: $(basename "$0") <major|minor|patch|X.Y.Z[-PRERELEASE]>
@@ -51,20 +54,6 @@ Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
 pre-release suffix is stripped before bumping; to step from
 1.0.0-rc.1 to 1.0.0, type the version literally).
 EOF
-}
-
-# Parse a MAJOR.MINOR.PATCH core (no pre-release suffix) and assign
-# to the three nameref outputs. Bash builtins only, no eval/sed.
-parse_semver_core() {
-    local input="$1"
-    local -n major_out="$2" minor_out="$3" patch_out="$4"
-    IFS='.' read -r major_out minor_out patch_out _ <<< "$input"
-    if ! [[ "$major_out" =~ ^[0-9]+$ ]] \
-        || ! [[ "$minor_out" =~ ^[0-9]+$ ]] \
-        || ! [[ "$patch_out" =~ ^[0-9]+$ ]]; then
-        echo "release-cut: couldn't parse semver core: $input" >&2
-        return 1
-    fi
 }
 
 if [ $# -ne 1 ]; then
@@ -101,22 +90,13 @@ case "$arg" in
             echo "release-cut: couldn't parse current version from $manifest" >&2
             exit 1
         fi
-        # Strip any pre-release suffix before bumping. The shortcuts
-        # operate on the core MAJOR.MINOR.PATCH; if you want to step
-        # from 1.0.0-rc.1 to 1.0.0, type the version literally.
-        current_core="${current%%-*}"
-        MAJOR=0; MINOR=0; PATCH=0
-        parse_semver_core "$current_core" MAJOR MINOR PATCH
-        case "$arg" in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
-        esac
-        new_version="${MAJOR}.${MINOR}.${PATCH}"
+        new_version="$("$SEMVER" bump "$arg" "$current")"
         echo "Bumping ${arg}: ${current} -> ${new_version}"
         ;;
     *)
-        if ! [[ "$arg" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+        if [[ "$arg" =~ ^[vV] ]] \
+            || [[ "$("$SEMVER" validate "$arg")" != "valid" ]] \
+            || [[ -n "$("$SEMVER" get build "$arg")" ]]; then
             echo "release-cut: version must be MAJOR.MINOR.PATCH[-PRERELEASE] or one of: major, minor, patch (got: $arg)" >&2
             exit 2
         fi
