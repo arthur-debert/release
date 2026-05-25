@@ -218,7 +218,9 @@ jobs:
           # comes in via download-artifact, not from source).
           sparse-checkout: |
             tests/e2e
+            live-tests
             bin
+            lib
           # Submodules forwarded here too — some e2e suites need them
           # (e.g. lex's bats tests reference comms submodule fixtures).
           submodules: ${{ inputs.submodules }}
