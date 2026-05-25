@@ -1,0 +1,52 @@
+name: 'Prepare Neovim plugin release'
+description: |
+  Validate semver, sanity-check plugin layout, bump optional
+  M.version in a Lua file, roll changelog, run pre-commit gate,
+  commit + tag + push. Supports bare-tag cuts for plugins without
+  a version constant.
+
+inputs:
+  version:
+    description: 'Version to release (bare semver). No leading v.'
+    required: true
+  changelog-path:
+    description: 'Path to CHANGELOG.md. Empty to skip.'
+    required: false
+    default: 'CHANGELOG.md'
+  plugin-root:
+    description: 'Plugin root directory (where lua/ and/or plugin/ live).'
+    required: false
+    default: '.'
+  version-file:
+    description: 'Lua file with M.version to bump. Empty to skip.'
+    required: false
+    default: ''
+  prep-script:
+    description: 'Optional consumer prep-script, run before the bump.'
+    required: false
+    default: ''
+
+outputs:
+  version:
+    description: 'Validated version (no leading v)'
+    value: ${{ steps.prep.outputs.version }}
+  release-sha:
+    description: 'Commit SHA of the tag'
+    value: ${{ steps.prep.outputs.release-sha }}
+  prerelease:
+    description: '"true" if version contains a pre-release suffix'
+    value: ${{ steps.prep.outputs.prerelease }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare Neovim plugin release
+      id: prep
+      shell: bash
+      env:
+        NEW_VERSION: ${{ inputs.version }}
+        PLUGIN_ROOT: ${{ inputs.plugin-root }}
+        CHANGELOG: ${{ inputs.changelog-path }}
+        VERSION_FILE: ${{ inputs.version-file }}
+        PREP_SCRIPT: ${{ inputs.prep-script }}
+      run: bash "${{ github.action_path }}/../../../scripts/prepare-nvim-release.sh"
