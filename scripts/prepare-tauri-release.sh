@@ -41,7 +41,7 @@ fi
 
 # ── Early changelog validation ────────────────────────────────────
 if [ -n "${CHANGELOG}" ]; then
-  bash "${script_dir}/check-changelog-fragments.sh"
+  CHANGELOG="${CHANGELOG}" bash "${script_dir}/check-changelog-fragments.sh"
 fi
 
 # ── Sanity-check version files ────────────────────────────────────

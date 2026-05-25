@@ -41,7 +41,6 @@ runs:
   using: 'composite'
   steps:
     - name: Check changelog fragments
-      if: inputs.changelog-path != ''
       shell: bash
       env:
         CHANGELOG: ${{ inputs.changelog-path }}
