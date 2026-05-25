@@ -39,6 +39,11 @@ if [[ "${NEW_VERSION}" == *-* ]]; then
   IS_PRERELEASE=true
 fi
 
+# ── Early changelog validation ────────────────────────────────────
+if [ -n "${CHANGELOG}" ]; then
+  bash "${script_dir}/check-changelog-fragments.sh"
+fi
+
 # ── Sanity-check version files ────────────────────────────────────
 pkg="${TAURI_DIR}/package.json"
 cargo="${TAURI_DIR}/src-tauri/Cargo.toml"

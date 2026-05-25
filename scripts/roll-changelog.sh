@@ -107,7 +107,10 @@ case "$mode" in
           echo "::error::Add an unreleased fragment via 'bin/changelog add <slug> <body>' before re-running." >&2
           exit 1
         fi
-        cat "${fragments[@]}" > "$out"
+        for frag in "${fragments[@]}"; do
+          cat "$frag"
+          [[ -s "$frag" && "$(tail -c1 "$frag")" != "" ]] && printf '\n'
+        done > "$out"
       fi
       if ! grep -q '[^[:space:]]' "$out"; then
         echo "::error::Extracted changelog body is empty (source: $dir)" >&2

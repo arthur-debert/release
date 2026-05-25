@@ -74,6 +74,8 @@ today="$(date -u +%Y-%m-%d)"
   printf '## %s - %s\n\n' "$version" "$today"
   for f in "${fragments[@]}"; do
     cat "$f"
+    # Ensure a trailing newline between fragments
+    [[ -s "$f" && "$(tail -c1 "$f")" != "" ]] && printf '\n'
   done
 } > "$target"
 

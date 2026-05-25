@@ -112,7 +112,7 @@ on:
         type: string
         required: true
       changelog-path:
-        description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`). Empty to skip.'
+        description: 'Path to CHANGELOG.md (Keep-a-Changelog with `## [Unreleased]`).'
         type: string
         required: false
         default: 'CHANGELOG.md'

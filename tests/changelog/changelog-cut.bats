@@ -96,6 +96,18 @@ load helper
   [ ! -f CHANGELOG/V1.2.3.md ]
 }
 
+@test "fragments without trailing newline get one appended (#224)" {
+  mkdir -p CHANGELOG
+  # Write two fragments WITHOUT trailing newlines
+  printf -- '- first' > CHANGELOG/unreleased-a.md
+  printf -- '- second' > CHANGELOG/unreleased-b.md
+  run "$BIN/changelog-cut" 0.1.0
+  [ "$status" -eq 0 ]
+  # Each fragment should be on its own line
+  run grep -c '^- ' CHANGELOG/0.1.0.md
+  [ "$output" = "2" ]
+}
+
 @test "cwd-agnostic: works from a subdir (#219)" {
   "$BIN/changelog-add" 1 "- bullet"
   mkdir -p crates/foo
