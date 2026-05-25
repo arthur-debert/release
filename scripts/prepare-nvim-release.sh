@@ -107,14 +107,23 @@ if [ -n "${VERSION_FILE}" ]; then
 fi
 
 # ── Roll changelog ────────────────────────────────────────────────
+CHANGELOG_DIR="$(dirname "${CHANGELOG:-.}")/CHANGELOG"
 if [ -z "${CHANGELOG}" ]; then
   echo "Release ${TAG}" > release-notes.md
-elif [ "${IS_PRERELEASE}" = "true" ]; then
-  bash "${script_dir}/roll-changelog.sh" \
-    extract "${CHANGELOG}" release-notes.md
+elif [ -d "${CHANGELOG_DIR}" ] || [ -f "${CHANGELOG}" ]; then
+  if [ "${IS_PRERELEASE}" = "true" ]; then
+    bash "${script_dir}/roll-changelog.sh" \
+      extract "${CHANGELOG}" release-notes.md
+  else
+    bash "${script_dir}/roll-changelog.sh" \
+      roll "${CHANGELOG}" "${NEW_VERSION}" release-notes.md
+    git add "${CHANGELOG}"
+    if [ -d "${CHANGELOG_DIR}" ]; then
+      git add "${CHANGELOG_DIR}/"
+    fi
+  fi
 else
-  bash "${script_dir}/roll-changelog.sh" \
-    roll "${CHANGELOG}" "${NEW_VERSION}" release-notes.md
+  echo "Release ${TAG}" > release-notes.md
 fi
 [ -s release-notes.md ] || echo "Release ${TAG}" > release-notes.md
 
@@ -133,8 +142,7 @@ if [ -s release-notes.md ]; then
 else
   git tag -a "${TAG}" -m "Release ${TAG}"
 fi
-git push origin HEAD
-git push origin "${TAG}"
+git push origin HEAD "${TAG}"
 
 emit "version=${NEW_VERSION}"
 emit "prerelease=${IS_PRERELEASE}"
