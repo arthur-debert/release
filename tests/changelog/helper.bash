@@ -8,19 +8,20 @@
 # verify the "not in a git repo" error path can skip git init
 # explicitly.
 
-# Resolve the repo's bin/ once so tests can call scripts without PATH
-# games and so a broken PATH in a test doesn't leak in.
+# The harness lives in the bats component template during development;
+# consumers get it via release-sync.
+source "$BATS_TEST_DIRNAME/../../templates/components/bats/lib/bats-harness.bash"
+
 BIN="$BATS_TEST_DIRNAME/../../bin"
 
 setup() {
-  TMPDIR_TEST="$(mktemp -d)"
-  cd "$TMPDIR_TEST"
-  # `git init -q` so the scripts can resolve repo root. No commits
-  # needed; --show-toplevel works on an empty repo.
+  harness_create_workspace_notrap
+  TMPDIR_TEST="$HARNESS_WORKSPACE"
+  cd "$HARNESS_WORKSPACE"
   git init -q
 }
 
 teardown() {
   cd /
-  rm -rf "$TMPDIR_TEST"
+  harness_cleanup
 }
