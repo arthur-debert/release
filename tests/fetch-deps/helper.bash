@@ -6,6 +6,11 @@ FETCH_DEPS="$BIN/fetch-deps"
 setup() {
     harness_create_workspace_notrap
     cd "$HARNESS_WORKSPACE"
+    # Prevent ambient tokens from leaking into tests. Tests that need
+    # authentication (e.g. the authenticated API path test) set GH_TOKEN
+    # explicitly. Without this, a shell-level GH_TOKEN makes fetch-deps
+    # take the API path, which the simple mock_curl does not handle.
+    unset GH_TOKEN GITHUB_TOKEN 2>/dev/null || true
 }
 
 teardown() {
