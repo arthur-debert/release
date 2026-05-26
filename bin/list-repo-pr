@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# list-repo-pr — for each managed repo, list open PRs with status info.
+#
+# Shows: PR number, draft/ready, CI status, mergeable, review threads
+# (total / unresolved), and title. Designed as a daily dashboard.
+#
+# Usage:
+#   list-repo-pr                 # all managed repos
+#   list-repo-pr --only-present  # skip repos missing locally
+#   list-repo-pr --owner lex-fmt # filter by owner prefix
+
+set -uo pipefail
+
+only_present=0
+owner_filter=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --only-present) only_present=1; shift ;;
+    --owner)        owner_filter=$2; shift 2 ;;
+    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+REPOS=(
+  "arthur-debert/release|$HOME/h/release"
+  "arthur-debert/arami-app|$HOME/h/arami/arami-app"
+  "arthur-debert/arami-core|$HOME/h/arami/arami-core"
+  "arthur-debert/burgertocow|$HOME/h/burgertocow"
+  "arthur-debert/clapfig|$HOME/h/clapfig"
+  "arthur-debert/dodot|$HOME/h/dodot"
+  "arthur-debert/homebrew-tools|$HOME/h/homebrew-tools"
+  "arthur-debert/padz|$HOME/h/padz"
+  "arthur-debert/rustloc|$HOME/h/rustloc"
+  "arthur-debert/simple-gal|$HOME/h/simple-gal/simple-gal"
+  "arthur-debert/simple-gal-action|$HOME/h/simple-gal/simple-gal-action"
+  "arthur-debert/simple-gal-ui|$HOME/h/simple-gal/simple-gal-ui"
+  "arthur-debert/standout|$HOME/h/standout"
+  "lex-fmt/comms|$HOME/h/lex-fmt/comms"
+  "lex-fmt/lex|$HOME/h/lex-fmt/lex"
+  "lex-fmt/lexed|$HOME/h/lex-fmt/lexed"
+  "lex-fmt/nvim|$HOME/h/lex-fmt/nvim"
+  "lex-fmt/tree-sitter-lex|$HOME/h/lex-fmt/tree-sitter-lex"
+  "lex-fmt/vscode|$HOME/h/lex-fmt/vscode"
+  "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
+)
+
+QUERY='
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        number
+        title
+        url
+        isDraft
+        mergeable
+        author { login }
+        headRefName
+        reviewThreads(first: 100) {
+          totalCount
+          nodes { isResolved }
+        }
+        reviews(first: 100) { totalCount }
+        commits(last: 1) {
+          nodes {
+            commit {
+              statusCheckRollup { state }
+            }
+          }
+        }
+      }
+    }
+  }
+}'
+
+R='\033[0m'
+RED='\033[31m'
+GRN='\033[32m'
+YLW='\033[33m'
+
+color() { printf '%b%s%b' "$1" "$2" "$R"; }
+
+# Print a fixed-width colored cell: pad the plain text, then wrap with color.
+cell() {
+  local width=$1 clr=$2 text=$3
+  printf '%b%-*s%b' "$clr" "$width" "$text" "$R"
+}
+
+first=1
+for entry in "${REPOS[@]}"; do
+  repo=${entry%%|*}
+  path=${entry##*|}
+  owner=${repo%%/*}
+  name=${repo##*/}
+
+  if [ -n "$owner_filter" ] && [ "$owner" != "$owner_filter" ]; then
+    continue
+  fi
+
+  if [ "$only_present" = "1" ] && [ ! -d "$path" ]; then
+    continue
+  fi
+
+  json=$(gh api graphql \
+    -f query="$QUERY" \
+    -f owner="$owner" \
+    -f name="$name" 2>&1) || {
+    [ "$first" = "1" ] || echo
+    first=0
+    echo "=== $repo ==="
+    echo "  (API error: $json)"
+    continue
+  }
+
+  count=$(printf '%s' "$json" | jq '.data.repository.pullRequests.nodes | length')
+  if [ "$count" = "0" ]; then
+    continue
+  fi
+
+  [ "$first" = "1" ] || echo
+  first=0
+  echo "=== $repo ($count open) ==="
+  printf "  %-6s %-7s %-8s %-10s %-10s %-52s %s\n" "#" "status" "CI" "merge" "threads" "title" "url"
+  printf "  %-6s %-7s %-8s %-10s %-10s %-52s %s\n" "──────" "───────" "────────" "──────────" "──────────" "──────────────────────────────" "───"
+
+  printf '%s' "$json" | jq -c '.data.repository.pullRequests.nodes[]' | while IFS= read -r pr; do
+    num=$(printf '%s' "$pr" | jq -r '.number')
+    url=$(printf '%s' "$pr" | jq -r '.url')
+    title=$(printf '%s' "$pr" | jq -r '.title' | cut -c1-50)
+    is_draft=$(printf '%s' "$pr" | jq -r '.isDraft')
+    mergeable=$(printf '%s' "$pr" | jq -r '.mergeable')
+    ci_state=$(printf '%s' "$pr" | jq -r '.commits.nodes[0].commit.statusCheckRollup.state // "null"')
+    threads_total=$(printf '%s' "$pr" | jq '.reviewThreads.totalCount')
+    threads_unresolved=$(printf '%s' "$pr" | jq '[.reviewThreads.nodes[] | select(.isResolved == false)] | length')
+
+    if [ "$is_draft" = "true" ]; then status="draft"; else status="ready"; fi
+
+    case "$ci_state" in
+      SUCCESS) ci_text="✓ pass"; ci_clr=$GRN ;;
+      PENDING) ci_text="● pend"; ci_clr=$YLW ;;
+      FAILURE) ci_text="✗ fail"; ci_clr=$RED ;;
+      ERROR)   ci_text="✗ err";  ci_clr=$RED ;;
+      *)       ci_text="—";      ci_clr=""   ;;
+    esac
+
+    case "$mergeable" in
+      MERGEABLE)   mg_text="yes";      mg_clr=$GRN ;;
+      CONFLICTING) mg_text="conflict"; mg_clr=$RED ;;
+      *)           mg_text="?";        mg_clr=$YLW ;;
+    esac
+
+    if [ "$threads_total" -gt 0 ]; then
+      th_text="${threads_unresolved}/${threads_total}"
+      if [ "$threads_unresolved" -gt 0 ]; then th_clr=$YLW; else th_clr=$GRN; fi
+    else
+      th_text="—"; th_clr=""
+    fi
+
+    printf '  '
+    cell 6  ""      "#$num"
+    printf ' '
+    cell 7  ""      "$status"
+    printf ' '
+    cell 8  "$ci_clr" "$ci_text"
+    printf ' '
+    cell 10 "$mg_clr" "$mg_text"
+    printf ' '
+    cell 10 "$th_clr" "$th_text"
+    printf ' %-52s %s\n' "$title" "$url"
+  done
+done
+
+if [ "$first" = "1" ]; then
+  echo "(no open PRs across managed repos)"
+fi
