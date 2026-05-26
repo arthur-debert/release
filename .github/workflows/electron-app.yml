@@ -459,17 +459,19 @@ jobs:
       # artifact in this step would invalidate notarization — keep it
       # read-only (launch the binary, check exit / output; don't
       # rewrite files).
+      - name: Derive app name
+        id: app-name
+        shell: bash
+        run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
+
       - name: Smoke test (mac)
-        # Default `success()` semantics: only run if every prior step
-        # in this job succeeded. Notarization timeout / staple failure
-        # emit `::warning::` (not failure), so this still runs in
-        # those degraded cases. Skips cleanly if signing failed.
         if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
         env:
           PLATFORM: mac
           ARCH: ${{ matrix.arch }}
           PACKAGE_DIR: ${{ inputs.output-dir }}
+          APP_NAME: ${{ steps.app-name.outputs.name }}
         run: bash scripts/smoke.sh
 
       # Upload runs `if: always() && !cancelled()` so a notarization
@@ -545,6 +547,11 @@ jobs:
             ${{ steps.pm.outputs.pm }} run build --linux --${{ matrix.arch }} --publish never
           fi
 
+      - name: Derive app name
+        id: app-name
+        shell: bash
+        run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
+
       - name: Smoke test (linux)
         if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
@@ -552,6 +559,7 @@ jobs:
           PLATFORM: linux
           ARCH: ${{ matrix.arch }}
           PACKAGE_DIR: ${{ inputs.output-dir }}
+          APP_NAME: ${{ steps.app-name.outputs.name }}
         run: bash scripts/smoke.sh
 
       # AppImage is the canonical linux artifact for electron-app and
@@ -643,6 +651,11 @@ jobs:
           fi
         shell: bash
 
+      - name: Derive app name
+        id: app-name
+        shell: bash
+        run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
+
       - name: Smoke test (windows)
         if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
@@ -650,6 +663,7 @@ jobs:
           PLATFORM: windows
           ARCH: ${{ matrix.arch }}
           PACKAGE_DIR: ${{ inputs.output-dir }}
+          APP_NAME: ${{ steps.app-name.outputs.name }}
         run: bash scripts/smoke.sh
 
       - name: Upload windows artifacts
