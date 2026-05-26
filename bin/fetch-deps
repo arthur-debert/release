@@ -126,13 +126,17 @@ extract_root() {
 
 find_binary() {
     local root="$1" name="$2"
-    find "$root" -name "$name" -type f 2>/dev/null | head -1
+    find "$root" -name "$name" -type f 2>/dev/null | head -1 || true
 }
 
 # ─── Process a single dep ─────────────────────────────────
 
 fetch_one() {
     local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+
+    if [[ ! "$dep" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        die "invalid dependency name: $dep"
+    fi
 
     local repo version asset_tpl binary dest has_extract
     repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config")"
@@ -179,12 +183,14 @@ fetch_one() {
         ok "$bin_name → $dest/"
 
     elif [[ "$has_extract" == "true" ]]; then
-        local src dst found
+        local src dst found extract_map
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
         while IFS=$'\t' read -r src dst; do
+            [[ -z "$src" || -z "$dst" ]] && continue
             if [[ -e "$root/$src" ]]; then
                 found="$root/$src"
             else
-                found="$(find "$root" -name "$(basename "$src")" 2>/dev/null | head -1)"
+                found="$(find "$root" -name "$(basename "$src")" 2>/dev/null | head -1 || true)"
             fi
 
             if [[ -z "${found:-}" ]]; then
@@ -199,7 +205,7 @@ fetch_one() {
                 cp "$found" "$dst/"
             fi
             ok "$src → $dst"
-        done < <(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")
+        done <<< "$extract_map"
     else
         mkdir -p "$dest"
         cp -r "$root"/. "$dest/"
@@ -279,15 +285,17 @@ main() {
     jq empty "$config" 2>/dev/null || die "invalid JSON: $config"
 
     if [[ ${#deps[@]} -eq 0 ]]; then
+        local keys
+        keys="$(jq -r 'keys[]' "$config")"
         while IFS= read -r d; do
-            deps+=("$d")
-        done < <(jq -r 'keys[]' "$config")
+            [[ -n "$d" ]] && deps+=("$d")
+        done <<< "$keys"
     fi
 
     [[ ${#deps[@]} -eq 0 ]] && die "no deps defined in $config"
 
     _FETCH_DEPS_WORK_DIR="$(mktemp -d)"
-    trap 'rm -rf "$_FETCH_DEPS_WORK_DIR"' EXIT
+    trap 'rm -rf "${_FETCH_DEPS_WORK_DIR:-}"' EXIT
     local work_dir="$_FETCH_DEPS_WORK_DIR"
 
     printf '%s: fetching %d dep(s) for %s\n' "$PROG" "${#deps[@]}" "$target"

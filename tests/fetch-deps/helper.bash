@@ -79,11 +79,10 @@ output=""
 url=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -o) output="$2"; shift 2 ;;
-        -H|-fsSL) shift ;; # skip flags
-        -fsSL) shift ;;
-        -*) shift ;;
-        *) url="$1"; shift ;;
+        -o)   output="$2"; shift 2 ;;
+        -H)   shift 2 ;;
+        -*)   shift ;;
+        *)    url="$1"; shift ;;
     esac
 done
 

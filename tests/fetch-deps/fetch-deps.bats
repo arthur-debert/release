@@ -56,7 +56,6 @@ load helper
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin
-    echo "$output"
     [[ "$status" -eq 0 ]]
     [[ -x bin/mycli ]]
     [[ "$(bin/mycli)" == "hello" ]]
@@ -80,7 +79,6 @@ JSON
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin
-    echo "$output"
     [[ "$status" -eq 0 ]]
     [[ -x resources/mycli ]]
 }
@@ -134,7 +132,6 @@ JSON
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin
-    echo "$output"
     [[ "$status" -eq 0 ]]
     [[ -f resources/tree-sitter-lex.wasm ]]
     [[ "$(cat resources/tree-sitter-lex.wasm)" == "wasm-content" ]]
@@ -164,7 +161,6 @@ JSON
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin
-    echo "$output"
     [[ "$status" -eq 0 ]]
     [[ -f resources/tree-sitter-lex.wasm ]]
     [[ "$output" == *"not found in archive"* ]]
@@ -191,7 +187,6 @@ JSON
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin
-    echo "$output"
     [[ "$status" -eq 0 ]]
     [[ -f wasm/mypkg/index.js ]]
     [[ -f wasm/mypkg/lib.wasm ]]
@@ -307,7 +302,6 @@ JSON
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin dep-a
-    echo "$output"
     [[ "$status" -eq 0 ]]
     [[ -x bin/dep-a ]]
     [[ ! -f bin/dep-b ]]
