@@ -105,14 +105,16 @@ download_release_asset() {
         # Authenticated path -- works for both public and private repos.
         local api_url="https://api.github.com/repos/$repo/releases/tags/$version"
         local asset_url
-        asset_url="$(curl -fsSL \
+        if ! asset_url="$(curl -fsSL \
             -H "Authorization: Bearer $token" \
             "$api_url" \
-            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')" \
-            || die "failed to look up release $version for $repo"
+            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')"; then
+            die "failed to look up release $version for $repo"
+        fi
 
-        [[ -z "$asset_url" || "$asset_url" == "null" ]] && \
+        if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
             die "$repo@$version: asset '$asset' not found in release"
+        fi
 
         curl -fsSL \
             -H "Authorization: Bearer $token" \
