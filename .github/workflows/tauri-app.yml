@@ -376,6 +376,13 @@ jobs:
           PLATFORM: ${{ matrix.t.platform }}
         run: bash .release/scripts/collect-tauri-bundles.sh
 
+      - name: Derive app name
+        id: app-name
+        shell: bash
+        run: |
+          conf="${{ inputs.tauri-dir && format('{0}/src-tauri/tauri.conf.json', inputs.tauri-dir) || 'src-tauri/tauri.conf.json' }}"
+          echo "name=$(jq -r '.productName // .package.productName // "App"' "$conf")" >> "$GITHUB_OUTPUT"
+
       - name: Smoke test
         if: hashFiles('scripts/smoke.sh') != ''
         shell: bash
@@ -383,6 +390,7 @@ jobs:
           PLATFORM: ${{ matrix.t.platform }}
           BUNDLE_DIR: ${{ steps.bundles.outputs.dir }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
+          APP_NAME: ${{ steps.app-name.outputs.name }}
         run: bash scripts/smoke.sh
 
       - name: Upload platform bundle
