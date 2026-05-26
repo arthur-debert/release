@@ -1,0 +1,316 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="0.1.0"
+PROG="fetch-deps"
+
+die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+info() { printf '  %s\n' "$*"; }
+ok()   { printf '  ✓ %s\n' "$*"; }
+skip() { printf '  ⊘ %s\n' "$*"; }
+
+# ─── Platform detection ───────────────────────────────────
+
+detect_target() {
+    local os arch
+    case "$(uname -s)" in
+        Linux)                          os="unknown-linux-gnu" ;;
+        Darwin)                         os="apple-darwin" ;;
+        MINGW*|MSYS*|CYGWIN*|Windows*) os="pc-windows-msvc" ;;
+        *)                              die "unsupported OS: $(uname -s)" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64)         arch="x86_64" ;;
+        aarch64|arm64)  arch="aarch64" ;;
+        *)              die "unsupported arch: $(uname -m)" ;;
+    esac
+    printf '%s-%s' "$arch" "$os"
+}
+
+target_os() {
+    case "$1" in
+        *linux*)   echo "linux" ;;
+        *darwin*)  echo "macos" ;;
+        *windows*) echo "windows" ;;
+        *)         echo "unknown" ;;
+    esac
+}
+
+target_arch() {
+    case "$1" in
+        x86_64*)   echo "x86_64" ;;
+        aarch64*)  echo "aarch64" ;;
+        *)         echo "unknown" ;;
+    esac
+}
+
+archive_ext() {
+    case "$1" in
+        *windows*) echo ".zip" ;;
+        *)         echo ".tar.gz" ;;
+    esac
+}
+
+# ─── Template expansion ───────────────────────────────────
+
+expand_template() {
+    local tpl="$1" target="$2"
+    local result="$tpl"
+    result="${result//\{\{target\}\}/$target}"
+    result="${result//\{\{os\}\}/$(target_os "$target")}"
+    result="${result//\{\{arch\}\}/$(target_arch "$target")}"
+    result="${result//\{\{ext\}\}/$(archive_ext "$target")}"
+    printf '%s' "$result"
+}
+
+# ─── Stamp management ─────────────────────────────────────
+
+STAMP_DIR=".deps"
+
+stamp_path() { printf '%s/%s.stamp' "$STAMP_DIR" "$1"; }
+
+stamp_matches() {
+    local dep="$1" version="$2" target="$3"
+    local stamp_file
+    stamp_file="$(stamp_path "$dep")"
+    [[ -f "$stamp_file" ]] || return 1
+    local recorded
+    recorded="$(cat "$stamp_file")"
+    [[ "$recorded" == "$version $target" ]]
+}
+
+stamp_write() {
+    local dep="$1" version="$2" target="$3"
+    mkdir -p "$STAMP_DIR"
+    printf '%s %s' "$version" "$target" > "$(stamp_path "$dep")"
+}
+
+# ─── Download ──────────────────────────────────────────────
+
+download() {
+    local url="$1" dest="$2"
+    local curl_opts=(-fsSL -o "$dest")
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        curl_opts+=(-H "Authorization: Bearer $GITHUB_TOKEN")
+    elif [[ -n "${GH_TOKEN:-}" ]]; then
+        curl_opts+=(-H "Authorization: Bearer $GH_TOKEN")
+    fi
+    curl "${curl_opts[@]}" "$url" || die "download failed: $url"
+}
+
+# ─── Extraction ────────────────────────────────────────────
+
+extract_archive() {
+    local archive="$1" dest="$2"
+    mkdir -p "$dest"
+    case "$archive" in
+        *.tar.gz|*.tgz) tar -xzf "$archive" -C "$dest" ;;
+        *.zip)          unzip -qo "$archive" -d "$dest" ;;
+        *)              die "unsupported archive format: $archive" ;;
+    esac
+}
+
+extract_root() {
+    local dir="$1"
+    local count=0 single=""
+    for entry in "$dir"/*; do
+        count=$((count + 1))
+        single="$entry"
+    done
+    if [[ $count -eq 1 && -d "$single" ]]; then
+        printf '%s' "$single"
+    else
+        printf '%s' "$dir"
+    fi
+}
+
+find_binary() {
+    local root="$1" name="$2"
+    find "$root" -name "$name" -type f 2>/dev/null | head -1 || true
+}
+
+# ─── Process a single dep ─────────────────────────────────
+
+fetch_one() {
+    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+
+    if [[ ! "$dep" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        die "invalid dependency name: $dep"
+    fi
+
+    local repo version asset_tpl binary dest has_extract
+    repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config")"
+    version="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config")"
+    asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config")"
+    binary="$(jq -r --arg d "$dep" '.[$d].binary // empty' "$config")"
+    dest="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config")"
+    has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config")"
+
+    [[ -z "$repo" ]]      && die "$dep: missing 'repo'"
+    [[ -z "$version" ]]   && die "$dep: missing 'version'"
+    [[ -z "$asset_tpl" ]] && die "$dep: missing 'asset'"
+
+    local asset
+    asset="$(expand_template "$asset_tpl" "$target")"
+
+    if [[ "$if_missing" == true ]] && stamp_matches "$dep" "$version" "$target"; then
+        skip "$dep $version — up to date"
+        return 0
+    fi
+
+    info "$dep $version → $dest"
+
+    local dep_dir="$work_dir/$dep"
+    mkdir -p "$dep_dir"
+
+    local url="https://github.com/$repo/releases/download/$version/$asset"
+    download "$url" "$dep_dir/$asset"
+
+    extract_archive "$dep_dir/$asset" "$dep_dir/out"
+    local root
+    root="$(extract_root "$dep_dir/out")"
+
+    if [[ -n "$binary" ]]; then
+        local bin_name="$binary"
+        [[ "$target" == *windows* ]] && bin_name="${binary}.exe"
+
+        local found
+        found="$(find_binary "$root" "$bin_name")"
+        [[ -z "$found" ]] && die "$dep: binary '$bin_name' not found in archive"
+
+        mkdir -p "$dest"
+        install -m 0755 "$found" "$dest/$bin_name"
+        ok "$bin_name → $dest/"
+
+    elif [[ "$has_extract" == "true" ]]; then
+        local src dst found extract_map
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
+        while IFS=$'\t' read -r src dst; do
+            [[ -z "$src" || -z "$dst" ]] && continue
+            if [[ -e "$root/$src" ]]; then
+                found="$root/$src"
+            else
+                found="$(find "$root" -name "$(basename "$src")" 2>/dev/null | head -1 || true)"
+            fi
+
+            if [[ -z "${found:-}" ]]; then
+                info "  ⚠ $src not found in archive (skipping)"
+                continue
+            fi
+
+            mkdir -p "$dst"
+            if [[ -d "$found" ]]; then
+                cp -r "$found"/. "$dst/"
+            else
+                cp "$found" "$dst/"
+            fi
+            ok "$src → $dst"
+        done <<< "$extract_map"
+    else
+        mkdir -p "$dest"
+        cp -r "$root"/. "$dest/"
+        ok "extracted → $dest/"
+    fi
+
+    stamp_write "$dep" "$version" "$target"
+}
+
+# ─── CLI ───────────────────────────────────────────────────
+
+usage() {
+    cat <<'EOF'
+Usage: fetch-deps [options] [dep ...]
+
+Download dependencies defined in deps.json from GitHub releases.
+
+Options:
+  --if-missing     Skip deps whose stamp matches current version+target
+  --target TRIPLE  Override platform detection (e.g. x86_64-apple-darwin)
+  --config FILE    Config file path (default: deps.json)
+  --help           Show this help
+  --version        Show version
+
+With no dep names, fetches all deps in the config file.
+
+deps.json schema:
+  {
+    "dep-name": {
+      "repo":    "owner/repo",           (required)
+      "version": "v1.2.3",              (required)
+      "asset":   "name-{{target}}{{ext}}", (required, supports templates)
+      "binary":  "binary-name",          (binary mode: find + install one file)
+      "dest":    "resources",            (install directory, default: ".")
+      "extract": {                       (extract mode: map tarball paths → dest dirs)
+        "file.wasm": "resources",
+        "queries":   "resources/queries"
+      }
+    }
+  }
+
+Template variables in "asset":
+  {{target}}  Rust target triple   (x86_64-unknown-linux-gnu)
+  {{os}}      OS name              (linux, macos, windows)
+  {{arch}}    Architecture         (x86_64, aarch64)
+  {{ext}}     Archive extension    (.tar.gz on Unix, .zip on Windows)
+EOF
+}
+
+main() {
+    local if_missing=false
+    local target=""
+    local config="deps.json"
+    local deps=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --if-missing) if_missing=true; shift ;;
+            --target)
+                [[ $# -lt 2 ]] && die "--target requires a value"
+                target="$2"; shift 2 ;;
+            --config)
+                [[ $# -lt 2 ]] && die "--config requires a value"
+                config="$2"; shift 2 ;;
+            --help)    usage; exit 0 ;;
+            --version) echo "$PROG $VERSION"; exit 0 ;;
+            -*)        die "unknown option: $1" ;;
+            *)         deps+=("$1"); shift ;;
+        esac
+    done
+
+    command -v jq  &>/dev/null || die "jq is required but not found"
+    command -v curl &>/dev/null || die "curl is required but not found"
+
+    [[ -z "$target" ]] && target="$(detect_target)"
+    [[ -f "$config" ]] || die "config not found: $config"
+    jq empty "$config" 2>/dev/null || die "invalid JSON: $config"
+
+    if [[ ${#deps[@]} -eq 0 ]]; then
+        local keys
+        keys="$(jq -r 'keys[]' "$config")"
+        while IFS= read -r d; do
+            [[ -n "$d" ]] && deps+=("$d")
+        done <<< "$keys"
+    fi
+
+    [[ ${#deps[@]} -eq 0 ]] && die "no deps defined in $config"
+
+    _FETCH_DEPS_WORK_DIR="$(mktemp -d)"
+    trap 'rm -rf "${_FETCH_DEPS_WORK_DIR:-}"' EXIT
+    local work_dir="$_FETCH_DEPS_WORK_DIR"
+
+    printf '%s: fetching %d dep(s) for %s\n' "$PROG" "${#deps[@]}" "$target"
+
+    local failed=0
+    for dep in "${deps[@]}"; do
+        if ! fetch_one "$dep" "$if_missing" "$target" "$config" "$work_dir"; then
+            failed=$((failed + 1))
+        fi
+    done
+
+    [[ $failed -gt 0 ]] && die "$failed dep(s) failed"
+    return 0
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
