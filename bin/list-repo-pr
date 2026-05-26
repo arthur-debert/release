@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # list-repo-pr — for each managed repo, list open PRs with status info.
 #
-# Shows: PR number, draft/ready, CI status, mergeable, review threads
-# (total / unresolved), and title. Designed as a daily dashboard.
+# Shows: PR number, draft/ready, CI status, mergeable, review comments,
+# unresolved threads, title, and PR link. Designed as a daily dashboard.
+# The PR link is colored green when the PR is merge-ready (CI passes,
+# mergeable, no unresolved threads).
 #
 # Usage:
 #   list-repo-pr                 # all managed repos
@@ -62,7 +64,11 @@ query($owner: String!, $name: String!) {
           totalCount
           nodes { isResolved }
         }
-        reviews(first: 100) { totalCount }
+        reviews(first: 100) {
+          totalCount
+          nodes { comments { totalCount } }
+        }
+        comments { totalCount }
         commits(last: 1) {
           nodes {
             commit {
@@ -80,9 +86,6 @@ RED='\033[31m'
 GRN='\033[32m'
 YLW='\033[33m'
 
-color() { printf '%b%s%b' "$1" "$2" "$R"; }
-
-# Print a fixed-width colored cell: pad the plain text, then wrap with color.
 cell() {
   local width=$1 clr=$2 text=$3
   printf '%b%-*s%b' "$clr" "$width" "$text" "$R"
@@ -122,8 +125,8 @@ for entry in "${REPOS[@]}"; do
   [ "$first" = "1" ] || echo
   first=0
   echo "=== $repo ($count open) ==="
-  printf "  %-6s %-7s %-8s %-10s %-10s %-52s %s\n" "#" "status" "CI" "merge" "threads" "title" "url"
-  printf "  %-6s %-7s %-8s %-10s %-10s %-52s %s\n" "──────" "───────" "────────" "──────────" "──────────" "──────────────────────────────" "───"
+  printf "  %-6s %-7s %-8s %-10s %-8s %-10s %-52s %s\n" "#" "status" "CI" "merge" "cmnts" "unresolvd" "title" "url"
+  printf "  %-6s %-7s %-8s %-10s %-8s %-10s %-52s %s\n" "------" "-------" "--------" "----------" "--------" "----------" "------------------------------" "---"
 
   printf '%s' "$json" | jq -c '.data.repository.pullRequests.nodes[]' | while IFS= read -r pr; do
     num=$(printf '%s' "$pr" | jq -r '.number')
@@ -132,17 +135,23 @@ for entry in "${REPOS[@]}"; do
     is_draft=$(printf '%s' "$pr" | jq -r '.isDraft')
     mergeable=$(printf '%s' "$pr" | jq -r '.mergeable')
     ci_state=$(printf '%s' "$pr" | jq -r '.commits.nodes[0].commit.statusCheckRollup.state // "null"')
-    threads_total=$(printf '%s' "$pr" | jq '.reviewThreads.totalCount')
     threads_unresolved=$(printf '%s' "$pr" | jq '[.reviewThreads.nodes[] | select(.isResolved == false)] | length')
+    inline_comments=$(printf '%s' "$pr" | jq '[.reviews.nodes[].comments.totalCount] | add // 0')
+    pr_comments=$(printf '%s' "$pr" | jq '.comments.totalCount')
+    total_comments=$(( inline_comments + pr_comments ))
 
-    if [ "$is_draft" = "true" ]; then status="draft"; else status="ready"; fi
+    if [ "$is_draft" = "true" ]; then
+      st_text="draft"; st_clr=$YLW
+    else
+      st_text="ready"; st_clr=$GRN
+    fi
 
     case "$ci_state" in
-      SUCCESS) ci_text="✓ pass"; ci_clr=$GRN ;;
-      PENDING) ci_text="● pend"; ci_clr=$YLW ;;
-      FAILURE) ci_text="✗ fail"; ci_clr=$RED ;;
-      ERROR)   ci_text="✗ err";  ci_clr=$RED ;;
-      *)       ci_text="—";      ci_clr=""   ;;
+      SUCCESS) ci_text="+ pass"; ci_clr=$GRN ;;
+      PENDING) ci_text="~ pend"; ci_clr=$YLW ;;
+      FAILURE) ci_text="x fail"; ci_clr=$RED ;;
+      ERROR)   ci_text="x err";  ci_clr=$RED ;;
+      *)       ci_text="-";      ci_clr=""   ;;
     esac
 
     case "$mergeable" in
@@ -151,24 +160,35 @@ for entry in "${REPOS[@]}"; do
       *)           mg_text="?";        mg_clr=$YLW ;;
     esac
 
-    if [ "$threads_total" -gt 0 ]; then
-      th_text="${threads_unresolved}/${threads_total}"
-      if [ "$threads_unresolved" -gt 0 ]; then th_clr=$YLW; else th_clr=$GRN; fi
+    if [ "$total_comments" -gt 0 ]; then
+      cm_text="$total_comments"
     else
-      th_text="—"; th_clr=""
+      cm_text="-"
     fi
 
-    printf '  '
-    cell 6  ""      "#$num"
-    printf ' '
-    cell 7  ""      "$status"
+    if [ "$threads_unresolved" -gt 0 ]; then
+      ur_text="$threads_unresolved"; ur_clr=$YLW
+    else
+      ur_text="-"; ur_clr=""
+    fi
+
+    url_clr=""
+    if [ "$ci_state" = "SUCCESS" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$threads_unresolved" -eq 0 ]; then
+      url_clr=$GRN
+    fi
+
+    printf '  %-6s ' "#$num"
+    cell 7  "$st_clr" "$st_text"
     printf ' '
     cell 8  "$ci_clr" "$ci_text"
     printf ' '
     cell 10 "$mg_clr" "$mg_text"
     printf ' '
-    cell 10 "$th_clr" "$th_text"
-    printf ' %-52s %s\n' "$title" "$url"
+    cell 8  ""      "$cm_text"
+    printf ' '
+    cell 10 "$ur_clr" "$ur_text"
+    printf ' %-52s ' "$title"
+    printf '%b%s%b\n' "$url_clr" "$url" "$R"
   done
 done
 
