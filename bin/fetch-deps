@@ -169,12 +169,12 @@ fetch_one() {
     fi
 
     local repo version asset_tpl binary dest has_extract
-    repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config")"
-    version="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config")"
-    asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config")"
-    binary="$(jq -r --arg d "$dep" '.[$d].binary // empty' "$config")"
-    dest="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config")"
-    has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config")"
+    repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config" | tr -d '\r')"
+    version="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config" | tr -d '\r')"
+    asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config" | tr -d '\r')"
+    binary="$(jq -r --arg d "$dep" '.[$d].binary // empty' "$config" | tr -d '\r')"
+    dest="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
+    has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config" | tr -d '\r')"
 
     [[ -z "$repo" ]]      && die "$dep: missing 'repo'"
     [[ -z "$version" ]]   && die "$dep: missing 'version'"
@@ -315,7 +315,7 @@ main() {
 
     if [[ ${#deps[@]} -eq 0 ]]; then
         local keys
-        keys="$(jq -r 'keys[]' "$config")"
+        keys="$(jq -r 'keys[]' "$config" | tr -d '\r')"
         while IFS= read -r d; do
             [[ -n "$d" ]] && deps+=("$d")
         done <<< "$keys"
