@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# list-repo-scripts — for each managed repo, list the contents of its
+# bin/, scripts/, and app-bin/ directories.
+#
+# The repo list is the canonical "managed by arthur-debert/release" set
+# (NOT auto-discovered from the main-branch-protection ruleset — that
+# signal includes unrelated repos). Update REPOS below when the
+# managed set changes.
+#
+# Usage:
+#   list-repo-scripts                 # all managed repos
+#   list-repo-scripts --only-present  # skip repos missing locally or without any dir
+#   list-repo-scripts --owner lex-fmt # filter by owner prefix
+
+set -uo pipefail
+
+only_present=0
+owner_filter=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --only-present) only_present=1; shift ;;
+    --owner)        owner_filter=$2; shift 2 ;;
+    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    *) echo "unknown arg: $1" >&2; exit 64 ;;
+  esac
+done
+
+# repo|local-path. Keep aligned with
+# ~/.claude/projects/-Users-adebert-h-release/memory/project_managed_repos.md
+REPOS=(
+  "arthur-debert/release|$HOME/h/release"
+  "arthur-debert/arami-app|$HOME/h/arami/arami-app"
+  "arthur-debert/arami-core|$HOME/h/arami/arami-core"
+  "arthur-debert/burgertocow|$HOME/h/burgertocow"
+  "arthur-debert/clapfig|$HOME/h/clapfig"
+  "arthur-debert/dodot|$HOME/h/dodot"
+  "arthur-debert/homebrew-tools|$HOME/h/homebrew-tools"
+  "arthur-debert/padz|$HOME/h/padz"
+  "arthur-debert/rustloc|$HOME/h/rustloc"
+  "arthur-debert/simple-gal|$HOME/h/simple-gal/simple-gal"
+  "arthur-debert/simple-gal-action|$HOME/h/simple-gal/simple-gal-action"
+  "arthur-debert/simple-gal-ui|$HOME/h/simple-gal/simple-gal-ui"
+  "arthur-debert/standout|$HOME/h/standout"
+  "lex-fmt/comms|$HOME/h/lex-fmt/comms"
+  "lex-fmt/lex|$HOME/h/lex-fmt/lex"
+  "lex-fmt/lexed|$HOME/h/lex-fmt/lexed"
+  "lex-fmt/nvim|$HOME/h/lex-fmt/nvim"
+  "lex-fmt/tree-sitter-lex|$HOME/h/lex-fmt/tree-sitter-lex"
+  "lex-fmt/vscode|$HOME/h/lex-fmt/vscode"
+  "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
+)
+
+COL=30
+DIRS=(bin scripts app-bin)
+
+col_lines() {
+  local dir=$1
+  if [ ! -d "$dir" ]; then
+    echo "(not present)"
+  elif contents=$(ls -1 "$dir") && [ -n "$contents" ]; then
+    printf '%s\n' "$contents"
+  else
+    echo "(empty)"
+  fi
+}
+
+print_columns() {
+  local file1=$1 file2=$2 file3=$3
+  local max n1 n2 n3
+  n1=$(wc -l < "$file1"); n2=$(wc -l < "$file2"); n3=$(wc -l < "$file3")
+  max=$n1; [ "$n2" -gt "$max" ] && max=$n2; [ "$n3" -gt "$max" ] && max=$n3
+
+  printf "%-${COL}s %-${COL}s %s\n" "bin/" "scripts/" "app-bin/"
+  printf "%-${COL}s %-${COL}s %s\n" "$(printf '%0.s─' $(seq 1 $((COL-2))))" "$(printf '%0.s─' $(seq 1 $((COL-2))))" "$(printf '%0.s─' $(seq 1 $((COL-2))))"
+
+  local i=1
+  while [ "$i" -le "$max" ]; do
+    local c1="" c2="" c3=""
+    [ "$i" -le "$n1" ] && c1=$(sed -n "${i}p" "$file1")
+    [ "$i" -le "$n2" ] && c2=$(sed -n "${i}p" "$file2")
+    [ "$i" -le "$n3" ] && c3=$(sed -n "${i}p" "$file3")
+    printf "%-${COL}s %-${COL}s %s\n" "$c1" "$c2" "$c3"
+    i=$((i + 1))
+  done
+}
+
+first=1
+for entry in "${REPOS[@]}"; do
+  repo=${entry%%|*}
+  path=${entry##*|}
+
+  if [ -n "$owner_filter" ] && [ "${repo%%/*}" != "$owner_filter" ]; then
+    continue
+  fi
+
+  if [ ! -d "$path" ]; then
+    [ "$only_present" = "1" ] && continue
+    [ "$first" = "1" ] || echo
+    first=0
+    echo "=== $repo ==="
+    echo "(repo not cloned locally)"
+    continue
+  fi
+
+  has_any=0
+  for d in "${DIRS[@]}"; do
+    [ -d "$path/$d" ] && { has_any=1; break; }
+  done
+
+  if [ "$has_any" = "0" ] && [ "$only_present" = "1" ]; then
+    continue
+  fi
+
+  [ "$first" = "1" ] || echo
+  first=0
+  echo "=== $repo ==="
+
+  tmp1=$(mktemp) tmp2=$(mktemp) tmp3=$(mktemp)
+  col_lines "$path/bin"     > "$tmp1"
+  col_lines "$path/scripts" > "$tmp2"
+  col_lines "$path/app-bin" > "$tmp3"
+  print_columns "$tmp1" "$tmp2" "$tmp3"
+  rm -f "$tmp1" "$tmp2" "$tmp3"
+done
