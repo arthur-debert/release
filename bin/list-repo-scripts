@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # list-repo-scripts — for each managed repo, list the contents of its
-# bin/, scripts/, and app-bin/ directories.
+# bin/, scripts/, and app-bin/ directories in side-by-side columns.
 #
 # The repo list is the canonical "managed by arthur-debert/release" set
 # (NOT auto-discovered from the main-branch-protection ruleset — that
@@ -8,23 +8,37 @@
 # managed set changes.
 #
 # Usage:
-#   list-repo-scripts                 # all managed repos
+#   list-repo-scripts                 # all managed repos, all dirs
 #   list-repo-scripts --only-present  # skip repos missing locally or without any dir
 #   list-repo-scripts --owner lex-fmt # filter by owner prefix
+#   list-repo-scripts --only-bin      # show only bin/ column
+#   list-repo-scripts --only-scripts  # show only scripts/ column
+#   list-repo-scripts --only-app-bin  # show only app-bin/ column
+#   list-repo-scripts --only-bin --only-scripts  # composable
 
 set -uo pipefail
 
 only_present=0
 owner_filter=""
+show_bin=0
+show_scripts=0
+show_app_bin=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --only-present) only_present=1; shift ;;
-    --owner)        owner_filter=$2; shift 2 ;;
-    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
+    --only-present)  only_present=1; shift ;;
+    --owner)         owner_filter=$2; shift 2 ;;
+    --only-bin)      show_bin=1; shift ;;
+    --only-scripts)  show_scripts=1; shift ;;
+    --only-app-bin)  show_app_bin=1; shift ;;
+    -h|--help)       sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 64 ;;
   esac
 done
+
+if [ "$show_bin" = "0" ] && [ "$show_scripts" = "0" ] && [ "$show_app_bin" = "0" ]; then
+  show_bin=1; show_scripts=1; show_app_bin=1
+fi
 
 # repo|local-path. Keep aligned with
 # ~/.claude/projects/-Users-adebert-h-release/memory/project_managed_repos.md
@@ -51,8 +65,23 @@ REPOS=(
   "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
 )
 
+ACTIVE_DIRS=()
+[ "$show_bin" = "1" ]     && ACTIVE_DIRS+=(bin)
+[ "$show_scripts" = "1" ] && ACTIVE_DIRS+=(scripts)
+[ "$show_app_bin" = "1" ] && ACTIVE_DIRS+=(app-bin)
+
 COL=30
-DIRS=(bin scripts app-bin)
+
+count_real_files() {
+  local dir=$1
+  if [ -d "$dir" ]; then
+    local c
+    c=$(ls -1 "$dir" 2>/dev/null | wc -l)
+    echo "$((c))"
+  else
+    echo 0
+  fi
+}
 
 col_lines() {
   local dir=$1
@@ -66,24 +95,57 @@ col_lines() {
 }
 
 print_columns() {
-  local file1=$1 file2=$2 file3=$3
-  local max n1 n2 n3
-  n1=$(wc -l < "$file1"); n2=$(wc -l < "$file2"); n3=$(wc -l < "$file3")
-  max=$n1; [ "$n2" -gt "$max" ] && max=$n2; [ "$n3" -gt "$max" ] && max=$n3
+  local ncols=${#ACTIVE_DIRS[@]}
+  local -a files=("$@")
+  local -a counts=()
+  local max=0
 
-  printf "%-${COL}s %-${COL}s %s\n" "bin/" "scripts/" "app-bin/"
-  printf "%-${COL}s %-${COL}s %s\n" "$(printf '%0.s─' $(seq 1 $((COL-2))))" "$(printf '%0.s─' $(seq 1 $((COL-2))))" "$(printf '%0.s─' $(seq 1 $((COL-2))))"
+  for f in "${files[@]}"; do
+    local n
+    n=$(wc -l < "$f")
+    counts+=("$n")
+    [ "$n" -gt "$max" ] && max=$n
+  done
 
-  local i=1
-  while [ "$i" -le "$max" ]; do
-    local c1="" c2="" c3=""
-    [ "$i" -le "$n1" ] && c1=$(sed -n "${i}p" "$file1")
-    [ "$i" -le "$n2" ] && c2=$(sed -n "${i}p" "$file2")
-    [ "$i" -le "$n3" ] && c3=$(sed -n "${i}p" "$file3")
-    printf "%-${COL}s %-${COL}s %s\n" "$c1" "$c2" "$c3"
-    i=$((i + 1))
+  local sep
+  sep=$(printf '%0.s-' $(seq 1 $((COL-2))))
+
+  # header
+  local hdr="" rule=""
+  for i in "${!ACTIVE_DIRS[@]}"; do
+    if [ "$i" -lt $((ncols - 1)) ]; then
+      hdr+=$(printf "%-${COL}s " "${ACTIVE_DIRS[$i]}/")
+      rule+=$(printf "%-${COL}s " "$sep")
+    else
+      hdr+="${ACTIVE_DIRS[$i]}/"
+      rule+="$sep"
+    fi
+  done
+  printf '%s\n' "$hdr"
+  printf '%s\n' "$rule"
+
+  local row=1
+  while [ "$row" -le "$max" ]; do
+    local line=""
+    for i in "${!files[@]}"; do
+      local cell=""
+      if [ "$row" -le "${counts[$i]}" ]; then
+        cell=$(sed -n "${row}p" "${files[$i]}")
+      fi
+      if [ "$i" -lt $((ncols - 1)) ]; then
+        line+=$(printf "%-${COL}s " "$cell")
+      else
+        line+="$cell"
+      fi
+    done
+    printf '%s\n' "$line"
+    row=$((row + 1))
   done
 }
+
+total_bin=0
+total_scripts=0
+total_app_bin=0
 
 first=1
 for entry in "${REPOS[@]}"; do
@@ -104,7 +166,7 @@ for entry in "${REPOS[@]}"; do
   fi
 
   has_any=0
-  for d in "${DIRS[@]}"; do
+  for d in "${ACTIVE_DIRS[@]}"; do
     [ -d "$path/$d" ] && { has_any=1; break; }
   done
 
@@ -112,14 +174,27 @@ for entry in "${REPOS[@]}"; do
     continue
   fi
 
+  # accumulate totals (always count all three for summary)
+  total_bin=$((total_bin + $(count_real_files "$path/bin")))
+  total_scripts=$((total_scripts + $(count_real_files "$path/scripts")))
+  total_app_bin=$((total_app_bin + $(count_real_files "$path/app-bin")))
+
   [ "$first" = "1" ] || echo
   first=0
   echo "=== $repo ==="
 
-  tmp1=$(mktemp) tmp2=$(mktemp) tmp3=$(mktemp)
-  col_lines "$path/bin"     > "$tmp1"
-  col_lines "$path/scripts" > "$tmp2"
-  col_lines "$path/app-bin" > "$tmp3"
-  print_columns "$tmp1" "$tmp2" "$tmp3"
-  rm -f "$tmp1" "$tmp2" "$tmp3"
+  tmpfiles=()
+  for d in "${ACTIVE_DIRS[@]}"; do
+    t=$(mktemp)
+    col_lines "$path/$d" > "$t"
+    tmpfiles+=("$t")
+  done
+  print_columns "${tmpfiles[@]}"
+  rm -f "${tmpfiles[@]}"
 done
+
+echo
+echo "--- totals across fleet ---"
+[ "$show_bin" = "1" ]     && printf "  bin/     %d\n" "$total_bin"
+[ "$show_scripts" = "1" ] && printf "  scripts/ %d\n" "$total_scripts"
+[ "$show_app_bin" = "1" ] && printf "  app-bin/ %d\n" "$total_app_bin"
