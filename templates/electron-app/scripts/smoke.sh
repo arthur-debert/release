@@ -27,7 +27,13 @@ echo "smoke.sh: PLATFORM=${PLATFORM} ARCH=${ARCH:-} APP_NAME=${APP_NAME}"
 
 case "${PLATFORM}" in
   mac)
-    binary="${PACKAGE_DIR}/mac-${ARCH}/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
+    # electron-builder uses "mac" when no arch is specified, "mac-${ARCH}"
+    # otherwise. Guard against unset ARCH under set -u.
+    mac_dir="mac"
+    if [ -n "${ARCH:-}" ]; then
+      mac_dir="mac-${ARCH}"
+    fi
+    binary="${PACKAGE_DIR}/${mac_dir}/${APP_NAME}.app/Contents/MacOS/${APP_NAME}"
     if [ ! -e "${binary}" ]; then
       echo "smoke.sh: binary not found: ${binary}" >&2
       echo "smoke.sh: PACKAGE_DIR contents:" >&2
@@ -42,7 +48,21 @@ case "${PLATFORM}" in
     ;;
 
   linux)
+    # electron-builder names the linux binary from build.executableName
+    # (falling back to package.json "name"), NOT from productName. The
+    # workflow passes APP_NAME from productName, so lowercasing it may
+    # not match. Try the lowered productName first; if missing, fall back
+    # to scanning linux-unpacked/ for the single executable.
     binary="${PACKAGE_DIR}/linux-unpacked/${app_name_lower}"
+    if [ ! -e "${binary}" ]; then
+      # Fallback: find the main executable (largest ELF file in the dir).
+      candidate="$(find "${PACKAGE_DIR}/linux-unpacked" -maxdepth 1 -type f -executable 2>/dev/null \
+        | head -n 1 || true)"
+      if [ -n "${candidate}" ]; then
+        echo "smoke.sh: primary name '${app_name_lower}' not found; using '${candidate}'"
+        binary="${candidate}"
+      fi
+    fi
     if [ ! -e "${binary}" ]; then
       echo "smoke.sh: binary not found: ${binary}" >&2
       echo "smoke.sh: PACKAGE_DIR contents:" >&2
