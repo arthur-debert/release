@@ -70,6 +70,7 @@ setup_mock_curl() {
     local mock_dir="$HARNESS_WORKSPACE/_mock_releases"
     local mock_curl="$HARNESS_WORKSPACE/_bin/curl"
     mkdir -p "$HARNESS_WORKSPACE/_bin"
+    unset GITHUB_TOKEN GH_TOKEN
 
     cat > "$mock_curl" <<'MOCKCURL'
 #!/usr/bin/env bash

@@ -87,15 +87,45 @@ stamp_write() {
 
 # ─── Download ──────────────────────────────────────────────
 
-download() {
-    local url="$1" dest="$2"
-    local curl_opts=(-fsSL -o "$dest")
-    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-        curl_opts+=(-H "Authorization: Bearer $GITHUB_TOKEN")
-    elif [[ -n "${GH_TOKEN:-}" ]]; then
-        curl_opts+=(-H "Authorization: Bearer $GH_TOKEN")
+_auth_token() {
+    printf '%s' "${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+}
+
+# Download a GitHub release asset. For private repos the browser-style URL
+# (github.com/.../releases/download/...) returns 404 even with an auth
+# header because the 302 redirect strips Authorization. Use the API
+# endpoint instead: look up the asset ID via the releases/tags endpoint,
+# then download with Accept: application/octet-stream.
+download_release_asset() {
+    local repo="$1" version="$2" asset="$3" dest="$4"
+    local token
+    token="$(_auth_token)"
+
+    if [[ -n "$token" ]]; then
+        # Authenticated path -- works for both public and private repos.
+        local api_url="https://api.github.com/repos/$repo/releases/tags/$version"
+        local asset_url
+        asset_url="$(curl -fsSL \
+            -H "Authorization: Bearer $token" \
+            "$api_url" \
+            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')" \
+            || die "failed to look up release $version for $repo"
+
+        [[ -z "$asset_url" || "$asset_url" == "null" ]] && \
+            die "$repo@$version: asset '$asset' not found in release"
+
+        curl -fsSL \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: application/octet-stream" \
+            -o "$dest" \
+            "$asset_url" \
+            || die "download failed: $asset from $repo@$version"
+    else
+        # Unauthenticated -- public repos only.
+        local url="https://github.com/$repo/releases/download/$version/$asset"
+        curl -fsSL -o "$dest" "$url" \
+            || die "download failed: $url (private repo? set GH_TOKEN)"
     fi
-    curl "${curl_opts[@]}" "$url" || die "download failed: $url"
 }
 
 # ─── Extraction ────────────────────────────────────────────
@@ -163,8 +193,7 @@ fetch_one() {
     local dep_dir="$work_dir/$dep"
     mkdir -p "$dep_dir"
 
-    local url="https://github.com/$repo/releases/download/$version/$asset"
-    download "$url" "$dep_dir/$asset"
+    download_release_asset "$repo" "$version" "$asset" "$dep_dir/$asset"
 
     extract_archive "$dep_dir/$asset" "$dep_dir/out"
     local root

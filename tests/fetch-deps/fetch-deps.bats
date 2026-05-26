@@ -353,6 +353,61 @@ JSON
     [[ -x bin/mycli ]]
 }
 
+# ─── Authenticated (API) download path ────────────────────
+
+@test "authenticated path uses API to resolve asset URL" {
+    # Mock curl that handles both the API lookup and the asset download
+    mkdir -p "$HARNESS_WORKSPACE/_mock_releases" "$HARNESS_WORKSPACE/_bin"
+    make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli"
+    cp "$HARNESS_WORKSPACE/mybin.tar.gz" "$HARNESS_WORKSPACE/_mock_releases/mycli-aarch64-apple-darwin.tar.gz"
+
+    cat > "$HARNESS_WORKSPACE/_bin/curl" <<'MOCKCURL'
+#!/usr/bin/env bash
+output="" ; url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o)   output="$2"; shift 2 ;;
+        -H)   shift 2 ;;
+        -*)   shift ;;
+        *)    url="$1"; shift ;;
+    esac
+done
+mock_dir="$(dirname "$0")/../_mock_releases"
+if [[ "$url" == *"api.github.com"* ]]; then
+    # API call — return a fake release JSON with one asset
+    cat <<JSON
+{"assets":[{"name":"mycli-aarch64-apple-darwin.tar.gz","url":"https://fake-api/asset/12345"}]}
+JSON
+    exit 0
+elif [[ "$url" == *"fake-api/asset"* ]]; then
+    # Asset download via API URL
+    cp "$mock_dir/mycli-aarch64-apple-darwin.tar.gz" "$output"
+    exit 0
+else
+    echo "mock curl: unexpected url: $url" >&2; exit 22
+fi
+MOCKCURL
+    chmod +x "$HARNESS_WORKSPACE/_bin/curl"
+    export PATH="$HARNESS_WORKSPACE/_bin:$PATH"
+    export GH_TOKEN="fake-token"
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}.tar.gz",
+        "binary": "mycli",
+        "dest": "bin"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ -x bin/mycli ]]
+}
+
 # ─── Config validation ───────────────────────────────────
 
 @test "errors on missing required fields" {
