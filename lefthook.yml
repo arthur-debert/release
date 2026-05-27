@@ -45,7 +45,7 @@ pre-commit:
           echo "prettier not installed; skipping (install: brew install prettier)"
           exit 0
         fi
-        prettier --check {staged_files}
+        prettier --check -- {staged_files}
 
     actionlint:
       glob:
