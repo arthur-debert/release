@@ -359,6 +359,10 @@ fi
 
 # --- 4. Per-repo hook -------------------------------------------------------
 _hook="${REPO_ROOT}/app-bin/post-setup-hook.sh"
-if [ -x "${_hook}" ]; then
-  "${_hook}"
+if [ -f "${_hook}" ]; then
+  if [ -x "${_hook}" ]; then
+    "${_hook}"
+  else
+    echo "warning: ${_hook} exists but is not executable; skipping" >&2
+  fi
 fi
