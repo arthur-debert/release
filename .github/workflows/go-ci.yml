@@ -104,7 +104,7 @@ jobs:
         run: bash "${{ inputs.pre-check }}"
 
       - name: Install lefthook
-        run: npm install -g lefthook
+        run: npm install -g lefthook@2.1.6
 
       - name: Run umbrella check
         shell: bash

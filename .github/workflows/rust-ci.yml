@@ -182,7 +182,7 @@ jobs:
         run: bash "${{ inputs.pre-test }}"
 
       - name: Install lefthook
-        run: npm install -g lefthook
+        run: npm install -g lefthook@2.1.6
 
       - name: Run canonical checks (bin/check)
         run: bin/check
