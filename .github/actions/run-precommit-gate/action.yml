@@ -55,4 +55,4 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         SKIP_PRECOMMIT_GATE: ${{ inputs.skip == 'true' && 'true' || '' }}
-      run: bash "${{ github.action_path }}/../../../scripts/run-precommit-gate.sh"
+      run: bash "${{ github.action_path }}/../../../bin-internal/run-precommit-gate.sh"

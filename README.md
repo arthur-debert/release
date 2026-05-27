@@ -503,7 +503,7 @@ bin/                  human-runnable tooling, on $PATH via dodot:
                       release-cut, fetch-artifact
                       🚧 done-check (planned)
 rulesets/             branch-protection JSON templates
-scripts/              CI scripts exec'd by composite actions
+bin-internal/         CI scripts exec'd by composite actions
 templates/            path-mirror layout — sync destination = source
                       path minus the commons/, components/<c>/, or
                       <stack>/ prefix

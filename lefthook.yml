@@ -13,8 +13,8 @@ pre-commit:
     shellcheck:
       glob:
         - "bin/*"
-        - "scripts/*.sh"
-        - "scripts/*.bash"
+        - "bin-internal/*.sh"
+        - "bin-internal/*.bash"
       run: |
         if ! command -v shellcheck >/dev/null 2>&1; then
           echo "shellcheck not installed; skipping (install: apt-get install shellcheck)"

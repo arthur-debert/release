@@ -16,7 +16,7 @@ constraints that apply when *working on this repo itself*.
 - `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
   - Policy/setup: `apply-ruleset`, `sweep-github-policy`, `install-release-{secrets,token}`, `enable-dependabot-security`, `detect-stack`
   - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `gh-release-issue`
-- `scripts/` — what composite actions exec inside CI
+- `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
 - `tests/fixtures/` — synthetic projects per category, exercised by `_ci.yml`
 - `docs/` — consumer guide, secrets, breaking-changes log
@@ -104,7 +104,7 @@ lex-fmt/lex v0.9.1.
 - **Bug fixes go here, not in consumers.** A bug surfaced by a
   consumer is fixed here, tagged as a PATCH, and the `v1` branch
   advanced. Consumers re-run; nothing for them to edit.
-- **`scripts/ci-publish-crate.sh` is load-bearing.** It tolerates
+- **`bin-internal/ci-publish-crate.sh` is load-bearing.** It tolerates
   the case where a re-published older RC version exists per the
   crates.io JSON API but `cargo publish` errors. Don't replace
   with a `cargo search VERSION | grep` fallback — that's the

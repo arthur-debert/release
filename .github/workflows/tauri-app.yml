@@ -305,7 +305,7 @@ jobs:
           repository: arthur-debert/release
           ref: v1
           path: .release
-          sparse-checkout: scripts
+          sparse-checkout: bin-internal
 
       # pnpm/action-setup MUST run before setup-node, because
       # setup-node@v6 with `cache: 'pnpm'` invokes `pnpm store path`
@@ -332,13 +332,13 @@ jobs:
 
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
-        run: bash .release/scripts/install-tauri-linux-deps.sh
+        run: bash .release/bin-internal/install-tauri-linux-deps.sh
 
       - name: Install JS deps
         shell: bash
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
-        run: bash .release/scripts/install-js-deps.sh
+        run: bash .release/bin-internal/install-js-deps.sh
 
       - name: Set Apple signing env (macOS, signing only)
         if: matrix.t.platform == 'mac' && !inputs.notarize
@@ -347,7 +347,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           SIGNING_ONLY: 'true'
-        run: bash .release/scripts/setup-tauri-signing-env.sh
+        run: bash .release/bin-internal/setup-tauri-signing-env.sh
 
       - name: Set Apple signing + notarization env (macOS)
         if: matrix.t.platform == 'mac' && inputs.notarize
@@ -358,7 +358,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash .release/scripts/setup-tauri-signing-env.sh
+        run: bash .release/bin-internal/setup-tauri-signing-env.sh
 
       - name: Build
         shell: bash
@@ -366,7 +366,7 @@ jobs:
           BUNDLES: ${{ matrix.t.bundles }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: bash .release/scripts/build-tauri.sh
+        run: bash .release/bin-internal/build-tauri.sh
 
       - name: Collect bundles
         id: bundles
@@ -374,7 +374,7 @@ jobs:
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
           PLATFORM: ${{ matrix.t.platform }}
-        run: bash .release/scripts/collect-tauri-bundles.sh
+        run: bash .release/bin-internal/collect-tauri-bundles.sh
 
       - name: Derive app name
         id: app-name
@@ -414,7 +414,7 @@ jobs:
           repository: arthur-debert/release
           ref: v1
           path: .release
-          sparse-checkout: scripts
+          sparse-checkout: bin-internal
 
       - name: Download release notes
         uses: actions/download-artifact@v4
@@ -436,4 +436,4 @@ jobs:
           TAG: v${{ needs.prepare.outputs.version }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
           ASSETS_DIR: bundles
-        run: bash .release/scripts/create-github-release.sh
+        run: bash .release/bin-internal/create-github-release.sh

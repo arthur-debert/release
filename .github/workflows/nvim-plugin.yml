@@ -140,7 +140,7 @@ jobs:
           repository: arthur-debert/release
           ref: v1
           path: .release
-          sparse-checkout: scripts
+          sparse-checkout: bin-internal
 
       - name: Download release notes
         uses: actions/download-artifact@v4
@@ -154,4 +154,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
           TAG: v${{ needs.prepare.outputs.version }}
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
-        run: bash .release/scripts/create-github-release.sh
+        run: bash .release/bin-internal/create-github-release.sh

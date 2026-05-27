@@ -41,4 +41,4 @@ runs:
         BUNDLE_MAC: ${{ inputs.bundle-targets-mac }}
         BUNDLE_LINUX: ${{ inputs.bundle-targets-linux }}
         BUNDLE_WINDOWS: ${{ inputs.bundle-targets-windows }}
-      run: bash "${{ github.action_path }}/../../../scripts/compute-tauri-matrix.sh"
+      run: bash "${{ github.action_path }}/../../../bin-internal/compute-tauri-matrix.sh"

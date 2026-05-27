@@ -34,5 +34,5 @@ runs:
             sleep "$WAIT"
           fi
           first=false
-          bash "${{ github.action_path }}/../../../scripts/ci-publish-crate.sh" "$crate"
+          bash "${{ github.action_path }}/../../../bin-internal/ci-publish-crate.sh" "$crate"
         done
