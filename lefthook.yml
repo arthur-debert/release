@@ -37,6 +37,16 @@ pre-commit:
         done
         exit $fail
 
+    prettier:
+      glob:
+        - "templates/**/*.{json,md,yml,yaml}"
+      run: |
+        if ! command -v prettier >/dev/null 2>&1; then
+          echo "prettier not installed; skipping (install: brew install prettier)"
+          exit 0
+        fi
+        prettier --check {staged_files}
+
     actionlint:
       glob:
         - ".github/workflows/*.yml"

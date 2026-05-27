@@ -41,8 +41,8 @@ unit tests) AND rust checks (`cargo fmt --check`, `cargo clippy`,
 - No backwards-compatibility hacks: no `// removed` comments, no renaming unused
   vars to `_var`, no shim modules. If something is unused, delete it.
 - No fallbacks, defaults, or feature flags unless the PR explicitly asks for them.
-- Default to no comments. Well-named identifiers carry the *what*. Reserve
-  comments for non-obvious *why* (hidden constraint, workaround, surprising
+- Default to no comments. Well-named identifiers carry the _what_. Reserve
+  comments for non-obvious _why_ (hidden constraint, workaround, surprising
   invariant).
 - Trust internal code and framework guarantees. Only validate at system
   boundaries (user input, IPC messages, filesystem entry, network).
