@@ -39,7 +39,7 @@ runs:
   steps:
     - name: Install Tauri Linux build dependencies
       shell: bash
-      run: bash "${{ github.action_path }}/../../../scripts/install-tauri-linux-deps.sh"
+      run: bash "${{ github.action_path }}/../../../bin-internal/install-tauri-linux-deps.sh"
 
     - name: Prepare Tauri release
       id: prep
@@ -49,4 +49,4 @@ runs:
         TAURI_DIR: ${{ inputs.tauri-dir }}
         CHANGELOG: ${{ inputs.changelog-path }}
         PREP_SCRIPT: ${{ inputs.prep-script }}
-      run: bash "${{ github.action_path }}/../../../scripts/prepare-tauri-release.sh"
+      run: bash "${{ github.action_path }}/../../../bin-internal/prepare-tauri-release.sh"

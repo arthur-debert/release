@@ -35,7 +35,7 @@ runs:
       shell: bash
       env:
         CHANGELOG: ${{ inputs.changelog-path }}
-      run: bash "${{ github.action_path }}/../../../scripts/check-changelog-fragments.sh"
+      run: bash "${{ github.action_path }}/../../../bin-internal/check-changelog-fragments.sh"
 
     - name: Validate and detect resume case
       id: detect
@@ -126,7 +126,7 @@ runs:
         CHANGELOG: ${{ inputs.changelog-path }}
         NEW_VERSION: ${{ inputs.version }}
       run: |
-        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+        bash "${{ github.action_path }}/../../../bin-internal/roll-changelog.sh" \
           roll "$CHANGELOG" "$NEW_VERSION" release-notes.md
 
     - name: Extract changelog notes (prerelease)
@@ -137,7 +137,7 @@ runs:
       run: |
         # Prereleases share Unreleased entries with the final they lead to;
         # extract for release notes but don't roll into a versioned section.
-        bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+        bash "${{ github.action_path }}/../../../bin-internal/roll-changelog.sh" \
           extract "$CHANGELOG" release-notes.md
 
     - name: Commit, tag, push
@@ -255,7 +255,7 @@ runs:
         # For final releases, the rolled section is `## [<version>]`; read it.
         set -euo pipefail
         if [ "$IS_PRERELEASE" = "true" ]; then
-          bash "${{ github.action_path }}/../../../scripts/roll-changelog.sh" \
+          bash "${{ github.action_path }}/../../../bin-internal/roll-changelog.sh" \
             extract "$CHANGELOG" release-notes.md
         else
           # Read the already-rolled versioned section.

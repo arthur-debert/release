@@ -191,7 +191,7 @@ jobs:
                   # bin/changelog walks up cwd for CHANGELOG/, so cd
                   # next to the changelog file first — otherwise on
                   # monorepos with multiple changelogs the wrong
-                  # CHANGELOG/ gets cut. Mirrors scripts/roll-changelog.sh.
+                  # CHANGELOG/ gets cut. Mirrors bin-internal/roll-changelog.sh.
                   (
                     cd "$(dirname "${CHANGELOG}")"
                     bin/changelog new-version "${NEW_VERSION}"

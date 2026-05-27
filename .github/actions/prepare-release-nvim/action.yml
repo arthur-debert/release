@@ -49,4 +49,4 @@ runs:
         CHANGELOG: ${{ inputs.changelog-path }}
         VERSION_FILE: ${{ inputs.version-file }}
         PREP_SCRIPT: ${{ inputs.prep-script }}
-      run: bash "${{ github.action_path }}/../../../scripts/prepare-nvim-release.sh"
+      run: bash "${{ github.action_path }}/../../../bin-internal/prepare-nvim-release.sh"

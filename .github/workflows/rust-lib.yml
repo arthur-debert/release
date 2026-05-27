@@ -91,7 +91,7 @@ jobs:
   # -------------------------------------------------------------------
   # 2. Publish crates to crates.io in declared topological order. The
   #    publish-crate composite action's underlying script
-  #    (scripts/ci-publish-crate.sh) tolerates already-published
+  #    (bin-internal/ci-publish-crate.sh) tolerates already-published
   #    versions via the two-tier "JSON API pre-check + cargo output
   #    grep" pattern — so a resumed release that's partially
   #    published doesn't fail.

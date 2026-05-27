@@ -110,7 +110,7 @@ runs:
 
         mkdir -p "$(dirname "$OUTPUT_PATH")"
         env "${env_args[@]}" python3 \
-          "${{ github.action_path }}/../../../scripts/render-brew-formula.py" \
+          "${{ github.action_path }}/../../../bin-internal/render-brew-formula.py" \
           "$TMPL" "$OUTPUT_PATH"
 
         echo "=== Rendered formula ==="

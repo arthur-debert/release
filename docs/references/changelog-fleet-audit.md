@@ -94,7 +94,7 @@ if unavailable).
   These get replaced by `bin/changelog new-version` + the
   per-stack reusable release workflow. The legacy scripts on
   `lex-fmt/lex` come along in the same sweep.
-- **`scripts/roll-changelog.sh` in release/ itself** is out of
+- **`bin-internal/roll-changelog.sh` in release/ itself** is out of
   scope here (release/ isn't in the audit), but is still dead
   code worth deleting in #211 alongside the consumer-side sweep.
 - **`no-staging-block` repos** (`lex-fmt/nvim`, `lex-fmt/zed-lex`)
