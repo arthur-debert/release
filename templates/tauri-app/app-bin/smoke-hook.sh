@@ -2,7 +2,7 @@
 # Canonical packaged-bundle smoke test for Tauri apps.
 #
 # Convention hook: release/'s tauri-app.yml detects this via
-# hashFiles('scripts/smoke.sh') and runs it per-platform after
+# hashFiles('app-bin/smoke-hook.sh') and runs it per-platform after
 # bundle collection, before artifact upload.
 #
 # Env vars (provided by the workflow):

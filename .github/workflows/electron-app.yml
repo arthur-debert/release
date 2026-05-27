@@ -448,7 +448,7 @@ jobs:
             || echo "::warning::Staple failed — notarization may not be complete yet. DMG is still signed."
           xcrun stapler validate "${DMG_PATH}" || true
 
-      # Smoke test (convention): scripts/smoke.sh. Catches catastrophic
+      # Smoke test (convention): app-bin/smoke-hook.sh. Catches catastrophic
       # build issues (wrong binary path, dylib missing, Windows path
       # quirks, etc.) — the only way to know the packaged build doesn't
       # crash on launch is to launch it. PLATFORM/ARCH/PACKAGE_DIR env
@@ -465,14 +465,14 @@ jobs:
         run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test (mac)
-        if: hashFiles('scripts/smoke.sh') != ''
+        if: hashFiles('app-bin/smoke-hook.sh') != ''
         shell: bash
         env:
           PLATFORM: mac
           ARCH: ${{ matrix.arch }}
           PACKAGE_DIR: ${{ inputs.output-dir }}
           APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash scripts/smoke.sh
+        run: bash app-bin/smoke-hook.sh
 
       # Upload runs `if: always() && !cancelled()` so a notarization
       # timeout (warning, not failure) still publishes the signed DMG.
@@ -553,14 +553,14 @@ jobs:
         run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test (linux)
-        if: hashFiles('scripts/smoke.sh') != ''
+        if: hashFiles('app-bin/smoke-hook.sh') != ''
         shell: bash
         env:
           PLATFORM: linux
           ARCH: ${{ matrix.arch }}
           PACKAGE_DIR: ${{ inputs.output-dir }}
           APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash scripts/smoke.sh
+        run: bash app-bin/smoke-hook.sh
 
       # AppImage is the canonical linux artifact for electron-app and
       # required for the release to be useful; .deb is optional (only
@@ -657,14 +657,14 @@ jobs:
         run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test (windows)
-        if: hashFiles('scripts/smoke.sh') != ''
+        if: hashFiles('app-bin/smoke-hook.sh') != ''
         shell: bash
         env:
           PLATFORM: windows
           ARCH: ${{ matrix.arch }}
           PACKAGE_DIR: ${{ inputs.output-dir }}
           APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash scripts/smoke.sh
+        run: bash app-bin/smoke-hook.sh
 
       - name: Upload windows artifacts
         uses: actions/upload-artifact@v4
