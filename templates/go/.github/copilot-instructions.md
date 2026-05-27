@@ -25,8 +25,8 @@ This is a Go project (CLI, server, or module).
 - No backwards-compatibility hacks: no `// removed` comments, no renaming unused
   vars to `_`, no shim packages. If something is unused, delete it.
 - No fallbacks, defaults, or feature flags unless the PR explicitly asks for them.
-- Default to no comments. Well-named identifiers carry the *what*. Reserve
-  comments for non-obvious *why* (hidden constraint, workaround, surprising
+- Default to no comments. Well-named identifiers carry the _what_. Reserve
+  comments for non-obvious _why_ (hidden constraint, workaround, surprising
   invariant). Export comments are the exception — `golint` / `revive` will
   require them on exported identifiers, but keep them tight.
 - Trust internal code and framework guarantees. Only validate at system
