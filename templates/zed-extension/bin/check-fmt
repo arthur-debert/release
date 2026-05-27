@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# rustfmt is target-agnostic — formatting rules don't change between
-# host and wasm32-wasip2 — so the invocation is identical to rust-cli's.
-
-echo "Checking formatting..."
-cargo fmt --all -- --check
-echo "Formatting OK"

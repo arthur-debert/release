@@ -181,11 +181,10 @@ jobs:
         if: inputs.pre-test != ''
         run: bash "${{ inputs.pre-test }}"
 
+      - name: Install lefthook
+        run: npm install -g lefthook@2.1.6
+
       - name: Run canonical checks (bin/check)
-        # THE point of this workflow: every consumer runs the same
-        # umbrella (fmt + lint + tests). Fix once in the rust-quality
-        # Component, propagate via release-sync, every consumer's CI
-        # picks it up on the next run.
         run: bin/check
 
       - name: Build release binary

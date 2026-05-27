@@ -1,32 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Shared checks used by both pre-commit hook and CI.
-# Each step is its own script so they can be run individually.
-#
-# For electron-app the umbrella is: fmt + lint + typecheck + tests.
-# Typecheck has no per-file analogue (tsc operates on the project)
-# so it's invoked inline rather than as a separate bin/check-typecheck
-# script — matching the existing rust/go pattern of "one script per
-# tool, but a single tsc call is the tool".
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
-"$SCRIPT_DIR/check-fmt"
-"$SCRIPT_DIR/check-lint"
-
-# Typecheck (tsc --noEmit). Skip with a notice if the consumer hasn't
-# wired a `typecheck` npm script — Electron projects without TS are
-# rare but valid (some Svelte/Vue setups use svelte-check via a
-# differently-named script; consumers can add a `typecheck` alias to
-# their package.json scripts to opt in).
-if [ -f package.json ] && node -e "process.exit(require('./package.json').scripts && require('./package.json').scripts.typecheck ? 0 : 1)" 2>/dev/null; then
-    echo "Running typecheck..."
-    npm run --silent typecheck
-    echo "Typecheck OK"
+_lefthook=""
+if [ -x node_modules/.bin/lefthook ]; then
+  _lefthook="node_modules/.bin/lefthook"
+elif command -v lefthook >/dev/null 2>&1; then
+  _lefthook="lefthook"
 else
-    echo "No 'typecheck' script in package.json — skipping typecheck."
+  echo "error: lefthook not found (install: npm install -g lefthook)" >&2
+  exit 1
 fi
+
+"$_lefthook" run pre-commit --all-files --no-tty
 
 "$SCRIPT_DIR/check-tests"
 
