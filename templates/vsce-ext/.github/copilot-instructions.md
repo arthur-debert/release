@@ -54,7 +54,7 @@ via the `vsce-targets` input on the reusable release workflow.
   activation slows VS Code startup for every user, not just those who
   use this extension.
 - Native binaries (LSP servers, tree-sitter parsers) bundled into the
-  VSIX must be fetched per-target by `scripts/pre-vsce-package.sh` (the
+  VSIX must be fetched per-target by `app-bin/pre-vsce-package-hook.sh` (the
   convention hook the reusable `vscode-ext.yml` workflow invokes). The
   script runs once per matrix entry with `VSCE_TARGET`, `PLATFORM`,
   `ARCH`, and `RUST_TARGET` exposed in the env. Don't fetch binaries

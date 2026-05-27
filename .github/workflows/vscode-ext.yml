@@ -14,7 +14,7 @@ name: VS Code extension release
 # matrix collapses to a single build job that emits one platform-
 # agnostic VSIX.
 #
-# Native-binary fetch hook (convention): if `scripts/pre-vsce-package.sh`
+# Native-binary fetch hook (convention): if `app-bin/pre-vsce-package-hook.sh`
 # exists, it's invoked before `vsce package` on every matrix entry
 # with VSCE_TARGET (e.g. `darwin-arm64`), PLATFORM, ARCH, and
 # RUST_TARGET (mapped rust-target-triple, e.g.
@@ -213,7 +213,7 @@ jobs:
 
   # -------------------------------------------------------------------
   # 2. Build matrix — one VSIX per target. Each entry runs on the
-  #    matching OS, optionally invokes scripts/pre-vsce-package.sh
+  #    matching OS, optionally invokes app-bin/pre-vsce-package-hook.sh
   #    (e.g. for fetching native binaries), runs `vsce package`.
   # -------------------------------------------------------------------
   build:
@@ -244,7 +244,7 @@ jobs:
       # Only installed when the hook is actually present (cheap noop
       # otherwise).
       - name: Install fetch-artifact CLI
-        if: hashFiles('scripts/pre-vsce-package.sh') != ''
+        if: hashFiles('app-bin/pre-vsce-package-hook.sh') != ''
         shell: bash
         run: |
           set -euo pipefail
@@ -265,7 +265,7 @@ jobs:
           rm -rf "${tmp}"
 
       # Convention hook. Runs only when consumer ships
-      # scripts/pre-vsce-package.sh. Use case: fetch native binaries
+      # app-bin/pre-vsce-package-hook.sh. Use case: fetch native binaries
       # for the target arch before vsce package bundles them.
       #
       # Env exposed:
@@ -276,7 +276,7 @@ jobs:
       #   GH_TOKEN     so `fetch-artifact` (which shells out to
       #                `gh release download`) can authenticate
       - name: Pre-package hook (consumer)
-        if: hashFiles('scripts/pre-vsce-package.sh') != ''
+        if: hashFiles('app-bin/pre-vsce-package-hook.sh') != ''
         shell: bash
         env:
           VSCE_TARGET: ${{ matrix.t.target }}
@@ -284,7 +284,7 @@ jobs:
           ARCH: ${{ matrix.t.arch }}
           RUST_TARGET: ${{ matrix.t.rust }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-        run: bash scripts/pre-vsce-package.sh
+        run: bash app-bin/pre-vsce-package-hook.sh
 
       - name: Package VSIX
         id: pkg

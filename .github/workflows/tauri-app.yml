@@ -384,14 +384,14 @@ jobs:
           echo "name=$(jq -r '.productName // .package.productName // "App"' "$conf")" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test
-        if: hashFiles('scripts/smoke.sh') != ''
+        if: hashFiles('app-bin/smoke-hook.sh') != ''
         shell: bash
         env:
           PLATFORM: ${{ matrix.t.platform }}
           BUNDLE_DIR: ${{ steps.bundles.outputs.dir }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
           APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash scripts/smoke.sh
+        run: bash app-bin/smoke-hook.sh
 
       - name: Upload platform bundle
         uses: actions/upload-artifact@v4

@@ -2,13 +2,13 @@
 # Canonical packaged-binary smoke test for Electron apps.
 #
 # Convention hook: release/'s electron-app.yml detects this via
-# hashFiles('scripts/smoke.sh') and runs it per-platform after
+# hashFiles('app-bin/smoke-hook.sh') and runs it per-platform after
 # build + notarization, before artifact upload.
 #
 # Static integrity checks only — verifies the binary exists and
 # is the correct file type. Consumers needing dynamic tests
 # (e.g. Playwright --project=packaged) override this file with
-# their own scripts/smoke.sh.
+# their own app-bin/smoke-hook.sh.
 #
 # Env vars (provided by the workflow):
 #   PLATFORM     mac | linux | windows
