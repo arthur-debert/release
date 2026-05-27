@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Shared checks used by both pre-commit hook and CI.
-# Each step is its own script so they can be run individually.
-
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/.."
 
-"$SCRIPT_DIR/check-fmt"
-"$SCRIPT_DIR/check-lint"
+lefthook run pre-commit --all-files --no-tty
+
 "$SCRIPT_DIR/check-tests"
 
 echo ""

@@ -370,14 +370,10 @@ jobs:
           GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: ${{ inputs.pre-test }}
 
+      - name: Install lefthook
+        run: npm install -g lefthook
+
       - name: Run canonical checks (bin/check)
-        # THE point of this workflow: every consumer runs the same
-        # umbrella across BOTH halves (frontend: fmt + lint +
-        # typecheck + unit tests; rust: cargo fmt --check + clippy +
-        # test, scoped to src-tauri/). Fix once in the Stack
-        # template / npm-quality Component, propagate via
-        # release-sync, every consumer's CI picks it up on the next
-        # run.
         env:
           GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: bin/check
