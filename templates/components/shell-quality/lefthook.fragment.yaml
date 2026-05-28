@@ -58,9 +58,18 @@ pre-commit:
         - "**/*.{sh,bash}"
         - "scripts/**"
         - "bin/**"
+      # NOTE on glob syntax: lefthook's `exclude` field uses glob, NOT
+      # regex (despite some docs suggesting otherwise). Empirically:
+      # `**/*.foo` does NOT work (the `**/` prefix breaks). `*.foo`
+      # DOES match recursively (treated as ends-with). `dir/**` works
+      # for excluding a subtree. The original `**/*.{md,...}` pattern
+      # below was a pre-existing no-op; switched to `*.{md,...}`.
       exclude:
-        - "**/*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
+        - "*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
+        - "*LICENSE*"
+        - "bin/share/**"
         - "live-tests/**"
+        - "test/**"
         - "tests/e2e/**"
       # --severity=warning passed as a CLI flag (not via .shellcheckrc)
       # because Ubuntu 24.04 ships shellcheck 0.9.0 which silently
