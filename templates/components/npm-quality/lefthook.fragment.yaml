@@ -1,6 +1,8 @@
 # npm-quality lefthook fragment.
 # Merged into the consumer's lefthook.yml by release-sync.
-# Priority 2 = check-only (no auto-fix and re-stage).
+# Priority 2 = pre-commit gate. prettier runs in auto-fix mode
+# (--write + stage_fixed); eslint and typecheck are check-only
+# (rule violations need code changes, not formatting).
 #
 # Frontend hygiene shared across npm-based Stacks (electron-app,
 # tauri-app, vscode-ext, anything with a package.json front end).

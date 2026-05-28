@@ -1,6 +1,8 @@
 # shell-quality lefthook fragment.
 # Merged into the consumer's lefthook.yml by release-sync.
-# Priority 2 = check-only (no auto-fix and re-stage).
+# Priority 2 = pre-commit gate. markdownlint runs in auto-fix mode
+# (--fix + stage_fixed); yamllint and shellcheck are check-only
+# (no auto-fix available).
 #
 # Each hook is `command -v`-guarded so a contributor without the tool
 # installed gets a clear skip-with-notice rather than a cryptic "command
@@ -18,7 +20,7 @@ pre-commit:
       glob: "**/*.md"
       run: >-
         if command -v markdownlint >/dev/null 2>&1; then
-          markdownlint --fix {staged_files};
+          markdownlint --fix -- {staged_files};
         else
           echo "markdownlint not installed (skipping; install via npm i -g markdownlint-cli or brew install markdownlint-cli)" >&2;
         fi
