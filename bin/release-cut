@@ -101,16 +101,32 @@ fi
 # exits non-zero if it can't determine one.
 # ---------------------------------------------------------------------
 
-# Read the first `version = "..."` line from a TOML file. Works for
-# Cargo.toml ([workspace.package] or [package]) and extension.toml
-# (top-level version key). Tolerates leading indentation.
+# Read the package version from a TOML file. Works for Cargo.toml
+# ([package] / [workspace.package]) and extension.toml (top-level
+# version key).
+#
+# Section-aware: starts in "matching" mode so top-level keys before
+# any [section] header are read (extension.toml shape); turns off on
+# any [section] header; turns back on only for [package] and
+# [workspace.package]. This avoids matching a `version = "..."` line
+# inside [dependencies], [workspace.dependencies.<dep>], [lints],
+# [features], etc.
 _read_toml_version() {
     local f="$1"
     [ -f "$f" ] || return 1
     local v
-    v=$(grep -E '^[[:space:]]*version[[:space:]]*=[[:space:]]*"' "$f" \
-        | head -1 \
-        | sed -E 's/^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/') || true
+    v=$(awk '
+        BEGIN { in_sect=1 }
+        /^\[package\][[:space:]]*$/             { in_sect=1; next }
+        /^\[workspace\.package\][[:space:]]*$/  { in_sect=1; next }
+        /^\[/                                   { in_sect=0; next }
+        in_sect && /^[[:space:]]*version[[:space:]]*=/ {
+            if (match($0, /"[^"]+"/)) {
+                print substr($0, RSTART+1, RLENGTH-2)
+                exit 0
+            }
+        }
+    ' "$f") || true
     [ -n "$v" ] || return 1
     printf '%s\n' "$v"
 }

@@ -145,6 +145,34 @@ EOF
   [[ "$output" == *"Bumping minor: 5.0.1-rc.1 -> 5.1.0"* ]]
 }
 
+@test "rust-cli workspace-only root: ignores [workspace.dependencies] versions" {
+  # Regression guard: a workspace-only root that declares dependency
+  # versions inside [workspace.dependencies.<dep>] tables MUST NOT
+  # have those mistaken for the package version. The reader is
+  # section-aware: only [package] / [workspace.package] / top-level
+  # keys count.
+  _write_release_yml
+  cat > Cargo.toml <<EOF
+[workspace]
+resolver = "2"
+members = ["crates/lib"]
+
+[workspace.dependencies.serde]
+version = "1.0.219"
+features = ["derive"]
+EOF
+  mkdir -p crates/lib
+  cat > crates/lib/Cargo.toml <<EOF
+[package]
+name = "foo-lib"
+version = "3.2.1"
+EOF
+  _stub_gh
+  run "$BIN/release-cut" patch
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bumping patch: 3.2.1 -> 3.2.2"* ]]
+}
+
 @test "rust-cli workspace-only root: handles multi-line members array" {
   _write_release_yml
   cat > Cargo.toml <<EOF
