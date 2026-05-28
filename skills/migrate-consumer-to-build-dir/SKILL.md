@@ -37,7 +37,7 @@ Set `RELEASE_HOME` once and reuse it in the steps below. `release-sync` already 
 # if release-sync was actually found — otherwise the `&&` short-circuit
 # leaves it unset rather than landing on cd ./.. → parent of $PWD):
 #   RELEASE_BIN=$(command -v release-sync) && RELEASE_HOME=$(cd "$(dirname "$RELEASE_BIN")/.." && pwd)
-[ -d "$RELEASE_HOME/.git" ] || { echo "RELEASE_HOME=$RELEASE_HOME is not a release checkout" >&2; exit 1; }
+[ -x "$RELEASE_HOME/bin/release-sync" ] || { echo "RELEASE_HOME=$RELEASE_HOME is not a release checkout" >&2; exit 1; }
 export RELEASE_HOME
 ```
 
@@ -117,7 +117,10 @@ Check **both** the local branch and the remote-tracking ref. A previous attempt 
 ```sh
 BRANCH=chore/adopt-release-sync-build-dir
 cd "$CONSUMER_PATH"
-git fetch origin "$BRANCH" 2>/dev/null || true
+# Step 2 already ran `git fetch origin` for the whole remote, so the
+# remote-tracking ref below is fresh. (Don't `git fetch origin $BRANCH
+# 2>/dev/null || true` here — that silently swallows real failures
+# like auth/network errors and corrupts the detection downstream.)
 LOCAL_EXISTS=0
 REMOTE_EXISTS=0
 if git show-ref --verify --quiet "refs/heads/$BRANCH";          then LOCAL_EXISTS=1; fi
