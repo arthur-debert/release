@@ -341,6 +341,48 @@ JSON
     [[ -f out/ok/parser.wasm ]]
 }
 
+@test "iter mode: declaration order is preserved (manifest-extractor runs before iter dep)" {
+    # Real-world case: an "extract" dep pulls a JSON manifest out of a
+    # tarball into resources/, and a later iter dep reads that
+    # manifest via from-manifest. If keys were processed alphabetically
+    # the iter dep ('grammars' < 'tree-sitter') would run first and
+    # fail because the manifest isn't on disk yet.
+    setup_mock_curl
+    mock_asset_file "g-rs.wasm" "rs-wasm"
+
+    # Mock the tree-sitter tarball that contains the manifest.
+    make_multi_tarball "$HARNESS_WORKSPACE/ts.tar.gz" \
+        'shared/embedded-grammars.json:{"items":[{"name":"rs","repo":"ex/rs","version":"v1.0.0","wasm_asset":"g-rs.wasm"}]}'
+    mock_release ts v0.11.0 "tree-sitter.tar.gz" "$HARNESS_WORKSPACE/ts.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "tree-sitter": {
+        "repo": "ex/ts",
+        "version": "v0.11.0",
+        "asset": "tree-sitter.tar.gz",
+        "extract": {
+            "shared/embedded-grammars.json": "resources"
+        }
+    },
+    "grammars": {
+        "from-manifest": "resources/embedded-grammars.json",
+        "for-each":      ".items[]",
+        "repo":          "{{.repo}}",
+        "version":       "{{.version}}",
+        "asset":         "{{.wasm_asset}}",
+        "dest":          "out/{{.name}}",
+        "binary-as":     "parser.wasm"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ -f resources/embedded-grammars.json ]]
+    [[ -f out/rs/parser.wasm ]]
+}
+
 @test "iter mode: optional: true makes one bad item soft-fail the whole dep" {
     setup_mock_curl
     mock_asset_file "g-ok.wasm" "ok"

@@ -730,8 +730,13 @@ main() {
     jq empty "$config" 2>/dev/null || die "invalid JSON: $config"
 
     if [[ ${#deps[@]} -eq 0 ]]; then
+        # keys_unsorted preserves deps.json declaration order so authors
+        # can put a dep that extracts a manifest (via `extract`) before
+        # an iteration-mode dep that reads that manifest via
+        # `from-manifest`. jq's plain `keys` would sort alphabetically
+        # and break that contract.
         local keys
-        keys="$(jq -r 'keys[]' "$config" | tr -d '\r')"
+        keys="$(jq -r 'keys_unsorted[]' "$config" | tr -d '\r')"
         while IFS= read -r d; do
             [[ -n "$d" ]] && deps+=("$d")
         done <<< "$keys"
