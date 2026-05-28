@@ -166,6 +166,22 @@ should_skip_source() {
   return 1
 }
 
+# Some paths can't be symlinks because the consuming tool doesn't
+# dereference them. The known case: GitHub Actions workflows. GH reads
+# .github/workflows/*.yml directly from the git tree and treats a
+# symlink blob as the literal target path, which fails to parse and
+# silently breaks every workflow in the directory. For these paths
+# release-sync writes a real-file copy with a marker header comment
+# so cleanup can later detect and remove stale managed copies.
+needs_real_file() {
+  case "$1" in
+    .github/workflows/*) return 0 ;;
+  esac
+  return 1
+}
+
+MANAGED_MARKER='# Managed by release-sync — do not edit. Regenerate via release-sync.'
+
 # Map every source path → (file_mode, destination relative to .release/).
 # Last write wins (mirrors current release-sync precedence).
 declare -A plan_mode=()
@@ -279,13 +295,22 @@ for f in "${old_files[@]}"; do
   fi
 done
 
-# Symlink changes: which new files need a symlink created
+# Symlink/copy changes: each new file is either symlinked or copied.
 declare -a symlinks_to_create=()
 declare -a symlinks_to_remove=()
+declare -a copies_to_write=()
 declare -a conflicts=()
 declare -a migrated=()
 
 for f in "${new_files[@]}"; do
+  if needs_real_file "$f"; then
+    # Always (re)write copies. They're regenerated from .release/ every
+    # sync; never skip on conflict since the conflict IS expected on
+    # initial migration AND on every content update.
+    copies_to_write+=("$f")
+    continue
+  fi
+
   target=".release/$f"
   # Compute relative path from $f's location to .release/$f
   link_dir=$(dirname "$f")
@@ -331,6 +356,29 @@ while IFS= read -r -d '' link; do
   esac
 done < <(find . -type l -not -path './.git/*' -not -path './.release/*' -print0 2>/dev/null)
 
+# Build the set of expected copy destinations (this sync's needs_real_file paths).
+declare -A copy_set=()
+for f in "${copies_to_write[@]}"; do copy_set[$f]=1; done
+
+# Walk paths where copies live to find stale managed copies — real
+# files with the marker header that no longer have a corresponding
+# .release/ source. Today only .github/workflows/ qualifies.
+declare -a copies_to_remove=()
+if [ -d .github/workflows ]; then
+  while IFS= read -r -d '' candidate; do
+    rel=${candidate#./}
+    # Skip files already planned to be (re)written
+    [ -n "${copy_set[$rel]:-}" ] && continue
+    # Skip symlinks (those are someone else's concern)
+    [ -L "$candidate" ] && continue
+    # Only sweep files that carry the marker — leave hand-authored
+    # consumer workflows alone.
+    if head -1 "$candidate" 2>/dev/null | grep -qF "$MANAGED_MARKER"; then
+      copies_to_remove+=("$rel")
+    fi
+  done < <(find .github/workflows -type f -print0 2>/dev/null)
+fi
+
 # --- Report -------------------------------------------------------------
 
 echo "=== .release/ changes ==="
@@ -342,6 +390,13 @@ echo
 echo "=== symlink changes ==="
 for s in "${symlinks_to_create[@]}"; do echo "  +link     $s"; done
 for s in "${symlinks_to_remove[@]}"; do echo "  -link     $s (broken)"; done
+
+if [ ${#copies_to_write[@]} -gt 0 ] || [ ${#copies_to_remove[@]} -gt 0 ]; then
+  echo
+  echo "=== copy changes (real-file managed paths) ==="
+  for f in "${copies_to_write[@]}"; do echo "  =copy     $f"; done
+  for f in "${copies_to_remove[@]}"; do echo "  -copy     $f (stale managed copy)"; done
+fi
 
 if [ ${#conflicts[@]} -gt 0 ]; then
   echo
@@ -357,7 +412,7 @@ if [ ${#migrated[@]} -gt 0 ]; then
   for f in "${migrated[@]}"; do echo "  >file     $f (will be deleted, then symlinked)"; done
 fi
 
-total_changes=$((${#added[@]} + ${#modified[@]} + ${#removed[@]} + ${#symlinks_to_create[@]} + ${#symlinks_to_remove[@]} + ${#migrated[@]}))
+total_changes=$((${#added[@]} + ${#modified[@]} + ${#removed[@]} + ${#symlinks_to_create[@]} + ${#symlinks_to_remove[@]} + ${#migrated[@]} + ${#copies_to_write[@]} + ${#copies_to_remove[@]}))
 echo
 echo "summary: $total_changes changes, ${#conflicts[@]} conflicts"
 
@@ -394,6 +449,38 @@ done
 # Remove broken symlinks
 for link in "${symlinks_to_remove[@]}"; do
   rm "$link"
+done
+
+# Write managed copies (real files for paths GH can't dereference).
+# If the destination is currently a symlink (e.g. leftover from a
+# previous sync that wrongly tried to symlink it), remove the link
+# first so we write the real file in its place.
+for f in "${copies_to_write[@]}"; do
+  mkdir -p "$(dirname "$f")"
+  [ -L "$f" ] && rm "$f"
+  src=".release/$f"
+  # Detect file kind from the source extension for the comment syntax.
+  case "$f" in
+    *.yml|*.yaml)
+      {
+        printf '%s\n' "$MANAGED_MARKER"
+        cat "$src"
+      } > "$f"
+      ;;
+    *)
+      # Fallback: just copy as-is. Other file types (not currently used
+      # under .github/workflows/) can grow their own header style later.
+      cp "$src" "$f"
+      ;;
+  esac
+  # Preserve executable bit from the source.
+  if [ -x "$src" ]; then chmod +x "$f"; fi
+done
+
+# Remove stale managed copies — files that carry the marker but no
+# longer have a .release/ source.
+for f in "${copies_to_remove[@]}"; do
+  rm "$f"
 done
 
 echo
