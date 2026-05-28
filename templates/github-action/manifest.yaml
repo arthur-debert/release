@@ -1,0 +1,14 @@
+# Kind default manifest for `github-action` (detected via action.yml
+# or action.yaml at repo root — a composite or javascript GitHub
+# Action repo).
+# Consumers can override with `.release-sync.yaml` at their repo root.
+
+kind: github-action
+capabilities:
+  - shell-quality
+# GitHub Action repos are typically minimal: action.yml + maybe some
+# shell helpers + README. shell-quality covers markdownlint /
+# yamllint / shellcheck which is the full pre-commit surface. No
+# language-specific quality Capability applies (the action's
+# implementation could be composite shell, JavaScript, or Docker —
+# we don't gate on those uniformly).

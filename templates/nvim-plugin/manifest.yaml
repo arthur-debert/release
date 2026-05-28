@@ -1,0 +1,10 @@
+# Kind default manifest for `nvim-plugin` (detected via plugin/,
+# ftdetect/, ftplugin/, autoload/, or queries/ dir + lua source).
+# Consumers can override with `.release-sync.yaml` at their repo root.
+
+kind: nvim-plugin
+capabilities:
+  - shell-quality
+# nvim plugins are pure Lua; no Rust/Go/npm quality gates apply.
+# The shell-quality Capability covers any .sh helpers in bin/ +
+# the standard markdownlint/yamllint over docs and CI configs.
