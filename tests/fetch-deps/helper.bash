@@ -91,8 +91,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Extract asset filename from URL (last path component)
-asset="$(basename "$url")"
+# Extract asset filename from URL (strip query string, last path component)
+asset="${url%%\?*}"
+asset="$(basename "$asset")"
 mock_dir="$(dirname "$0")/../_mock_releases"
 
 if [[ -f "$mock_dir/$asset" ]]; then
