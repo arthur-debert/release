@@ -11,13 +11,18 @@
 pre-commit:
   commands:
     markdownlint:
+      # Auto-fix + re-stage. markdownlint --fix handles most
+      # whitespace/style issues mechanically. Content-level rules
+      # (MD041 first-line-heading, unbalanced refs) still fail the
+      # commit when they can't be auto-fixed — that's the right gate.
       glob: "**/*.md"
       run: >-
         if command -v markdownlint >/dev/null 2>&1; then
-          markdownlint {staged_files};
+          markdownlint --fix {staged_files};
         else
           echo "markdownlint not installed (skipping; install via npm i -g markdownlint-cli or brew install markdownlint-cli)" >&2;
         fi
+      stage_fixed: true
       priority: 2
     yamllint:
       glob: "**/*.{yml,yaml}"

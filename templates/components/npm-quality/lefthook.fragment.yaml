@@ -43,9 +43,17 @@ pre-commit:
       run: npx --no-install eslint --max-warnings 0 -- {staged_files}
       priority: 2
     prettier:
+      # Auto-fix + re-stage. Prettier's whole value is mechanical
+      # formatting; failing the commit for fixable whitespace is
+      # friction with no payoff. `stage_fixed: true` writes the
+      # fixes back to the working tree AND re-stages them in the
+      # same hook run, so the commit goes through with the
+      # formatted content. If prettier can't fix something (rare),
+      # it'll exit non-zero and the commit fails as before.
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
-      run: npx --no-install prettier --check -- {staged_files}
+      run: npx --no-install prettier --write -- {staged_files}
+      stage_fixed: true
       priority: 2
     typecheck:
       # tsc operates on the project as a whole — no per-file invocation.
