@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Canonical `bin/release` shim. Forwards to `release-cut` from the
+# release portfolio (arthur-debert/release/bin/release-cut). What CI
+# does after dispatch is per-Kind — see .github/workflows/release.yml
+# and CHANGELOG/.
+#
+# Workspace consumers (Cargo workspaces with the version in a sub-
+# crate's manifest) export RELEASE_CUT_MANIFEST to point at the right
+# Cargo.toml. Everyone else ignores it.
+set -euo pipefail
+
+if ! command -v release-cut >/dev/null 2>&1; then
+    echo "bin/release: release-cut not on \$PATH" >&2
+    echo "  install: clone arthur-debert/release and add its bin/ to \$PATH" >&2
+    exit 1
+fi
+
+exec release-cut "$@"
