@@ -28,6 +28,17 @@ The design rationale lives in `docs/adr/0001-release-sync-build-dir-with-symlink
 - `gh` authenticated.
 - The local `release` repository checkout exists and is on `main`.
 
+Set `RELEASE_HOME` once and reuse it in the steps below. `release-sync` already honors this env var; pick whichever resolution path matches your setup:
+
+```sh
+# If your shell already has it (e.g. via dodot), keep what's there:
+: "${RELEASE_HOME:=$HOME/release}"
+# Or derive from where release-sync is installed:
+#   RELEASE_HOME=$(cd "$(dirname "$(command -v release-sync)")/.." && pwd)
+[ -d "$RELEASE_HOME/.git" ] || { echo "RELEASE_HOME=$RELEASE_HOME is not a release checkout" >&2; exit 1; }
+export RELEASE_HOME
+```
+
 ## Inputs
 
 The user gives you a consumer repo identifier. Resolve to a path:
@@ -99,13 +110,27 @@ git status --porcelain | awk '/^\?\?/{print}' | sed 's/^/  ignoring untracked: /
 
 The canonical branch name is **`chore/adopt-release-sync-build-dir`** — use exactly this. The gh-pr-review-loop tooling and any future audit will rely on it.
 
+Check **both** the local branch and the remote-tracking ref. A previous attempt from another clone / cloud session can leave `origin/chore/adopt-release-sync-build-dir` published while this clone has no local copy; without the remote check we'd create a fresh branch from main, push without `--force-with-lease`, and the existing remote would reject the push.
+
 ```sh
 BRANCH=chore/adopt-release-sync-build-dir
 cd "$CONSUMER_PATH"
-if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-  # Re-sync path: the branch already exists from a previous attempt.
+git fetch origin "$BRANCH" 2>/dev/null || true
+LOCAL_EXISTS=0
+REMOTE_EXISTS=0
+git show-ref --verify --quiet "refs/heads/$BRANCH"          && LOCAL_EXISTS=1
+git show-ref --verify --quiet "refs/remotes/origin/$BRANCH" && REMOTE_EXISTS=1
+
+if [ "$LOCAL_EXISTS" = 1 ]; then
+  # Re-sync path with local branch present: reuse it, reset to fresh main.
   git checkout "$BRANCH"
   git reset --hard origin/main
+  RESYNC=1
+elif [ "$REMOTE_EXISTS" = 1 ]; then
+  # Re-sync path with only the remote branch present (PR opened from
+  # another clone or a prior cloud session). Create a fresh local
+  # branch from main; push will use --force-with-lease.
+  git checkout -b "$BRANCH" origin/main
   RESYNC=1
 else
   git checkout -b "$BRANCH"
@@ -118,7 +143,7 @@ fi
 The migration's correctness depends on the templates the local release checkout sees right now.
 
 ```sh
-( cd <path-to-release-repo> && git pull --ff-only )
+( cd "$RELEASE_HOME" && git pull --ff-only )
 ```
 
 If release has uncommitted changes, surface that and stop — running with a dirty templates tree means non-reproducible output.
@@ -127,8 +152,10 @@ If release has uncommitted changes, surface that and stop — running with a dir
 
 ```sh
 cd "$CONSUMER_PATH"
-RELEASE_HOME=<path-to-release-repo> release-sync --migrate
+release-sync --migrate
 ```
+
+(`$RELEASE_HOME` is already exported from Prerequisites.)
 
 Expected output ends with a summary like `0 conflicts`. If there are conflicts, STOP — that means a managed file in the consumer was hand-edited and differs from the template. Surface the conflict list to the user.
 
@@ -185,19 +212,16 @@ EOF
 
 ### 10. Push
 
+`release-sync` does not switch branches, but if any earlier step (e.g. an `apply-ruleset` invocation in the same session) flipped HEAD to main, an unguarded push would land on main. The branch-current guard runs **before** the push so it actually prevents the unsafe operation.
+
 ```sh
 cd "$CONSUMER_PATH"
+[ "$(git branch --show-current)" = "$BRANCH" ] || { echo "wrong branch — aborting"; exit 1; }
 if [ "$RESYNC" = 1 ]; then
   git push --force-with-lease -u origin "$BRANCH"
 else
   git push -u origin "$BRANCH"
 fi
-```
-
-**Verify branch before push** — `release-sync` does not switch branches, but if any earlier step (e.g. an `apply-ruleset` invocation in the same session) flipped HEAD to main, the push would land on main. Cheap insurance:
-
-```sh
-[ "$(git branch --show-current)" = "$BRANCH" ] || { echo "wrong branch — aborting"; exit 1; }
 ```
 
 ### 11. Open the PR
