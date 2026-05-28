@@ -63,9 +63,12 @@ pre-commit:
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
       run: >-
-        real_files=$(for f in {staged_files}; do [ -L "$f" ] || printf '%s\n' "$f"; done);
-        if [ -n "$real_files" ]; then
-          printf '%s\n' "$real_files" | xargs npx --no-install prettier --write --;
+        set --;
+        for f in {staged_files}; do
+          [ -L "$f" ] || set -- "$@" "$f";
+        done;
+        if [ $# -gt 0 ]; then
+          npx --no-install prettier --write -- "$@";
         fi
       stage_fixed: true
       priority: 2
