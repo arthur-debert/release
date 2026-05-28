@@ -7,7 +7,7 @@ description: "Migrate one consumer repo from the old in-place release-sync model
 
 Drives one consumer repo through the ADR-0001 migration in one shot. The shape of the change is identical for every consumer; the per-repo work is just running the sequence cleanly and triaging CI.
 
-The design rationale lives in `/Users/adebert/h/release/docs/adr/0001-release-sync-build-dir-with-symlinks.md`. Read that first if you don't know why `.release/` + symlinks exists.
+The design rationale lives in `docs/adr/0001-release-sync-build-dir-with-symlinks.md`. Read that first if you don't know why `.release/` + symlinks exists.
 
 ## When to use
 
@@ -23,10 +23,10 @@ The design rationale lives in `/Users/adebert/h/release/docs/adr/0001-release-sy
 
 ## Prerequisites
 
-- `release-sync` on PATH (lives at `/Users/adebert/h/release/bin/release-sync` locally; PATH usually already has it via dodot).
+- `release-sync` on PATH (lives at `bin/release-sync` in the release repository; PATH usually already has it via dodot).
 - `lefthook` installed (`brew install lefthook` if missing).
 - `gh` authenticated.
-- The local `/Users/adebert/h/release` checkout exists and is on `main`.
+- The local `release` repository checkout exists and is on `main`.
 
 ## Inputs
 
@@ -81,7 +81,7 @@ If `git checkout main` fails because of uncommitted changes on the current branc
 
 ```sh
 cd "$CONSUMER_PATH"
-MODIFIED=$(git status --porcelain | awk '/^[ MARCDU]M /{print} /^M[ MARCDU] /{print}' || true)
+MODIFIED=$(git status --porcelain --untracked-files=no || true)
 if [ -n "$MODIFIED" ]; then
   echo "STOP: modified tracked files present:" >&2
   echo "$MODIFIED" >&2
@@ -118,7 +118,7 @@ fi
 The migration's correctness depends on the templates the local release checkout sees right now.
 
 ```sh
-( cd /Users/adebert/h/release && git pull --ff-only )
+( cd <path-to-release-repo> && git pull --ff-only )
 ```
 
 If release has uncommitted changes, surface that and stop — running with a dirty templates tree means non-reproducible output.
@@ -127,7 +127,7 @@ If release has uncommitted changes, surface that and stop — running with a dir
 
 ```sh
 cd "$CONSUMER_PATH"
-RELEASE_HOME=/Users/adebert/h/release release-sync --migrate
+RELEASE_HOME=<path-to-release-repo> release-sync --migrate
 ```
 
 Expected output ends with a summary like `0 conflicts`. If there are conflicts, STOP — that means a managed file in the consumer was hand-edited and differs from the template. Surface the conflict list to the user.
@@ -308,4 +308,4 @@ Do NOT `git commit --amend` an existing migration commit. Always replace it with
 
 - `gh-pr-review-loop` — the next skill in the chain; drives review/fix loop.
 - `gh-repo-setup` — onboarding skill; run *before* this one if the repo isn't on release-sync yet.
-- ADR-0001 at `/Users/adebert/h/release/docs/adr/0001-release-sync-build-dir-with-symlinks.md` — design rationale for `.release/` + symlinks.
+- ADR-0001 at `docs/adr/0001-release-sync-build-dir-with-symlinks.md` — design rationale for `.release/` + symlinks.
