@@ -15,9 +15,11 @@ load helper
 }
 
 @test "shim errors with helpful message when release-cut is not on PATH" {
-  # Empty PATH except for coreutils so `command -v release-cut` fails
-  # but bash itself still works.
-  run env -i PATH=/usr/bin:/bin bash "$TEMPLATES_BIN/release" minor
+  # Empty PATH except for coreutils so `command -v release-cut` fails.
+  # Use $BASH for the bash binary instead of relying on `/usr/bin/bash`
+  # or `/bin/bash` — those don't exist on NixOS, FreeBSD, or any host
+  # with a custom toolchain.
+  run env -i PATH=/usr/bin:/bin "$BASH" "$TEMPLATES_BIN/release" minor
   [ "$status" -eq 1 ]
   [[ "$output" == *"release-cut not on \$PATH"* ]]
 }

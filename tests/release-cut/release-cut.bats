@@ -36,14 +36,17 @@ load helper
   [[ "$output" == *"nothing to do"* ]]
 }
 
-@test "RELEASE_CUT_WORKFLOW override is honored in no-workflow check" {
-  # Override the workflow name; the graceful check should look for the
-  # overridden name, not release.yml.
+@test "RELEASE_CUT_WORKFLOW override: missing workflow is a hard error" {
+  # When the user explicitly overrides the workflow name, a typo or
+  # missing file must fail loudly — otherwise the override silently
+  # no-ops, which defeats the purpose of overriding.
   mkdir -p .github/workflows
   echo "name: release" > .github/workflows/release.yml
   RELEASE_CUT_WORKFLOW=custom.yml run "$BIN/release-cut" minor
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"no .github/workflows/custom.yml"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"workflow not found"* ]]
+  [[ "$output" == *"custom.yml"* ]]
+  [[ "$output" == *"RELEASE_CUT_WORKFLOW override"* ]]
 }
 
 @test "release.yml present but no manifest: errors on missing manifest" {

@@ -72,8 +72,14 @@ workflow="${RELEASE_CUT_WORKFLOW:-release.yml}"
 # Graceful no-op for Consumers that don't ship a release workflow
 # (github-action repos, tree-sitter standalone grammars, etc.). The
 # canonical bin/release shim lands in every Consumer via release-sync;
-# not every Kind has something to dispatch.
+# not every Kind has something to dispatch. An explicit
+# RELEASE_CUT_WORKFLOW override is treated as a hard error on miss,
+# since a typo there would otherwise silently do nothing.
 if [ ! -f "$repo_root/.github/workflows/$workflow" ]; then
+    if [ -n "${RELEASE_CUT_WORKFLOW:-}" ]; then
+        echo "release-cut: workflow not found: .github/workflows/$workflow (RELEASE_CUT_WORKFLOW override)" >&2
+        exit 1
+    fi
     echo "release-cut: no .github/workflows/$workflow in this repo; nothing to do."
     exit 0
 fi
