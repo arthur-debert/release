@@ -440,3 +440,231 @@ JSON
     [[ "$status" -ne 0 ]]
     [[ "$output" == *"missing 'asset'"* ]]
 }
+
+# ─── {{node_platform}} / {{node_arch}} templates ──────────
+
+@test "{{node_platform}} and {{node_arch}} expand in dest" {
+    # Electron extraResource convention: per-platform subdir under
+    # resources/bin/. {{node_platform}}-{{node_arch}} → darwin-arm64
+    # on macOS arm64.
+    setup_mock_curl
+    make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli"
+    mock_release mycli v1.0.0 "mycli-aarch64-apple-darwin.tar.gz" "$HARNESS_WORKSPACE/mybin.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}.tar.gz",
+        "binary": "mycli",
+        "dest": "resources/bin/{{node_platform}}-{{node_arch}}"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ -x "resources/bin/darwin-arm64/mycli" ]]
+}
+
+@test "{{node_platform}} expands to linux for linux target" {
+    setup_mock_curl
+    make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli"
+    mock_release mycli v1.0.0 "mycli-x86_64-unknown-linux-gnu.tar.gz" "$HARNESS_WORKSPACE/mybin.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}.tar.gz",
+        "binary": "mycli",
+        "dest": "out/{{node_platform}}-{{node_arch}}"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target x86_64-unknown-linux-gnu
+    [[ "$status" -eq 0 ]]
+    [[ -x "out/linux-x64/mycli" ]]
+}
+
+@test "{{node_arch}} accepts LLVM-style arm64 triple (not just aarch64)" {
+    # LLVM/Clang spelling: arm64-apple-darwin. Rust spells the same
+    # target aarch64-apple-darwin. Both should map to node arm64.
+    setup_mock_curl
+    make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli"
+    mock_release mycli v1.0.0 "mycli-arm64-apple-darwin.tar.gz" "$HARNESS_WORKSPACE/mybin.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}.tar.gz",
+        "binary": "mycli",
+        "dest": "out/{{node_platform}}-{{node_arch}}"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target arm64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ -x "out/darwin-arm64/mycli" ]]
+}
+
+@test "{{node_platform}} expands to win32 for windows target" {
+    # Use simple mode (no binary) to avoid the .exe path quirk in the mock harness.
+    setup_mock_curl
+    make_multi_tarball "$HARNESS_WORKSPACE/pkg.zip" "marker:ok"
+    # mock_release just copies the file; the .zip extension matters
+    # for extract_archive to pick the right tool.
+    mock_release mycli v1.0.0 "mycli-x86_64-pc-windows-msvc.zip" "$HARNESS_WORKSPACE/pkg.zip"
+    # The "zip" we made is actually a tarball; swap it for a real one
+    # by re-creating it as a zip if `zip` is available; otherwise skip.
+    if ! command -v zip >/dev/null 2>&1; then
+        skip "zip not available in this environment"
+    fi
+    rm "$HARNESS_WORKSPACE/_mock_releases/mycli-x86_64-pc-windows-msvc.zip"
+    ( cd "$HARNESS_WORKSPACE" && mkdir -p _zipstage && echo ok > _zipstage/marker && \
+      cd _zipstage && zip -q "$HARNESS_WORKSPACE/_mock_releases/mycli-x86_64-pc-windows-msvc.zip" marker )
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}{{ext}}",
+        "dest": "out/{{node_platform}}-{{node_arch}}"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target x86_64-pc-windows-msvc
+    [[ "$status" -eq 0 ]]
+    [[ -f "out/win32-x64/marker" ]]
+}
+
+# ─── --soft / "optional": true ───────────────────────────
+
+@test "download failure exits non-zero by default" {
+    setup_mock_curl
+    # No mock_release call -> mock curl returns 22 (asset not found).
+    cat > deps.json <<'JSON'
+{
+    "ghost": {
+        "repo": "test/ghost",
+        "version": "v1.0.0",
+        "asset": "ghost-{{target}}.tar.gz",
+        "binary": "ghost",
+        "dest": "bin"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"dep(s) failed"* ]]
+}
+
+@test "--soft: download failure exits 0 with warning" {
+    setup_mock_curl
+    cat > deps.json <<'JSON'
+{
+    "ghost": {
+        "repo": "test/ghost",
+        "version": "v1.0.0",
+        "asset": "ghost-{{target}}.tar.gz",
+        "binary": "ghost",
+        "dest": "bin"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --soft --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"soft mode"* ]]
+    [[ ! -f bin/ghost ]]
+}
+
+@test "\"optional\": true: per-entry soft-fail exits 0 with warning" {
+    setup_mock_curl
+    cat > deps.json <<'JSON'
+{
+    "ghost": {
+        "repo": "test/ghost",
+        "version": "v1.0.0",
+        "asset": "ghost-{{target}}.tar.gz",
+        "binary": "ghost",
+        "dest": "bin",
+        "optional": true
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ "$output" == *"soft mode"* ]]
+    [[ ! -f bin/ghost ]]
+}
+
+@test "\"optional\": true: hard dep in same run still fails the script" {
+    setup_mock_curl
+    # one ok dep that downloads fine + one optional dep that fails
+    # + one hard dep that fails → exit non-zero because of the hard one.
+    make_binary_tarball "$HARNESS_WORKSPACE/ok.tar.gz" "ok-cli"
+    mock_release ok-cli v1.0.0 "ok-cli-aarch64-apple-darwin.tar.gz" "$HARNESS_WORKSPACE/ok.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "ok-cli": {
+        "repo": "test/ok",
+        "version": "v1.0.0",
+        "asset": "ok-cli-{{target}}.tar.gz",
+        "binary": "ok-cli",
+        "dest": "bin"
+    },
+    "soft-ghost": {
+        "repo": "test/soft-ghost",
+        "version": "v1.0.0",
+        "asset": "soft-ghost-{{target}}.tar.gz",
+        "binary": "soft-ghost",
+        "dest": "bin",
+        "optional": true
+    },
+    "hard-ghost": {
+        "repo": "test/hard-ghost",
+        "version": "v1.0.0",
+        "asset": "hard-ghost-{{target}}.tar.gz",
+        "binary": "hard-ghost",
+        "dest": "bin"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"1 dep(s) failed"* ]]
+    [[ "$output" == *"soft mode"* ]]
+    [[ -x bin/ok-cli ]]
+}
+
+@test "--soft does not mask config errors (missing required fields)" {
+    setup_mock_curl
+    cat > deps.json <<'JSON'
+{
+    "bad": {
+        "repo": "test/bad"
+    }
+}
+JSON
+
+    # Missing required fields are bugs in deps.json — not transient
+    # runtime errors. --soft must still hard-fail so the developer sees
+    # the typo. (Contrast with download failures, which --soft swallows.)
+    run "$FETCH_DEPS" --soft --target aarch64-apple-darwin
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"missing 'version'"* ]]
+    [[ "$output" != *"soft mode"* ]]
+}
