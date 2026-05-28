@@ -8,3 +8,10 @@ external-sources=true
 # that source `~/.cargo/env`, `$HOME/.bashrc`, etc., where the file
 # exists on the runner but not in static analysis.
 disable=SC1091
+
+# Severity floor: warning. Info/style level findings (SC2028 echo
+# escape, SC2086 quoting nits, SC2015 A&&B||C, SC2129 redirect
+# grouping, etc.) are surfaced as suggestions but don't fail the
+# umbrella gate. Real bugs and risky patterns (warning+) still fail.
+# Each consumer tracks their own info-level cleanup separately.
+severity=warning
