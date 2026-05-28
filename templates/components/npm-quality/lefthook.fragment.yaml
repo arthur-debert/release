@@ -52,9 +52,24 @@ pre-commit:
       # same hook run, so the commit goes through with the
       # formatted content. If prettier can't fix something (rare),
       # it'll exit non-zero and the commit fails as before.
+      #
+      # Symlink filter: prettier 3.x explicitly refuses symlinks
+      # passed as explicit paths ("Explicitly specified pattern X
+      # is a symbolic link"). With the build-dir + symlinks sync
+      # model (ADR-0001), most managed files are symlinks pointing
+      # into .release/, so we strip them before invoking prettier.
+      # The real files (under .release/) are in the same staged
+      # set when changed, and still get formatted.
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
-      run: npx --no-install prettier --write -- {staged_files}
+      run: >-
+        set --;
+        for f in {staged_files}; do
+          [ -L "$f" ] || set -- "$@" "$f";
+        done;
+        if [ $# -gt 0 ]; then
+          npx --no-install prettier --write -- "$@";
+        fi
       stage_fixed: true
       priority: 2
     typecheck:
