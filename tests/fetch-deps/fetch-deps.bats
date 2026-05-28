@@ -490,6 +490,30 @@ JSON
     [[ -x "out/linux-x64/mycli" ]]
 }
 
+@test "{{node_arch}} accepts LLVM-style arm64 triple (not just aarch64)" {
+    # LLVM/Clang spelling: arm64-apple-darwin. Rust spells the same
+    # target aarch64-apple-darwin. Both should map to node arm64.
+    setup_mock_curl
+    make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli"
+    mock_release mycli v1.0.0 "mycli-arm64-apple-darwin.tar.gz" "$HARNESS_WORKSPACE/mybin.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}.tar.gz",
+        "binary": "mycli",
+        "dest": "out/{{node_platform}}-{{node_arch}}"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target arm64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ -x "out/darwin-arm64/mycli" ]]
+}
+
 @test "{{node_platform}} expands to win32 for windows target" {
     # Use simple mode (no binary) to avoid the .exe path quirk in the mock harness.
     setup_mock_curl
@@ -636,11 +660,11 @@ JSON
 }
 JSON
 
-    # Config errors are bugs in deps.json — they're a hard failure even
-    # in soft mode. (They count as a per-dep failure that --soft swallows;
-    # this test pins that documented behavior.)
+    # Missing required fields are bugs in deps.json — not transient
+    # runtime errors. --soft must still hard-fail so the developer sees
+    # the typo. (Contrast with download failures, which --soft swallows.)
     run "$FETCH_DEPS" --soft --target aarch64-apple-darwin
-    [[ "$status" -eq 0 ]]
+    [[ "$status" -ne 0 ]]
     [[ "$output" == *"missing 'version'"* ]]
-    [[ "$output" == *"soft mode"* ]]
+    [[ "$output" != *"soft mode"* ]]
 }

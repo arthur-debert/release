@@ -38,9 +38,9 @@ target_os() {
 
 target_arch() {
     case "$1" in
-        x86_64*)   echo "x86_64" ;;
-        aarch64*)  echo "aarch64" ;;
-        *)         echo "unknown" ;;
+        x86_64*)         echo "x86_64" ;;
+        aarch64*|arm64*) echo "aarch64" ;;
+        *)               echo "unknown" ;;
     esac
 }
 
@@ -60,9 +60,9 @@ target_node_platform() {
 # uses Rust-style names). Used by {{node_arch}}.
 target_node_arch() {
     case "$1" in
-        x86_64*)   echo "x64" ;;
-        aarch64*)  echo "arm64" ;;
-        *)         echo "unknown" ;;
+        x86_64*)         echo "x64" ;;
+        aarch64*|arm64*) echo "arm64" ;;
+        *)               echo "unknown" ;;
     esac
 }
 
@@ -75,15 +75,34 @@ archive_ext() {
 
 # ─── Template expansion ───────────────────────────────────
 
+# Cache target-derived values. The target is fixed for the whole
+# script run; expanding 6 substitutions per dep via subshells adds up
+# (Bash subshells are noticeably slow on macOS / Git-Bash). main()
+# calls `cache_target_vars "$target"` once before the fetch loop.
+_OS=""
+_ARCH=""
+_NODE_PLATFORM=""
+_NODE_ARCH=""
+_EXT=""
+
+cache_target_vars() {
+    local target="$1"
+    _OS="$(target_os "$target")"
+    _ARCH="$(target_arch "$target")"
+    _NODE_PLATFORM="$(target_node_platform "$target")"
+    _NODE_ARCH="$(target_node_arch "$target")"
+    _EXT="$(archive_ext "$target")"
+}
+
 expand_template() {
     local tpl="$1" target="$2"
     local result="$tpl"
     result="${result//\{\{target\}\}/$target}"
-    result="${result//\{\{os\}\}/$(target_os "$target")}"
-    result="${result//\{\{arch\}\}/$(target_arch "$target")}"
-    result="${result//\{\{node_platform\}\}/$(target_node_platform "$target")}"
-    result="${result//\{\{node_arch\}\}/$(target_node_arch "$target")}"
-    result="${result//\{\{ext\}\}/$(archive_ext "$target")}"
+    result="${result//\{\{os\}\}/$_OS}"
+    result="${result//\{\{arch\}\}/$_ARCH}"
+    result="${result//\{\{node_platform\}\}/$_NODE_PLATFORM}"
+    result="${result//\{\{node_arch\}\}/$_NODE_ARCH}"
+    result="${result//\{\{ext\}\}/$_EXT}"
     printf '%s' "$result"
 }
 
@@ -204,9 +223,11 @@ fail_dep() {
 fetch_one() {
     local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
 
+    # Invalid dep names and missing required fields are static config
+    # bugs in deps.json, not transient runtime errors — die hard so
+    # --soft / "optional": true don't silently swallow them.
     if [[ ! "$dep" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-        fail_dep "invalid dependency name: $dep"
-        return 1
+        die "invalid dependency name: $dep"
     fi
 
     local repo version asset_tpl binary dest_tpl has_extract
@@ -217,9 +238,9 @@ fetch_one() {
     dest_tpl="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
     has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config" | tr -d '\r')"
 
-    [[ -z "$repo" ]]      && { fail_dep "$dep: missing 'repo'"; return 1; }
-    [[ -z "$version" ]]   && { fail_dep "$dep: missing 'version'"; return 1; }
-    [[ -z "$asset_tpl" ]] && { fail_dep "$dep: missing 'asset'"; return 1; }
+    [[ -z "$repo" ]]      && die "$dep: missing 'repo'"
+    [[ -z "$version" ]]   && die "$dep: missing 'version'"
+    [[ -z "$asset_tpl" ]] && die "$dep: missing 'asset'"
 
     local asset dest
     asset="$(expand_template "$asset_tpl" "$target")"
@@ -375,6 +396,7 @@ main() {
     command -v curl &>/dev/null || die "curl is required but not found"
 
     [[ -z "$target" ]] && target="$(detect_target)"
+    cache_target_vars "$target"
     [[ -f "$config" ]] || die "config not found: $config"
     jq empty "$config" 2>/dev/null || die "invalid JSON: $config"
 
