@@ -207,9 +207,9 @@ What it is
   zed-extension (1/1), go-cli (1/1), gh-action (1/1). The CI-reusable half (*-ci.yml) is partially adopted — rust, electron, and tauri have canonical CI workflows; the rest still use bespoke CI in the
   consumer.
 
-Client Repos Executables: 
+Consumer Repos Executables:
 
-    In client repos , we keep three  q
-   1. Does a canonical bin/<verb> already handle this? → Delete the script. It's redundant.
-  2. Is this a core dev capability release/ should provide but doesn't yet? → Track it as a gap. Don't dump it in app-bin/ and forget about it.
-  3. Is it genuinely app-specific? (theme generators, model fetchers, UI comparison tools) → app-bin/
+    In consumer repos, we keep three questions in mind:
+    1. Does a canonical bin/<verb> already handle this? → Delete the script. It's redundant.
+    2. Is this a core dev capability release/ should provide but doesn't yet? → Track it as a gap. Don't dump it in app-bin/ and forget about it.
+    3. Is it genuinely app-specific? (theme generators, model fetchers, UI comparison tools) → app-bin/
