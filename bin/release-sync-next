@@ -190,7 +190,10 @@ fi
 
 # --- Build the new .release/ tree in a tempdir -------------------------
 
-tmp_release=$(mktemp -d)
+# Create the tempdir as a sibling of .release/ so the final `mv` is a
+# rename within the same filesystem (atomic). Otherwise mv across
+# filesystems silently degrades to copy+delete.
+tmp_release=$(mktemp -d "./.release-build.XXXXXX")
 trap 'rm -rf "$tmp_release"' EXIT
 
 for dest in "${plan_order[@]}"; do
