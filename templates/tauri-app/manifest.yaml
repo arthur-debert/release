@@ -1,17 +1,17 @@
-# Stack default manifest for `tauri-app` (detected via src-tauri/Cargo.toml
+# Kind default manifest for `tauri-app` (detected via src-tauri/Cargo.toml
 # AND package.json — a Tauri app has both a Rust core under src-tauri/
 # and a frontend at repo root).
 # Consumers can override with `.release-sync.yaml` at their repo root.
 
-stack: tauri-app
-components:
+kind: tauri-app
+capabilities:
   - shell-quality
   - npm-quality
-# Opt-in Components (bats, mkdocs, playwright-eventually) are not
+# Opt-in Capabilities (bats, mkdocs, playwright-eventually) are not
 # listed here. Consumers that want them ship a .release-sync.yaml
 # that includes them in addition to the defaults above.
 #
-# Note: there is NO rust-quality Component in the defaults. The
-# Rust hooks for tauri-app live in this Stack's lefthook.fragment.yaml
-# (cwd-scoped to src-tauri/) because the rust-quality Component
+# Note: there is NO rust-quality Capability in the defaults. The
+# Rust hooks for tauri-app live in this Kind's lefthook.fragment.yaml
+# (cwd-scoped to src-tauri/) because the rust-quality Capability
 # assumes Cargo.toml at the repo root. See lefthook.fragment.yaml.

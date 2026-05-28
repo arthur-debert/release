@@ -80,7 +80,7 @@ workflow_to_stack() {
     rust-lib.yml)      echo rust-lib ;;
     electron-app.yml)  echo electron-app ;;
     tauri-app.yml)     echo tauri-app ;;
-    vscode-ext.yml)    echo vsce-ext ;;
+    vscode-ext.yml)    echo vscode-ext ;;
     nvim-plugin.yml)   echo nvim-plugin ;;
     tree-sitter.yml)   echo tree-sitter ;;
     zed-extension.yml) echo zed-extension ;;
@@ -124,7 +124,7 @@ detect_stack_remote() {
     fi
   fi
 
-  # Fallback: filesystem heuristics (matches bin/detect-stack).
+  # Fallback: filesystem heuristics (matches bin/detect-kind).
   # `--paginate` ensures we see every file in repos with a large root
   # listing (default page is 100 entries).
   local contents
@@ -154,7 +154,7 @@ detect_stack_remote() {
       echo electron-app; return 0
     fi
     if printf '%s\n' "$pkg" | grep -qE '"@vscode/vsce"|"vsce"'; then
-      echo vsce-ext; return 0
+      echo vscode-ext; return 0
     fi
   fi
   if printf '%s\n' "$contents" | grep -qx 'Cargo.toml'; then
@@ -185,7 +185,7 @@ verbs_for_stack() {
     rust-lib)        echo "check build release" ;;
     electron-app)    echo "check build release e2e" ;;
     tauri-app)       echo "check build release e2e" ;;
-    vsce-ext)        echo "check build release" ;;
+    vscode-ext)        echo "check build release" ;;
     nvim-plugin)     echo "check release" ;;
     tree-sitter)     echo "check build release" ;;
     zed-extension)   echo "check build release" ;;
@@ -202,7 +202,7 @@ release_workflow_for_stack() {
     rust-lib)        echo "rust-lib.yml" ;;
     electron-app)    echo "electron-app.yml" ;;
     tauri-app)       echo "tauri-app.yml" ;;
-    vsce-ext)        echo "vscode-ext.yml" ;;
+    vscode-ext)        echo "vscode-ext.yml" ;;
     nvim-plugin)     echo "nvim-plugin.yml" ;;
     tree-sitter)     echo "tree-sitter.yml" ;;
     zed-extension)   echo "zed-extension.yml" ;;

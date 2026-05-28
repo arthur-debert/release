@@ -1,0 +1,13 @@
+# Kind default manifest for `rust-cli` (detected via Cargo.toml).
+# Consumers can override with .release-sync.yaml at their repo root.
+#
+# Note: rust-lib will be a separate Kind in a follow-up; today all
+# rust consumers are rust-cli.
+
+kind: rust-cli
+capabilities:
+  - shell-quality
+  - rust-quality
+# Opt-in Capabilities like bats are not listed here. Consumers that want
+# them ship a .release-sync.yaml that includes them in addition to the
+# defaults above.
