@@ -48,12 +48,20 @@ pre-commit:
       # first glob entry. False positives from less common types (a
       # Lua script in scripts/, say) will fail shellcheck loudly —
       # acceptable signal to rename or move.
+      #
+      # Ad-hoc test paths are excluded: live-tests/** (smoke test
+      # scratch), tests/**/*.bats and bats helper *.bash files (bats
+      # injects $status/$output magic that shellcheck flags as SC2154).
+      # Those scripts have relaxed standards by convention. Production
+      # shell under bin/ and app-bin/ still gets full strictness.
       glob:
         - "**/*.{sh,bash}"
         - "scripts/**"
         - "bin/**"
       exclude:
         - "**/*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
+        - "live-tests/**"
+        - "tests/e2e/**"
       run: >-
         if command -v shellcheck >/dev/null 2>&1; then
           shellcheck {staged_files};
