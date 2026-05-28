@@ -62,9 +62,15 @@ pre-commit:
         - "**/*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
         - "live-tests/**"
         - "tests/e2e/**"
+      # --severity=warning passed as a CLI flag (not via .shellcheckrc)
+      # because Ubuntu 24.04 ships shellcheck 0.9.0 which silently
+      # ignores the `severity=` directive in the rc file (that's a
+      # 0.10+ feature). The CLI flag works on all versions. Keep the
+      # rc-file setting too so local invocations (without lefthook)
+      # still get the same severity floor on modern shellchecks.
       run: >-
         if command -v shellcheck >/dev/null 2>&1; then
-          shellcheck {staged_files};
+          shellcheck --severity=warning {staged_files};
         else
           echo "shellcheck not installed (skipping; install: see https://github.com/koalaman/shellcheck#installing)" >&2;
         fi
