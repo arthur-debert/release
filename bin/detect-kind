@@ -66,9 +66,22 @@ if [ -f action.yml ] || [ -f action.yaml ]; then
   echo github-action; exit 0
 fi
 
-# nvim plugin
-if [ -d plugin ] && find . -maxdepth 3 -name '*.lua' -print -quit | grep -q .; then
-  echo nvim-plugin; exit 0
+# nvim plugin: recognise both classic vimscript layout (plugin/ +
+# autoload/ + ftdetect/ + ...) AND modern lua-only layout (lua/<name>/
+# directory, optionally with queries/ for tree-sitter integration or
+# ftplugin/colors/ftdetect for vim integration). Modern plugins
+# frequently ship with no plugin/ dir at all — everything lives under
+# lua/ and gets required at runtime by lazy.nvim / packer / etc.
+if [ -d plugin ] \
+   || [ -d ftdetect ] \
+   || [ -d ftplugin ] \
+   || [ -d autoload ] \
+   || [ -d queries ]; then
+  # Confirm there's actually lua source (excludes a tree-sitter
+  # grammar-only repo, which already matched grammar.js above).
+  if [ -d lua ] || find . -maxdepth 3 -name '*.lua' -print -quit | grep -q .; then
+    echo nvim-plugin; exit 0
+  fi
 fi
 
 # static site (mdbook or jekyll)
