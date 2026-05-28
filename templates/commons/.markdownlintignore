@@ -4,3 +4,11 @@
 # arthur-debert/release#234.
 CHANGELOG.md
 CHANGELOG/
+
+# .claude/skills/** and docs/skills/** are agent-authored skill
+# documentation. AI-generated markdown often has stylistic quirks
+# (in-table section headers, mixed list styles) that are intentional
+# for AI consumption but trip strict markdownlint rules. Keep them
+# out of the gate; consumers can lint them on demand if they want to.
+.claude/skills/
+docs/skills/
