@@ -1,11 +1,11 @@
-# Stack default manifest for `electron-app` (detected via package.json
+# Kind default manifest for `electron-app` (detected via package.json
 # containing `"electron"` or `"electron-builder"`).
 # Consumers can override with `.release-sync.yaml` at their repo root.
 
-stack: electron-app
-components:
+kind: electron-app
+capabilities:
   - shell-quality
   - npm-quality
-# Opt-in Components (bats, mkdocs, playwright-eventually) are not
+# Opt-in Capabilities (bats, mkdocs, playwright-eventually) are not
 # listed here. Consumers that want them ship a .release-sync.yaml
 # that includes them in addition to the defaults above.

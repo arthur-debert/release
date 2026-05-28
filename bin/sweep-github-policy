@@ -5,7 +5,7 @@
 # Usage:
 #   sweep-github-policy [--stack <stack>] [--force]
 #
-# - Auto-detects stack via detect-stack (override with --stack)
+# - Auto-detects kind via detect-kind (override with --stack)
 # - For each template file: creates if missing; reports if already present
 #   with different content (use --force to overwrite)
 #
@@ -32,7 +32,7 @@ done
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-stack=${stack:-$(detect-stack)}
+stack=${stack:-$(detect-kind)}
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 release_root="$script_dir/.."
 commons_dir="$release_root/templates/commons"

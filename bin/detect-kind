@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Detect the project stack of a directory by inspecting its filesystem.
-# Prints one of: rust, go, electron-app, tauri-app, zed-extension, vsce-ext,
-# nvim-plugin, tree-sitter, static-site, brew-tap, github-action — or exits 1
-# if undetermined.
+# Detect the Kind of a directory by inspecting its filesystem.
+# Prints one of: rust-cli, go-cli, electron-app, tauri-app, zed-extension,
+# vscode-ext, nvim-plugin, tree-sitter, static-site, brew-tap, github-action
+# — or exits 1 if undetermined.
 #
-# Usage: detect-stack [<dir>]   (defaults to current dir)
+# Usage: detect-kind [<dir>]   (defaults to current dir)
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ if [ -f grammar.js ]; then
   echo tree-sitter; exit 0
 fi
 
-# tauri-app — must precede both the bare `rust` branch (a tauri repo
+# tauri-app — must precede both the bare `rust-cli` branch (a tauri repo
 # could conceivably ship a root Cargo.toml in a workspace-root layout)
 # AND the `electron-app` branch (a tauri repo could carry electron in
 # devDependencies for a legacy reason; src-tauri/Cargo.toml is the
@@ -31,25 +31,24 @@ if [ -f src-tauri/Cargo.toml ] && [ -f package.json ]; then
   echo tauri-app; exit 0
 fi
 
-# zed-extension — must precede the bare `rust` branch. A Zed extension
+# zed-extension — must precede the bare `rust-cli` branch. A Zed extension
 # carries BOTH an extension.toml (the manifest Zed reads, with `id` and
 # `schema_version` at root) AND a Cargo.toml (the cdylib crate
-# compiled to wasm32-wasip2). The presence of both is the
-# discriminator: a plain Rust crate has no extension.toml, and an
-# extension.toml without Cargo.toml would be a JSON-only extension (no
-# stack of its own yet).
+# compiled to wasm32-wasip2).
 if [ -f extension.toml ] && [ -f Cargo.toml ]; then
   echo zed-extension; exit 0
 fi
 
-# rust
+# rust-cli — today all rust consumers are CLIs. rust-lib will be a
+# separate Kind in a follow-up (distinguisher: [[bin]] in Cargo.toml
+# or src/main.rs).
 if [ -f Cargo.toml ]; then
-  echo rust; exit 0
+  echo rust-cli; exit 0
 fi
 
-# go
+# go-cli
 if [ -f go.mod ]; then
-  echo go; exit 0
+  echo go-cli; exit 0
 fi
 
 # javascript-side
@@ -58,7 +57,7 @@ if [ -f package.json ]; then
     echo electron-app; exit 0
   fi
   if grep -q '"@vscode/vsce"' package.json 2>/dev/null || grep -q '"vsce"' package.json 2>/dev/null; then
-    echo vsce-ext; exit 0
+    echo vscode-ext; exit 0
   fi
 fi
 
@@ -77,5 +76,5 @@ if [ -f book.toml ] || [ -f _config.yml ]; then
   echo static-site; exit 0
 fi
 
-echo "could not detect stack of $(pwd)" >&2
+echo "could not detect kind of $(pwd)" >&2
 exit 1
