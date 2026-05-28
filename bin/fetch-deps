@@ -44,6 +44,28 @@ target_arch() {
     esac
 }
 
+# Node/Electron platform naming (distinct from `target_os` which uses
+# Rust-style names). Used by {{node_platform}} for paths like
+# electron-builder's `extraResource: resources/bin/<node_platform>-<node_arch>`.
+target_node_platform() {
+    case "$1" in
+        *linux*)   echo "linux" ;;
+        *darwin*)  echo "darwin" ;;
+        *windows*) echo "win32" ;;
+        *)         echo "unknown" ;;
+    esac
+}
+
+# Node/Electron architecture naming (distinct from `target_arch` which
+# uses Rust-style names). Used by {{node_arch}}.
+target_node_arch() {
+    case "$1" in
+        x86_64*)   echo "x64" ;;
+        aarch64*)  echo "arm64" ;;
+        *)         echo "unknown" ;;
+    esac
+}
+
 archive_ext() {
     case "$1" in
         *windows*) echo ".zip" ;;
@@ -59,6 +81,8 @@ expand_template() {
     result="${result//\{\{target\}\}/$target}"
     result="${result//\{\{os\}\}/$(target_os "$target")}"
     result="${result//\{\{arch\}\}/$(target_arch "$target")}"
+    result="${result//\{\{node_platform\}\}/$(target_node_platform "$target")}"
+    result="${result//\{\{node_arch\}\}/$(target_node_arch "$target")}"
     result="${result//\{\{ext\}\}/$(archive_ext "$target")}"
     printf '%s' "$result"
 }
@@ -96,6 +120,9 @@ _auth_token() {
 # header because the 302 redirect strips Authorization. Use the API
 # endpoint instead: look up the asset ID via the releases/tags endpoint,
 # then download with Accept: application/octet-stream.
+#
+# Returns non-zero on failure so callers can decide whether to soft-fail
+# or hard-fail. Prints errors to stderr.
 download_release_asset() {
     local repo="$1" version="$2" asset="$3" dest="$4"
     local token
@@ -105,26 +132,34 @@ download_release_asset() {
         # Authenticated path -- works for both public and private repos.
         local api_url="https://api.github.com/repos/$repo/releases/tags/$version"
         local asset_url
-        asset_url="$(curl -fsSL \
+        if ! asset_url="$(curl -fsSL \
             -H "Authorization: Bearer $token" \
             "$api_url" \
-            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')" \
-            || die "failed to look up release $version for $repo"
+            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')"; then
+            printf '%s: failed to look up release %s for %s\n' "$PROG" "$version" "$repo" >&2
+            return 1
+        fi
 
-        [[ -z "$asset_url" || "$asset_url" == "null" ]] && \
-            die "$repo@$version: asset '$asset' not found in release"
+        if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
+            printf '%s: %s@%s: asset %q not found in release\n' "$PROG" "$repo" "$version" "$asset" >&2
+            return 1
+        fi
 
-        curl -fsSL \
+        if ! curl -fsSL \
             -H "Authorization: Bearer $token" \
             -H "Accept: application/octet-stream" \
             -o "$dest" \
-            "$asset_url" \
-            || die "download failed: $asset from $repo@$version"
+            "$asset_url"; then
+            printf '%s: download failed: %s from %s@%s\n' "$PROG" "$asset" "$repo" "$version" >&2
+            return 1
+        fi
     else
         # Unauthenticated -- public repos only.
         local url="https://github.com/$repo/releases/download/$version/$asset"
-        curl -fsSL -o "$dest" "$url" \
-            || die "download failed: $url (private repo? set GH_TOKEN)"
+        if ! curl -fsSL -o "$dest" "$url"; then
+            printf '%s: download failed: %s (private repo? set GH_TOKEN)\n' "$PROG" "$url" >&2
+            return 1
+        fi
     fi
 }
 
@@ -134,9 +169,9 @@ extract_archive() {
     local archive="$1" dest="$2"
     mkdir -p "$dest"
     case "$archive" in
-        *.tar.gz|*.tgz) tar -xzf "$archive" -C "$dest" ;;
-        *.zip)          unzip -qo "$archive" -d "$dest" ;;
-        *)              die "unsupported archive format: $archive" ;;
+        *.tar.gz|*.tgz) tar -xzf "$archive" -C "$dest" || return 1 ;;
+        *.zip)          unzip -qo "$archive" -d "$dest" || return 1 ;;
+        *)              printf '%s: unsupported archive format: %s\n' "$PROG" "$archive" >&2; return 1 ;;
     esac
 }
 
@@ -161,27 +196,34 @@ find_binary() {
 
 # ─── Process a single dep ─────────────────────────────────
 
+fail_dep() {
+    printf '%s: %s\n' "$PROG" "$*" >&2
+    return 1
+}
+
 fetch_one() {
     local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
 
     if [[ ! "$dep" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-        die "invalid dependency name: $dep"
+        fail_dep "invalid dependency name: $dep"
+        return 1
     fi
 
-    local repo version asset_tpl binary dest has_extract
+    local repo version asset_tpl binary dest_tpl has_extract
     repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config" | tr -d '\r')"
     version="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config" | tr -d '\r')"
     asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config" | tr -d '\r')"
     binary="$(jq -r --arg d "$dep" '.[$d].binary // empty' "$config" | tr -d '\r')"
-    dest="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
+    dest_tpl="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
     has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config" | tr -d '\r')"
 
-    [[ -z "$repo" ]]      && die "$dep: missing 'repo'"
-    [[ -z "$version" ]]   && die "$dep: missing 'version'"
-    [[ -z "$asset_tpl" ]] && die "$dep: missing 'asset'"
+    [[ -z "$repo" ]]      && { fail_dep "$dep: missing 'repo'"; return 1; }
+    [[ -z "$version" ]]   && { fail_dep "$dep: missing 'version'"; return 1; }
+    [[ -z "$asset_tpl" ]] && { fail_dep "$dep: missing 'asset'"; return 1; }
 
-    local asset
+    local asset dest
     asset="$(expand_template "$asset_tpl" "$target")"
+    dest="$(expand_template "$dest_tpl" "$target")"
 
     if [[ "$if_missing" == true ]] && stamp_matches "$dep" "$version" "$target"; then
         skip "$dep $version — up to date"
@@ -193,9 +235,9 @@ fetch_one() {
     local dep_dir="$work_dir/$dep"
     mkdir -p "$dep_dir"
 
-    download_release_asset "$repo" "$version" "$asset" "$dep_dir/$asset"
+    download_release_asset "$repo" "$version" "$asset" "$dep_dir/$asset" || return 1
 
-    extract_archive "$dep_dir/$asset" "$dep_dir/out"
+    extract_archive "$dep_dir/$asset" "$dep_dir/out" || return 1
     local root
     root="$(extract_root "$dep_dir/out")"
 
@@ -205,7 +247,7 @@ fetch_one() {
 
         local found
         found="$(find_binary "$root" "$bin_name")"
-        [[ -z "$found" ]] && die "$dep: binary '$bin_name' not found in archive"
+        [[ -z "$found" ]] && { fail_dep "$dep: binary '$bin_name' not found in archive"; return 1; }
 
         mkdir -p "$dest"
         install -m 0755 "$found" "$dest/$bin_name"
@@ -244,6 +286,18 @@ fetch_one() {
     stamp_write "$dep" "$version" "$target"
 }
 
+# Returns 0 if the dep is "soft" (CLI --soft flag, or "optional": true
+# in deps.json). Soft deps log warnings and don't count toward the
+# script's failure total — for postinstall hooks where hard-fail would
+# break `npm install` outside CI.
+is_soft_dep() {
+    local dep="$1" soft_flag="$2" config="$3"
+    [[ "$soft_flag" == true ]] && return 0
+    local optional
+    optional="$(jq -r --arg d "$dep" '.[$d].optional // false' "$config" | tr -d '\r')"
+    [[ "$optional" == "true" ]]
+}
+
 # ─── CLI ───────────────────────────────────────────────────
 
 usage() {
@@ -256,6 +310,10 @@ Options:
   --if-missing     Skip deps whose stamp matches current version+target
   --target TRIPLE  Override platform detection (e.g. x86_64-apple-darwin)
   --config FILE    Config file path (default: deps.json)
+  --soft           Treat every dep as optional: log warnings and exit 0
+                   on download/extraction failure. Useful for npm/Electron
+                   postinstall hooks where hard-failure would break
+                   `npm install` outside CI.
   --help           Show this help
   --version        Show version
 
@@ -264,28 +322,34 @@ With no dep names, fetches all deps in the config file.
 deps.json schema:
   {
     "dep-name": {
-      "repo":    "owner/repo",           (required)
-      "version": "v1.2.3",              (required)
-      "asset":   "name-{{target}}{{ext}}", (required, supports templates)
-      "binary":  "binary-name",          (binary mode: find + install one file)
-      "dest":    "resources",            (install directory, default: ".")
-      "extract": {                       (extract mode: map tarball paths → dest dirs)
+      "repo":     "owner/repo",           (required)
+      "version":  "v1.2.3",               (required)
+      "asset":    "name-{{target}}{{ext}}", (required, supports templates)
+      "binary":   "binary-name",          (binary mode: find + install one file)
+      "dest":     "resources",            (install directory, default: ".",
+                                           supports templates)
+      "optional": true,                   (soft-fail this dep; same as --soft
+                                           but per-entry — default false)
+      "extract":  {                       (extract mode: map tarball paths → dest dirs)
         "file.wasm": "resources",
         "queries":   "resources/queries"
       }
     }
   }
 
-Template variables in "asset":
-  {{target}}  Rust target triple   (x86_64-unknown-linux-gnu)
-  {{os}}      OS name              (linux, macos, windows)
-  {{arch}}    Architecture         (x86_64, aarch64)
-  {{ext}}     Archive extension    (.tar.gz on Unix, .zip on Windows)
+Template variables (work in "asset" and "dest"):
+  {{target}}         Rust target triple    (x86_64-unknown-linux-gnu)
+  {{os}}             OS name (Rust style)  (linux, macos, windows)
+  {{arch}}           Architecture (Rust)   (x86_64, aarch64)
+  {{node_platform}}  OS name (Node style)  (linux, darwin, win32)
+  {{node_arch}}      Architecture (Node)   (x64, arm64)
+  {{ext}}            Archive extension     (.tar.gz on Unix, .zip on Windows)
 EOF
 }
 
 main() {
     local if_missing=false
+    local soft=false
     local target=""
     local config="deps.json"
     local deps=()
@@ -293,6 +357,7 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --if-missing) if_missing=true; shift ;;
+            --soft)       soft=true; shift ;;
             --target)
                 [[ $# -lt 2 ]] && die "--target requires a value"
                 target="$2"; shift 2 ;;
@@ -329,14 +394,18 @@ main() {
 
     printf '%s: fetching %d dep(s) for %s\n' "$PROG" "${#deps[@]}" "$target"
 
-    local failed=0
+    local hard_failed=0
     for dep in "${deps[@]}"; do
         if ! fetch_one "$dep" "$if_missing" "$target" "$config" "$work_dir"; then
-            failed=$((failed + 1))
+            if is_soft_dep "$dep" "$soft" "$config"; then
+                printf '%s: ⚠ %s failed; continuing (soft mode)\n' "$PROG" "$dep" >&2
+            else
+                hard_failed=$((hard_failed + 1))
+            fi
         fi
     done
 
-    [[ $failed -gt 0 ]] && die "$failed dep(s) failed"
+    [[ $hard_failed -gt 0 ]] && die "$hard_failed dep(s) failed"
     return 0
 }
 
