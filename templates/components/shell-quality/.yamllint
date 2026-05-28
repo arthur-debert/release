@@ -16,3 +16,12 @@ rules:
   comments:
     min-spaces-from-content: 1
   comments-indentation: disable
+  # `colons` requires exactly one space after `:`. Stylistic only;
+  # consumer-authored .github/workflows/*.yml in the fleet often have
+  # extra spacing for alignment (e.g. `name:         value`) and we
+  # don't want to gate migrations on that. Tracked in release#288.
+  colons: disable
+  # `indentation` requires consistent indent levels. Some hand-written
+  # YAML in the fleet uses mixed indent for readability inside long
+  # lists; allow it.
+  indentation: disable

@@ -215,7 +215,11 @@ jobs:
           # Pulls just what `bin/check-e2e` needs: the bats suite and
           # the canonical runner. Keeps the e2e job fast (the binary
           # comes in via download-artifact, not from source).
+          # .release/ is required because bin/ is symlinks pointing
+          # into it (ADR-0001 build-dir + symlinks model). Without
+          # .release/, `bin/check-e2e` is a broken symlink.
           sparse-checkout: |
+            .release
             tests/e2e
             live-tests
             bin
