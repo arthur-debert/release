@@ -134,17 +134,18 @@ stamp_path() { printf '%s/%s.stamp' "$STAMP_DIR" "$1"; }
 
 stamp_matches() {
     local key="$1" expected="$2"
-    local stamp_file
+    local stamp_file recorded
     stamp_file="$(stamp_path "$key")"
     [[ -f "$stamp_file" ]] || return 1
-    [[ "$(cat "$stamp_file")" == "$expected" ]]
+    read -r recorded < "$stamp_file" || true
+    [[ "$recorded" == "$expected" ]]
 }
 
 stamp_write() {
     local key="$1" content="$2"
     local stamp_file
     stamp_file="$(stamp_path "$key")"
-    mkdir -p "$(dirname "$stamp_file")"
+    mkdir -p "${stamp_file%/*}"
     printf '%s' "$content" > "$stamp_file"
 }
 
@@ -154,22 +155,16 @@ _auth_token() {
     printf '%s' "${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 }
 
-_url_host() {
-    # Pull "host" out of "scheme://host/...". Strips userinfo and port.
-    local rest="${1#*://}"
-    local host="${rest%%/*}"
-    host="${host#*@}"
-    host="${host%%:*}"
-    printf '%s' "$host"
-}
-
 # Plain HTTPS download. Sends auth header only for github.com hosts so
 # arbitrary URLs (HuggingFace, CDNs) don't leak tokens.
 download_url() {
     local url="$1" dest="$2"
-    local token host
-    token="$(_auth_token)"
-    host="$(_url_host "$url")"
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    # Pull "host" out of "scheme://host/...". Strips userinfo and port.
+    local rest="${url#*://}"
+    local host="${rest%%/*}"
+    host="${host#*@}"
+    host="${host%%:*}"
 
     if [[ -n "$token" ]] && \
        { [[ "$host" == "github.com" ]] || \
@@ -243,14 +238,15 @@ download_raw_github() {
 }
 
 sha256_of() {
-    local file="$1"
+    local file="$1" sum
     if command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$file" | awk '{print $1}'
+        sum="$(sha256sum "$file")"
     elif command -v shasum >/dev/null 2>&1; then
-        shasum -a 256 "$file" | awk '{print $1}'
+        sum="$(shasum -a 256 "$file")"
     else
         return 1
     fi
+    printf '%s' "${sum%% *}"
 }
 
 # ─── Extraction ────────────────────────────────────────────
@@ -293,7 +289,7 @@ apply_extract_map() {
         if [[ -e "$root/$src" ]]; then
             found="$root/$src"
         else
-            found="$(find "$root" -name "$(basename "$src")" 2>/dev/null | head -1 || true)"
+            found="$(find "$root" -name "${src##*/}" 2>/dev/null | head -1 || true)"
         fi
 
         if [[ -z "${found:-}" ]]; then
@@ -329,9 +325,9 @@ process_dep() {
         die "invalid dependency name: $dep"
     fi
 
-    local has_manifest has_url
-    has_manifest="$(jq -r --arg d "$dep" '.[$d] | has("from-manifest")' "$config" | tr -d '\r')"
-    has_url="$(jq -r --arg d "$dep" '.[$d] | has("url")' "$config" | tr -d '\r')"
+    local has_manifest has_url shapes
+    shapes="$(jq -r --arg d "$dep" '.[$d] | [has("from-manifest"), has("url")] | @tsv' "$config" | tr -d '\r')"
+    IFS=$'\t' read -r has_manifest has_url <<< "$shapes"
 
     if [[ "$has_manifest" == "true" ]]; then
         fetch_iter "$dep" "$if_missing" "$target" "$config" "$work_dir"
@@ -406,11 +402,13 @@ fetch_github() {
 fetch_url() {
     local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
 
-    local url_tpl filename_tpl dest_tpl sha256
-    url_tpl="$(jq -r --arg d "$dep" '.[$d].url // empty' "$config" | tr -d '\r')"
-    filename_tpl="$(jq -r --arg d "$dep" '.[$d].filename // empty' "$config" | tr -d '\r')"
-    dest_tpl="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
-    sha256="$(jq -r --arg d "$dep" '.[$d].sha256 // empty' "$config" | tr -d '\r')"
+    # ASCII Unit Separator (\x1f) for joining — `read` with IFS=$'\t'
+    # collapses consecutive separators because tab is a whitespace char.
+    local url_tpl filename_tpl dest_tpl sha256 config_vals
+    config_vals="$(jq -r --arg d "$dep" --arg sep $'\x1f' \
+        '.[$d] | [.url // "", .filename // "", .dest // ".", .sha256 // ""] | join($sep)' \
+        "$config" | tr -d '\r')"
+    IFS=$'\x1f' read -r url_tpl filename_tpl dest_tpl sha256 <<< "$config_vals"
 
     [[ -z "$url_tpl" ]] && die "$dep: missing 'url'"
 
@@ -463,16 +461,48 @@ fetch_url() {
 }
 
 # Manifest-driven iteration (#309). Iterates a jq path over a JSON
-# file already on disk and processes each item.
+# file already on disk and processes each item. Pre-computes all
+# per-dep config in a single jq call so the per-item loop only does
+# template expansion + downloads.
 fetch_iter() {
     local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
 
-    local manifest_tpl for_each
-    manifest_tpl="$(jq -r --arg d "$dep" '.[$d]["from-manifest"] // empty' "$config" | tr -d '\r')"
-    for_each="$(jq -r --arg d "$dep" '.[$d]["for-each"] // empty' "$config" | tr -d '\r')"
+    # ASCII Unit Separator (\x1f) preserves empty fields through `read`
+    # (a tab would be collapsed because IFS=$'\t' treats consecutive
+    # whitespace as one separator).
+    local manifest_tpl for_each repo_tpl version_tpl asset_tpl \
+          dest_tpl binary_as_tpl has_extract has_raw config_vals
+    config_vals="$(jq -r --arg d "$dep" --arg sep $'\x1f' '
+        .[$d] | [
+            ."from-manifest" // "",
+            ."for-each"      // "",
+            .repo            // "",
+            .version         // "",
+            .asset           // "",
+            .dest            // ".",
+            ."binary-as"     // "",
+            (has("extract")  | tostring),
+            (has("raw-files")| tostring)
+        ] | join($sep)' "$config" | tr -d '\r')"
+    IFS=$'\x1f' read -r manifest_tpl for_each repo_tpl version_tpl asset_tpl \
+                        dest_tpl binary_as_tpl has_extract has_raw <<< "$config_vals"
 
+    # Validate in author-friendly order: from-manifest → for-each →
+    # the GH-release fields. So a config missing for-each surfaces that
+    # error first, even if repo/version/asset are also missing.
     [[ -z "$manifest_tpl" ]] && die "$dep: missing 'from-manifest'"
     [[ -z "$for_each" ]]     && die "$dep: missing 'for-each'"
+    [[ -z "$repo_tpl" ]]     && die "$dep: missing 'repo'"
+    [[ -z "$version_tpl" ]]  && die "$dep: missing 'version'"
+    [[ -z "$asset_tpl" ]]    && die "$dep: missing 'asset'"
+
+    local extract_map="" raw_pairs=""
+    if [[ "$has_extract" == "true" ]]; then
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
+    fi
+    if [[ "$has_raw" == "true" ]]; then
+        raw_pairs="$(jq -r --arg d "$dep" '.[$d]["raw-files"] | to_entries[] | [.key, .value] | @tsv' "$config")"
+    fi
 
     local manifest
     manifest="$(expand_template "$manifest_tpl" "$target")"
@@ -491,7 +521,9 @@ fetch_iter() {
     local item_failed=0
     while IFS= read -r item; do
         [[ -z "$item" ]] && continue
-        if ! fetch_iter_item "$dep" "$item" "$if_missing" "$target" "$config" "$work_dir"; then
+        if ! fetch_iter_item "$dep" "$item" "$if_missing" "$target" "$work_dir" \
+                "$repo_tpl" "$version_tpl" "$asset_tpl" "$dest_tpl" "$binary_as_tpl" \
+                "$has_extract" "$extract_map" "$has_raw" "$raw_pairs"; then
             item_failed=$((item_failed + 1))
         fi
     done <<< "$items"
@@ -501,22 +533,13 @@ fetch_iter() {
 }
 
 fetch_iter_item() {
-    local dep="$1" item="$2" if_missing="$3" target="$4" config="$5" work_dir="$6"
+    local dep="$1" item="$2" if_missing="$3" target="$4" work_dir="$5"
+    local repo_tpl="$6" version_tpl="$7" asset_tpl="$8" dest_tpl="$9" binary_as_tpl="${10}"
+    local has_extract="${11}" extract_map="${12}" has_raw="${13}" raw_pairs="${14}"
 
     local item_name
     item_name="$(jq -r '.name // empty' <<< "$item")"
     [[ -z "$item_name" ]] && { fail_dep "$dep: iteration item missing 'name' field"; return 1; }
-
-    local repo_tpl version_tpl asset_tpl dest_tpl binary_as_tpl
-    repo_tpl="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config" | tr -d '\r')"
-    version_tpl="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config" | tr -d '\r')"
-    asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config" | tr -d '\r')"
-    dest_tpl="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
-    binary_as_tpl="$(jq -r --arg d "$dep" '.[$d]["binary-as"] // empty' "$config" | tr -d '\r')"
-
-    [[ -z "$repo_tpl" ]]    && die "$dep: missing 'repo'"
-    [[ -z "$version_tpl" ]] && die "$dep: missing 'version'"
-    [[ -z "$asset_tpl" ]]   && die "$dep: missing 'asset'"
 
     local repo version asset dest binary_as
     repo="$(expand_item_template "$repo_tpl" "$item" "$target")"
@@ -550,34 +573,27 @@ fetch_iter_item() {
         local root
         root="$(extract_root "$item_dir/out")"
 
-        local has_extract
-        has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config" | tr -d '\r')"
         if [[ "$has_extract" == "true" ]]; then
-            local extract_map
-            extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config" \
-                | while IFS=$'\t' read -r k v; do
-                    [[ -z "$k" ]] && continue
-                    ek="$(expand_item_template "$k" "$item" "$target")"
-                    ev="$(expand_item_template "$v" "$item" "$target")"
-                    printf '%s\t%s\n' "$ek" "$ev"
-                done)"
-            apply_extract_map "$root" "$extract_map"
+            local expanded_extract_map
+            expanded_extract_map="$(while IFS=$'\t' read -r k v; do
+                [[ -z "$k" ]] && continue
+                ek="$(expand_item_template "$k" "$item" "$target")"
+                ev="$(expand_item_template "$v" "$item" "$target")"
+                printf '%s\t%s\n' "$ek" "$ev"
+            done <<< "$extract_map")"
+            apply_extract_map "$root" "$expanded_extract_map"
         else
             cp -r "$root"/. "$dest/"
             ok "extracted → $dest/"
         fi
     else
         # Non-archive asset, no binary-as configured: copy as-is.
-        cp "$item_dir/$asset" "$dest/$(basename "$asset")"
+        cp "$item_dir/$asset" "$dest/${asset##*/}"
         ok "$asset → $dest/"
     fi
 
     # raw-files: additional files from raw.githubusercontent.com.
-    local has_raw
-    has_raw="$(jq -r --arg d "$dep" '.[$d] | has("raw-files")' "$config" | tr -d '\r')"
     if [[ "$has_raw" == "true" ]]; then
-        local raw_pairs
-        raw_pairs="$(jq -r --arg d "$dep" '.[$d]["raw-files"] | to_entries[] | [.key, .value] | @tsv' "$config")"
         local rsrc rdst esrc edst
         while IFS=$'\t' read -r rsrc rdst; do
             [[ -z "$rsrc" ]] && continue
