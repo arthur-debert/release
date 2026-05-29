@@ -41,7 +41,11 @@ run_lefthook() {
   elif [ -f package-lock.json ]; then
     echo "→ npm ci (no scripts) for lefthook deps"
     npm ci --ignore-scripts
-    npx --no-install lefthook run pre-commit "${lefthook_file_args[@]}"
+    # --yes (not --no-install): npx prefers a locally-installed lefthook
+    # but fetches it non-interactively if the consumer doesn't carry it
+    # as an npm dep. --no-install fails in CI with "npx canceled … no YES
+    # option" for those consumers (release#318).
+    npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
   elif [ -f yarn.lock ]; then
     corepack enable >/dev/null 2>&1 || true
     echo "→ yarn install (frozen, no scripts) for lefthook deps"

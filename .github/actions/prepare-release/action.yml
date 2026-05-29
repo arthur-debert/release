@@ -197,7 +197,7 @@ runs:
                 pnpm exec lefthook run pre-commit "${lefthook_file_args[@]}"
               elif [ -f package-lock.json ]; then
                 npm ci --ignore-scripts
-                npx --no-install lefthook run pre-commit "${lefthook_file_args[@]}"
+                npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
               elif [ -f yarn.lock ]; then
                 corepack enable >/dev/null 2>&1 || true
                 yarn install --frozen-lockfile --ignore-scripts
