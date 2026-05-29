@@ -182,7 +182,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-npm@v1
+      - uses: arthur-debert/release/.github/actions/prepare-release-npm@v2
         id: prep
         with:
           version: ${{ inputs.version }}

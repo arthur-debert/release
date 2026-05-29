@@ -270,9 +270,9 @@ jobs:
           submodules: ${{ inputs.submodules }}
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
 
-      - uses: arthur-debert/release/.github/actions/prepare-release@v1
+      - uses: arthur-debert/release/.github/actions/prepare-release@v2
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -325,7 +325,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
         with:
           targets: ${{ matrix.target }}
 
@@ -351,7 +351,7 @@ jobs:
       - name: Sign macOS binaries
         id: sign
         if: matrix.sign
-        uses: arthur-debert/release/.github/actions/sign-mac@v1
+        uses: arthur-debert/release/.github/actions/sign-mac@v2
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -497,7 +497,7 @@ jobs:
       - name: Build .deb
         if: matrix.deb_arch != '' && inputs.apt
         id: deb
-        uses: arthur-debert/release/.github/actions/build-deb@v1
+        uses: arthur-debert/release/.github/actions/build-deb@v2
         with:
           package: ${{ inputs.bin-name }}
           target: ${{ matrix.target }}
@@ -521,9 +521,9 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
 
-      - uses: arthur-debert/release/.github/actions/publish-crate@v1
+      - uses: arthur-debert/release/.github/actions/publish-crate@v2
         with:
           crates: ${{ inputs.crates }}
           token: ${{ secrets.CRATES_IO_KEY }}
@@ -556,7 +556,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
         if: steps.guard.outputs.skip != 'true'
 
       - name: Download tarballs
@@ -619,7 +619,7 @@ jobs:
           echo "urls<<EOF" >> "$GITHUB_OUTPUT"; echo "$urls" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
           echo "shas<<EOF" >> "$GITHUB_OUTPUT"; echo "$shas" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - uses: arthur-debert/release/.github/actions/render-brew-formula@v1
+      - uses: arthur-debert/release/.github/actions/render-brew-formula@v2
         if: steps.guard.outputs.skip != 'true'
         with:
           bin-name: ${{ inputs.bin-name }}
@@ -632,7 +632,7 @@ jobs:
           output-path: out/${{ inputs.bin-name }}.rb
           private-repo: ${{ inputs.brew-private-repo }}
 
-      - uses: arthur-debert/release/.github/actions/push-brew-tap@v1
+      - uses: arthur-debert/release/.github/actions/push-brew-tap@v2
         if: steps.guard.outputs.skip != 'true'
         with:
           tap-repo: ${{ inputs.brew-tap }}
@@ -708,7 +708,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
         with:
           targets: wasm32-unknown-unknown
 

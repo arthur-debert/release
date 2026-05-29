@@ -166,7 +166,7 @@ jobs:
           submodules: ${{ inputs.submodules }}
 
       - name: Setup Rust (toolchain + cache)
-        uses: arthur-debert/release/.github/actions/setup-rust@v1
+        uses: arthur-debert/release/.github/actions/setup-rust@v2
         with:
           components: clippy, rustfmt
           targets: ${{ inputs.extra-targets }}
