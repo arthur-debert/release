@@ -227,7 +227,7 @@ jobs:
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
     steps:
-      - uses: arthur-debert/release/.github/actions/validate-apple-secrets@v1
+      - uses: arthur-debert/release/.github/actions/validate-apple-secrets@v2
 
   # -------------------------------------------------------------------
   # 1. Prepare: bump all three version files (package.json,
@@ -249,7 +249,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-tauri@v1
+      - uses: arthur-debert/release/.github/actions/prepare-release-tauri@v2
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -277,7 +277,7 @@ jobs:
     outputs:
       targets: ${{ steps.matrix.outputs.targets }}
     steps:
-      - uses: arthur-debert/release/.github/actions/compute-tauri-matrix@v1
+      - uses: arthur-debert/release/.github/actions/compute-tauri-matrix@v2
         id: matrix
         with:
           build-mac: ${{ inputs.build-mac }}

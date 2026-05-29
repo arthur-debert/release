@@ -83,7 +83,7 @@ jobs:
         with:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - uses: arthur-debert/release/.github/actions/setup-go@v1
+      - uses: arthur-debert/release/.github/actions/setup-go@v2
         with:
           go-version: ${{ inputs.go-version }}
 

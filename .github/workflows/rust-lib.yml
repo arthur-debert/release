@@ -80,9 +80,9 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
 
-      - uses: arthur-debert/release/.github/actions/prepare-release@v1
+      - uses: arthur-debert/release/.github/actions/prepare-release@v2
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -105,9 +105,9 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v1
+      - uses: arthur-debert/release/.github/actions/setup-rust@v2
 
-      - uses: arthur-debert/release/.github/actions/publish-crate@v1
+      - uses: arthur-debert/release/.github/actions/publish-crate@v2
         with:
           crates: ${{ inputs.crates }}
           token: ${{ secrets.CRATES_IO_KEY }}
