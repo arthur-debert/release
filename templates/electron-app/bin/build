@@ -81,6 +81,16 @@ fi
 # Delegate to the consumer's `<pm> run build` script with the separator
 # each pm needs to forward args cleanly to the build tool (see above).
 case "${PM}" in
-    npm) exec npm run build -- "$@" ;;
-    *)   exec "${PM}" run build "$@" ;;
+    npm)
+        # npm needs the `--` to forward args — but only append it when
+        # there ARE args. `npm run build --` with nothing after can leak a
+        # stray `--` to the script on some npm versions.
+        if [ "$#" -gt 0 ]; then
+            exec npm run build -- "$@"
+        fi
+        exec npm run build
+        ;;
+    *)
+        exec "${PM}" run build "$@"
+        ;;
 esac
