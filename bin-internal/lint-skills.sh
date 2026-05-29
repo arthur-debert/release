@@ -44,7 +44,11 @@ fi
 declare -a targets=()
 declare -a skipped=()
 while IFS= read -r skillmd; do
-  dir=$(dirname "$skillmd")
+  # Parameter expansion instead of $(dirname ...) — no subshell per
+  # iteration. find always yields a path with a slash, but guard the
+  # no-slash case for dirname-equivalent semantics.
+  dir="${skillmd%/*}"
+  [ "$dir" = "$skillmd" ] && dir="."
   if [ -e "$dir/.upstream" ]; then
     skipped+=("$dir")
     continue
