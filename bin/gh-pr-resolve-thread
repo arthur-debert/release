@@ -23,6 +23,13 @@
 # Example:
 #   gh-pr-resolve-thread 507 1234567890
 
+# The `$owner`/`$name`/`$pr`/`$threadId` inside the single-quoted
+# `gh api graphql -f query='…'` blocks are GraphQL variables, not shell
+# expansions — they must stay literal (gh substitutes them from the -F/-f
+# flags). SC2016 ("expressions don't expand in single quotes") is a false
+# positive for these query bodies. Disable file-wide (must precede the
+# first command to apply to the whole file).
+# shellcheck disable=SC2016
 set -euo pipefail
 
 show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }

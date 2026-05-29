@@ -48,6 +48,8 @@ REPOS=(
   "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
 )
 
+# $owner/$name are GraphQL variables (substituted by gh via -F), not shell.
+# shellcheck disable=SC2016
 QUERY='
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {

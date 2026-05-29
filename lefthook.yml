@@ -33,7 +33,7 @@ pre-commit:
               ;;
           esac
           echo "shellcheck $f"
-          shellcheck --severity=warning "$f" || fail=1
+          shellcheck --severity=info "$f" || fail=1
         done
         exit $fail
 

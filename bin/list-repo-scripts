@@ -73,18 +73,23 @@ ACTIVE_DIRS=()
 COL=30
 
 count_real_files() {
-  local dir=$1
+  local dir="$1"
   if [ -d "$dir" ]; then
-    local c
-    c=$(ls -1 "$dir" 2>/dev/null | wc -l)
-    echo "$((c))"
+    local count=0 entry
+    for entry in "$dir"/*; do
+      # -e OR -L so a broken symlink (which fails -e) still counts.
+      if [ -e "$entry" ] || [ -L "$entry" ]; then
+        count=$((count + 1))
+      fi
+    done
+    echo "$count"
   else
     echo 0
   fi
 }
 
 col_lines() {
-  local dir=$1
+  local dir="$1"
   if [ ! -d "$dir" ]; then
     echo "(not present)"
   elif contents=$(ls -1 "$dir") && [ -n "$contents" ]; then
