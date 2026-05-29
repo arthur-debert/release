@@ -384,14 +384,26 @@ jobs:
           echo "name=$(jq -r '.productName // .package.productName // "App"' "$conf")" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test
-        if: hashFiles('app-bin/smoke-hook.sh') != ''
+        # Optional consumer hook: run it if present, skip otherwise.
+        # Guard with a shell test, NOT `if: hashFiles(...)`. When
+        # app-bin/smoke-hook.sh is a release-sync symlink into .release/
+        # and that target isn't materialized, hashFiles() can't hash it
+        # and aborts the whole step-expression instead of returning ''
+        # — failing the build (release#316). `[ -e ]` follows the
+        # symlink and is simply false on a dangling link, so we skip
+        # cleanly.
         shell: bash
         env:
           PLATFORM: ${{ matrix.t.platform }}
           BUNDLE_DIR: ${{ steps.bundles.outputs.dir }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
           APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash app-bin/smoke-hook.sh
+        run: |
+          if [ -e app-bin/smoke-hook.sh ]; then
+            bash app-bin/smoke-hook.sh
+          else
+            echo "no app-bin/smoke-hook.sh (absent or dangling symlink) — skipping smoke test"
+          fi
 
       - name: Upload platform bundle
         uses: actions/upload-artifact@v4
