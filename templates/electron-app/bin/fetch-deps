@@ -1,0 +1,770 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="0.2.0"
+PROG="fetch-deps"
+
+die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
+info() { printf '  %s\n' "$*"; }
+ok()   { printf '  ✓ %s\n' "$*"; }
+skip() { printf '  ⊘ %s\n' "$*"; }
+
+# ─── Platform detection ───────────────────────────────────
+
+detect_target() {
+    local os arch
+    case "$(uname -s)" in
+        Linux)                          os="unknown-linux-gnu" ;;
+        Darwin)                         os="apple-darwin" ;;
+        MINGW*|MSYS*|CYGWIN*|Windows*) os="pc-windows-msvc" ;;
+        *)                              die "unsupported OS: $(uname -s)" ;;
+    esac
+    case "$(uname -m)" in
+        x86_64)         arch="x86_64" ;;
+        aarch64|arm64)  arch="aarch64" ;;
+        *)              die "unsupported arch: $(uname -m)" ;;
+    esac
+    printf '%s-%s' "$arch" "$os"
+}
+
+target_os() {
+    case "$1" in
+        *linux*)   echo "linux" ;;
+        *darwin*)  echo "macos" ;;
+        *windows*) echo "windows" ;;
+        *)         echo "unknown" ;;
+    esac
+}
+
+target_arch() {
+    case "$1" in
+        x86_64*)         echo "x86_64" ;;
+        aarch64*|arm64*) echo "aarch64" ;;
+        *)               echo "unknown" ;;
+    esac
+}
+
+# Node/Electron platform naming (distinct from `target_os` which uses
+# Rust-style names). Used by {{node_platform}} for paths like
+# electron-builder's `extraResource: resources/bin/<node_platform>-<node_arch>`.
+target_node_platform() {
+    case "$1" in
+        *linux*)   echo "linux" ;;
+        *darwin*)  echo "darwin" ;;
+        *windows*) echo "win32" ;;
+        *)         echo "unknown" ;;
+    esac
+}
+
+# Node/Electron architecture naming (distinct from `target_arch` which
+# uses Rust-style names). Used by {{node_arch}}.
+target_node_arch() {
+    case "$1" in
+        x86_64*)         echo "x64" ;;
+        aarch64*|arm64*) echo "arm64" ;;
+        *)               echo "unknown" ;;
+    esac
+}
+
+archive_ext() {
+    case "$1" in
+        *windows*) echo ".zip" ;;
+        *)         echo ".tar.gz" ;;
+    esac
+}
+
+is_archive() {
+    case "$1" in
+        *.tar.gz|*.tgz|*.zip) return 0 ;;
+        *)                    return 1 ;;
+    esac
+}
+
+# ─── Template expansion ───────────────────────────────────
+
+# Cache target-derived values. The target is fixed for the whole
+# script run; expanding 6 substitutions per dep via subshells adds up
+# (Bash subshells are noticeably slow on macOS / Git-Bash). main()
+# calls `cache_target_vars "$target"` once before the fetch loop.
+_OS=""
+_ARCH=""
+_NODE_PLATFORM=""
+_NODE_ARCH=""
+_EXT=""
+
+cache_target_vars() {
+    local target="$1"
+    _OS="$(target_os "$target")"
+    _ARCH="$(target_arch "$target")"
+    _NODE_PLATFORM="$(target_node_platform "$target")"
+    _NODE_ARCH="$(target_node_arch "$target")"
+    _EXT="$(archive_ext "$target")"
+}
+
+expand_template() {
+    local tpl="$1" target="$2"
+    local result="$tpl"
+    result="${result//\{\{target\}\}/$target}"
+    result="${result//\{\{os\}\}/$_OS}"
+    result="${result//\{\{arch\}\}/$_ARCH}"
+    result="${result//\{\{node_platform\}\}/$_NODE_PLATFORM}"
+    result="${result//\{\{node_arch\}\}/$_NODE_ARCH}"
+    result="${result//\{\{ext\}\}/$_EXT}"
+    printf '%s' "$result"
+}
+
+# Expand {{.field}} placeholders against a JSON object, then expand
+# global {{target}} / {{os}} / ... placeholders. Used by the
+# manifest-iteration mode (#309).
+expand_item_template() {
+    local tpl="$1" item="$2" target="$3"
+    local interim
+    interim="$(jq -nr --arg tpl "$tpl" --argjson obj "$item" '
+        $tpl | gsub("\\{\\{\\.(?<f>[a-zA-Z_][a-zA-Z0-9_]*)\\}\\}";
+                    ($obj[.f] // "" | tostring))
+    ')"
+    expand_template "$interim" "$target"
+}
+
+# ─── Stamp management ─────────────────────────────────────
+
+STAMP_DIR=".deps"
+
+stamp_path() { printf '%s/%s.stamp' "$STAMP_DIR" "$1"; }
+
+stamp_matches() {
+    local key="$1" expected="$2"
+    local stamp_file recorded
+    stamp_file="$(stamp_path "$key")"
+    [[ -f "$stamp_file" ]] || return 1
+    read -r recorded < "$stamp_file" || true
+    [[ "$recorded" == "$expected" ]]
+}
+
+stamp_write() {
+    local key="$1" content="$2"
+    local stamp_file
+    stamp_file="$(stamp_path "$key")"
+    mkdir -p "${stamp_file%/*}"
+    printf '%s' "$content" > "$stamp_file"
+}
+
+# ─── Download ──────────────────────────────────────────────
+
+_auth_token() {
+    printf '%s' "${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+}
+
+# Plain HTTPS download. Sends auth header only for github.com hosts so
+# arbitrary URLs (HuggingFace, CDNs) don't leak tokens.
+download_url() {
+    local url="$1" dest="$2"
+    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+    # Pull "host" out of "scheme://host/...". Strips userinfo and port.
+    local rest="${url#*://}"
+    local host="${rest%%/*}"
+    host="${host#*@}"
+    host="${host%%:*}"
+
+    if [[ -n "$token" ]] && \
+       { [[ "$host" == "github.com" ]] || \
+         [[ "$host" == "raw.githubusercontent.com" ]] || \
+         [[ "$host" == "api.github.com" ]]; }; then
+        if ! curl -fsSL -H "Authorization: Bearer $token" -o "$dest" "$url"; then
+            printf '%s: download failed: %s\n' "$PROG" "$url" >&2
+            return 1
+        fi
+    else
+        if ! curl -fsSL -o "$dest" "$url"; then
+            printf '%s: download failed: %s\n' "$PROG" "$url" >&2
+            return 1
+        fi
+    fi
+}
+
+# Download a GitHub release asset. For private repos the browser-style URL
+# (github.com/.../releases/download/...) returns 404 even with an auth
+# header because the 302 redirect strips Authorization. Use the API
+# endpoint instead: look up the asset ID via the releases/tags endpoint,
+# then download with Accept: application/octet-stream.
+#
+# Returns non-zero on failure so callers can decide whether to soft-fail
+# or hard-fail. Prints errors to stderr.
+download_release_asset() {
+    local repo="$1" version="$2" asset="$3" dest="$4"
+    local token
+    token="$(_auth_token)"
+
+    if [[ -n "$token" ]]; then
+        # Authenticated path -- works for both public and private repos.
+        local api_url="https://api.github.com/repos/$repo/releases/tags/$version"
+        local asset_url
+        if ! asset_url="$(curl -fsSL \
+            -H "Authorization: Bearer $token" \
+            "$api_url" \
+            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')"; then
+            printf '%s: failed to look up release %s for %s\n' "$PROG" "$version" "$repo" >&2
+            return 1
+        fi
+
+        if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
+            printf '%s: %s@%s: asset %q not found in release\n' "$PROG" "$repo" "$version" "$asset" >&2
+            return 1
+        fi
+
+        if ! curl -fsSL \
+            -H "Authorization: Bearer $token" \
+            -H "Accept: application/octet-stream" \
+            -o "$dest" \
+            "$asset_url"; then
+            printf '%s: download failed: %s from %s@%s\n' "$PROG" "$asset" "$repo" "$version" >&2
+            return 1
+        fi
+    else
+        # Unauthenticated -- public repos only.
+        local url="https://github.com/$repo/releases/download/$version/$asset"
+        if ! curl -fsSL -o "$dest" "$url"; then
+            printf '%s: download failed: %s (private repo? set GH_TOKEN)\n' "$PROG" "$url" >&2
+            return 1
+        fi
+    fi
+}
+
+# Download a raw file from raw.githubusercontent.com — used by
+# `raw-files` in iteration mode (#309).
+download_raw_github() {
+    local repo="$1" version="$2" path="$3" dest="$4"
+    download_url "https://raw.githubusercontent.com/$repo/$version/$path" "$dest"
+}
+
+sha256_of() {
+    local file="$1" sum
+    if command -v sha256sum >/dev/null 2>&1; then
+        sum="$(sha256sum "$file")"
+    elif command -v shasum >/dev/null 2>&1; then
+        sum="$(shasum -a 256 "$file")"
+    else
+        return 1
+    fi
+    printf '%s' "${sum%% *}"
+}
+
+# ─── Extraction ────────────────────────────────────────────
+
+extract_archive() {
+    local archive="$1" dest="$2"
+    mkdir -p "$dest"
+    case "$archive" in
+        *.tar.gz|*.tgz) tar -xzf "$archive" -C "$dest" || return 1 ;;
+        *.zip)          unzip -qo "$archive" -d "$dest" || return 1 ;;
+        *)              printf '%s: unsupported archive format: %s\n' "$PROG" "$archive" >&2; return 1 ;;
+    esac
+}
+
+extract_root() {
+    local dir="$1"
+    local count=0 single=""
+    for entry in "$dir"/*; do
+        count=$((count + 1))
+        single="$entry"
+    done
+    if [[ $count -eq 1 && -d "$single" ]]; then
+        printf '%s' "$single"
+    else
+        printf '%s' "$dir"
+    fi
+}
+
+find_binary() {
+    local root="$1" name="$2"
+    find "$root" -name "$name" -type f 2>/dev/null | head -1 || true
+}
+
+# Apply a {src: dst} extract map against an unpacked archive root.
+apply_extract_map() {
+    local root="$1" extract_map="$2"
+    local src dst found
+    while IFS=$'\t' read -r src dst; do
+        [[ -z "$src" || -z "$dst" ]] && continue
+        if [[ -e "$root/$src" ]]; then
+            found="$root/$src"
+        else
+            found="$(find "$root" -name "${src##*/}" 2>/dev/null | head -1 || true)"
+        fi
+
+        if [[ -z "${found:-}" ]]; then
+            info "  ⚠ $src not found in archive (skipping)"
+            continue
+        fi
+
+        mkdir -p "$dst"
+        if [[ -d "$found" ]]; then
+            cp -r "$found"/. "$dst/"
+        else
+            cp "$found" "$dst/"
+        fi
+        ok "$src → $dst"
+    done <<< "$extract_map"
+}
+
+# ─── Process a single dep ─────────────────────────────────
+
+fail_dep() {
+    printf '%s: %s\n' "$PROG" "$*" >&2
+    return 1
+}
+
+# Dispatcher: routes a dep to the correct handler based on its shape.
+process_dep() {
+    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+
+    # Invalid dep names and missing required fields are static config
+    # bugs in deps.json, not transient runtime errors — die hard so
+    # --soft / "optional": true don't silently swallow them.
+    if [[ ! "$dep" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        die "invalid dependency name: $dep"
+    fi
+
+    local has_manifest has_url shapes
+    shapes="$(jq -r --arg d "$dep" '.[$d] | [has("from-manifest"), has("url")] | @tsv' "$config" | tr -d '\r')"
+    IFS=$'\t' read -r has_manifest has_url <<< "$shapes"
+
+    if [[ "$has_manifest" == "true" ]]; then
+        fetch_iter "$dep" "$if_missing" "$target" "$config" "$work_dir"
+    elif [[ "$has_url" == "true" ]]; then
+        fetch_url "$dep" "$if_missing" "$target" "$config" "$work_dir"
+    else
+        fetch_github "$dep" "$if_missing" "$target" "$config" "$work_dir"
+    fi
+}
+
+fetch_github() {
+    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+
+    local repo version asset_tpl binary dest_tpl has_extract
+    repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config" | tr -d '\r')"
+    version="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config" | tr -d '\r')"
+    asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config" | tr -d '\r')"
+    binary="$(jq -r --arg d "$dep" '.[$d].binary // empty' "$config" | tr -d '\r')"
+    dest_tpl="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
+    has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config" | tr -d '\r')"
+
+    [[ -z "$repo" ]]      && die "$dep: missing 'repo'"
+    [[ -z "$version" ]]   && die "$dep: missing 'version'"
+    [[ -z "$asset_tpl" ]] && die "$dep: missing 'asset'"
+
+    local asset dest
+    asset="$(expand_template "$asset_tpl" "$target")"
+    dest="$(expand_template "$dest_tpl" "$target")"
+
+    if [[ "$if_missing" == true ]] && stamp_matches "$dep" "$version $target"; then
+        skip "$dep $version — up to date"
+        return 0
+    fi
+
+    info "$dep $version → $dest"
+
+    local dep_dir="$work_dir/$dep"
+    mkdir -p "$dep_dir"
+
+    download_release_asset "$repo" "$version" "$asset" "$dep_dir/$asset" || return 1
+
+    extract_archive "$dep_dir/$asset" "$dep_dir/out" || return 1
+    local root
+    root="$(extract_root "$dep_dir/out")"
+
+    if [[ -n "$binary" ]]; then
+        local bin_name="$binary"
+        [[ "$target" == *windows* ]] && bin_name="${binary}.exe"
+
+        local found
+        found="$(find_binary "$root" "$bin_name")"
+        [[ -z "$found" ]] && { fail_dep "$dep: binary '$bin_name' not found in archive"; return 1; }
+
+        mkdir -p "$dest"
+        install -m 0755 "$found" "$dest/$bin_name"
+        ok "$bin_name → $dest/"
+
+    elif [[ "$has_extract" == "true" ]]; then
+        local extract_map
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
+        apply_extract_map "$root" "$extract_map"
+    else
+        mkdir -p "$dest"
+        cp -r "$root"/. "$dest/"
+        ok "extracted → $dest/"
+    fi
+
+    stamp_write "$dep" "$version $target"
+}
+
+# Plain HTTPS download — non-GitHub sources (#310).
+fetch_url() {
+    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+
+    # ASCII Unit Separator (\x1f) for joining — `read` with IFS=$'\t'
+    # collapses consecutive separators because tab is a whitespace char.
+    local url_tpl filename_tpl dest_tpl sha256 config_vals
+    config_vals="$(jq -r --arg d "$dep" --arg sep $'\x1f' \
+        '.[$d] | [.url // "", .filename // "", .dest // ".", .sha256 // ""] | join($sep)' \
+        "$config" | tr -d '\r')"
+    IFS=$'\x1f' read -r url_tpl filename_tpl dest_tpl sha256 <<< "$config_vals"
+
+    [[ -z "$url_tpl" ]] && die "$dep: missing 'url'"
+
+    local url dest filename
+    url="$(expand_template "$url_tpl" "$target")"
+    dest="$(expand_template "$dest_tpl" "$target")"
+    if [[ -n "$filename_tpl" ]]; then
+        filename="$(expand_template "$filename_tpl" "$target")"
+    else
+        # Strip query string then take basename.
+        local path="${url%%\?*}"
+        filename="$(basename "$path")"
+    fi
+
+    # Stamp identity: sha256 if present (content-addressed), else url.
+    local stamp_id
+    if [[ -n "$sha256" ]]; then
+        stamp_id="sha256:$sha256"
+    else
+        stamp_id="url:$url"
+    fi
+
+    if [[ "$if_missing" == true ]] && stamp_matches "$dep" "$stamp_id"; then
+        skip "$dep — up to date"
+        return 0
+    fi
+
+    info "$dep → $dest/$filename"
+
+    local dep_dir="$work_dir/$dep"
+    mkdir -p "$dep_dir"
+
+    download_url "$url" "$dep_dir/$filename" || return 1
+
+    if [[ -n "$sha256" ]]; then
+        local actual
+        actual="$(sha256_of "$dep_dir/$filename")" \
+            || die "$dep: cannot compute sha256 (sha256sum/shasum not found)"
+        if [[ "$actual" != "$sha256" ]]; then
+            # Integrity failure: hard fail even under --soft.
+            die "$dep: sha256 mismatch (expected $sha256, got $actual)"
+        fi
+    fi
+
+    mkdir -p "$dest"
+    cp "$dep_dir/$filename" "$dest/$filename"
+    ok "$filename → $dest/"
+
+    stamp_write "$dep" "$stamp_id"
+}
+
+# Manifest-driven iteration (#309). Iterates a jq path over a JSON
+# file already on disk and processes each item. Pre-computes all
+# per-dep config in a single jq call so the per-item loop only does
+# template expansion + downloads.
+fetch_iter() {
+    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+
+    # ASCII Unit Separator (\x1f) preserves empty fields through `read`
+    # (a tab would be collapsed because IFS=$'\t' treats consecutive
+    # whitespace as one separator).
+    local manifest_tpl for_each repo_tpl version_tpl asset_tpl \
+          dest_tpl binary_as_tpl has_extract has_raw config_vals
+    config_vals="$(jq -r --arg d "$dep" --arg sep $'\x1f' '
+        .[$d] | [
+            ."from-manifest" // "",
+            ."for-each"      // "",
+            .repo            // "",
+            .version         // "",
+            .asset           // "",
+            .dest            // ".",
+            ."binary-as"     // "",
+            (has("extract")  | tostring),
+            (has("raw-files")| tostring)
+        ] | join($sep)' "$config" | tr -d '\r')"
+    IFS=$'\x1f' read -r manifest_tpl for_each repo_tpl version_tpl asset_tpl \
+                        dest_tpl binary_as_tpl has_extract has_raw <<< "$config_vals"
+
+    # Validate in author-friendly order: from-manifest → for-each →
+    # the GH-release fields. So a config missing for-each surfaces that
+    # error first, even if repo/version/asset are also missing.
+    [[ -z "$manifest_tpl" ]] && die "$dep: missing 'from-manifest'"
+    [[ -z "$for_each" ]]     && die "$dep: missing 'for-each'"
+    [[ -z "$repo_tpl" ]]     && die "$dep: missing 'repo'"
+    [[ -z "$version_tpl" ]]  && die "$dep: missing 'version'"
+    [[ -z "$asset_tpl" ]]    && die "$dep: missing 'asset'"
+
+    local extract_map="" raw_pairs=""
+    if [[ "$has_extract" == "true" ]]; then
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
+    fi
+    if [[ "$has_raw" == "true" ]]; then
+        raw_pairs="$(jq -r --arg d "$dep" '.[$d]["raw-files"] | to_entries[] | [.key, .value] | @tsv' "$config")"
+    fi
+
+    local manifest
+    manifest="$(expand_template "$manifest_tpl" "$target")"
+    [[ -f "$manifest" ]] || { fail_dep "$dep: manifest not found: $manifest"; return 1; }
+    jq empty "$manifest" 2>/dev/null \
+        || { fail_dep "$dep: invalid JSON in manifest: $manifest"; return 1; }
+
+    local items
+    if ! items="$(jq -c "$for_each" "$manifest" 2>&1)"; then
+        fail_dep "$dep: invalid for-each expression '$for_each': $items"
+        return 1
+    fi
+
+    info "$dep: iterating $for_each over $manifest"
+
+    local item_failed=0
+    while IFS= read -r item; do
+        [[ -z "$item" ]] && continue
+        if ! fetch_iter_item "$dep" "$item" "$if_missing" "$target" "$work_dir" \
+                "$repo_tpl" "$version_tpl" "$asset_tpl" "$dest_tpl" "$binary_as_tpl" \
+                "$has_extract" "$extract_map" "$has_raw" "$raw_pairs"; then
+            item_failed=$((item_failed + 1))
+        fi
+    done <<< "$items"
+
+    [[ $item_failed -gt 0 ]] && return 1
+    return 0
+}
+
+fetch_iter_item() {
+    local dep="$1" item="$2" if_missing="$3" target="$4" work_dir="$5"
+    local repo_tpl="$6" version_tpl="$7" asset_tpl="$8" dest_tpl="$9" binary_as_tpl="${10}"
+    local has_extract="${11}" extract_map="${12}" has_raw="${13}" raw_pairs="${14}"
+
+    local item_name
+    item_name="$(jq -r '.name // empty' <<< "$item")"
+    [[ -z "$item_name" ]] && { fail_dep "$dep: iteration item missing 'name' field"; return 1; }
+
+    local repo version asset dest binary_as
+    repo="$(expand_item_template "$repo_tpl" "$item" "$target")"
+    version="$(expand_item_template "$version_tpl" "$item" "$target")"
+    asset="$(expand_item_template "$asset_tpl" "$item" "$target")"
+    dest="$(expand_item_template "$dest_tpl" "$item" "$target")"
+    binary_as=""
+    [[ -n "$binary_as_tpl" ]] && binary_as="$(expand_item_template "$binary_as_tpl" "$item" "$target")"
+
+    local stamp_key="$dep/$item_name"
+    if [[ "$if_missing" == true ]] && stamp_matches "$stamp_key" "$version $target"; then
+        skip "$dep/$item_name $version — up to date"
+        return 0
+    fi
+
+    info "$dep/$item_name $version → $dest"
+
+    local item_dir="$work_dir/$dep/$item_name"
+    mkdir -p "$item_dir"
+
+    download_release_asset "$repo" "$version" "$asset" "$item_dir/$asset" || return 1
+
+    mkdir -p "$dest"
+    if [[ -n "$binary_as" ]]; then
+        # The asset itself is the file we want — copy with the
+        # configured name. No extraction.
+        cp "$item_dir/$asset" "$dest/$binary_as"
+        ok "$binary_as → $dest/"
+    elif is_archive "$asset"; then
+        extract_archive "$item_dir/$asset" "$item_dir/out" || return 1
+        local root
+        root="$(extract_root "$item_dir/out")"
+
+        if [[ "$has_extract" == "true" ]]; then
+            local expanded_extract_map
+            expanded_extract_map="$(while IFS=$'\t' read -r k v; do
+                [[ -z "$k" ]] && continue
+                ek="$(expand_item_template "$k" "$item" "$target")"
+                ev="$(expand_item_template "$v" "$item" "$target")"
+                printf '%s\t%s\n' "$ek" "$ev"
+            done <<< "$extract_map")"
+            apply_extract_map "$root" "$expanded_extract_map"
+        else
+            cp -r "$root"/. "$dest/"
+            ok "extracted → $dest/"
+        fi
+    else
+        # Non-archive asset, no binary-as configured: copy as-is.
+        cp "$item_dir/$asset" "$dest/${asset##*/}"
+        ok "$asset → $dest/"
+    fi
+
+    # raw-files: additional files from raw.githubusercontent.com.
+    if [[ "$has_raw" == "true" ]]; then
+        local rsrc rdst esrc edst
+        while IFS=$'\t' read -r rsrc rdst; do
+            [[ -z "$rsrc" ]] && continue
+            esrc="$(expand_item_template "$rsrc" "$item" "$target")"
+            edst="$(expand_item_template "$rdst" "$item" "$target")"
+            download_raw_github "$repo" "$version" "$esrc" "$dest/$edst" \
+                || { fail_dep "$dep/$item_name: raw-file '$esrc' failed"; return 1; }
+            ok "raw $esrc → $dest/$edst"
+        done <<< "$raw_pairs"
+    fi
+
+    stamp_write "$stamp_key" "$version $target"
+}
+
+# Returns 0 if the dep is "soft" (CLI --soft flag, or "optional": true
+# in deps.json). Soft deps log warnings and don't count toward the
+# script's failure total — for postinstall hooks where hard-fail would
+# break `npm install` outside CI.
+is_soft_dep() {
+    local dep="$1" soft_flag="$2" config="$3"
+    [[ "$soft_flag" == true ]] && return 0
+    local optional
+    optional="$(jq -r --arg d "$dep" '.[$d].optional // false' "$config" | tr -d '\r')"
+    [[ "$optional" == "true" ]]
+}
+
+# ─── CLI ───────────────────────────────────────────────────
+
+usage() {
+    cat <<'EOF'
+Usage: fetch-deps [options] [dep ...]
+
+Download dependencies defined in deps.json. Three shapes are supported:
+  1. GitHub release asset (default)
+  2. Plain HTTPS URL (any host)
+  3. Manifest-driven iteration (loop over a JSON manifest on disk)
+
+Options:
+  --if-missing     Skip deps whose stamp matches the current identity
+  --target TRIPLE  Override platform detection (e.g. x86_64-apple-darwin)
+  --config FILE    Config file path (default: deps.json)
+  --soft           Treat every dep as optional: log warnings and exit 0
+                   on download/extraction failure. Useful for npm/Electron
+                   postinstall hooks where hard-failure would break
+                   `npm install` outside CI. sha256 mismatches and
+                   config errors still hard-fail.
+  --help           Show this help
+  --version        Show version
+
+With no dep names, fetches all deps in the config file.
+
+deps.json — GitHub release shape:
+  {
+    "dep-name": {
+      "repo":     "owner/repo",           (required)
+      "version":  "v1.2.3",               (required)
+      "asset":    "name-{{target}}{{ext}}", (required, templated)
+      "binary":   "binary-name",          (binary mode: find + install)
+      "dest":     "resources",            (install dir, default ".", templated)
+      "optional": true,                   (soft-fail this dep)
+      "extract":  { "file.wasm": "resources", "queries": "resources/queries" }
+    }
+  }
+
+deps.json — plain HTTPS URL shape:
+  {
+    "dep-name": {
+      "url":      "https://host/path/to/file",   (required)
+      "filename": "saved-name.bin",              (default: basename of url)
+      "dest":     "static/models",               (default ".", templated)
+      "sha256":   "abc123…",                     (optional, integrity check)
+      "optional": true
+    }
+  }
+
+deps.json — manifest iteration shape:
+  {
+    "dep-name": {
+      "from-manifest": "resources/manifest.json",  (path on disk, templated)
+      "for-each":      ".items[]",                  (jq expression)
+      "repo":          "{{.repo}}",                 (per-item templates)
+      "version":       "{{.version}}",
+      "asset":         "{{.asset_name}}",
+      "dest":          "out/{{.name}}",
+      "binary-as":     "parser.wasm",   (asset is a single file → save as)
+      "raw-files":     { "{{.queries_path}}": "highlights.scm" }
+    }
+  }
+  Each iteration item must have a "name" field (used for stamps).
+
+Template variables (global, expand in any string):
+  {{target}}         Rust target triple    (x86_64-unknown-linux-gnu)
+  {{os}}             OS name (Rust style)  (linux, macos, windows)
+  {{arch}}           Architecture (Rust)   (x86_64, aarch64)
+  {{node_platform}}  OS name (Node style)  (linux, darwin, win32)
+  {{node_arch}}      Architecture (Node)   (x64, arm64)
+  {{ext}}            Archive extension     (.tar.gz on Unix, .zip on Windows)
+
+Per-item placeholders (iteration mode only): {{.field}} reads the named
+field from the current manifest item.
+EOF
+}
+
+main() {
+    local if_missing=false
+    local soft=false
+    local target=""
+    local config="deps.json"
+    local deps=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --if-missing) if_missing=true; shift ;;
+            --soft)       soft=true; shift ;;
+            --target)
+                [[ $# -lt 2 ]] && die "--target requires a value"
+                target="$2"; shift 2 ;;
+            --config)
+                [[ $# -lt 2 ]] && die "--config requires a value"
+                config="$2"; shift 2 ;;
+            --help)    usage; exit 0 ;;
+            --version) echo "$PROG $VERSION"; exit 0 ;;
+            -*)        die "unknown option: $1" ;;
+            *)         deps+=("$1"); shift ;;
+        esac
+    done
+
+    command -v jq  &>/dev/null || die "jq is required but not found"
+    command -v curl &>/dev/null || die "curl is required but not found"
+
+    [[ -z "$target" ]] && target="$(detect_target)"
+    cache_target_vars "$target"
+    [[ -f "$config" ]] || die "config not found: $config"
+    jq empty "$config" 2>/dev/null || die "invalid JSON: $config"
+
+    if [[ ${#deps[@]} -eq 0 ]]; then
+        # keys_unsorted preserves deps.json declaration order so authors
+        # can put a dep that extracts a manifest (via `extract`) before
+        # an iteration-mode dep that reads that manifest via
+        # `from-manifest`. jq's plain `keys` would sort alphabetically
+        # and break that contract.
+        local keys
+        keys="$(jq -r 'keys_unsorted[]' "$config" | tr -d '\r')"
+        while IFS= read -r d; do
+            [[ -n "$d" ]] && deps+=("$d")
+        done <<< "$keys"
+    fi
+
+    [[ ${#deps[@]} -eq 0 ]] && die "no deps defined in $config"
+
+    _FETCH_DEPS_WORK_DIR="$(mktemp -d)"
+    trap 'rm -rf "${_FETCH_DEPS_WORK_DIR:-}"' EXIT
+    local work_dir="$_FETCH_DEPS_WORK_DIR"
+
+    printf '%s: fetching %d dep(s) for %s\n' "$PROG" "${#deps[@]}" "$target"
+
+    local hard_failed=0
+    for dep in "${deps[@]}"; do
+        if ! process_dep "$dep" "$if_missing" "$target" "$config" "$work_dir"; then
+            if is_soft_dep "$dep" "$soft" "$config"; then
+                printf '%s: ⚠ %s failed; continuing (soft mode)\n' "$PROG" "$dep" >&2
+            else
+                hard_failed=$((hard_failed + 1))
+            fi
+        fi
+    done
+
+    [[ $hard_failed -gt 0 ]] && die "$hard_failed dep(s) failed"
+    return 0
+}
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
