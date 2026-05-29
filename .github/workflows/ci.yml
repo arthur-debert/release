@@ -34,3 +34,19 @@ jobs:
         run: npm install -g markdownlint-cli
       - name: Lint self-authored skills
         run: bin-internal/lint-skills.sh
+
+  guards:
+    # Structural invariants that have bitten us before.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bin/fetch-deps must be a real file, not a symlink
+        # Consumers + electron-app.yml fetch it via raw.githubusercontent.com,
+        # which serves a symlink blob as its target string rather than the
+        # script — that broke five consumers when it was symlinked (release#317).
+        run: |
+          if [ -L bin/fetch-deps ]; then
+            echo "::error file=bin/fetch-deps::bin/fetch-deps is a symlink — it MUST be a real file (raw-URL consumers depend on it). See release#317."
+            exit 1
+          fi
+          test -s bin/fetch-deps
