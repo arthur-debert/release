@@ -321,6 +321,27 @@ jobs:
           echo "effective=${effective}" >> "${GITHUB_OUTPUT}"
           echo "Effective notarize=${effective} (all_present=${all_present}, missing:${missing:-none})"
 
+      - name: Provision fetch-deps on PATH
+        # The consumer's build script calls `fetch-deps` by name, but it
+        # isn't on PATH in CI (it lives in arthur-debert/release/bin).
+        # Fetch the canonical copy from release@main and prepend it to
+        # PATH. (main, not a pinned ref: matches consumers' existing
+        # bootstrap, and the CI `guards` job keeps main's bin/fetch-deps a
+        # real file so this raw fetch returns the script, not a symlink
+        # target string — release#317.)
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/release-bin"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/fetch-deps" \
+            "https://raw.githubusercontent.com/arthur-debert/release/main/bin/fetch-deps"
+          chmod +x "$dir/fetch-deps"
+          # Windows: npm/pnpm run scripts under cmd.exe, which can't exec a
+          # shebang script by bare name — add a .cmd shim that invokes it
+          # via bash (unused/harmless on linux + mac).
+          printf '@bash "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
+          echo "$dir" >> "$GITHUB_PATH"
+
       - name: Build (electron-builder, mac --${{ matrix.arch }})
         shell: bash
         env:
@@ -537,6 +558,19 @@ jobs:
       - name: Install deps
         run: ${{ steps.pm.outputs.install }}
 
+      - name: Provision fetch-deps on PATH
+        # See build-mac for rationale. fetch-deps isn't on PATH in CI;
+        # fetch the canonical real-file copy at this workflow's commit.
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/release-bin"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/fetch-deps" \
+            "https://raw.githubusercontent.com/arthur-debert/release/main/bin/fetch-deps"
+          chmod +x "$dir/fetch-deps"
+          printf '@bash "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
+          echo "$dir" >> "$GITHUB_PATH"
+
       - name: Build (electron-builder, linux --${{ matrix.arch }})
         run: |
           # Prefer canonical bin/build (release-sync managed); fall
@@ -636,6 +670,20 @@ jobs:
       - name: Install deps
         shell: bash
         run: ${{ steps.pm.outputs.install }}
+
+      - name: Provision fetch-deps on PATH
+        # See build-mac for rationale. The .cmd shim is what actually makes
+        # the bare `fetch-deps` in the consumer's npm build script resolve
+        # under Windows cmd.exe.
+        shell: bash
+        run: |
+          dir="$RUNNER_TEMP/release-bin"
+          mkdir -p "$dir"
+          curl -fsSL -o "$dir/fetch-deps" \
+            "https://raw.githubusercontent.com/arthur-debert/release/main/bin/fetch-deps"
+          chmod +x "$dir/fetch-deps"
+          printf '@bash "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
+          echo "$dir" >> "$GITHUB_PATH"
 
       - name: Build (electron-builder, win --${{ matrix.arch }})
         # Windows code-signing not yet integrated in this workflow. The
