@@ -1,4 +1,9 @@
-# shell-quality lefthook fragment.
+# commons lefthook fragment — the universal shell/markdown/yaml gate.
+# Lives in templates/commons/ so release-sync applies it to EVERY
+# consumer structurally, independent of Kind manifests (release#320).
+# Previously this was the `shell-quality` Capability, universal only
+# by every manifest happening to list it; promoting it to commons
+# closes the gap for newly-added or manifest-less Kinds.
 # Merged into the consumer's lefthook.yml by release-sync.
 # Priority 2 = pre-commit gate. markdownlint runs in auto-fix mode
 # (--fix + stage_fixed); yamllint and shellcheck are check-only

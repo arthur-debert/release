@@ -29,9 +29,10 @@ Five levels, used throughout the rest of this doc:
   `gh-action`, `brew-tap`, `zed-extension`.
 - **Component** — reusable capability module, orthogonal to Stack. Any
   Stack composes any Components. Examples: `npm-quality`,
-  `rust-quality`, `shell-quality`, `mkdocs`, `bats`, `macos-codesign`,
+  `rust-quality`, `mkdocs`, `bats`, `macos-codesign`,
   `brew-tap-push`, `wasm-pack`, `gh-release`, `changelog`,
-  `version-bump`.
+  `version-bump`. (The universal shell/markdown/yaml lint gate is not
+  a Component — it ships from `templates/commons/`; see release#320.)
 - **Task** — atomic verb exposed as `bin/<verb>` in the consumer.
   Behavior varies per Stack; interface does not. The canonical task
   set: `bin/check`, `bin/check-fmt`, `bin/check-lint`,

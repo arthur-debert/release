@@ -7,7 +7,9 @@ Status: locked 2026-05-19 (take-iii). Reference for issue #97.
 A **Component** is a reusable, cross-Stack unit of tooling. Where a *Stack*
 captures "what kind of project is this" (rust-cli, electron-app, vsce-ext),
 a Component captures "what shared concern does this project participate
-in" (shell-quality, rust-quality, bats).
+in" (rust-quality, npm-quality, bats). (The shell/markdown/yaml lint
+gate was once such a Component but is now universal — see
+`### shell-quality` below.)
 
 A Component is identified empirically: it shows up across multiple Stacks
 with substantially the same shape. Concerns that only appear in one Stack
@@ -30,7 +32,7 @@ Path-mirror semantics: the destination in each consumer repo is the source
 path with the `templates/commons/`, `templates/components/<c>/`, or
 `templates/<stack>/` prefix stripped.
 
-Example: `templates/components/shell-quality/.markdownlint.json` lands at
+Example: `templates/commons/.markdownlint.json` lands at
 `.markdownlint.json` in the consumer.
 
 Files outside those three subtrees (`templates/fragments/`,
@@ -163,13 +165,20 @@ Components"). It is the single answer to "what version am I on?".
 
 Derived from the empirical survey of 21 repos (issue #97 description).
 
-### `shell-quality`
+### `shell-quality` → promoted to commons (release#320)
+
+> **Update:** `shell-quality` is no longer a Component. Because it is
+> truly universal (every Kind listed it), the gate was promoted into
+> `templates/commons/` so release-sync applies it to *every* consumer
+> structurally — including manifest-less Kinds (`tree-sitter`, `render`)
+> that never declared it. Nothing below changed except where it lives;
+> consumers no longer list it in a manifest.
 
 Markdown + YAML + shell + editorconfig. Sparse adoption today (8/21 for
 markdownlint; 0/21 for the others) but identical config where present.
 Universalize.
 
-Ships:
+Ships (now under `templates/commons/`):
 
 - `.markdownlint.json` — `{"MD013": false, "line-length": false}`
 - `.yamllint` — sensible defaults (line-length tolerant)
@@ -240,8 +249,10 @@ currently using non-lefthook runners are migrated as part of the Component
 rollout (issue #97 sub-task).
 
 A consumer with zero declared Components and an empty Stack fragment
-still gets a `lefthook.yml` — it just contains only the base header. This
-is uncommon (most Stacks default to at least `shell-quality`).
+still gets a `lefthook.yml` containing the base header plus the commons
+lint gate (shellcheck + markdownlint + yamllint) — the latter ships from
+`templates/commons/lefthook.fragment.yaml` and applies to every consumer
+regardless of declared Components (release#320).
 
 ## Deferred (revisit when evidence justifies)
 

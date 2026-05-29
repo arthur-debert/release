@@ -3,8 +3,8 @@
 # Consumers can override with `.release-sync.yaml` at their repo root.
 
 kind: nvim-plugin
-capabilities:
-  - shell-quality
+capabilities: []
 # nvim plugins are pure Lua; no Rust/Go/npm quality gates apply.
-# The shell-quality Capability covers any .sh helpers in bin/ +
-# the standard markdownlint/yamllint over docs and CI configs.
+# The universal commons lint gate (release#320) covers any .sh helpers
+# in bin/ + the standard markdownlint/yamllint over docs and CI configs,
+# so no Capability needs to be listed.

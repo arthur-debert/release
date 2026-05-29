@@ -52,9 +52,10 @@ override with `.release-sync.yaml`:
 
 ```yaml
 # .release-sync.yaml — opt OUT of npm-quality (atypical)
-components:
-  - shell-quality
-  # npm-quality omitted on purpose
+components: []
+  # npm-quality omitted on purpose. The shell/markdown/yaml lint gate
+  # still applies — it ships universally from commons (release#320),
+  # not as a listed Component.
 ```
 
 For a Stack that doesn't yet default to `npm-quality` (`tauri-app`,
@@ -62,7 +63,6 @@ For a Stack that doesn't yet default to `npm-quality` (`tauri-app`,
 
 ```yaml
 components:
-  - shell-quality       # Stack default
   - <other defaults>
   - npm-quality         # opt-in until tauri-app's manifest defaults it
 ```

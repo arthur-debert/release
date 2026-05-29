@@ -3,5 +3,7 @@
 
 kind: go-cli
 capabilities:
-  - shell-quality
   - go-quality
+# The shell/markdown/yaml lint gate is no longer a Capability — it
+# ships in templates/commons/ and applies to every consumer
+# structurally (release#320), so it is not listed here.

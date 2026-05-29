@@ -42,9 +42,10 @@ defaults — include any defaults you want to keep:
 ```yaml
 # .release-sync.yaml — rust-cli consumer that also ships mkdocs docs
 components:
-  - shell-quality   # Stack default
   - rust-quality    # Stack default
   - mkdocs          # opt-in
+# (the shell/markdown/yaml lint gate ships universally from commons —
+#  not listed as a Component; see release#320)
 ```
 
 Then run `release-sync` (or wait for the next session-start sync).
@@ -108,7 +109,7 @@ they pass `pre-install-cmd: 'uv sync --group docs'` (or equivalent).
 
 `mkdocs build --strict` is seconds-to-minutes on a real docs site —
 slower than the rest of the pre-commit gate. Out of scope for
-pre-commit; CI's the right place. `shell-quality`'s markdownlint
+pre-commit; CI's the right place. The commons markdownlint gate
 already lints the markdown source files at pre-commit time, which
 covers the lightweight check.
 
