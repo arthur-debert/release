@@ -18,3 +18,19 @@ jobs:
     # No bin/check on release/ itself (it's a meta-repo of reusable
     # workflows + composite actions; no umbrella verb). actionlint +
     # shellcheck — the canonical's default surface — is what we want.
+
+  skill-lint:
+    # Hold OUR OWN skills/ docs to the markdownlint standard. Vendored
+    # skills (those with an .upstream provenance marker) are skipped by
+    # the script — not ours to clean (release#321). Mirrors this repo's
+    # lefthook `lint-skills` pre-commit hook.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+      - name: Lint self-authored skills
+        run: bin-internal/lint-skills.sh

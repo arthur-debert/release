@@ -101,7 +101,7 @@ The user's `~/.claude/CLAUDE.md` covers this in the "Cross-repo GitHub" section 
 
 `clone-lex-stack` prints a tab-separated summary on stdout — easy to parse:
 
-```
+```text
 repo            path                            status
 comms           /tmp/lex-fmt/comms              cloned
 vscode          /tmp/lex-fmt/vscode             skipped-exists

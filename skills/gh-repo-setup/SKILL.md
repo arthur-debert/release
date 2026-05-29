@@ -9,7 +9,7 @@ Portable equivalent of `release/bin/apply-ruleset` + `release/bin/sweep-github-p
 
 ## When to use
 
-- **Onboarding a new repo** to the arthur-debert/* or lex-fmt/* portfolio.
+- **Onboarding a new repo** to the arthur-debert/*or lex-fmt/* portfolio.
 - **Verifying alignment** — quick way to check whether a repo has drifted from canonical.
 - **Recovery** — when `audit-repo` reports a repo is missing pieces.
 

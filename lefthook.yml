@@ -65,3 +65,19 @@ pre-commit:
         # not a command line, so passing `-shellcheck '-S warning'`
         # silently disables integration entirely.
         SHELLCHECK_OPTS='-S warning' actionlint -color
+
+    lint-skills:
+      # Markdownlint our OWN skill docs. Vendored skills (those carrying
+      # an .upstream provenance marker) are skipped by the script — we
+      # don't own them, so cleaning their markdown churns upstream
+      # (release#321). Globs on any skill .md so the gate fires whenever
+      # a skill doc is touched; the script always lints the full
+      # self-authored set (it's fast).
+      glob:
+        - "skills/**/*.md"
+      run: |
+        if ! command -v markdownlint >/dev/null 2>&1; then
+          echo "markdownlint not installed; skipping skill lint (install: brew install markdownlint-cli)"
+          exit 0
+        fi
+        bin-internal/lint-skills.sh
