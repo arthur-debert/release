@@ -12,7 +12,7 @@ name: Rust CI
 #
 #  * **`bin/check` is the canonical call.** Consumers that have adopted
 #    the take-iii Component model already ship `bin/check` (synced by
-#    release-sync from the rust-quality + shell-quality Components).
+#    release-sync from the rust-quality Capability + the commons lint gate).
 #    Fix-once-propagate works because the script lives in the consumer
 #    tree and is the same shape across the fleet.
 #

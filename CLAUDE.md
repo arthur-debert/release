@@ -113,5 +113,13 @@ lex-fmt/lex v0.9.1.
   release secrets to onboarded rust repos. Sister to
   `bin/install-release-token`. If the set of required secrets here
   changes, update that script.
+- **Authoring a skill? Lint it.** Skills under `skills/` split by
+  provenance: vendored/third-party ones carry an `.upstream` marker
+  (source repo + pinned commit) and are exempt; our own self-authored
+  skills have no marker and MUST pass markdownlint. After adding or
+  editing a self-authored skill, run `bin-internal/lint-skills.sh`
+  (the lefthook pre-commit + the CI `skill-lint` job enforce it). When
+  vendoring a new skill, drop an `.upstream` marker in its dir so the
+  gate skips it. Per release#321.
 - Full design rationale, bug log, and open follow-ups live in
   `~/h/repo-all/tooling.lex` §13.

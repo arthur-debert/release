@@ -69,6 +69,7 @@ gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f query='
 ```
 
 The output gives you everything needed to triage and act:
+
 - `threadId` — the `PRRT_*` GraphQL ID to pass to `resolveReviewThread` (step 3).
 - `firstCommentId` — the numeric REST `databaseId` to POST replies against (step 2). Always the root comment, even when the thread has follow-up replies.
 - `comments[]` — full thread history in order, so you see the latest reviewer comment plus any earlier replies. The newest comment (`comments[-1]`) usually carries the most current request.
@@ -132,11 +133,13 @@ GitHub does **not** auto-resolve threads when you push a fix or reply. Without t
 For each unresolved thread, pick one:
 
 **A) Real, project-specific issue → fix the code, push, resolve the thread.** The diff is the proof. Examples seen in this ecosystem:
+
 - `cargo clippy -D warnings` must be `cargo clippy -- -D warnings` (the `--` forwards `-D` to rustc).
 - `permissions: { pull-requests: write }` alone removes default `contents: read`; add `contents: read` explicitly.
 - Fork PRs need a `github.event.pull_request.head.repo.fork == false` guard before posting reviewers.
 
 **B) Project ethos drift → rationale-reply, then resolve. Do not change the file.** End the reply with `Recording for future review passes: don't ask us to <X>.` so it's grep-able next round. Examples that always get pushback in this ecosystem:
+
 - "Pin org-internal reusable workflows to a SHA." Same owner controls both repos; pinning defeats the "fix once, propagate" point.
 - "Per-repo customize the multi-repo template." The template is intentionally generic — pointing at only what's local defeats its purpose.
 - "Match fallback flags exactly to CI." The fallback is a generic approximation; CI is the source of truth and varies per project.
@@ -154,7 +157,7 @@ Cloud sessions don't poll for new review comments on their own. After opening a 
    - `/autofix-pr` from a local terminal while on the PR branch
    - "watch this PR and auto-fix any review comments" in a fresh cloud session, pasting the PR URL
    - The mobile app, same natural-language instruction
-   
+
    Requires the [Claude GitHub App](https://github.com/apps/claude) installed on the repo's org. Once on, Claude reacts to each new review comment automatically; this skill's flow runs when the agent decides to address them. Docs: [Auto-fix pull requests](https://code.claude.com/docs/en/claude-code-on-the-web#auto-fix-pull-requests).
 
 2. **Manual poll** — if Auto-fix isn't installed or appropriate for the repo, re-run the step-1 "list unresolved review threads" query periodically. When the count increases, address the new threads.
@@ -177,6 +180,7 @@ In Claude Code on the web, your session is on an orchestrator-assigned branch (`
 
 1. Make the fix on your session branch.
 2. Open a draft sub-PR targeting the original PR's feature branch (not main). Gemini reviews drafts automatically; flip to ready when you want Copilot too. Use `--body` to name it as a stacked PR up-front so the human reviewer doesn't read it as a duplicate:
+
    ```sh
    FEATURE_BRANCH="<the original PR's branch — quoted defensively in case it contains a slash or colon>"
    gh pr create --draft \
@@ -184,6 +188,7 @@ In Claude Code on the web, your session is on an orchestrator-assigned branch (`
      --title "fixup: address review on #<original-PR>" \
      --body "Stacked sub-PR addressing review feedback on #<original-PR>. Squash-merge into \`$FEATURE_BRANCH\`; the original PR picks up the new commits automatically."
    ```
+
 3. Drive the sub-PR through review the same way (enable Auto-fix on it, address Gemini, flip to ready, address Copilot, resolve).
 4. Squash-merge the sub-PR into the feature branch. The original PR picks up the new commits automatically.
 

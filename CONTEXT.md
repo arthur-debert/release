@@ -18,7 +18,9 @@ The same logical concern (linting, testing, formatting) is implemented different
 
 Quality Capabilities provide lint/format/test rules (as lefthook fragments and lint configs). Broader Capabilities can provide scripts and configuration for docs, e2e testing, or other cross-cutting concerns.
 
-Examples: `rust-quality`, `shell-quality`, `npm-quality`, `go-quality` (language-scoped quality gates); `bats` (e2e testing); `mkdocs` (documentation site).
+Examples: `rust-quality`, `npm-quality`, `go-quality` (language-scoped quality gates); `bats` (e2e testing); `mkdocs` (documentation site).
+
+The shell/markdown/yaml lint gate (shellcheck + markdownlint + yamllint) is **not** a Capability — it is universal, so it lives in `templates/commons/` and applies to every Consumer structurally, independent of Kind manifests (release#320). It was formerly the `shell-quality` Capability.
 
 Capabilities do NOT own build or release logic — that belongs to the Kind.
 

@@ -312,7 +312,7 @@ is controlled by the `app`-level setting, not per-window).
 
 Every electron project's `tests/e2e/lib/` looks the same:
 
-```
+```text
 tests/e2e/lib/
   app.ts          # Playwright fixture (electronApp + page, with cleanup)
   wait.ts         # waitForApp, waitForReady(key), expectEvent, expect.poll wrappers
@@ -344,6 +344,7 @@ export const test = base.extend<AppFixtures>({
 ```
 
 **Fixture conventions:**
+
 - Fixture name `appLaunchOptions` (not `launchOptions` — Playwright reserves that).
 - Default `E2E_DISABLE_PERSISTENCE=1`; tests that need persistence override via
   `test.use({ appLaunchOptions: { env: { E2E_DISABLE_PERSISTENCE: '0' } } })`.
@@ -515,6 +516,7 @@ e2e:
 ```
 
 Key points:
+
 - `xvfb-run --auto-servernum` — virtual display for Electron.
 - Skip `electron-builder` packaging — `tsc && vite build` is enough for the
   renderer. The packaged-binary smoke test (if any) is a separate job.
@@ -557,6 +559,7 @@ headless mode, use `test.skip()` / `test.fixme()` with a reason.
 
 If a test enables persistence (`E2E_DISABLE_PERSISTENCE=0`) and writes
 settings, subsequent tests inherit stale state. Solutions:
+
 - Default fixture leaves persistence off.
 - Tests that need persistence reset settings to defaults at start.
 - Settings tests use `test.use()` to override, not env vars in test body.

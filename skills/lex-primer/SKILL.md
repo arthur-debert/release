@@ -20,14 +20,15 @@ Structure = indentation (4 spaces per level). The only explicit syntax marker is
 
 The first non-annotation line(s) at the top of a document, followed by a blank line, form the document title. Not every document has one.
 
-```
+```text
 My Document Title
 
     Content starts here (indented = inside a session).
 ```
 
 Title with subtitle — the title line ends with `:` and a second non-blank, non-indented line follows:
-```
+
+```text
 Sapiens:
 A Brief History of Humankind
 
@@ -35,6 +36,7 @@ A Brief History of Humankind
 ```
 
 Rules:
+
 - Must be the very first element (before any non-annotation content)
 - Must be followed by a blank line
 - Must not be indented
@@ -45,9 +47,10 @@ Rules:
 ## The Seven Elements
 
 ### 1. Paragraph (fallback)
+
 Consecutive non-blank lines at the same indentation level. If nothing else matches, it's a paragraph.
 
-```
+```text
 This is a paragraph.
 It can span multiple lines.
 ```
@@ -55,9 +58,10 @@ It can span multiple lines.
 Paragraphs yield to other elements: they stop before 2+ consecutive list-item lines or a subject line followed by an indent.
 
 ### 2. Session (heading + content)
+
 A title line, then a **blank line**, then **indented** content.
 
-```
+```text
 1. Introduction
 
     This paragraph is inside the "Introduction" session.
@@ -73,9 +77,10 @@ A title line, then a **blank line**, then **indented** content.
 - Sessions can contain all element types including nested sessions
 
 ### 3. Definition (term + immediate content)
+
 A subject line ending with `:`, then **immediately** indented content (NO blank line).
 
-```
+```text
 HTTP Methods:
     GET retrieves resources.
     POST creates new resources.
@@ -87,9 +92,10 @@ HTTP Methods:
 - Cannot contain sessions
 
 ### 4. List (2+ items)
+
 Two or more list-item lines.
 
-```
+```text
 Some intro text.
 
 - First item
@@ -97,16 +103,17 @@ Some intro text.
 - Third item
 ```
 
-- Markers: `- ` (dash), `1. ` or `1) ` (numbered), `a. ` or `a) ` (alpha), `I. ` (roman), `(1) ` or `(a) ` (parenthetical), `1.1. ` (extended/multi-segment)
+- Markers: `-` (dash), `1.` or `1)` (numbered), `a.` or `a)` (alpha), `I.` (roman), `(1)` or `(a)` (parenthetical), `1.1.` (extended/multi-segment)
 - MUST have at least 2 items (single item = paragraph)
 - Blank lines before lists are optional (paragraph look-ahead detects list boundaries), but common
 - NO blank lines between items (blank line terminates the list)
 - Marker style of first item defines the list style
 
 ### 5. Verbatim Block (raw content)
+
 A subject line ending with `:`, optional blank line, indented raw content, and a closing `:: label ::` data marker.
 
-```
+```text
 Example code:
 
     fn main() {
@@ -123,7 +130,8 @@ Example code:
 - The Indentation Wall: content must be indented past the subject's indentation level
 
 Verbatim groups — multiple subject/content pairs sharing one closing marker:
-```
+
+```text
 Install:
     npm install lex-fmt
 
@@ -134,9 +142,10 @@ Run:
 ```
 
 ### 6. Table (structured data)
+
 Same outer structure as verbatim blocks, but with `table` as the closing label and pipe-delimited content that gets inline-parsed.
 
-```
+```text
 Comparison:
     | Method     | Speed  | Accuracy |
     | Approach A | 120ms  | 94.2%    |
@@ -155,9 +164,10 @@ Comparison:
 - Footnotes: numbered list after last pipe row, separated by a blank line, inside the table block
 
 ### 7. Annotation (metadata)
+
 Structured metadata using `::` markers. Annotations attach to the previous element, the parent container, or are document-level if they appear first.
 
-```
+```text
 :: note :: Important information
 :: warning severity=high :: Check this carefully
 :: aside ::
@@ -166,6 +176,7 @@ Structured metadata using `::` markers. Annotations attach to the previous eleme
 ```
 
 Three forms:
+
 - **Marker**: `:: label ::` (no content)
 - **Single-line**: `:: label :: inline text`
 - **Block**: `:: label ::` + newline + indented content (dedent closes the block — no bare `::` needed)
@@ -176,7 +187,7 @@ Content cannot include sessions.
 
 ## Inline Formatting
 
-```
+```text
 *bold text*           — strong (NOT **double asterisk**)
 _italic text_         — emphasis (NOT *single asterisk*)
 `code`                — inline code (literal, no nested inlines)
@@ -187,6 +198,7 @@ _italic text_         — emphasis (NOT *single asterisk*)
 Start markers require a non-alphanumeric predecessor and non-whitespace successor. End markers require a non-whitespace predecessor and non-alphanumeric successor.
 
 Reference types (determined by content pattern):
+
 - `[https://example.com]` — URL
 - `[@doe2024]` — citation (supports multiple keys: `[@a; @b]`, locators: `[@a, pp. 42-45]`)
 - `[^note1]` — footnote (labeled)
@@ -198,6 +210,7 @@ Reference types (determined by content pattern):
 - `[Section Title]` — general reference (fallback)
 
 Escape with backslash: `\*not bold\*`, `\[not a link\]`
+
 - Before non-alphanumeric: escapes the character (backslash removed)
 - Before alphanumeric: backslash preserved (paths like `C:\Users` work naturally)
 - Inside literal inlines (`` ` ``, `#`, `[]`): no escape processing, backslashes preserved
@@ -226,6 +239,7 @@ Escape with backslash: `\*not bold\*`, `\[not a link\]`
 ## Parse Precedence
 
 The parser tries elements in this order:
+
 1. Document title (only at document start, before any content)
 2. Verbatim block / Table (both detected together — closing label determines type)
 3. Annotation (block form, then single-line form)

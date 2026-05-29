@@ -121,13 +121,16 @@ declare -a capabilities=()
 if [ -f .release-sync.yaml ]; then
   manifest_source=".release-sync.yaml (consumer override)"
   mapfile -t capabilities < <(yq '.capabilities // [] | .[]' .release-sync.yaml)
-else
+elif git -C "$RELEASE_HOME" cat-file -e "$ref:templates/$kind/manifest.yaml" 2>/dev/null; then
   manifest_source="templates/$kind/manifest.yaml (Kind default)"
-  if ! git -C "$RELEASE_HOME" cat-file -e "$ref:templates/$kind/manifest.yaml" 2>/dev/null; then
-    echo "release-sync: ref '$ref' has no templates/$kind/manifest.yaml" >&2
-    exit 1
-  fi
   mapfile -t capabilities < <(git -C "$RELEASE_HOME" show "$ref:templates/$kind/manifest.yaml" | yq '.capabilities // [] | .[]')
+else
+  # Manifest-less Kind (e.g. tree-sitter, render). No capabilities are
+  # declared, but the consumer still gets templates/commons/ (the
+  # universal lint gate, release#320) plus the Kind's own subtree. A
+  # consumer wanting capabilities ships a .release-sync.yaml.
+  manifest_source="(none — manifest-less Kind; commons + Kind only)"
+  capabilities=()
 fi
 
 for c in "${capabilities[@]}"; do
@@ -203,9 +206,15 @@ for st in "${subtrees[@]}"; do
 done
 
 # Compose lefthook.yml — this is a generated file, doesn't come from a single source path.
+# Order = precedence: base header < commons (universal gate) < each
+# capability < kind. The commons fragment applies to every consumer
+# regardless of declared capabilities (release#320).
 declare -a lefthook_frags=()
 if git -C "$RELEASE_HOME" cat-file -e "$ref:templates/components/_lefthook-base.yaml" 2>/dev/null; then
   lefthook_frags+=("templates/components/_lefthook-base.yaml")
+fi
+if git -C "$RELEASE_HOME" cat-file -e "$ref:templates/commons/lefthook.fragment.yaml" 2>/dev/null; then
+  lefthook_frags+=("templates/commons/lefthook.fragment.yaml")
 fi
 for c in "${capabilities[@]}"; do
   [ -n "$c" ] || continue

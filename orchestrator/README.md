@@ -97,7 +97,8 @@ sections, ending with a verdict like:
 
 The probe found a real bug on its first run against the Component
 model: `templates/rust/.github/pull_request_template.md` (shipped by
-release/) violates the `shell-quality` markdownlint config (MD041).
+release/) violates the canonical markdownlint config (MD041) — then
+shipped by the `shell-quality` Component, now part of `templates/commons/`.
 That's the value loop in one example — static review missed it; the
 fresh agent's `lefthook run` surfaced it.
 

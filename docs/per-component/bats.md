@@ -41,9 +41,10 @@ include the defaults you want to keep:**
 ```yaml
 # .release-sync.yaml — example for a rust-cli consumer
 components:
-  - shell-quality   # Stack default
   - rust-quality    # Stack default
   - bats            # opt-in
+# (the shell/markdown/yaml lint gate ships universally from commons —
+#  not listed as a Component; see release#320)
 ```
 
 Then run `release-sync` (or wait for the next session-start sync).

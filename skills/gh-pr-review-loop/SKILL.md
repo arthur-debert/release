@@ -24,6 +24,7 @@ audit-portfolio --only-failing  # discovers via main-branch-protection ruleset, 
 ```
 
 All have:
+
 - `main` branch protected by a `main-branch-protection` ruleset (PR required, check pass required, 0 reviews, no force-push, no delete, linear history)
 - `.github/workflows/copilot-review.yml` calling `arthur-debert/release/.github/workflows/copilot-review.yml@v1` on `pull_request: [opened, ready_for_review]`, passing `gh_token: ${{ secrets.RELEASE_TOKEN }}` via `secrets:`
 - `RELEASE_TOKEN` secret set (propagated by `install-release-token`)
@@ -62,7 +63,7 @@ Templates live at `~/h/release/templates/<stack>/`; ruleset JSON at `~/h/release
 
 This is the canonical sequence when driving a feature branch through the loop:
 
-```
+```text
 1. branch + change + commit
 2. push
 3. open PR (gh pr create) — NEVER pass --draft unless the user explicitly asked
@@ -103,6 +104,7 @@ Run in background (`run_in_background: true`) so the conversation isn't tied up 
 Three categories:
 
 **A) Project-specific real issues — address.** Examples seen:
+
 - `cargo clippy -D warnings` → must be `cargo clippy -- -D warnings` (the `--` is required to forward `-D` to rustc).
 - `permissions: { pull-requests: write }` alone removes default `contents: read`; add `contents: read` explicitly.
 - Reusable workflow `uses:` refs don't follow GitHub repo redirects — use the canonical name (currently `arthur-debert/release` for copilot-review).
@@ -116,7 +118,7 @@ gh api 'repos/{owner}/{repo}/pulls/<PR>/comments/<COMMENT_ID>/replies' \
   -X POST -f body="..."
 ```
 
-The reply ends with a line like *"Recording for future review passes: don't ask us to <X>"* so the rationale is searchable later. Examples seen, all pushed back on:
+The reply ends with a line like *"Recording for future review passes: don't ask us to `<X>`"* so the rationale is searchable later. Examples seen, all pushed back on:
 
 - **"Pin org-internal reusable workflows to a SHA."** Same owner controls both repos; supply-chain risk is negligible. Pinning defeats the "fix once, propagate" point of reusable workflows. Also baked into `copilot-instructions.md` so future passes don't re-raise.
 - **"Per-repo customize the multi-repo template."** The template (`~/h/release/templates/rust/`) lists umbrella-script names that *collectively* appear across the rollout (`check`, `pre-commit`, `rust-pre-commit`, `ci.sh`); pointing at only what's local would defeat the canonical-template purpose. Contributors recognize the one their repo uses.
@@ -163,14 +165,17 @@ gh pr view <PR> --json mergeStateStatus,mergeable --jq .
 ```
 
 **Merge only if the user has explicitly told you to.** Examples of explicit authorization:
+
 - "go for it, merge it"
 - "merge when green"
 - A standing "auto-merge" instruction at the start of a batch task
 
 When merging:
+
 ```sh
 gh pr merge <PR> --squash --delete-branch
 ```
+
 Always squash (rebase also works; merge commit is blocked by `required_linear_history`).
 
 If you genuinely can't merge because of a pre-existing CI failure unrelated to the PR (e.g. the dodot CI on main has been broken since last week, and your PR's check inherited that failure), surface this clearly and ask whether to admin-bypass — don't `--admin` unprompted.
@@ -178,6 +183,7 @@ If you genuinely can't merge because of a pre-existing CI failure unrelated to t
 ## Always update the changelog
 
 Before pushing the PR (or at minimum before requesting review), update the `Unreleased` section. The exact location varies:
+
 - Some repos use `CHANGELOG_UNRELEASED.md` (a separate staging file).
 - Others use `## [Unreleased]` inside `CHANGELOG.md`.
 - Run `ls CHANGELOG*.md` and look at git history for the convention.
@@ -219,6 +225,7 @@ audit-smoke-test <owner/repo>
 ```
 
 Notes:
+
 - The first PR is forced to use `gh-copilot-on` manually (workflow needs to be on main first).
 - Order: `apply-ruleset` → `install-release-token` → drop policy files → PR. The ruleset enables auto-discovery for `install-release-token` and `enable-dependabot-security`; running them before adds `--repos` overhead.
 - If `apply-ruleset`'s auto-detect picks up zero checks (brand-new repo with no prior CI runs), it falls back to yq job IDs. Pass `--checks` explicitly if both fail.
@@ -227,7 +234,8 @@ Notes:
 ## Onboarding a stack we don't have templates for yet
 
 Currently only `rust/` templates exist at `~/h/release/templates/`. To onboard the first electron / vsce-ext / nvim-plugin / etc. repo, first author the per-stack templates. The structure mirrors `rust/`:
-```
+
+```text
 ~/h/release/templates/<stack>/
   CODEOWNERS
   copilot-instructions.md
@@ -236,6 +244,7 @@ Currently only `rust/` templates exist at `~/h/release/templates/`. To onboard t
   workflows/
     copilot-review.yml   # identical across stacks
 ```
+
 Then `sweep-github-policy` works (no dodot step needed since scripts resolve templates relative to their own location).
 
 ## Status conventions across these repos
@@ -252,6 +261,7 @@ gh-release-issue <component> "<one-line symptom>"
 ```
 
 Symptoms worth filing:
+
 - `copilot-review.yml` reports SUCCESS but `requested_reviewers` is empty after 60s
 - `copilot-review.yml` exits FAILURE with a non-obvious error
 - `gh-copilot-wait` times out (30m, no review) on a non-draft PR

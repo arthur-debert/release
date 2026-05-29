@@ -5,15 +5,16 @@
 
 kind: vscode-ext
 capabilities:
-  - shell-quality
   - npm-quality
+# The shell/markdown/yaml lint gate is no longer a Capability — it
+# ships in templates/commons/ and applies to every consumer
+# structurally (release#320), so it is not listed here.
 # Opt-in Capabilities (bats, mkdocs, playwright-eventually) are not
 # listed here. Consumers that want them ship a .release-sync.yaml
 # that includes them in addition to the defaults above.
 #
 # Note: vscode-ext deliberately does NOT add a Kind-level
-# lefthook.fragment.yaml — the shell-quality + npm-quality Capabilities
-# cover prettier / eslint / typecheck / shellcheck / yamllint /
-# markdownlint, which is the full pre-commit surface for a typical
-# extension repo. The umbrella `bin/check` adds typecheck + tests on
-# top in CI.
+# lefthook.fragment.yaml — commons (shellcheck / yamllint / markdownlint)
+# plus the npm-quality Capability (prettier / eslint / typecheck) cover
+# the full pre-commit surface for a typical extension repo. The
+# umbrella `bin/check` adds typecheck + tests on top in CI.

@@ -13,7 +13,7 @@ Unsigned macOS apps trigger Gatekeeper warnings and can be quarantined. Notariza
 
 ## Architecture overview
 
-```
+```text
 electron-builder (signs the .app)
         |
         v
@@ -79,10 +79,12 @@ No manual keychain import, no cleanup step.
 ### 3. Use App Store Connect API key auth for notarization (not Apple ID)
 
 The initial approach used Apple ID + app-specific password (`--apple-id` / `--password`). This works but has problems in CI:
+
 - Credentials rotate and can trigger 2FA challenges
 - Apple's queue sometimes deprioritizes automated submissions from password auth
 
 API key auth (`--key` / `--key-id` / `--issuer`) is Apple's recommended path for CI:
+
 - No credential rotation issues
 - Better queue recognition for automated submissions
 - The `.p8` key file never expires (unless revoked)
@@ -224,7 +226,7 @@ The `.app` inside is already signed. Signing the DMG container itself causes iss
 
 1. Export your Developer ID Application cert as `.p12` with `openssl pkcs12 -export -legacy`
 2. Base64-encode it: `base64 -i cert.p12 | pbcopy`
-3. Create an App Store Connect API key at https://appstoreconnect.apple.com/access/integrations/api (Developer role is sufficient)
+3. Create an App Store Connect API key at <https://appstoreconnect.apple.com/access/integrations/api> (Developer role is sufficient)
 4. Add all 5 secrets to the GitHub repo
 5. Create `resources/entitlements.mac.plist` with the three Electron entitlements
 6. Set `hardenedRuntime: true`, `notarize: false`, and both entitlement paths in electron-builder config

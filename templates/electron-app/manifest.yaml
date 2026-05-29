@@ -4,8 +4,10 @@
 
 kind: electron-app
 capabilities:
-  - shell-quality
   - npm-quality
+# The shell/markdown/yaml lint gate is no longer a Capability — it
+# ships in templates/commons/ and applies to every consumer
+# structurally (release#320), so it is not listed here.
 # Opt-in Capabilities (bats, mkdocs, playwright-eventually) are not
 # listed here. Consumers that want them ship a .release-sync.yaml
 # that includes them in addition to the defaults above.

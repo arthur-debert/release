@@ -44,6 +44,7 @@ export RELEASE_HOME
 ## Inputs
 
 The user gives you a consumer repo identifier. Resolve to a path:
+
 - `simple-gal-action` → `~/h/arthur-debert/simple-gal-action` (or wherever it lives — see Locate the repo).
 - `lex-fmt/nvim` → `~/h/lex-fmt/nvim`.
 - A bare repo name → search `~/h/*/` and `~/h/` one level.
@@ -277,11 +278,13 @@ When the review loop surfaces a CI failure, decide which bucket it falls into:
 ### Bucket A: known canonical-lint regression (do NOT fix consumer-side)
 
 Examples:
+
 - `shellcheck` false positive on a vendored file, a `completions/` script, a test fixture, or a file release-sync itself put in place.
 - A new `lefthook` step that's overly strict and would need a per-consumer disable.
 - Anything where the fix would mean editing files inside `.release/` (you can't — they're rebuilt every sync) or adding consumer-side overrides to canonical files.
 
 **Action:** STOP. Surface the failure to the user with a short note: "this is canonical drift — fix belongs in release/, not here." Do NOT:
+
 - add `lefthook.yml` overrides
 - add per-file `# shellcheck disable=...` to symlinked files
 - replace a symlink with a hand-edited real file
@@ -292,6 +295,7 @@ Any of those create canonical drift, which is the exact thing this migration is 
 ### Bucket B: genuine consumer-specific failure
 
 Examples:
+
 - An actual test failure in the consumer's own test suite.
 - A content bug in a consumer-owned file (not a symlink into `.release/`).
 - A missing tool/dependency unique to this consumer.
