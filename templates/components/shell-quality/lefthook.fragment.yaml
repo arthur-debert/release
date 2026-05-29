@@ -49,39 +49,48 @@ pre-commit:
       # Lua script in scripts/, say) will fail shellcheck loudly —
       # acceptable signal to rename or move.
       #
-      # Ad-hoc test paths are excluded: live-tests/** (smoke test
-      # scratch), tests/**/*.bats and bats helper *.bash files (bats
-      # injects $status/$output magic that shellcheck flags as SC2154).
-      # Those scripts have relaxed standards by convention. Production
-      # shell under bin/ and app-bin/ still gets full strictness.
+      # All owned shell gets full strictness, including test helpers
+      # under live-tests/ and tests/. bats `$status`/`$output` false
+      # positives (SC2154) are handled per-file with a documented
+      # `# shellcheck disable=SC2154` header in the helpers, not by
+      # excluding the whole tree. app-bin/** is globbed so extensionless
+      # app scripts living there are linted too.
       glob:
         - "**/*.{sh,bash}"
         - "scripts/**"
         - "bin/**"
+        - "app-bin/**"
       # NOTE on glob syntax: lefthook's `exclude` field uses glob, NOT
       # regex (despite some docs suggesting otherwise). Empirically:
       # `**/*.foo` does NOT work (the `**/` prefix breaks). `*.foo`
       # DOES match recursively (treated as ends-with). `dir/**` works
-      # for excluding a subtree. The original `**/*.{md,...}` pattern
-      # below was a pre-existing no-op; switched to `*.{md,...}`.
+      # for excluding a subtree.
+      #
+      # Only non-shell file types and generated/vendored artifacts are
+      # excluded. completions/** are idiomatic (bash-3 compgen word-split
+      # that `mapfile` can't replace) and bin/share/** is vendored — both
+      # stay out permanently. Test paths are NOT excluded: their real
+      # debt is linted; bats false positives use per-file disables.
       exclude:
         - "*.{md,json,yaml,yml,toml,py,rb,rs,js,ts,mjs,cjs,html,css,txt,lock}"
         - "*LICENSE*"
         - "completions/**"
         - "*/completions/**"
         - "bin/share/**"
-        - "live-tests/**"
-        - "test/**"
-        - "tests/e2e/**"
-      # --severity=warning passed as a CLI flag (not via .shellcheckrc)
+      # --severity=info passed as a CLI flag (not via .shellcheckrc)
       # because Ubuntu 24.04 ships shellcheck 0.9.0 which silently
       # ignores the `severity=` directive in the rc file (that's a
       # 0.10+ feature). The CLI flag works on all versions. Keep the
       # rc-file setting too so local invocations (without lefthook)
       # still get the same severity floor on modern shellchecks.
+      #
+      # Floor is `info` (not `warning`): surfaces the high-value info
+      # checks — notably SC2086 (unquoted expansion) — while staying
+      # above `style`-level nitpicks. Consumers were cleaned to this
+      # floor before it was tightened here.
       run: >-
         if command -v shellcheck >/dev/null 2>&1; then
-          shellcheck --severity=warning {staged_files};
+          shellcheck --severity=info -- {staged_files};
         else
           echo "shellcheck not installed (skipping; install: see https://github.com/koalaman/shellcheck#installing)" >&2;
         fi
