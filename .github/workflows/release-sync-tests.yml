@@ -44,8 +44,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # release-sync reads templates from the git ref
-      - name: Install bats
-        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Install bats + shellcheck
+        # shellcheck: the unified-gate dogfood (gate-unified.bats) lints the
+        # synced distributed tools with templates/commons/bin/check-shell.
+        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
       - name: Install yq (mikefarah v4 — pinned)
         # Pin an explicit v4 release, NOT releases/latest: the determinism
         # of the marker round-trip depends on the yq major that composes
