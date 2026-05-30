@@ -58,6 +58,34 @@ jobs:
       - name: pytest
         run: pytest
 
+  templates-bin-shellcheck:
+    # Tools under templates/**/bin/ are SYNCED into consumers and linted by
+    # their commons shellcheck gate (severity=info) — but they live under
+    # templates/, outside release's own `bin scripts` shellcheck scope. So a
+    # lint bug in a distributed tool slips through release CI and only breaks
+    # consumers after they sync (release#348: setup-dev-env.sh SC2015, caught
+    # by consumers' older Ubuntu shellcheck but not newer local ones). Lint
+    # them here the same way consumers do — same Ubuntu shellcheck, same
+    # severity, shell-only, skipping vendored share/.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: shellcheck distributed bin tools
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            case "$f" in
+              */share/*) continue ;;
+              *.sh|*.bash) ;;
+              *) head -n1 "$f" | grep -qE '^#!.*[ /](bash|sh|dash|ksh)( |$)' || continue ;;
+            esac
+            echo "shellcheck $f"
+            shellcheck --severity=info "$f" || fail=1
+          done < <(find templates -path '*/bin/*' -type f)
+          exit "$fail"
+
   guards:
     # Structural invariants that have bitten us before.
     runs-on: ubuntu-latest
