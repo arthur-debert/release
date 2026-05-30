@@ -1,0 +1,51 @@
+name: release-sync tests
+
+# BATS suite for bin/release-sync + bin/release-drift-check, covering the
+# provenance marker (ADR-0002) and consumer-side drift detection. The
+# suite syncs a synthetic consumer from this checkout (RELEASE_REF=HEAD)
+# so regressions in the marker / --check / drift gate surface here before
+# riding out to consumers.
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'bin/release-sync'
+      - 'bin/release-drift-check'
+      - 'bin/detect-kind'
+      - 'templates/**'
+      - 'tests/release-sync/**'
+      - '.github/workflows/release-sync-tests.yml'
+  pull_request:
+    paths:
+      - 'bin/release-sync'
+      - 'bin/release-drift-check'
+      - 'bin/detect-kind'
+      - 'templates/**'
+      - 'tests/release-sync/**'
+      - '.github/workflows/release-sync-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # release-sync reads templates from the git ref
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Install yq (mikefarah v4 — pinned)
+        # Pin an explicit v4 release, NOT releases/latest: the determinism
+        # of the marker round-trip depends on the yq major that composes
+        # lefthook.yml. A jump to v5 as "latest" could change serialization
+        # and turn this into spurious churn instead of a real regression.
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+      - name: Run BATS suite
+        run: bats tests/release-sync/
