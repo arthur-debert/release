@@ -10,3 +10,11 @@ tests/fixtures/*/Cargo.lock
 tests/fixtures/*/node_modules/
 .antigravitycli/
 .claude/scheduled_tasks.lock
+
+# Python workspace (uv). The lock pins orchestrator's SDK tree; treat it as
+# non-vendored like orchestrator/ already does. release_gh itself is dep-free.
+.venv/
+uv.lock
+__pycache__/
+*.pyc
+*.egg-info/

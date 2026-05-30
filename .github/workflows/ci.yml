@@ -35,6 +35,29 @@ jobs:
       - name: Lint self-authored skills
         run: bin-internal/lint-skills.sh
 
+  py-lint:
+    # Lint + test the stdlib-only PR state engine (lib/release_gh).
+    # Mirrors this repo's lefthook `ruff` pre-commit hook. Deliberately
+    # light: release_gh has ZERO runtime deps and its tests import it via
+    # pytest `pythonpath`, so no build/install and no orchestrator SDK is
+    # needed — just ruff + pytest. Config is the workspace-root pyproject.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install ruff + pytest
+        # Pin ruff so CI and the local lefthook hook never disagree on
+        # findings; bump deliberately.
+        run: pip install ruff==0.15.12 pytest
+      - name: ruff check
+        run: ruff check lib/release_gh tests/python
+      - name: ruff format --check
+        run: ruff format --check lib/release_gh tests/python
+      - name: pytest
+        run: pytest
+
   guards:
     # Structural invariants that have bitten us before.
     runs-on: ubuntu-latest
