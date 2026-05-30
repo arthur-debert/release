@@ -227,5 +227,5 @@ These are the canonical buckets; the title prefix is what step 1's `--search` fi
 
 ## Related
 
-- `release/bin/gh-release-issue` — the local-only sibling, used by humans and local agents that have `~/h/release/bin/` on `$PATH`. Same body shape; no dedupe step.
+- `gh-release-issue` — the sibling CLI, used by humans and agents that have it on `$PATH`. Since release#348 it ships to consumers under `templates/commons/bin/` (synced into each consumer's `bin/`), so it's reachable inside a managed repo, not just on the maintainer's machine. Same body shape; no dedupe step.
 - `agentic-dev-workflow.lex` §5.3 — the broader sustainability loop this skill is half of. The other half (write-side: scheduled portfolio audit routine at release) is Phase 4b.

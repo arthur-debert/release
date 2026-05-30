@@ -200,6 +200,11 @@ is_release_internal() {
   case "$1" in
     "$SOURCE_MARKER") return 0 ;;
     lib/release_gh/*) return 0 ;;
+    # The consumer-orientation note (#348). It lives in .release/ and is
+    # pulled into the consumer's CLAUDE.md via an `@.release/ORIENTATION.md`
+    # import in the managed block (see claude_desired), NOT via a mirrored
+    # root symlink — so it must not scatter an ./ORIENTATION.md link.
+    ORIENTATION.md) return 0 ;;
   esac
   return 1
 }
@@ -212,6 +217,37 @@ MANAGED_MARKER='# Managed by release-sync — do not edit. Regenerate via releas
 # exact revision that produced this tree, separating real drift from mere
 # staleness.
 SOURCE_MARKER='.release-sync-source'
+
+# Consumer CLAUDE.md orientation block (#348). release-sync owns ONLY the
+# marker-delimited block at the TOP of the consumer's CLAUDE.md — a one-line
+# import of .release/ORIENTATION.md (the "Welcome — managed by release" note).
+# Everything below the END marker is the consumer's own content, never touched;
+# the file is created if absent. CLAUDE.md is excluded from the markdownlint
+# gate (templates/commons/.markdownlintignore) because this block legitimately
+# leads with an HTML comment.
+CLAUDE_FILE='CLAUDE.md'
+CLAUDE_BEGIN='<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->'
+CLAUDE_END='<!-- END release-managed orientation -->'
+
+# Emit the DESIRED full CLAUDE.md content: the managed block at the top, then
+# the consumer's existing content (minus any prior managed block) below it.
+# Idempotent — feeding its own output back in produces a byte-identical file,
+# so a second sync detects no change. Reads $CLAUDE_FILE; writes nothing.
+claude_desired() {
+  local rest=""
+  if [ -f "$CLAUDE_FILE" ] && [ ! -L "$CLAUDE_FILE" ]; then
+    # Strip any existing BEGIN..END block (fixed-string match, no regex), then
+    # drop leading blank lines so the separator below is the only one.
+    rest=$(awk -v b="$CLAUDE_BEGIN" -v e="$CLAUDE_END" '
+      index($0, b) { skip = 1 }
+      !skip { print }
+      index($0, e) { skip = 0 }
+    ' "$CLAUDE_FILE" | sed '/./,$!d')
+  fi
+  printf '%s\n@.release/ORIENTATION.md\n%s\n' "$CLAUDE_BEGIN" "$CLAUDE_END"
+  [ -n "$rest" ] && printf '\n%s\n' "$rest"
+  return 0
+}
 
 # Map every source path → (file_mode, destination relative to .release/).
 # Last write wins (mirrors current release-sync precedence).
@@ -262,7 +298,10 @@ fi
 # rename within the same filesystem (atomic). Otherwise mv across
 # filesystems silently degrades to copy+delete.
 tmp_release=$(mktemp -d "./.release-build.XXXXXX")
-trap 'rm -rf "$tmp_release"' EXIT
+# claude_tmp holds the candidate CLAUDE.md (computed below); clean it on any
+# exit path (check/dry-run return before the apply phase clears this trap).
+claude_tmp=""
+trap 'rm -rf "${tmp_release:-}" "${claude_tmp:-}"' EXIT
 
 for dest in "${plan_order[@]}"; do
   src=${plan_source[$dest]}
@@ -433,6 +472,32 @@ if [ -d .github/workflows ]; then
   done < <(find .github/workflows -type f -print0 2>/dev/null)
 fi
 
+# --- CLAUDE.md orientation block (#348) --------------------------------
+# Decide what (if anything) the consumer's CLAUDE.md needs. Only acts when the
+# synced tree actually carries ORIENTATION.md (it always does, via commons).
+claude_action=none
+if [ -f "$tmp_release/ORIENTATION.md" ]; then
+  if [ -L "$CLAUDE_FILE" ]; then
+    claude_action=skip-symlink
+  else
+    # Same-directory temp (portable across BSD/GNU mktemp; same filesystem as
+    # CLAUDE.md) so the apply phase can replace it with an atomic mv.
+    claude_tmp=$(mktemp "${CLAUDE_FILE}.tmp.XXXXXX")
+    claude_desired > "$claude_tmp"
+    if [ ! -e "$CLAUDE_FILE" ]; then
+      claude_action=create
+    elif cmp -s "$claude_tmp" "$CLAUDE_FILE"; then
+      claude_action=none
+    elif grep -qF "$CLAUDE_BEGIN" "$CLAUDE_FILE"; then
+      claude_action=refresh
+    else
+      claude_action=inject
+    fi
+  fi
+fi
+claude_change=0
+case "$claude_action" in create | inject | refresh) claude_change=1 ;; esac
+
 # --- Report -------------------------------------------------------------
 
 echo "=== .release/ changes ==="
@@ -466,7 +531,18 @@ if [ ${#migrated[@]} -gt 0 ]; then
   for f in "${migrated[@]}"; do echo "  >file     $f (will be deleted, then symlinked)"; done
 fi
 
-total_changes=$((${#added[@]} + ${#modified[@]} + ${#removed[@]} + ${#symlinks_to_create[@]} + ${#symlinks_to_remove[@]} + ${#migrated[@]} + ${#copies_to_write[@]} + ${#copies_to_remove[@]}))
+if [ "$claude_action" != none ]; then
+  echo
+  echo "=== CLAUDE.md orientation (#348) ==="
+  case "$claude_action" in
+    create) echo "  +claude   $CLAUDE_FILE (create with managed orientation block)" ;;
+    inject) echo "  ~claude   $CLAUDE_FILE (inject managed orientation block at top)" ;;
+    refresh) echo "  ~claude   $CLAUDE_FILE (refresh managed orientation block)" ;;
+    skip-symlink) echo "  !claude   $CLAUDE_FILE is a symlink — left untouched" ;;
+  esac
+fi
+
+total_changes=$((${#added[@]} + ${#modified[@]} + ${#removed[@]} + ${#symlinks_to_create[@]} + ${#symlinks_to_remove[@]} + ${#migrated[@]} + ${#copies_to_write[@]} + ${#copies_to_remove[@]} + claude_change))
 echo
 echo "summary: $total_changes changes, ${#conflicts[@]} conflicts"
 
@@ -544,6 +620,20 @@ done
 for f in "${copies_to_remove[@]}"; do
   rm "$f"
 done
+
+# Write the consumer CLAUDE.md orientation block (#348). create/inject/refresh
+# all reduce to "write the computed candidate"; skip-symlink/none do nothing.
+case "$claude_action" in
+  create | inject | refresh)
+    # mktemp made claude_tmp 0600 in the repo root; restore the normal mode,
+    # then mv for an atomic same-filesystem replace.
+    chmod 644 "$claude_tmp"
+    mv "$claude_tmp" "$CLAUDE_FILE"
+    ;;
+esac
+# The EXIT trap is cleared in the apply phase, so clean up an unused candidate
+# (the none/skip-symlink cases) explicitly.
+[ -n "$claude_tmp" ] && [ -f "$claude_tmp" ] && rm -f "$claude_tmp"
 
 echo
 echo "done."
