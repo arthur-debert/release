@@ -32,6 +32,7 @@ The Agent SDK is what powers `orc probe` (verification-by-proxy);
 propagate is mechanical and doesn't need LLM intelligence.
 """
 
+import contextlib
 import os
 import shlex
 import subprocess
@@ -95,7 +96,8 @@ def propagate_one(
         detail = (is_wt.stderr or is_wt.stdout or "").strip()
         suffix = f" ({detail})" if detail else ""
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=(
                 f"not a git work tree (bare repo or non-checkout state){suffix}. "
                 "If this is a bare repo, set up a linked worktree on the base "
@@ -107,15 +109,11 @@ def propagate_one(
     # Pre-flight: clean working tree
     status = _run(["git", "status", "--porcelain"], cwd=repo_path).stdout.strip()
     if status:
-        return PropagateResult(
-            repo_str, "error", error=f"working tree not clean:\n{status}"
-        )
+        return PropagateResult(repo_str, "error", error=f"working tree not clean:\n{status}")
 
     current = _run(["git", "branch", "--show-current"], cwd=repo_path).stdout.strip()
     if current != base_branch:
-        return PropagateResult(
-            repo_str, "error", error=f"not on {base_branch} (on {current})"
-        )
+        return PropagateResult(repo_str, "error", error=f"not on {base_branch} (on {current})")
 
     # Pull base — ff-only so an accidentally-diverged local doesn't get
     # a silent merge commit dropped on it.
@@ -123,7 +121,8 @@ def propagate_one(
         _run(["git", "pull", "--ff-only", "--quiet"], cwd=repo_path)
     except subprocess.CalledProcessError as e:
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=f"pull --ff-only failed: {e.stderr or e.stdout or e}",
         )
 
@@ -150,7 +149,8 @@ def propagate_one(
     if check.returncode != 1:
         # 1 = drift detected (expected). Anything else = real failure.
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=f"release-sync --check exited {check.returncode}: {check.stderr or check.stdout}",
         )
 
@@ -166,7 +166,8 @@ def propagate_one(
     )
     if existing.returncode == 0:
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=(
                 f"branch '{branch}' already exists locally — delete it "
                 f"(`git -C {repo_path} branch -D {branch}`) or rerun with "
@@ -178,7 +179,8 @@ def propagate_one(
         _run(["git", "checkout", "-b", branch], cwd=repo_path)
     except subprocess.CalledProcessError as e:
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=f"branch create failed: {e.stderr or e.stdout or e}",
         )
 
@@ -195,7 +197,8 @@ def propagate_one(
     except subprocess.CalledProcessError as e:
         _restore()
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=f"release-sync failed: {e.stderr or e.stdout or e}",
         )
 
@@ -205,7 +208,8 @@ def propagate_one(
     except subprocess.CalledProcessError as e:
         _restore()
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=f"commit failed: {e.stderr or e.stdout or e}",
         )
 
@@ -218,17 +222,23 @@ def propagate_one(
     except subprocess.CalledProcessError as e:
         _restore()
         return PropagateResult(
-            repo_str, "error",
+            repo_str,
+            "error",
             error=f"push failed: {e.stderr or e.stdout or e}",
         )
 
     try:
         pr_out = _run(
             [
-                "gh", "pr", "create",
-                "--base", base_branch,
-                "--title", pr_title,
-                "--body", pr_body,
+                "gh",
+                "pr",
+                "create",
+                "--base",
+                base_branch,
+                "--title",
+                pr_title,
+                "--body",
+                pr_body,
             ],
             cwd=repo_path,
         ).stdout.strip()
@@ -239,12 +249,12 @@ def propagate_one(
         # on origin for manual recovery, but checkout the local working
         # tree back to base so subsequent runs (and the user's shell)
         # land in a predictable state.
-        try:
+        with contextlib.suppress(subprocess.CalledProcessError):
             _run(["git", "checkout", base_branch], cwd=repo_path)
-        except subprocess.CalledProcessError:
-            pass
         return PropagateResult(
-            repo_str, "error", branch=branch,
+            repo_str,
+            "error",
+            branch=branch,
             error=f"pr create failed: {e.stderr or e.stdout or e}",
         )
 
@@ -285,9 +295,7 @@ def propagate_many(
                 )
             )
         except Exception as e:  # noqa: BLE001 — intentional broad catch
-            results.append(
-                PropagateResult(str(p), "error", error=f"unexpected: {e!r}")
-            )
+            results.append(PropagateResult(str(p), "error", error=f"unexpected: {e!r}"))
     return results
 
 

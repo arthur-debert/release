@@ -102,6 +102,12 @@ It reads the PR once and reports exactly one lifecycle state plus the next actio
 
 **Circuit breakers.** When `gh-task-status` returns `BLOCKED` with a `breaker:` line (`cycle-cap`, `diff-trajectory`, `comment-set`, `repeat-finding`), the review loop is diverging — do **not** push another fixup cycle. Stop and surface the breaker reason to the user. This is the first-class "stop and hand back" outcome, not a failure. Background: `docs/proposals/pr-review-loop-circuit-breakers.md`.
 
+### Leave a handoff note when you open the PR
+
+When you open a PR, drop a short handoff note capturing the **non-obvious reasoning** behind the change — the decisions a reviewer (or a later fixer agent) couldn't re-derive from the diff: why a particular approach, what's deliberately out of scope, what *not* to "fix." Put it either in the PR body under a `## Context` heading or in `.release/handoff-<pr>.md` (use the `/handoff` skill to generate it).
+
+Why: a detached auto-fix agent (`orc watch --auto`, release#338) addresses review comments as a **fresh** agent — it has the code but not your reasoning. The handoff note is the cheap, durable carrier of that reasoning, so the fixer respects deliberate decisions instead of undoing them to satisfy a comment. Skip it only for trivial chore/CI PRs.
+
 ### A note on draft PRs
 
 **PR drafts are user-requested only.** Never pass `--draft` to `gh pr create` unless the user used one of these exact triggers in *this* session: "open as draft", "draft PR", "WIP PR", "draft this", "for early feedback". Absent that explicit phrase, the PR is **live**. This is a hard rule.
