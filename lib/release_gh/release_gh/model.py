@@ -95,6 +95,7 @@ class PullContext:
     reactions: list[dict] = field(default_factory=list)  # issue-level (Gemini eyes)
     issue_comments: list[dict] = field(default_factory=list)  # Gemini bot comments
     requested_logins: list[str] = field(default_factory=list)
+    checks: list[dict] = field(default_factory=list)  # gh statusCheckRollup entries
 
     def reviews_on_head(self) -> list[Review]:
         """Reviews made against the current head — stale reviews don't count."""
