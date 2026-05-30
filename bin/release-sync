@@ -183,7 +183,24 @@ needs_real_file() {
   return 1
 }
 
+# Release-internal metadata that lives ONLY inside .release/ — it is part
+# of the tree (so --check sees it change) but is never mirrored out as a
+# symlink/copy into the consumer's working tree.
+is_release_internal() {
+  case "$1" in
+    "$SOURCE_MARKER") return 0 ;;
+  esac
+  return 1
+}
+
 MANAGED_MARKER='# Managed by release-sync — do not edit. Regenerate via release-sync.'
+
+# Provenance marker: records which arthur-debert/release revision generated
+# this .release/. Informational, not operational state — see ADR-0002. The
+# drift detector (release-drift-check) reads the SHA to rebuild against the
+# exact revision that produced this tree, separating real drift from mere
+# staleness.
+SOURCE_MARKER='.release-sync-source'
 
 # Map every source path → (file_mode, destination relative to .release/).
 # Last write wins (mirrors current release-sync precedence).
@@ -238,11 +255,14 @@ trap 'rm -rf "$tmp_release"' EXIT
 
 for dest in "${plan_order[@]}"; do
   src=${plan_source[$dest]}
-  mode=${plan_mode[$dest]}
+  # NB: use a dedicated name, NOT `mode` — that's the global run mode
+  # (sync/check/dryrun). Reusing it here clobbered it to a file-mode
+  # string, so --check/--dry-run silently fell through to apply.
+  fmode=${plan_mode[$dest]}
   out="$tmp_release/$dest"
   mkdir -p "$(dirname "$out")"
   git -C "$RELEASE_HOME" show "$ref:$src" > "$out"
-  if [ "$mode" = "100755" ]; then chmod 755 "$out"; else chmod 644 "$out"; fi
+  if [ "$fmode" = "100755" ]; then chmod 755 "$out"; else chmod 644 "$out"; fi
 done
 
 # Generate lefthook.yml if we have fragments
@@ -265,6 +285,16 @@ if [ ${#lefthook_frags[@]} -gt 0 ]; then
   } > "$lefthook_out"
   rm -rf "$frag_tmp"
 fi
+
+# Provenance marker. The only dynamic line is the full source SHA, so the
+# file round-trips: rebuilding from this SHA writes back the identical SHA,
+# yielding no diff. The comment lines are static. (ADR-0002.)
+{
+  printf '# release-sync provenance — the arthur-debert/release commit that\n'
+  printf '# generated this .release/. Informational, not operational state (ADR-0002).\n'
+  printf '# Regenerated on every sync. release-drift-check reads the SHA below.\n'
+  printf '%s\n' "$ref_sha"
+} > "$tmp_release/$SOURCE_MARKER"
 
 # --- Compute changes ----------------------------------------------------
 
@@ -312,6 +342,10 @@ declare -a conflicts=()
 declare -a migrated=()
 
 for f in "${new_files[@]}"; do
+  if is_release_internal "$f"; then
+    # Lives only inside .release/; not mirrored into the consumer tree.
+    continue
+  fi
   if needs_real_file "$f"; then
     # Always (re)write copies. They're regenerated from .release/ every
     # sync; never skip on conflict since the conflict IS expected on
@@ -426,7 +460,12 @@ echo
 echo "summary: $total_changes changes, ${#conflicts[@]} conflicts"
 
 if [ "$mode" = check ]; then
-  [ "$total_changes" -eq 0 ]
+  # A conflict (a real file sitting where a managed symlink belongs) is
+  # divergence too, even though it produces no planned change — sync
+  # refuses to clobber it. --check must report it as non-clean, or a
+  # consumer that replaced a managed symlink with a hand-edited real file
+  # would pass the gate. (This is the headline drift case.)
+  [ "$total_changes" -eq 0 ] && [ "${#conflicts[@]}" -eq 0 ]
   exit
 fi
 
