@@ -52,6 +52,36 @@ def test_stale_copilot_review_does_not_count_as_done(context):
     assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
 
 
+def test_gemini_review_on_earlier_head_still_counts_as_done():
+    # The exact #345-fixup case: Gemini reviewed the OLD head, a fixup made a new
+    # head, and the lingering eyes reaction must NOT downgrade Gemini to
+    # in_progress — it reviews once and won't re-review the push.
+    from release_gh.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "gemini-code-assist[bot]", "COMMENTED", "old", "")],
+        reactions=[{"content": "eyes", "user": {"login": "gemini-code-assist[bot]"}}],
+    )
+    assert GEMINI.detect(ctx) == ReviewLifecycle.DONE_CLEAN
+
+
+def test_copilot_review_on_earlier_head_does_NOT_count_done():
+    # Contrast: Copilot is head-strict — a review on an old head is stale.
+    from release_gh.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "Copilot", "COMMENTED", "old", "")],
+        requested_logins=["Copilot"],
+    )
+    assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
+
+
 def test_resolved_thread_clears_open_but_keeps_authored(context):
     ctx = context("copilot_done_all_resolved")
     assert COPILOT.detect(ctx) == ReviewLifecycle.DONE_COMMENTS

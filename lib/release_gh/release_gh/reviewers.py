@@ -64,11 +64,18 @@ class CopilotAdapter(ReviewerAdapter):
 class GeminiAdapter(ReviewerAdapter):
     """Gemini signals weakly and is best-effort.
 
-    The app triggers automatically (no discrete request event); an eyes
-    reaction from the bot means it is looking; a review or issue comment means
-    it is done. It goes over quota silently, so the state machine treats a
-    timed-out Gemini as skipped rather than blocking Ready — that timing
-    decision lives in the state machine, not here.
+    The app triggers automatically (no discrete request event); an eyes reaction
+    from the bot means it is looking; a review or issue comment means it is done.
+    It goes over quota silently, so the state machine treats a timed-out Gemini
+    as skipped rather than blocking Ready — that timing decision lives in the
+    state machine, not here.
+
+    Crucially, **Gemini reviews a PR once and does not re-review pushes** — so a
+    review on *any* commit of this PR counts as done, unlike Copilot's
+    head-strict model. (The eyes reaction is not commit-scoped and lingers after
+    the review, so a fixup that creates a new head would otherwise read as a
+    fresh "in_progress" forever.) This per-reviewer difference is exactly what
+    the adapter layer exists to hold.
     """
 
     name = "gemini"
@@ -78,7 +85,8 @@ class GeminiAdapter(ReviewerAdapter):
         return "gemini" in login.lower()
 
     def detect(self, ctx: PullContext) -> ReviewLifecycle:
-        if any(self.matches(r.author) for r in ctx.reviews_on_head()):
+        # Any-head, not head-strict: Gemini won't review the new head again.
+        if any(self.matches(r.author) for r in ctx.reviews):
             return self._done_state(ctx)
         if any(self.matches((c.get("user") or {}).get("login", "")) for c in ctx.issue_comments):
             return ReviewLifecycle.DONE_COMMENTS
