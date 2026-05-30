@@ -70,6 +70,8 @@ def test_status_to_dict_round_trips(context):
         "open_threads",
         "checks",
         "mergeable",
+        "cycles",
+        "breaker",
     }
 
 

@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from .breakers import DiffSizer, evaluate_breakers
 from .model import PullContext, ReviewLifecycle
 from .reviewers import REGISTRY, ReviewerAdapter
 
@@ -62,6 +63,8 @@ class TaskStatus:
     open_threads: int = 0
     checks: ChecksState = ChecksState.NONE
     mergeable: str | None = None
+    cycles: int = 0  # completed Copilot review cycles
+    breaker: str | None = None  # which circuit breaker fired, if any
 
     def to_dict(self) -> dict:
         return {
@@ -72,6 +75,8 @@ class TaskStatus:
             "open_threads": self.open_threads,
             "checks": self.checks.value,
             "mergeable": self.mergeable,
+            "cycles": self.cycles,
+            "breaker": self.breaker,
         }
 
 
@@ -83,13 +88,22 @@ def no_pr() -> TaskStatus:
     )
 
 
-def evaluate(ctx: PullContext, registry: list[ReviewerAdapter] | None = None) -> TaskStatus:
-    """Compute the PR's lifecycle state from a snapshot. Pure; no I/O."""
+def evaluate(
+    ctx: PullContext,
+    registry: list[ReviewerAdapter] | None = None,
+    diff_sizer: DiffSizer | None = None,
+) -> TaskStatus:
+    """Compute the PR's lifecycle state from a snapshot.
+
+    Pure except for `diff_sizer`, an optional git-backed callable for the
+    diff-trajectory breaker; without it that one breaker is skipped.
+    """
     registry = registry if registry is not None else REGISTRY
     lifecycles = {r.name: r.detect(ctx) for r in registry}
     reviewers = {name: lc.value for name, lc in lifecycles.items()}
     open_threads = len(ctx.open_threads())
     checks = classify_checks(ctx.checks)
+    breaker = evaluate_breakers(ctx, diff_sizer)
 
     status = TaskStatus(
         state=TaskState.REVIEWS_PENDING,  # provisional; set below
@@ -99,6 +113,7 @@ def evaluate(ctx: PullContext, registry: list[ReviewerAdapter] | None = None) ->
         open_threads=open_threads,
         checks=checks,
         mergeable=ctx.mergeable,
+        cycles=breaker.cycles,
     )
 
     # 1. Required reviewers must all be done. Best-effort ones never gate.
@@ -111,8 +126,18 @@ def evaluate(ctx: PullContext, registry: list[ReviewerAdapter] | None = None) ->
         )
         return status
 
-    # 2. Required reviews in; any open thread (from any reviewer) must be addressed.
+    # 2. Required reviews in; any open thread (from any reviewer) must be addressed
+    #    — UNLESS a circuit breaker says the loop is diverging: then STOP, don't
+    #    open another cycle. A converged PR (no open threads) is never stopped.
     if open_threads:
+        if breaker.stop:
+            status.state = TaskState.BLOCKED
+            status.breaker = breaker.breaker
+            status.next_action = (
+                f"STOP — circuit breaker '{breaker.breaker}' fired: {breaker.reason}. "
+                "Do not iterate; surface to the human."
+            )
+            return status
         status.state = TaskState.ADDRESSING
         status.next_action = (
             f"triage {open_threads} open thread(s): fix-or-reply, then resolve each"

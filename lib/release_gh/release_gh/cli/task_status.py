@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sys
 
-from .. import ghapi
+from .. import ghapi, gitstat
 from ..fetch import gather
 from ..state import TaskState, TaskStatus, evaluate, no_pr
 
@@ -57,7 +57,11 @@ def main(argv: list[str]) -> int:
         return 64
 
     pr = int(pr_arg) if pr_arg is not None else _current_pr()
-    status = no_pr() if pr is None else evaluate(gather(pr))
+    if pr is None:
+        _emit(no_pr(), as_json=as_json)
+        return 0
+    ctx = gather(pr)
+    status = evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
     _emit(status, as_json=as_json)
     return 0
 
@@ -87,3 +91,6 @@ def _emit(status: TaskStatus, *, as_json: bool) -> None:
     print(f"threads:    {status.open_threads} open")
     print(f"checks:     {status.checks.value}")
     print(f"mergeable:  {status.mergeable}")
+    print(f"cycles:     {status.cycles}")
+    if status.breaker:
+        print(f"breaker:    {status.breaker}")
