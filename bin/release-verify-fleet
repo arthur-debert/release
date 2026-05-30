@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# release-verify-fleet — pre-flight lint sweep across the whole portfolio.
+#
+# Verifies that a candidate release revision, once synced into every
+# managed consumer, still passes the canonical lint gate. Run this BEFORE
+# `release-advance-v1` to catch a commons/lint regression in release's own
+# tree instead of discovering it one consumer at a time after @v1 moves.
+#
+# It is HERMETIC: it clones the fleet into a throwaway root (NOT your ~/h
+# checkouts), syncs each from the candidate ref, and runs
+# `lefthook run pre-commit --all-files`. It never mutates your working
+# repos. Re-runs reuse the clones (pass --refresh to update them).
+#
+# This is the "checkout all repos, release-sync them, try to commit" idea:
+# real consumer files (the genuine edge cases), zero synthetic fixtures.
+#
+# Usage:
+#   release-verify-fleet [--ref <ref>] [--root <dir>] [--refresh] [--only <owner/name,...>]
+#
+#   --ref <ref>     release revision to sync FROM (default: HEAD of this
+#                   release checkout). Tests the code you have right here.
+#   --root <dir>    where to clone the fleet (default:
+#                   /tmp/release-fleet-verify-$USER, per-user to avoid
+#                   permission clashes on shared machines).
+#   --refresh       fetch+reset existing fleet clones before syncing.
+#   --only <list>   restrict to a comma-separated subset of owner/name.
+#
+# Caveat: the gate only catches what the local lint tools can see. The
+# canonical commons gate SKIPS a missing tool (exits 0), so run this on a
+# box with shellcheck/yamllint/prettier/markdownlint/yq installed (or read
+# it as a complement to CI, not a replacement).
+#
+# Exit codes:
+#   0  — every consumer's gate passed (or skipped tools cleanly)
+#   1  — at least one consumer's gate FAILED
+#   2  — setup/dependency error
+#   64 — bad usage
+
+set -uo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+ref=HEAD
+root="/tmp/release-fleet-verify-${USER:-shared}"
+refresh=0
+only=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ref)     ref=$2; shift 2 ;;
+    --root)    root=$2; shift 2 ;;
+    --refresh) refresh=1; shift ;;
+    --only)    only=$2; shift 2 ;;
+    -h|--help) show_help; exit 0 ;;
+    *) echo "release-verify-fleet: unknown arg: $1" >&2; show_help >&2; exit 64 ;;
+  esac
+done
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+RELEASE_HOME=$(cd "$script_dir/.." && pwd)
+export RELEASE_HOME
+
+for tool in managed-repos release-sync detect-kind lefthook yq gh git; do
+  command -v "$tool" >/dev/null || { echo "release-verify-fleet: $tool not on PATH" >&2; exit 2; }
+done
+
+# Resolve the candidate ref to a concrete SHA up front so the report is
+# unambiguous and every consumer syncs from the identical revision.
+ref_sha=$(git -C "$RELEASE_HOME" rev-parse --verify "$ref" 2>/dev/null) || {
+  echo "release-verify-fleet: bad --ref '$ref' in $RELEASE_HOME" >&2; exit 2; }
+echo "release-verify-fleet: syncing fleet from release@${ref_sha:0:12} ($ref) into $root" >&2
+
+# An --only subset (comma-separated) becomes positional filter args shared
+# by both managed-repos calls, so the clone is scoped too.
+subset=()
+if [ -n "$only" ]; then
+  IFS=',' read -ra subset <<< "$only"
+fi
+
+# Phase 1: materialize the fleet (hermetic — into $root, never ~/h).
+echo "==> cloning/refreshing fleet" >&2
+clone_args=(--clone)
+[ "$refresh" = 1 ] && clone_args+=(--refresh)
+REPOS_ROOT="$root" managed-repos "${clone_args[@]}" "${subset[@]}" || {
+  echo "release-verify-fleet: fleet clone reported failures (continuing with what cloned)" >&2; }
+
+# Phase 2: per-consumer sync + gate.
+printf 'repo\tkind\tsync\tgate\n'
+overall=0
+seen=0
+while IFS=$'\t' read -r repo abspath found; do
+  seen=$((seen + 1))
+  if [ "$found" != found ]; then
+    printf '%s\t%s\t%s\t%s\n' "$repo" "-" "missing" "skipped"
+    overall=1
+    continue
+  fi
+
+  # $() is already a subshell, so cd here doesn't leak to the parent.
+  kind=$(cd "$abspath" && detect-kind 2>/dev/null || echo "?")
+
+  if (cd "$abspath" && RELEASE_REF="$ref_sha" RELEASE_HOME="$RELEASE_HOME" release-sync) \
+       >"$abspath/.verify-sync.log" 2>&1; then
+    sync=ok
+  else
+    sync=FAILED
+  fi
+
+  if [ "$sync" = FAILED ]; then
+    printf '%s\t%s\t%s\t%s\n' "$repo" "$kind" "FAILED" "skipped"
+    overall=1
+    continue
+  fi
+
+  if (cd "$abspath" && lefthook run pre-commit --all-files) \
+       >"$abspath/.verify-gate.log" 2>&1; then
+    gate=pass
+  else
+    gate=FAIL
+    overall=1
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$repo" "$kind" "$sync" "$gate"
+done < <(REPOS_ROOT="$root" managed-repos --paths "${subset[@]}")
+
+echo >&2
+echo "release-verify-fleet: $seen consumer(s) swept from release@${ref_sha:0:12}." >&2
+if [ "$overall" -ne 0 ]; then
+  echo "release-verify-fleet: FAILURES above. Logs under $root: <repo>/.verify-sync.log (sync) and <repo>/.verify-gate.log (gate)." >&2
+else
+  echo "release-verify-fleet: all consumers pass the gate against this revision." >&2
+fi
+exit "$overall"

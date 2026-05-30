@@ -1,10 +1,11 @@
-name: release-sync tests
+name: release-sync + fleet tests
 
-# BATS suite for bin/release-sync + bin/release-drift-check, covering the
-# provenance marker (ADR-0002) and consumer-side drift detection. The
-# suite syncs a synthetic consumer from this checkout (RELEASE_REF=HEAD)
-# so regressions in the marker / --check / drift gate surface here before
-# riding out to consumers.
+# BATS suites for the sync/drift tooling and the fleet manifest accessor:
+#   tests/release-sync — provenance marker (ADR-0002) + drift detection,
+#     syncing a synthetic consumer from this checkout (RELEASE_REF=HEAD).
+#   tests/fleet        — managed-repos zero-logic path resolution against a
+#     fixture manifest (offline; no gh/network).
+# Regressions surface here before riding out to consumers.
 
 on:
   push:
@@ -12,17 +13,25 @@ on:
     paths:
       - 'bin/release-sync'
       - 'bin/release-drift-check'
+      - 'bin/managed-repos'
+      - 'bin/release-verify-fleet'
       - 'bin/detect-kind'
+      - 'managed-repos.yaml'
       - 'templates/**'
       - 'tests/release-sync/**'
+      - 'tests/fleet/**'
       - '.github/workflows/release-sync-tests.yml'
   pull_request:
     paths:
       - 'bin/release-sync'
       - 'bin/release-drift-check'
+      - 'bin/managed-repos'
+      - 'bin/release-verify-fleet'
       - 'bin/detect-kind'
+      - 'managed-repos.yaml'
       - 'templates/**'
       - 'tests/release-sync/**'
+      - 'tests/fleet/**'
       - '.github/workflows/release-sync-tests.yml'
 
 permissions:
@@ -47,5 +56,5 @@ jobs:
             https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           yq --version
-      - name: Run BATS suite
-        run: bats tests/release-sync/
+      - name: Run BATS suites
+        run: bats tests/release-sync/ tests/fleet/

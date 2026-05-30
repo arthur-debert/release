@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# managed-repos — accessor for the portfolio fleet manifest.
+#
+# Reads managed-repos.yaml (the ONLY source of truth — no discovery) and
+# maps each repo to its on-disk location with ZERO logic: the manifest
+# states each repo's `path`, and a repo resolves to `$REPOS_ROOT/<path>`.
+# No probing, no single-vs-multi heuristics, no org guessing.
+#
+# $REPOS_ROOT defaults to ~/h (a dev machine). Point it at an empty dir
+# and use --clone for a fresh, self-contained fleet checkout.
+#
+# Usage:
+#   managed-repos [--list]             # owner/name, one per line (default)
+#   managed-repos --paths              # owner/name <TAB> abspath <TAB> found|missing
+#   managed-repos --clone [--refresh]  # clone missing repos into their paths
+#                                      # (--refresh: also fetch+reset existing ones)
+#
+# Any mode accepts trailing owner/name args to restrict to that subset:
+#   managed-repos --clone arthur-debert/padz lex-fmt/lex
+#
+# Exit codes:
+#   0  — ok
+#   1  — a clone/refresh failed
+#   2  — manifest or dependency error
+#   64 — bad usage
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+mode=list
+refresh=0
+filter=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --list)    mode=list; shift ;;
+    --paths)   mode=paths; shift ;;
+    --clone)   mode=clone; shift ;;
+    --refresh) refresh=1; shift ;;
+    -h|--help) show_help; exit 0 ;;
+    -*) echo "managed-repos: unknown arg: $1" >&2; show_help >&2; exit 64 ;;
+    *) filter+=("$1"); shift ;;
+  esac
+done
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# MANAGED_REPOS_MANIFEST overrides the manifest path (tests point it at a
+# fixture); defaults to the repo's managed-repos.yaml.
+manifest="${MANAGED_REPOS_MANIFEST:-$script_dir/../managed-repos.yaml}"
+ROOT="${REPOS_ROOT:-$HOME/h}"
+
+[ -f "$manifest" ] || { echo "managed-repos: manifest not found: $manifest" >&2; exit 2; }
+command -v yq >/dev/null || { echo "managed-repos: yq required (mikefarah/yq v4)" >&2; exit 2; }
+
+# Every active entry as: owner/name <TAB> path. This is the only place the
+# manifest is read; everything below is a pure join on $ROOT. An optional
+# trailing owner/name filter restricts the set.
+pairs() {
+  # @tsv (not `+ "\t" +`): older yq builds emit a literal backslash-t for
+  # the escape, while @tsv yields a real tab on every v4 — version-stable.
+  if [ ${#filter[@]} -eq 0 ]; then
+    yq '.projects[][] | [.repo, .path] | @tsv' "$manifest"
+  else
+    yq '.projects[][] | [.repo, .path] | @tsv' "$manifest" \
+      | while IFS=$'\t' read -r r p; do
+          for f in "${filter[@]}"; do
+            [ "$f" = "$r" ] && { printf '%s\t%s\n' "$r" "$p"; break; }
+          done
+        done
+  fi
+}
+
+case "$mode" in
+  list)
+    pairs | cut -f1
+    ;;
+
+  paths)
+    while IFS=$'\t' read -r repo path; do
+      abspath="$ROOT/$path"
+      if [ -d "$abspath/.git" ]; then found=found; else found=missing; fi
+      printf '%s\t%s\t%s\n' "$repo" "$abspath" "$found"
+    done < <(pairs)
+    ;;
+
+  clone)
+    command -v gh >/dev/null || { echo "managed-repos: gh required for --clone" >&2; exit 2; }
+    rc=0
+    while IFS=$'\t' read -r repo path; do
+      abspath="$ROOT/$path"
+      if [ -d "$abspath/.git" ]; then
+        if [ "$refresh" = 1 ]; then
+          echo "→ $repo: refreshing $abspath" >&2
+          # Resolve the fallback INSIDE the substitution so the outer
+          # assignment never fails — `def=$(...) || def=main` can still
+          # trip set -e on Bash 3.2 (macOS). Then strip to the branch name.
+          def=$(git -C "$abspath" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null || echo main)
+          def=${def##*/}
+          if git -C "$abspath" fetch --quiet origin "$def" \
+             && git -C "$abspath" reset --quiet --hard "origin/$def"; then
+            :
+          else
+            echo "→ $repo: refresh FAILED" >&2; rc=1
+          fi
+        else
+          echo "→ $repo: exists, skipping ($abspath)" >&2
+        fi
+      else
+        echo "→ $repo: cloning into $abspath" >&2
+        mkdir -p "$(dirname "$abspath")"
+        # gh repo clone works in gh-authenticated sandboxes where plain
+        # git clone is restricted (matches clone-lex-* convention).
+        gh repo clone "$repo" "$abspath" || { echo "→ $repo: clone FAILED" >&2; rc=1; }
+      fi
+    done < <(pairs)
+    exit "$rc"
+    ;;
+esac
