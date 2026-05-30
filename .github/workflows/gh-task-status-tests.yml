@@ -10,13 +10,15 @@ on:
     branches: ['**']
     paths:
       - 'bin/gh-task-status'
-      - 'lib/release_gh/**'
+      - 'templates/commons/bin/gh-task-status'
+      - 'templates/commons/lib/release_gh/**'
       - 'tests/gh-task-status/**'
       - '.github/workflows/gh-task-status-tests.yml'
   pull_request:
     paths:
       - 'bin/gh-task-status'
-      - 'lib/release_gh/**'
+      - 'templates/commons/bin/gh-task-status'
+      - 'templates/commons/lib/release_gh/**'
       - 'tests/gh-task-status/**'
       - '.github/workflows/gh-task-status-tests.yml'
 

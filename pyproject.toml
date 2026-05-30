@@ -2,14 +2,18 @@
 #
 # Two members, split by the environment line (see
 # docs/proposals/dev-workflow-state-engine.lex §6.2):
-#   - lib/release_gh : the PR state engine. stdlib + `gh` only, runs in CI
-#                      and Cloud. ZERO third-party runtime deps.
+#   - templates/commons/lib/release_gh : the PR state engine. stdlib + `gh` only,
+#                      runs in CI and Cloud. ZERO third-party runtime deps.
 #   - orchestrator   : local-only harness. May use the Claude Agent SDK
 #                      because it never runs in CI/Cloud.
 #
 # Toolchain (ruff, pytest) is configured ONCE here and covers both.
 [tool.uv.workspace]
-members = ["lib/release_gh", "orchestrator"]
+# release_gh lives under templates/commons/ because it's a release-managed file
+# set distributed to consumers (like templates/commons/bin/*). The maintainer's
+# bin/gh-task-status is a symlink into it; release-sync materializes it into a
+# consumer's .release/lib/. It is still the single canonical copy.
+members = ["templates/commons/lib/release_gh", "orchestrator"]
 
 [tool.ruff]
 line-length = 100
@@ -25,4 +29,4 @@ testpaths = ["tests/python"]
 # mirrors the runtime sys.path-shim model; orchestrator.watch is importable
 # for its pure logic because it lazy-imports the Claude Agent SDK (so these
 # tests need no SDK — they run under the light py-lint CI job).
-pythonpath = ["lib/release_gh", "orchestrator"]
+pythonpath = ["templates/commons/lib/release_gh", "orchestrator"]

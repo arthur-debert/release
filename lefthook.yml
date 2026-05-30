@@ -71,7 +71,7 @@ pre-commit:
       # Config lives at the workspace-root pyproject.toml [tool.ruff]. Mirrors
       # the CI `py-lint` job.
       glob:
-        - "lib/**/*.py"
+        - "templates/commons/lib/**/*.py"
         - "orchestrator/**/*.py"
         - "tests/python/**/*.py"
       run: |
