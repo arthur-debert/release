@@ -35,8 +35,10 @@ out=human
 while [ $# -gt 0 ]; do
   case "$1" in
     --json)    out=json; shift ;;
-    --label)   label=${2:?--label needs a value}; shift 2 ;;
-    --repo)    repo=${2:?--repo needs a value}; shift 2 ;;
+    # Explicit arity check so a value-less flag exits 64 (bad usage) with a
+    # clean message, not the bash-default 1 that ${2:?} raises under set -u.
+    --label)   [ $# -ge 2 ] || { echo "release-inbox: --label needs a value" >&2; exit 64; }; label=$2; shift 2 ;;
+    --repo)    [ $# -ge 2 ] || { echo "release-inbox: --repo needs a value" >&2; exit 64; }; repo=$2; shift 2 ;;
     -h|--help) show_help; exit 0 ;;
     *) echo "release-inbox: unknown argument '$1'" >&2; show_help >&2; exit 64 ;;
   esac

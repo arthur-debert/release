@@ -94,6 +94,12 @@ JSON
   [ "$status" -eq 64 ]
 }
 
+@test "a value-less --label exits 64 (not the bash-default 1)" {
+  run "$BIN/release-inbox" --label
+  [ "$status" -eq 64 ]
+  [[ "$output" == *"--label needs a value"* ]]
+}
+
 @test "--help exits 0 and prints usage" {
   run "$BIN/release-inbox" --help
   [ "$status" -eq 0 ]
