@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Canonical docs-site check entry point. Same script local + CI.
+#
+# A docs-site repo is an mkdocs site (it is what defines the Kind). This
+# runs `mkdocs build --strict` so broken refs / missing nav entries /
+# plugin errors fail loudly — the same command the canonical mkdocs.yml
+# reusable workflow runs in CI.
+#
+# Auto-discovers config:
+#   1. ./mkdocs.yml          (canonical — root config)
+#   2. ./docs/mkdocs.yml     (alt layout)
+#
+# Plugin-agnostic: whatever the active mkdocs.yml + requirements pin in
+# gets used (e.g. the `lex` plugin renders .lex files natively). The
+# Kind does not opinionate on theme/plugin selection — that lives with
+# the consumer.
+#
+# Source of truth: arthur-debert/release templates/docs-site/bin/check.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+config=""
+if [ -f mkdocs.yml ]; then
+  config="mkdocs.yml"
+elif [ -f docs/mkdocs.yml ]; then
+  config="docs/mkdocs.yml"
+else
+  echo "No mkdocs.yml found (looked at ./mkdocs.yml and ./docs/mkdocs.yml). Skipping."
+  exit 0
+fi
+
+if ! command -v mkdocs >/dev/null 2>&1; then
+  echo "::error::mkdocs not installed. Activate the docs venv or run \`pip install -r docs/requirements.txt\`." >&2
+  exit 1
+fi
+
+echo "Building docs (strict) via $config ..."
+mkdocs build --strict --config-file "$config" "$@"
+echo "Docs OK"
