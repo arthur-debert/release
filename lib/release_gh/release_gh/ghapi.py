@@ -99,7 +99,7 @@ def pr_meta(pr: int) -> dict:
             "view",
             str(pr),
             "--json",
-            "number,headRefOid,isDraft,mergeable,mergeStateStatus,reviewRequests",
+            "number,headRefOid,isDraft,mergeable,mergeStateStatus,reviewRequests,statusCheckRollup",
         ]
     )
     return json.loads(out)

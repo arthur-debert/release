@@ -65,6 +65,7 @@ def context_from_raw(
         reactions=reactions,
         issue_comments=issue_comments,
         requested_logins=_requested_logins(meta.get("reviewRequests") or []),
+        checks=meta.get("statusCheckRollup") or [],
     )
 
 
