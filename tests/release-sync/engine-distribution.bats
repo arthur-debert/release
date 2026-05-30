@@ -45,13 +45,15 @@ load helper
   [ -f .release/lib/release_gh/release_gh/state.py ]
 }
 
-@test "the commons shellcheck gate excludes the gh-task-status shim (#348)" {
-  # The shim is an extensionless Python symlink under bin/. On a consumer
-  # commit it's staged and shellcheck would SC1071 on it, breaking the gate,
-  # unless the commons shellcheck step excludes it path-anchored. A leading-*
-  # glob can't cross '/', so the exclude must be **/ -anchored.
+@test "the commons shellcheck gate routes through check-shell (#348)" {
+  # The shim is an extensionless Python symlink under bin/; on a consumer commit
+  # it's staged and naive shellcheck SC1071's on it. The unified gate selects
+  # shell by CONTENT via the check-shell runner (not glob/exclude), so the shim
+  # falls out structurally. (The skip itself is exercised in gate-unified.bats;
+  # here we assert the synced gate is wired to the runner.)
   "$BIN/release-sync" >/dev/null
-  grep -q '\*\*/gh-task-status' .release/lefthook.yml
+  grep -q 'check-shell' .release/lefthook.yml
+  [ -f .release/bin/check-shell ]
 }
 
 @test "the synced gh-task-status runs — the shim resolves its package" {
