@@ -82,22 +82,53 @@ def test_diff_trajectory_skipped_without_sizer():
     assert not evaluate_breakers(ctx(reviews, comments=comments)).stop
 
 
+def test_diff_trajectory_below_floor_no_stop():
+    # Growing but tiny (1 -> 2 -> 3 lines) is below MIN_DIFF_LINES -> no false stop.
+    reviews = [review(1, "c1"), review(2, "c2"), review(3, "c3")]
+    sizes = {"c1": 1, "c2": 2, "c3": 3}
+    comments = [rc(1, "a", 1), rc(2, "b", 2), rc(3, "c", 3)]
+    assert not evaluate_breakers(ctx(reviews, comments=comments), diff_sizer=sizes.get).stop
+
+
 # --- comment-set / repeat -------------------------------------------------
 
 
-def test_comment_fixed_point_subset_stops():
+def test_comment_fixed_point_identical_stops():
+    # Exact same findings two cycles running -> true fixed point.
     reviews = [review(1, "c1"), review(2, "c2")]
-    comments = [rc(1, "a.py", 1), rc(1, "b.py", 2), rc(2, "a.py", 1)]  # cycle2 ⊆ cycle1
+    comments = [rc(1, "a.py", 1), rc(1, "b.py", 2), rc(2, "a.py", 1), rc(2, "b.py", 2)]
     v = evaluate_breakers(ctx(reviews, comments=comments))
     assert v.stop and v.breaker == "comment-set"
 
 
-def test_repeat_finding_same_line_consecutive_stops():
+def test_comment_fixed_point_strict_subset_is_progress_no_stop():
+    # cycle2 is a STRICT subset (b.py:2 got resolved) -> progress, not a fixed point.
     reviews = [review(1, "c1"), review(2, "c2")]
-    # cycle2 is NOT a subset (adds c.py:3) but shares a.py:1 -> repeat-finding
-    comments = [rc(1, "a.py", 1), rc(2, "a.py", 1), rc(2, "c.py", 3)]
+    comments = [rc(1, "a.py", 1), rc(1, "b.py", 2), rc(2, "a.py", 1)]
+    assert not evaluate_breakers(ctx(reviews, comments=comments)).stop
+
+
+def test_repeat_finding_three_consecutive_cycles_stops():
+    # a.py:1 persists across all 3 cycles (each cycle's set differs, so it's not a
+    # fixed point) -> repeat-finding after two failed fix attempts.
+    reviews = [review(1, "c1"), review(2, "c2"), review(3, "c3")]
+    comments = [
+        rc(1, "a.py", 1),
+        rc(1, "x.py", 1),
+        rc(2, "a.py", 1),
+        rc(2, "y.py", 2),
+        rc(3, "a.py", 1),
+        rc(3, "z.py", 3),
+    ]
     v = evaluate_breakers(ctx(reviews, comments=comments))
     assert v.stop and v.breaker == "repeat-finding"
+
+
+def test_repeat_finding_two_cycles_allows_second_attempt():
+    # Same location flagged twice is allowed (a 2nd attempt is normal) -> no stop.
+    reviews = [review(1, "c1"), review(2, "c2")]
+    comments = [rc(1, "a.py", 1), rc(2, "a.py", 1), rc(2, "c.py", 3)]
+    assert not evaluate_breakers(ctx(reviews, comments=comments)).stop
 
 
 def test_disjoint_consecutive_findings_no_stop():

@@ -1,7 +1,7 @@
 """`gh-task-status` — read-only PR lifecycle snapshot.
 
 Prints where a PR stands (one of the TaskState values) and the single next
-action. Resolves the PR for the current branch when no number is given.
+action. Resolves the PR number for the current branch when no number is given.
 Read-only: it never edits the PR — it reports READY; the caller flips.
 """
 
@@ -20,7 +20,7 @@ gh-task-status — where does this PR stand?
 Usage:
   gh-task-status [<pr-number>] [--json]
 
-With no <pr-number>, resolves the PR for the current branch. Read-only:
+With no <pr-number>, resolves the PR number for the current branch. Read-only:
 reports the lifecycle state (reviews pending/addressing/reviewed/validating/
 ready/blocked) and the next action; never mutates the PR.
 
@@ -70,7 +70,7 @@ def _current_pr() -> int | None:
     """Resolve the PR number for the current branch, or None if there is none."""
     try:
         data = json.loads(ghapi._gh(["pr", "view", "--json", "number"]))
-    except ghapi.GhError:
+    except (ghapi.GhError, json.JSONDecodeError):
         return None
     return data.get("number")
 

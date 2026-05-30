@@ -111,6 +111,12 @@ def test_classify_status_context_error_is_failing():
     assert classify_checks(rollup) is ChecksState.FAILING
 
 
+def test_classify_expected_status_is_pending():
+    # EXPECTED = a status that's expected but hasn't reported yet -> not green.
+    rollup = [{"__typename": "StatusContext", "state": "EXPECTED"}]
+    assert classify_checks(rollup) is ChecksState.PENDING
+
+
 def test_classify_neutral_and_skipped_are_green():
     rollup = [
         {"status": "COMPLETED", "conclusion": "NEUTRAL"},

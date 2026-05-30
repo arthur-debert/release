@@ -20,6 +20,8 @@ from .model import PullContext
 
 CYCLE_CAP = 3
 DIFF_GROWTH_TOLERANCE = 1.1  # allow 10% jitter before calling it "growing"
+MIN_DIFF_LINES = 50  # below this the diff is too small for "growing" to mean anything
+REPEAT_WINDOW = 3  # a location must persist this many consecutive cycles to stop
 
 CommentKey = tuple[str, "int | None"]
 DiffSizer = Callable[[str], "int | None"]
@@ -79,11 +81,17 @@ def evaluate_breakers(ctx: PullContext, diff_sizer: DiffSizer | None = None) -> 
 
 
 def _diff_trajectory(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
-    """Diff growing two consecutive cycles signals divergence (would catch #118)."""
+    """Diff growing two consecutive cycles signals divergence (would catch #118).
+
+    Guarded by an absolute floor so a 1 -> 2 -> 3 line PR doesn't trip it — only
+    diffs that are both growing *and* non-trivial count.
+    """
     sized = [c for c in cycles if c.diff_size is not None]
     if len(sized) < 3:
         return None
     a, b, c = sized[-3], sized[-2], sized[-1]
+    if c.diff_size < MIN_DIFF_LINES:
+        return None
     if b.diff_size > a.diff_size * DIFF_GROWTH_TOLERANCE and (
         c.diff_size > b.diff_size * DIFF_GROWTH_TOLERANCE
     ):
@@ -97,25 +105,36 @@ def _diff_trajectory(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
 
 
 def _comment_fixed_point(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
-    """Cycle N+1's findings are a subset of cycle N's — the reviewer is repeating."""
+    """Cycle N+1's findings are *identical* to cycle N's — a true fixed point.
+
+    Equality, not subset: a strict subset means some findings were resolved,
+    which is progress, not a stuck loop. A persisting location is the
+    repeat-finding breaker's job, not this one's.
+    """
     if n < 2:
         return None
     prev, last = cycles[-2], cycles[-1]
-    if last.comment_keys and last.comment_keys <= prev.comment_keys:
+    if last.comment_keys and last.comment_keys == prev.comment_keys:
         return BreakerVerdict(
             True,
             "comment-set",
-            "latest review's findings repeat the previous cycle's (fixed point)",
+            "latest review's findings are identical to the previous cycle's (fixed point)",
             n,
         )
     return None
 
 
 def _repeat_finding(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
-    """The same (path, line) flagged in two consecutive cycles — attempt #2."""
-    if n < 2:
+    """The same (path, line) flagged across REPEAT_WINDOW consecutive cycles.
+
+    Requires the location to survive two fix attempts (3 cycles by default), not
+    one — a second attempt at a stubborn comment is normal; a third is the
+    signal that it needs redesign rather than another fix.
+    """
+    if n < REPEAT_WINDOW:
         return None
-    recurring = cycles[-1].comment_keys & cycles[-2].comment_keys
+    window = cycles[-REPEAT_WINDOW:]
+    recurring = set.intersection(*(set(c.comment_keys) for c in window))
     if recurring:
         where = ", ".join(
             f"{p}:{ln}" for p, ln in sorted(recurring, key=lambda k: (k[0], k[1] or 0))
@@ -123,7 +142,8 @@ def _repeat_finding(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
         return BreakerVerdict(
             True,
             "repeat-finding",
-            f"same location flagged in back-to-back cycles ({where}) — redesign, not a 3rd fix",
+            f"same location flagged in {REPEAT_WINDOW} consecutive cycles ({where}) — "
+            "redesign, not another fix",
             n,
         )
     return None
