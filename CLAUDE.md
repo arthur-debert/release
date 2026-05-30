@@ -15,9 +15,9 @@ constraints that apply when *working on this repo itself*.
 - `.github/actions/<name>/` — composite actions, atomic units shared across (future) workflows
 - `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
   - Policy/setup: `apply-ruleset`, `sweep-github-policy`, `install-release-{secrets,token}`, `enable-dependabot-security`, `detect-stack`
-  - Release mechanics: `release-advance-v1` (fast-forward the floating `v1` branch to main after a release-side merge — one command for the old four-step `checkout v1 && merge --ff-only main && push` dance)
+  - Release mechanics: `release-advance-major` (fast-forward the floating major branch — auto-detected highest `vN`, currently `v2` — to main after a release-side merge; one command for the old four-step `checkout vN && merge --ff-only main && push` dance)
   - Sync/drift: `release-sync` (build-dir + symlinks materializer), `release-drift-check` (consumer-side drift gate — rebuilds against the revision recorded in `.release/.release-sync-source` so it separates *drift* from mere *staleness*; see ADR-0002 + `docs/proposals/301-consumer-drift-gate-rollout.md`)
-  - Fleet: `managed-repos` (zero-logic accessor over `managed-repos.yaml` — the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`), `release-verify-fleet` (hermetic pre-flight lint sweep: clone fleet → `release-sync` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-advance-v1`). See `docs/dev/fleet-tooling.md`.
+  - Fleet: `managed-repos` (zero-logic accessor over `managed-repos.yaml` — the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`), `release-verify-fleet` (hermetic pre-flight lint sweep: clone fleet → `release-sync` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-advance-major`). See `docs/dev/fleet-tooling.md`.
   - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `gh-release-issue`
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
