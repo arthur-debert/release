@@ -19,7 +19,9 @@
 #
 #   --ref <ref>     release revision to sync FROM (default: HEAD of this
 #                   release checkout). Tests the code you have right here.
-#   --root <dir>    where to clone the fleet (default: /tmp/release-fleet-verify).
+#   --root <dir>    where to clone the fleet (default:
+#                   /tmp/release-fleet-verify-$USER, per-user to avoid
+#                   permission clashes on shared machines).
 #   --refresh       fetch+reset existing fleet clones before syncing.
 #   --only <list>   restrict to a comma-separated subset of owner/name.
 #
@@ -39,7 +41,7 @@ set -uo pipefail
 show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
 
 ref=HEAD
-root=/tmp/release-fleet-verify
+root="/tmp/release-fleet-verify-${USER:-shared}"
 refresh=0
 only=""
 while [ $# -gt 0 ]; do
@@ -57,7 +59,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 RELEASE_HOME=$(cd "$script_dir/.." && pwd)
 export RELEASE_HOME
 
-for tool in managed-repos release-sync lefthook yq gh git; do
+for tool in managed-repos release-sync detect-kind lefthook yq gh git; do
   command -v "$tool" >/dev/null || { echo "release-verify-fleet: $tool not on PATH" >&2; exit 2; }
 done
 
@@ -93,7 +95,8 @@ while IFS=$'\t' read -r repo abspath found; do
     continue
   fi
 
-  kind=$( (cd "$abspath" && detect-kind) 2>/dev/null || echo "?")
+  # $() is already a subshell, so cd here doesn't leak to the parent.
+  kind=$(cd "$abspath" && detect-kind 2>/dev/null || echo "?")
 
   if (cd "$abspath" && RELEASE_REF="$ref_sha" RELEASE_HOME="$RELEASE_HOME" release-sync) \
        >"$abspath/.verify-sync.log" 2>&1; then
@@ -121,7 +124,7 @@ done < <(REPOS_ROOT="$root" managed-repos --paths "${subset[@]}")
 echo >&2
 echo "release-verify-fleet: $seen consumer(s) swept from release@${ref_sha:0:12}." >&2
 if [ "$overall" -ne 0 ]; then
-  echo "release-verify-fleet: FAILURES above. Gate logs: <repo>/.verify-gate.log under $root" >&2
+  echo "release-verify-fleet: FAILURES above. Logs under $root: <repo>/.verify-sync.log (sync) and <repo>/.verify-gate.log (gate)." >&2
 else
   echo "release-verify-fleet: all consumers pass the gate against this revision." >&2
 fi

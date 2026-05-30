@@ -91,8 +91,11 @@ case "$mode" in
       if [ -d "$abspath/.git" ]; then
         if [ "$refresh" = 1 ]; then
           echo "→ $repo: refreshing $abspath" >&2
-          def=$(git -C "$abspath" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null \
-                | sed 's@^refs/remotes/origin/@@') || def=main
+          # Resolve the fallback INSIDE the substitution so the outer
+          # assignment never fails — `def=$(...) || def=main` can still
+          # trip set -e on Bash 3.2 (macOS). Then strip to the branch name.
+          def=$(git -C "$abspath" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null || echo main)
+          def=${def##*/}
           if git -C "$abspath" fetch --quiet origin "$def" \
              && git -C "$abspath" reset --quiet --hard "origin/$def"; then
             :
