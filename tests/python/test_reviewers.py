@@ -82,6 +82,34 @@ def test_copilot_review_on_earlier_head_does_NOT_count_done():
     assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
 
 
+def test_dismissed_copilot_review_on_head_does_NOT_count_done():
+    # A DISMISSED review (cleared by an admin/author) is retracted — even on the
+    # current head it must not read as done; the PR falls back to REQUESTED.
+    from release_gh.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "Copilot", "DISMISSED", "new", "")],
+        requested_logins=["Copilot"],
+    )
+    assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
+
+
+def test_dismissed_gemini_review_does_NOT_count_done():
+    # Same for best-effort Gemini: a dismissed review is not a standing verdict.
+    from release_gh.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "gemini-code-assist[bot]", "DISMISSED", "old", "")],
+    )
+    assert GEMINI.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
+
+
 def test_resolved_thread_clears_open_but_keeps_authored(context):
     ctx = context("copilot_done_all_resolved")
     assert COPILOT.detect(ctx) == ReviewLifecycle.DONE_COMMENTS
