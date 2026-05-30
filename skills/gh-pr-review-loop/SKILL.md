@@ -75,6 +75,7 @@ This is the canonical sequence when driving a feature branch through the loop:
 7. wait for checks
 8. STOP. PR is mergeable, agent's job is done. The user does the final read and merges.
    Merge only on explicit authorization ("merge it", "go ahead and merge").
+9. ALWAYS close with the structured report block (see "The final-report contract").
 ```
 
 ### A note on draft PRs
@@ -90,6 +91,10 @@ Common signals that should *not* trigger a draft:
 Why it matters: the canonical `copilot-review.yml` workflow gates on `if: github.event.pull_request.draft == false`. Drafts silently suppress the auto-Copilot-review until the PR is manually flipped to ready, costing real time to un-draft and re-trigger the loop. The unchecked checklist / spec language / skeleton scope already communicate WIP to human reviewers; drafting on top is duplication that breaks the loop.
 
 When genuinely uncertain: **ask before opening** — don't assume.
+
+### A note on the `migration-in-flight` lock
+
+Build-dir migration PRs (from `migrate-consumer-to-build-dir`) carry a `migration-in-flight` label — a lightweight signal that one agent/session already owns that consumer's migration, so a second parallel session backs off instead of opening a duplicate stacked PR (release#302). When you drive such a PR here: **leave the label alone** — it's released naturally when the PR merges/closes (a closed PR is no longer "in flight"). Don't strip it mid-loop. If you're picking up an existing migration PR that's somehow missing the label, add it (`gh pr edit <PR> --add-label migration-in-flight`) so a concurrent session sees the lock.
 
 ### Step 4: waiting for Copilot
 
@@ -179,6 +184,34 @@ gh pr merge <PR> --squash --delete-branch
 Always squash (rebase also works; merge commit is blocked by `required_linear_history`).
 
 If you genuinely can't merge because of a pre-existing CI failure unrelated to the PR (e.g. the dodot CI on main has been broken since last week, and your PR's check inherited that failure), surface this clearly and ask whether to admin-bypass — don't `--admin` unprompted.
+
+## The final-report contract (always, even mid-flow)
+
+Whenever you end a turn on a PR — ready to merge, blocked, or stopping early — close with a structured report. This is non-negotiable when the skill runs as a subagent: the parent has no other window into what happened, and a bare *"I'll wait for the background task to complete via notifications"* forces it to re-query every PR by hand. (Half of a 20-subagent migration batch stalled exactly this way — see release#300.)
+
+Two hard rules before you report:
+
+1. **Re-verify actual state — don't trust the last wait result.** A `gh-copilot-wait` / `gh-pr-checks-wait` exit code can be stale by the time you stop (a check finished, a new commit landed). Always read live state first:
+
+   ```sh
+   gh pr view <PR> --json url,headRefOid,mergeStateStatus,mergeable,statusCheckRollup,reviews --jq '{url,head:.headRefOid,mergeState:.mergeStateStatus,mergeable,checks:[.statusCheckRollup[]|{name:.name,c:.conclusion}],reviews:[.reviews[]|{by:.author.login,state:.state}]}'
+   ```
+
+2. **Never stop with only "I'll wait for the background task."** If a background wait is genuinely needed, *poll it to completion first* — `gh-copilot-wait` and `gh-pr-checks-wait` block precisely so you can. Returning before they resolve wastes the run: the parent finds the event already arrived and has to restart you.
+
+Then emit the report block verbatim — same shape every time so downstream agents can parse it:
+
+```text
+## Report
+PR: <url>
+Head SHA: <sha>
+CI: <check=conclusion, ...>   (or "none yet")
+Reviews: <bot/user=state, ...>   (or "none yet")
+Mergeable: <yes | no — blocker>
+Next step: <merge | wait for X | file issue | stop, handing back>
+```
+
+`Next step` is the actionable line — be specific (`wait for Copilot on <sha>`, not `wait`). If `Mergeable: no`, name the blocker (failing check, unresolved thread, pre-existing main breakage).
 
 ## Always update the changelog
 
