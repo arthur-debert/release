@@ -70,6 +70,9 @@ class RecordingSink(Sink):
     def spawn_fixer(self, pr, status):
         self.calls.append(("spawn_fixer", pr))
 
+    def error(self, pr, exc):
+        self.calls.append(("error", pr))
+
 
 def test_poll_dispatches_then_dedups_same_state():
     sink = RecordingSink()
@@ -99,6 +102,21 @@ def test_poll_redispatches_on_transition():
         ("log", 7),
         ("flip_ready", 7),  # READY
     ]
+
+
+def test_poll_survives_status_error_and_keeps_going():
+    # A transient failure on one PR must not crash the daemon — it logs the
+    # error, skips that PR, and still dispatches the healthy ones.
+    sink = RecordingSink()
+
+    def flaky(pr):
+        if pr == 1:
+            raise RuntimeError("gh timed out")
+        return status(TaskState.READY)
+
+    poll_once([1, 2], get_status=flaky, last_states={}, sink=sink, auto=False)
+    assert ("error", 1) in sink.calls
+    assert ("flip_ready", 2) in sink.calls
 
 
 def test_poll_handles_several_prs():

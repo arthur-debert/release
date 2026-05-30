@@ -197,12 +197,22 @@ class _WatchSink(watch.Sink):
     def _desktop(self, title: str, body: str) -> None:
         print(f">>> {title} — {body}")
         if sys.platform == "darwin":
-            safe = body.replace('"', "'")
+            # Escape quotes in BOTH fields, else a breaker name / reason with a
+            # quote breaks the osascript string and the notification silently fails.
+            safe_body = body.replace('"', "'")
+            safe_title = title.replace('"', "'")
             subprocess.run(
-                ["osascript", "-e", f'display notification "{safe}" with title "{title}"'],
+                [
+                    "osascript",
+                    "-e",
+                    f'display notification "{safe_body}" with title "{safe_title}"',
+                ],
                 capture_output=True,
                 check=False,
             )
+
+    def error(self, pr, exc) -> None:
+        print(f"#{pr}: poll error ({exc}); skipping this pass.", file=sys.stderr)
 
 
 def _spawn_fixer(pr: int, repo_path: str) -> None:
@@ -215,37 +225,41 @@ def _spawn_fixer(pr: int, repo_path: str) -> None:
     import shutil
     import tempfile
 
+    # One `gh pr view` gets everything: the branch, the HEAD repo's clone URL
+    # (the base URL is wrong for fork PRs — the branch doesn't exist there), and
+    # whether this is a cross-repo (fork) PR at all.
     try:
-        head = subprocess.run(
-            [
-                "gh",
-                "pr",
-                "view",
-                str(pr),
-                "--json",
-                "headRefName,headRepositoryOwner,headRepository",
-            ],
+        raw = subprocess.run(
+            ["gh", "pr", "view", str(pr), "--json", "headRefName,headRepository,isCrossRepository"],
             cwd=repo_path,
             capture_output=True,
             text=True,
             check=True,
         ).stdout
-        branch = json.loads(head)["headRefName"]
-        url = subprocess.run(
-            ["gh", "repo", "view", "--json", "url", "-q", ".url"],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-    except (subprocess.CalledProcessError, KeyError) as e:
-        print(f"#{pr}: could not resolve PR branch to fix ({e}); skipping.", file=sys.stderr)
+        data = json.loads(raw)
+        if data.get("isCrossRepository"):
+            # Auto-fix can't push to a fork we don't own — fail fast, leave it.
+            print(
+                f"#{pr}: auto-fix skips fork PR (can't push to the fork); leaving for a human.",
+                file=sys.stderr,
+            )
+            return
+        branch = data["headRefName"]
+        url = data["headRepository"]["url"]
+    except (subprocess.CalledProcessError, json.JSONDecodeError, KeyError, TypeError) as e:
+        detail = getattr(e, "stderr", None) or getattr(e, "stdout", None) or e
+        print(f"#{pr}: could not resolve PR branch to fix ({detail}); skipping.", file=sys.stderr)
         return
 
     tmp = tempfile.mkdtemp(prefix=f"orc-fix-{pr}-")
     clone = str(Path(tmp) / "repo")
     try:
-        subprocess.run(["git", "clone", "--branch", branch, url, clone], check=True)
+        subprocess.run(
+            ["git", "clone", "--branch", branch, url, clone],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         asyncio.run(
             run_session(
                 clone,
@@ -256,7 +270,7 @@ def _spawn_fixer(pr: int, repo_path: str) -> None:
             )
         )
     except subprocess.CalledProcessError as e:
-        print(f"#{pr}: auto-fix clone/setup failed ({e}); skipping.", file=sys.stderr)
+        print(f"#{pr}: auto-fix clone/setup failed ({e.stderr or e}); skipping.", file=sys.stderr)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -267,7 +281,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         _guard_billing()  # --auto spawns SDK agents
     repo_path = str(Path(args.repo).expanduser().resolve())
     os.chdir(repo_path)  # release_gh.fetch shells `gh` in the cwd
-    prs = [int(p) for p in args.prs]
+    prs = args.prs  # argparse already parsed these as ints
     mode = "AUTO-FIX" if args.auto else "notify-only"
     print(
         f"watching {len(prs)} PR(s) in {repo_path} every {args.interval:g}s [{mode}]. "
@@ -389,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
         "watch",
         help="poll PRs and act on lifecycle transitions (detached transport)",
     )
-    p_watch.add_argument("prs", nargs="+", help="PR numbers to watch (in --repo)")
+    p_watch.add_argument("prs", nargs="+", type=int, help="PR numbers to watch (in --repo)")
     p_watch.add_argument("--repo", default=".", help="repo working tree (default: current dir)")
     p_watch.add_argument(
         "--interval", type=float, default=45.0, help="poll interval seconds (default 45)"

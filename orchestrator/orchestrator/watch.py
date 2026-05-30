@@ -66,6 +66,7 @@ class Sink:
     def page(self, pr: int, status: TaskStatus, *, reason: str) -> None: ...
     def flip_ready(self, pr: int, status: TaskStatus) -> None: ...
     def spawn_fixer(self, pr: int, status: TaskStatus) -> None: ...
+    def error(self, pr: int, exc: Exception) -> None: ...
 
 
 def poll_once(
@@ -83,7 +84,13 @@ def poll_once(
     double-dispatch while a PR sits in the same state.
     """
     for pr in prs:
-        status = get_status(pr)
+        try:
+            status = get_status(pr)
+        except Exception as exc:  # noqa: BLE001
+            # A detached daemon must survive transient gh/network/rate-limit
+            # failures: log this PR's error, skip it, keep polling the rest.
+            sink.error(pr, exc)
+            continue
         if last_states.get(pr) == status.state.value:
             continue
         prev = last_states.get(pr)
