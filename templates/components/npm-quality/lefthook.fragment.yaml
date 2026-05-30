@@ -38,11 +38,22 @@ pre-commit:
       # Catch ESLint config edits too — a rule change should re-lint
       # everything staged. mjs/cjs included for tooling files written
       # in modern module syntax (vite.config.mjs, eslint.config.mjs).
+      #
+      # `--no-warn-ignored` (requires ESLint >= 8.51.0): pre-commit hands
+      # eslint the STAGED set, which can include files eslint's own config
+      # ignores (build output, or a monorepo's `shared/**` / `packages/**`
+      # that lint under their own setup). Without this flag eslint emits a
+      # "File ignored because of a matching ignore pattern" WARNING for each,
+      # and `--max-warnings 0` turns that into a commit failure — punishing
+      # the consumer for a file eslint was *told* to ignore. Same class as
+      # the check-shell shim skip: a staged-files linter must not fail on
+      # files it was asked to skip. (Consumers previously hand-rolled this in
+      # a lefthook-local.yml shadow; folding it upstream retires those.)
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,mjs,cjs}"
         - "**/.eslintrc*"
         - "**/eslint.config.*"
-      run: npx --no-install eslint --max-warnings 0 -- {staged_files}
+      run: npx --no-install eslint --no-warn-ignored --max-warnings 0 -- {staged_files}
       priority: 2
     prettier:
       # Auto-fix + re-stage. Prettier's whole value is mechanical
