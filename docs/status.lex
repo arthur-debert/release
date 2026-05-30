@@ -38,9 +38,11 @@ Getting here was a long and error-prone path while we experimented and dealt wit
 
     This is the first big milestone: full adoption of release across all consumers.
 
-4. Development Cycle
+4. Development Cycle  [DONE — epic #332, closed]
 
     The PR flow is unreliable in both local and cloud environments. Agents cannot reliably request reviewers, detect completed reviews, resolve comments, or determine when a PR is mergeable. See docs/foundational-gh-layer.lex for the full analysis.
+
+    Shipped: the reviewer-agnostic gh-task-status state engine (release_gh) + orc watch poll-loop, distributed to consumers and review-hardened. Residual tracked in #349 (orc watch --auto live shake-out) and #350 (cloud transport).
 
     4.1. gh-task-status: a single command that tells the agent where it stands in the PR lifecycle. Orchestrates existing primitives (gh-copilot-wait, gh-pr-resolve-thread, gh-pr-checks-wait) rather than replacing them.
 
@@ -48,9 +50,9 @@ Getting here was a long and error-prone path while we experimented and dealt wit
 
     This is the second big milestone: reliable, verified tooling and a consistent development cycle across environments.
 
-5. Self-Improving Feedback Loop
+5. Self-Improving Feedback Loop  [PARTIAL — epic #348 open]
 
-    5.1. Consumer CLAUDE.md instructions: release manages infrastructure; in case of a problem, the consumer opens an issue on the release tracker and works around it.
+    5.1. Consumer CLAUDE.md instructions: release manages infrastructure; in case of a problem, the consumer opens an issue on the release tracker and works around it.  [DONE — #360: managed orientation block + escalation contract, propagated to all consumers; gh-release-issue distributed.]
 
     5.2. Batch processing: runs (first manually triggered) to summarize and prioritize issues from consumer repos, then release fixes and notifies consumers via their trackers.
 

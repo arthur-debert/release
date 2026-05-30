@@ -9,6 +9,31 @@ block.
 versioning policy. This file captures the principles and non-obvious
 constraints that apply when *working on this repo itself*.
 
+## Working the fleet / consumer repos — start here
+
+Any task that touches consumers — re-syncing, propagating a fix, advancing the
+floating major, or diagnosing why a consumer's CI/gate is red — is governed by
+the **`release-fleet-ops` skill**. Invoke it first. It encodes the one rule
+(*upstream-first*: a consumer failure is a `release/` bug until proven
+consumer-specific), the reproduce-once → consult-the-dogfood-oracle → route
+loop, and the traps (`lefthook-local.yml` shadows; a consumer `.gitignore`
+silently dropping managed `bin/` tools).
+
+- **What's open / next:** the GitHub issue tracker is the task list — epic
+  **#348** (self-improving loop: consumer orientation is shipped + propagated to
+  all consumers; Phase A3 skill-reach + Phases C/D remain), **#349 / #350**
+  (`orc watch` shake-out + cloud transport). `docs/status.lex` is the
+  *directional* roadmap (the why), explicitly not a task tracker.
+- **Core fleet loop:** `release-verify-fleet` (hermetic pre-flight sweep) →
+  `orc propagate` (re-sync + open a PR per consumer) → `release-advance-major`
+  (fast-forward the floating major). Always run `release-verify-fleet` before advancing.
+- **The load-bearing gotcha:** mechanical fleet tools run in clones *without* the
+  consumer's toolchain (no `npm install` / `cargo`), so they cannot run the
+  consumer gate faithfully — `propagate` commits `--no-verify` and the PR's CI is
+  the real gate; a `release-verify-fleet --all-files` FAIL on an npm/frontend repo is
+  usually a missing-deps artifact, not real debt. Review threads on synced
+  `.release/**` are upstream concerns, not consumer-PR blockers.
+
 ## Repo shape
 
 - `.github/workflows/rust-cli.yml`, `copilot-review.yml` — reusable workflows
