@@ -42,6 +42,7 @@ def gather(pr: int) -> PullContext:
         thread_nodes=thread_nodes,
         reactions=ghapi.rest(f"{base}/issues/{pr}/reactions", paginate=True) or [],
         issue_comments=ghapi.rest(f"{base}/issues/{pr}/comments", paginate=True) or [],
+        review_comments=ghapi.rest(f"{base}/pulls/{pr}/comments", paginate=True) or [],
     )
 
 
@@ -52,12 +53,14 @@ def context_from_raw(
     thread_nodes: list[dict],
     reactions: list[dict],
     issue_comments: list[dict],
+    review_comments: list[dict] | None = None,
 ) -> PullContext:
     """Pure: assemble a `PullContext` from raw gh payloads. No network."""
     return PullContext(
         number=meta["number"],
         head_sha=meta["headRefOid"],
         is_draft=bool(meta.get("isDraft")),
+        base_ref=meta.get("baseRefName"),
         mergeable=meta.get("mergeable"),
         merge_state=meta.get("mergeStateStatus"),
         reviews=[_review(r) for r in reviews_json],
@@ -66,6 +69,7 @@ def context_from_raw(
         issue_comments=issue_comments,
         requested_logins=_requested_logins(meta.get("reviewRequests") or []),
         checks=meta.get("statusCheckRollup") or [],
+        review_comments=review_comments or [],
     )
 
 

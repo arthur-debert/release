@@ -88,6 +88,7 @@ class PullContext:
     number: int
     head_sha: str
     is_draft: bool
+    base_ref: str | None = None  # base branch name (for diff-size breaker)
     mergeable: str | None = None  # gh: MERGEABLE / CONFLICTING / UNKNOWN
     merge_state: str | None = None  # gh: CLEAN / BLOCKED / BEHIND / ...
     reviews: list[Review] = field(default_factory=list)
@@ -96,6 +97,8 @@ class PullContext:
     issue_comments: list[dict] = field(default_factory=list)  # Gemini bot comments
     requested_logins: list[str] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)  # gh statusCheckRollup entries
+    review_comments: list[dict] = field(default_factory=list)  # REST inline comments
+    # (carry pull_request_review_id -> per-cycle grouping for breakers)
 
     def reviews_on_head(self) -> list[Review]:
         """Reviews made against the current head — stale reviews don't count."""
