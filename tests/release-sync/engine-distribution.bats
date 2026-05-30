@@ -30,8 +30,19 @@ load helper
   # Nothing under the consumer tree (outside .release/) links to the package.
   run bash -c 'find . -path ./.release -prune -o -type l -lname "*release_gh*" -print'
   [ -z "$output" ]
-  # And no lib/release_gh dir exists outside .release/.
-  [ ! -e lib/release_gh ]
+  # And no lib/release_gh exists outside .release/ (a broken symlink would
+  # pass -e but not -L, so check both).
+  [ ! -e lib/release_gh ] && [ ! -L lib/release_gh ]
+}
+
+@test "is_release_internal is scoped to lib/release_gh — other lib/ files still mirror" {
+  # The bats Capability ships a consumer-facing lib/bats-harness.bash; shielding
+  # all of lib/ would wrongly stop it mirroring. Only lib/release_gh/ is internal.
+  printf 'capabilities:\n  - bats\n' > .release-sync.yaml
+  "$BIN/release-sync" >/dev/null
+  [ -L lib/bats-harness.bash ]                       # consumer-facing lib/ mirrors
+  [ ! -e lib/release_gh ] && [ ! -L lib/release_gh ]  # engine package stays internal
+  [ -f .release/lib/release_gh/release_gh/state.py ]
 }
 
 @test "the synced gh-task-status runs — the shim resolves its package" {

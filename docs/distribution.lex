@@ -46,7 +46,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
         Some content must live in `.release/` but must *not* be mirrored out to a working-tree location. It is part of the tree (so `--check` sees it change) but no symlink/copy is created for it. Two kinds:
 
         - The provenance marker (`.release-sync-source`) — records the source revision (ADR-0002); read by `release-drift-check`, never used at a consumer location.
-        - `lib/*` — runtime packages that release-provided `bin/` tools import. The package must exist in `.release/lib/` for the tool to load, but it is an internal dependency, not a file the consumer uses at a mirrored location — so no `lib/...` symlinks get scattered through the consumer tree.
+        - `lib/release_gh/*` — the PR state engine package that `bin/gh-task-status` imports. It must exist in `.release/lib/` for the tool to load, but it is an internal dependency, not a file the consumer uses at a mirrored location — so no `lib/release_gh/...` symlinks get scattered through the consumer tree. The match is scoped to `lib/release_gh/`, *not* all of `lib/`: other `lib/` paths are consumer-facing and must mirror (the bats Capability ships `lib/bats-harness.bash`, which consumer test files source).
 
 5. The canonical-home pattern for tools
 
@@ -82,7 +82,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
         | consumer `.release/bin/gh-task-status` | `.release/bin/...`            | `.release/lib/release_gh`            |
     :: table align=lll ::
 
-    The package is shielded by `is_release_internal` (`lib/*`), so a consumer gets `.release/lib/release_gh/` (real files the shim loads) but no `lib/...` symlinks in its tree. `tests/release-sync/engine-distribution.bats` asserts the full chain: materialized into `.release/`, mirrored as a `bin/` symlink, no leaked `lib/` symlinks, and the synced shim actually runs.
+    The package is shielded by `is_release_internal` (`lib/release_gh/*` — scoped to the engine, so other `lib/` paths like the bats harness still mirror), so a consumer gets `.release/lib/release_gh/` (real files the shim loads) but no `lib/release_gh/...` symlinks in its tree. `tests/release-sync/engine-distribution.bats` asserts the full chain: materialized into `.release/`, mirrored as a `bin/` symlink, no leaked `lib/` symlinks, and the synced shim actually runs.
 
 7. Provenance and drift
 

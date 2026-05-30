@@ -188,16 +188,18 @@ needs_real_file() {
 # symlink/copy into the consumer's working tree.
 #
 #   - the provenance marker (ADR-0002).
-#   - lib/* : runtime packages that release-provided bin/ tools import
-#     (e.g. lib/release_gh/, the PR state engine behind bin/gh-task-status).
-#     The bin shim resolves the package via its own realpath (.release/bin ->
-#     ../lib/release_gh), so the package must exist in .release/ — but it is an
-#     internal dependency, not a file the consumer uses at a mirrored location,
-#     so no `lib/...` symlinks get scattered through the consumer tree.
+#   - lib/release_gh/* : the PR state engine package that bin/gh-task-status
+#     imports. The shim resolves it via its own realpath (.release/bin ->
+#     ../lib/release_gh), so it must exist in .release/ — but it is an internal
+#     dependency, not a file the consumer uses at a mirrored location, so no
+#     lib/release_gh/... symlinks get scattered through the consumer tree.
+#     NB: scope to lib/release_gh/, NOT all of lib/ — other lib/ paths ARE
+#     consumer-facing and must mirror (e.g. the bats Capability ships
+#     lib/bats-harness.bash, which consumer test files source).
 is_release_internal() {
   case "$1" in
     "$SOURCE_MARKER") return 0 ;;
-    lib/*) return 0 ;;
+    lib/release_gh/*) return 0 ;;
   esac
   return 1
 }
