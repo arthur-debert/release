@@ -45,6 +45,15 @@ load helper
   [ -f .release/lib/release_gh/release_gh/state.py ]
 }
 
+@test "the commons shellcheck gate excludes the gh-task-status shim (#348)" {
+  # The shim is an extensionless Python symlink under bin/. On a consumer
+  # commit it's staged and shellcheck would SC1071 on it, breaking the gate,
+  # unless the commons shellcheck step excludes it path-anchored. A leading-*
+  # glob can't cross '/', so the exclude must be **/ -anchored.
+  "$BIN/release-sync" >/dev/null
+  grep -q '\*\*/gh-task-status' .release/lefthook.yml
+}
+
 @test "the synced gh-task-status runs — the shim resolves its package" {
   command -v python3 >/dev/null || skip "python3 not available"
   "$BIN/release-sync" >/dev/null

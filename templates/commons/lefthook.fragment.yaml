@@ -82,6 +82,12 @@ pre-commit:
         - "completions/**"
         - "*/completions/**"
         - "bin/share/**"
+        # gh-task-status is a release-provided Python shim (extensionless, it
+        # imports the release_gh package), so the `*.py` exclude above can't
+        # catch it and shellcheck SC1071's on every consumer that syncs the
+        # engine. A leading-`*` glob can't cross `/`; `**/` can (cf.
+        # bin/share/**), so match it path-anchored. (release#348)
+        - "**/gh-task-status"
       # --severity=info passed as a CLI flag (not via .shellcheckrc)
       # because Ubuntu 24.04 ships shellcheck 0.9.0 which silently
       # ignores the `severity=` directive in the rc file (that's a
