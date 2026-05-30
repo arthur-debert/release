@@ -67,12 +67,15 @@ and omits `gh-task-status`.
   (onboarding, `apply-ruleset`, `audit-*`) — they're harmless to a consumer
   agent and the description no longer advertises them.
 - **Distribute the skill into consumers** (decision: ship the existing skill
-  as-is, not a slim variant). Materialize it via `release-sync` so it lands at
-  `.claude/skills/gh-pr-review-loop/SKILL.md` in each consumer — the path Claude
-  Code auto-discovers project skills from. Wrinkle: `release-sync` mirrors paths
-  (`.release/<p>` → symlink at `<p>`), so the skill must live under
-  `templates/commons/` at a rel path that maps to `.claude/skills/...`; verify a
-  symlinked SKILL.md (pointing into `.release/`) is still discovered.
+  as-is, not a slim variant). `release-sync` injects it into the sync plan so it
+  lands at `.claude/skills/gh-pr-review-loop/SKILL.md` in each consumer — the path
+  Claude Code auto-discovers project skills from. **Finalized design:** source the
+  skill **directly from `skills/`** (the single home, also installed to
+  `~/.claude/skills/` by `env/setup.sh`) rather than duplicating it into a
+  `templates/` subtree — one copy, no drift. The materialize loop writes a real
+  blob; the mirror step symlinks it out (a symlinked SKILL.md pointing into
+  `.release/` is dereferenceable, so Claude Code still discovers it).
+  `.claude/skills/**` is already excluded from the consumer markdownlint gate.
 
 **Acceptance:** a fresh agent in a consumer repo (cloud *and* local) has the
 skill available, triggered by "open a PR" / "check PR status"; its description
