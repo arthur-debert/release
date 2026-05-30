@@ -56,10 +56,12 @@ command -v yq >/dev/null || { echo "managed-repos: yq required (mikefarah/yq v4)
 # manifest is read; everything below is a pure join on $ROOT. An optional
 # trailing owner/name filter restricts the set.
 pairs() {
+  # @tsv (not `+ "\t" +`): older yq builds emit a literal backslash-t for
+  # the escape, while @tsv yields a real tab on every v4 — version-stable.
   if [ ${#filter[@]} -eq 0 ]; then
-    yq '.projects[][] | .repo + "\t" + .path' "$manifest"
+    yq '.projects[][] | [.repo, .path] | @tsv' "$manifest"
   else
-    yq '.projects[][] | .repo + "\t" + .path' "$manifest" \
+    yq '.projects[][] | [.repo, .path] | @tsv' "$manifest" \
       | while IFS=$'\t' read -r r p; do
           for f in "${filter[@]}"; do
             [ "$f" = "$r" ] && { printf '%s\t%s\n' "$r" "$p"; break; }
