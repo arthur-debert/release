@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Detect the Kind of a directory by inspecting its filesystem.
 # Prints one of: rust-cli, go-cli, electron-app, tauri-app, zed-extension,
-# vscode-ext, nvim-plugin, tree-sitter, static-site, brew-tap, github-action
-# — or exits 1 if undetermined.
+# vscode-ext, nvim-plugin, tree-sitter, docs-site, static-site, brew-tap,
+# github-action — or exits 1 if undetermined.
 #
 # Usage: detect-kind [<dir>]   (defaults to current dir)
 
@@ -82,6 +82,19 @@ if [ -d plugin ] \
   if [ -d lua ] || find . -maxdepth 3 -name '*.lua' -print -quit | grep -q .; then
     echo nvim-plugin; exit 0
   fi
+fi
+
+# docs-site (mkdocs) — must precede the `static-site` (mdbook/jekyll)
+# branch: a repo mid-migration can carry a legacy docs/_config.yml
+# alongside the new root mkdocs.yml, and the mkdocs.yml is the
+# discriminator for the canonical docs-site pipeline. The Kind is
+# pure-content (no compiled artifact); the build+deploy lives in the
+# mkdocs.yml reusable workflow, and the docs build check ships via the
+# `mkdocs` Capability + this Kind's bin/check. A root mkdocs.yml is the
+# unambiguous signal (config-at-docs-root consumers point the reusable
+# workflow's `config-file:` at it but still keep a root marker).
+if [ -f mkdocs.yml ]; then
+  echo docs-site; exit 0
 fi
 
 # static site (mdbook or jekyll)
