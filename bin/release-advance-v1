@@ -63,21 +63,23 @@ git fetch --quiet origin
 src=${ref:-origin/main}
 target_sha=$(git rev-parse --verify "$src" 2>/dev/null) || {
   echo "release-advance-v1: bad ref '$src'" >&2; exit 1; }
+target_short=$(git rev-parse --short "$target_sha")
 
 if git rev-parse --verify --quiet origin/v1 >/dev/null; then
   current_v1=$(git rev-parse origin/v1)
+  current_short=$(git rev-parse --short "$current_v1")
   if [ "$current_v1" = "$target_sha" ]; then
-    echo "v1 already at $src ($(git rev-parse --short "$target_sha")) — nothing to do."
+    echo "v1 already at $src ($target_short) — nothing to do."
     exit 0
   fi
   if ! git merge-base --is-ancestor "$current_v1" "$target_sha"; then
-    echo "release-advance-v1: v1 ($(git rev-parse --short "$current_v1")) is NOT an ancestor of $src ($(git rev-parse --short "$target_sha"))." >&2
+    echo "release-advance-v1: v1 ($current_short) is NOT an ancestor of $src ($target_short)." >&2
     echo "A fast-forward is impossible — v1 has commits $src doesn't. Resolve by hand." >&2
     exit 1
   fi
-  echo "advancing v1: $(git rev-parse --short "$current_v1") -> $(git rev-parse --short "$target_sha") ($src)"
+  echo "advancing v1: $current_short -> $target_short ($src)"
 else
-  echo "release-advance-v1: origin/v1 doesn't exist yet; creating it at $src ($(git rev-parse --short "$target_sha"))." >&2
+  echo "release-advance-v1: origin/v1 doesn't exist yet; creating it at $src ($target_short)." >&2
 fi
 
 if [ "$dry_run" = 1 ]; then
@@ -86,4 +88,4 @@ if [ "$dry_run" = 1 ]; then
 fi
 
 git push origin "${target_sha}:refs/heads/v1"
-echo "v1 -> $(git rev-parse --short "$target_sha")"
+echo "v1 -> $target_short"

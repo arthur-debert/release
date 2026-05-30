@@ -194,7 +194,7 @@ Two hard rules before you report:
 1. **Re-verify actual state — don't trust the last wait result.** A `gh-copilot-wait` / `gh-pr-checks-wait` exit code can be stale by the time you stop (a check finished, a new commit landed). Always read live state first:
 
    ```sh
-   gh pr view <PR> --json url,headRefOid,mergeStateStatus,mergeable,statusCheckRollup,reviews --jq '{url,head:.headRefOid,mergeState:.mergeStateStatus,mergeable,checks:[.statusCheckRollup[]|{name:.name,c:.conclusion}],reviews:[.reviews[]|{by:.author.login,state:.state}]}'
+   gh pr view <PR> --json url,headRefOid,mergeStateStatus,mergeable,statusCheckRollup,reviews --jq '{url,head:.headRefOid,mergeState:.mergeStateStatus,mergeable,checks:[.statusCheckRollup[]?|{name:.name,c:.conclusion}],reviews:[.reviews[]?|{by:.author.login,state:.state}]}'
    ```
 
 2. **Never stop with only "I'll wait for the background task."** If a background wait is genuinely needed, *poll it to completion first* — `gh-copilot-wait` and `gh-pr-checks-wait` block precisely so you can. Returning before they resolve wastes the run: the parent finds the event already arrived and has to restart you.
