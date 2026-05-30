@@ -13,11 +13,11 @@ set -euo pipefail
 # layout (release#292). Portable: avoids GNU-only `readlink -f`.
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do
-  dir="$(cd "$(dirname "$src")" && pwd)"
+  dir="$(CDPATH= cd "$(dirname "$src")" && pwd)"
   src="$(readlink "$src")"
   [[ "$src" != /* ]] && src="$dir/$src"
 done
-self_dir="$(cd "$(dirname "$src")" && pwd)"
+self_dir="$(CDPATH= cd "$(dirname "$src")" && pwd)"
 
 usage() {
   cat <<EOF

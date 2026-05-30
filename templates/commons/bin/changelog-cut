@@ -12,11 +12,11 @@ export LC_ALL=C
 # Portable: avoids the GNU-only `readlink -f` (macOS lacks it).
 src="${BASH_SOURCE[0]}"
 while [ -L "$src" ]; do
-  dir="$(cd "$(dirname "$src")" && pwd)"
+  dir="$(CDPATH= cd "$(dirname "$src")" && pwd)"
   src="$(readlink "$src")"
   [[ "$src" != /* ]] && src="$dir/$src"
 done
-self_dir="$(cd "$(dirname "$src")" && pwd)"
+self_dir="$(CDPATH= cd "$(dirname "$src")" && pwd)"
 SEMVER="$self_dir/share/semver-tool/semver"
 
 version="${1:-}"

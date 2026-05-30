@@ -2,7 +2,7 @@
 
 load helper
 
-SCRIPT="$BATS_TEST_DIRNAME/../../scripts/roll-changelog.sh"
+SCRIPT="$BATS_TEST_DIRNAME/../../bin-internal/roll-changelog.sh"
 
 @test "extract: legacy single-file (no CHANGELOG/ dir) exits 1 with migration guidance" {
   echo "## [Unreleased]" > CHANGELOG.md
