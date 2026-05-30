@@ -269,6 +269,25 @@ for st in "${subtrees[@]}"; do
   done < <(git -C "$RELEASE_HOME" ls-tree -r "$ref" -- "$st" 2>/dev/null || true)
 done
 
+# #348 A3: distribute the canonical PR-loop skill to every consumer at the
+# path Claude Code auto-discovers project skills from (.claude/skills/), so a
+# fresh agent in a managed repo can drive a PR to ready-for-human-merge. Sourced
+# DIRECTLY from skills/ — the single home for skills (env/setup.sh installs the
+# same tree into ~/.claude/skills/ for cloud) — rather than duplicated into a
+# templates/ subtree, so there is one copy and no drift. The materialize loop
+# below writes it as a real blob; the mirror step symlinks it into the working
+# tree. .claude/skills/** is already excluded from the consumer markdownlint
+# gate (templates/commons/.markdownlintignore).
+pr_loop_skill_src="skills/gh-pr-review-loop/SKILL.md"
+pr_loop_skill_dest=".claude/skills/gh-pr-review-loop/SKILL.md"
+if git -C "$RELEASE_HOME" cat-file -e "$ref:$pr_loop_skill_src" 2>/dev/null; then
+  if [ -z "${plan_source[$pr_loop_skill_dest]:-}" ]; then
+    plan_order+=("$pr_loop_skill_dest")
+  fi
+  plan_mode[$pr_loop_skill_dest]=100644
+  plan_source[$pr_loop_skill_dest]=$pr_loop_skill_src
+fi
+
 # Compose lefthook.yml — this is a generated file, doesn't come from a single source path.
 # Order = precedence: base header < commons (universal gate) < each
 # capability < kind. The commons fragment applies to every consumer
