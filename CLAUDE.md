@@ -15,6 +15,7 @@ constraints that apply when *working on this repo itself*.
 - `.github/actions/<name>/` — composite actions, atomic units shared across (future) workflows
 - `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
   - Policy/setup: `apply-ruleset`, `sweep-github-policy`, `install-release-{secrets,token}`, `enable-dependabot-security`, `detect-stack`
+  - Release mechanics: `release-advance-v1` (fast-forward the floating `v1` branch to main after a release-side merge — one command for the old four-step `checkout v1 && merge --ff-only main && push` dance)
   - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `gh-release-issue`
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)

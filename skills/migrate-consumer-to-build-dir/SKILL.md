@@ -80,6 +80,23 @@ echo "remote: $REMOTE"
 
 If `$REMOTE` doesn't match what the user said (e.g. they said `lex-fmt/nvim` but the remote is `someone-else/nvim`), STOP and confirm.
 
+### 1b. Check the in-flight lock (parallel-agent coordination)
+
+Before doing any work, check whether another session already owns this consumer's migration. Two sessions racing the same repo produced a duplicate stacked PR that had to be closed as CONFLICTING (release#302). The lock is an open PR carrying the `migration-in-flight` label.
+
+```sh
+cd "$CONSUMER_PATH"
+INFLIGHT=$(gh pr list --state open --label migration-in-flight \
+  --json number,url,headRefName --jq '.[] | "\(.number)\t\(.url)\t\(.headRefName)"')
+if [ -n "$INFLIGHT" ]; then
+  echo "STOP: a migration is already in flight on $REMOTE:" >&2
+  echo "$INFLIGHT" >&2
+  exit 1
+fi
+```
+
+If a labelled PR exists, **STOP and surface it** — another agent/session is on it. The only exception is when the user explicitly says "re-sync"/"take over" this repo; in that case the existing PR *is* yours and you proceed down the re-sync path (step 4 detects the branch). Do not open a second PR.
+
 ### 2. Get main clean and current
 
 ```sh
@@ -232,7 +249,7 @@ fi
 
 ### 11. Open the PR
 
-Skip if `--force-with-lease` push went to an existing PR — gh-pr-review-loop will pick it up.
+Skip the `gh pr create` if `--force-with-lease` push went to an existing PR — gh-pr-review-loop will pick it up. Either way, **set the in-flight lock** (step 11b) so a parallel session backs off.
 
 ```sh
 cd "$CONSUMER_PATH"
@@ -264,6 +281,21 @@ Closes the ADR-0001 migration for this repo.
 EOF
 )"
 ```
+
+### 11b. Set the in-flight lock
+
+Label the PR `migration-in-flight` (the lock other sessions check in step 1b). Create the label first if the consumer repo doesn't have it yet — `--add-label` fails on an unknown label. Idempotent: re-running on an already-labelled PR is a no-op.
+
+```sh
+cd "$CONSUMER_PATH"
+PR=$(gh pr view --json number --jq .number)   # works for both freshly-created and re-sync PRs
+gh label create migration-in-flight \
+  --color FBCA04 --description "ADR-0001 migration owned by an active agent/session" \
+  2>/dev/null || true
+gh pr edit "$PR" --add-label migration-in-flight
+```
+
+The label is released naturally when the PR merges or closes — no explicit teardown. gh-pr-review-loop leaves it in place while driving the PR.
 
 ### 12. Hand off to gh-pr-review-loop
 
@@ -312,12 +344,13 @@ Examples:
 
 If the user says "re-sync repo X" or "the PR for X is stale because release moved":
 
-1. Steps 0-2 unchanged.
-2. Step 4 detects the existing branch and resets to `origin/main` (`RESYNC=1`).
-3. Steps 5-9 unchanged.
-4. Step 10 uses `--force-with-lease`.
-5. Step 11 is skipped — the PR is already open. `gh pr view` to confirm; the new commit just replaces the old one.
-6. Step 12 hands back to `gh-pr-review-loop`.
+1. Steps 0-1 unchanged. Step 1b: the lock check finds *your own* open PR — that's expected for a re-sync, so proceed (the user explicitly asked to re-sync this repo).
+2. Step 2 unchanged.
+3. Step 4 detects the existing branch and resets to `origin/main` (`RESYNC=1`).
+4. Steps 5-9 unchanged.
+5. Step 10 uses `--force-with-lease`.
+6. Step 11's `gh pr create` is skipped — the PR is already open. `gh pr view` to confirm; the new commit just replaces the old one. **Still run step 11b** to ensure the `migration-in-flight` label is present (idempotent).
+7. Step 12 hands back to `gh-pr-review-loop`.
 
 Do NOT `git commit --amend` an existing migration commit. Always replace it with a fresh commit on top of `origin/main` — the diff against `main` must reflect exactly what release-sync produces today, not a hand-merged amalgam.
 
