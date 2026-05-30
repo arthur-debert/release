@@ -1,6 +1,6 @@
 ---
 name: gh-pr-review-loop
-description: "Drive a PR through the standard arthur-debert review pipeline: push, request Copilot review, wait, triage comments, push fixups, merge. Use when working on any PR in arthur-debert/* or lex-fmt/* repos onboarded to the canonical GitHub-side standardization (ruleset + Copilot auto-trigger + policy files). Triggered by: `gh pr create`, requesting a Copilot review, asking to merge a PR, or processing Copilot feedback."
+description: "Drive a PR to ready-for-human-merge in any repo managed by `arthur-debert/release`. Start with `gh-task-status` to see where the PR stands (one lifecycle state + next action), then push, request the Copilot review, wait, triage comments, resolve threads, and stop when mergeable — the human does the final merge. Use when opening a PR, checking where a PR stands, waiting on or triaging Copilot review feedback, or driving a PR toward merge-readiness. Triggered by: `gh pr create`, 'check PR status', 'where does this PR stand', requesting a Copilot review, or processing review comments."
 ---
 
 # gh-pr-review-loop
