@@ -67,12 +67,12 @@ pre-commit:
         SHELLCHECK_OPTS='-S warning' actionlint -color
 
     ruff:
-      # Lint + format-check the Python state engine. Config lives at the
-      # workspace-root pyproject.toml [tool.ruff]. Mirrors the CI `py-lint`
-      # job. Scoped to lib/release_gh + tests for now; orchestrator/ (a WIP
-      # spike, not yet ruff-clean) folds into this glob once cleaned.
+      # Lint + format-check the Python workspace (release_gh + orchestrator).
+      # Config lives at the workspace-root pyproject.toml [tool.ruff]. Mirrors
+      # the CI `py-lint` job.
       glob:
         - "lib/**/*.py"
+        - "orchestrator/**/*.py"
         - "tests/python/**/*.py"
       run: |
         if ! command -v ruff >/dev/null 2>&1; then

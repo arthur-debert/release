@@ -21,6 +21,8 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
-# Import release_gh without a build/install step — mirrors the runtime
-# sys.path-shim model, so tests exercise the same import path bin/ does.
-pythonpath = ["lib/release_gh"]
+# Import release_gh + orchestrator without a build/install step. release_gh
+# mirrors the runtime sys.path-shim model; orchestrator.watch is importable
+# for its pure logic because it lazy-imports the Claude Agent SDK (so these
+# tests need no SDK — they run under the light py-lint CI job).
+pythonpath = ["lib/release_gh", "orchestrator"]

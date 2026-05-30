@@ -30,12 +30,44 @@ orc run <repo-path> "<prompt>"       # open a fresh session for repo (acceptEdit
 orc resume <repo-path> "<prompt>"    # continue the last session for repo
 orc probe <repo-path> "<prompt>"     # evaluate via fresh agent (bypassPermissions)
 orc propagate <repo-path>... --ref X # release-sync across consumers + open PRs
+orc watch <pr>... [--auto]           # poll PRs, act on lifecycle transitions
 orc sessions list                    # show {repo_path: session_id}
 orc sessions clear <repo-path>       # drop session id for repo
 ```
 
 Add `-v` / `--verbose` to dump raw SDK messages to stderr — useful
 while exploring the SDK surface.
+
+## `orc watch` — the detached PR transport (release#338)
+
+The poll-loop transport for the PR state engine. Instead of webhooks, a
+long-running local process imports `release_gh.state` and polls a few PRs
+(~zero agent tokens — it's `gh` calls, not an awake agent), dispatching only
+when a PR's lifecycle *state changes*.
+
+```sh
+orc watch 350 351                 # notify-only: ping you at the moments that matter
+orc watch 350 --auto              # full auto-fix: spawn a fresh agent on ADDRESSING/BLOCKED
+orc watch 350 --repo ~/h/dodot --interval 60
+```
+
+Two human gates are never automated: the **merge** (READY flips draft→ready and
+pages you) and a fired **circuit breaker** (always pages, never acts).
+
+| Transition | notify-only | `--auto` |
+|---|---|---|
+| `ADDRESSING` / `BLOCKED` (check/conflict) | ping you to drive | spawn a fresh fixer agent |
+| `BLOCKED` (breaker) | page — never act | page — never act |
+| `READY` | flip draft→ready, page | flip draft→ready, page |
+| pending / validating | quiet | quiet |
+
+**Why a fresh agent, not session-resume:** resume reloads the whole
+implementation conversation (100–200k tokens) every wake, goes stale when
+detached, and is defensive about its own code. The fixer is fresh and reads its
+context — the `/handoff` note the PR-opening agent left, the linked spec/issue,
+and `gh-task-status`. It runs `bypassPermissions` in a **throwaway clone** of the
+PR branch (blast radius bounded, like `probe`), pushes fixups to the PR, and is
+removed after. It never merges.
 
 ## `orc probe` — verification by proxy
 
@@ -129,13 +161,18 @@ branch, pass `--ref take-iii` explicitly.
 
 - `orchestrator/cli.py` — `orc` entry point
 - `orchestrator/session.py` — `run_session()` wrapping `ClaudeSDKClient`
+- `orchestrator/watch.py` — `orc watch` poll-loop + pure `decide()` dispatch
+  (imports `release_gh.state`; lazy-imports the SDK so its logic unit-tests
+  without it — `tests/python/test_watch.py`)
 - `orchestrator/state.py` — JSON-backed `{repo_path: session_id}` store
   at `~/.local/state/release-orchestrator/sessions.json`
 - `tests/spike.sh` — end-to-end smoke check
 
 ## What's deliberately not here yet
 
-- Multi-repo fan-out
-- GH-event-driven session wake-up (Phase B)
+- Multi-repo fan-out within a single `orc watch` (it watches PRs in one repo)
+- Cloud/webhook transport for the "survive laptop-off" case — `orc watch`
+  covers detached-while-machine-on; true routines are a later, Cloud-coupled add
+- Persisting `orc watch` transition memory across restarts (in-memory today)
 - Permission-callback gating per project
 - Pruning of session state (text-only today; revisit when state grows)

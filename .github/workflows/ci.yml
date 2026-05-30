@@ -52,9 +52,9 @@ jobs:
         # findings; bump deliberately.
         run: pip install ruff==0.15.12 pytest
       - name: ruff check
-        run: ruff check lib/release_gh tests/python
+        run: ruff check lib/release_gh orchestrator tests/python
       - name: ruff format --check
-        run: ruff format --check lib/release_gh tests/python
+        run: ruff format --check lib/release_gh orchestrator tests/python
       - name: pytest
         run: pytest
 
