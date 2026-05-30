@@ -66,6 +66,22 @@ pre-commit:
         # silently disables integration entirely.
         SHELLCHECK_OPTS='-S warning' actionlint -color
 
+    ruff:
+      # Lint + format-check the Python state engine. Config lives at the
+      # workspace-root pyproject.toml [tool.ruff]. Mirrors the CI `py-lint`
+      # job. Scoped to lib/release_gh + tests for now; orchestrator/ (a WIP
+      # spike, not yet ruff-clean) folds into this glob once cleaned.
+      glob:
+        - "lib/**/*.py"
+        - "tests/python/**/*.py"
+      run: |
+        if ! command -v ruff >/dev/null 2>&1; then
+          echo "ruff not installed; skipping (install: brew install ruff)"
+          exit 0
+        fi
+        ruff check {staged_files}
+        ruff format --check {staged_files}
+
     lint-skills:
       # Markdownlint our OWN skill docs. Vendored skills (those carrying
       # an .upstream provenance marker) are skipped by the script — we
