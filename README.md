@@ -150,6 +150,7 @@ scaffolded but not exercised; `📋` planned; `—` not applicable.
 | python-pkg    | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ | — | — | — | 🚧 | 📋 |
 | gh-action     | ✅ | ✅ | — | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
 | brew-tap      | — | — | — | — | ✅ | — | — | — | (is tap) | 🚧 | — | 🚧 | 📋 |
+| docs-site     | — | — | — | — | ✅ | — | — | — | — | — | — | ✅⁶ | ✅ |
 
 ¹ Opt-in `wasm-packages` slot (multiline list as of #187) — Rust
 workspace with one or more wasm-bindgen members. Each member is
@@ -197,6 +198,15 @@ registry-publish step.
 `GitHubPrivateRepositoryReleaseDownloadStrategy`. End users export
 `HOMEBREW_GITHUB_API_TOKEN=$(gh auth token)` before `brew install`.
 Used by supage; the same option exists on rust-cli for parity.
+
+⁶ **docs-site — pure-content Kind, no release semantics.** A docs-site
+repo is an mkdocs site (detected by a root `mkdocs.yml`). It carries no
+artifact-publish mechanics — its "release" is the GitHub Pages deploy
+driven by the `mkdocs.yml@v2` reusable workflow on push to main. The
+Kind ships `bin/check` (mkdocs build `--strict`); the `mkdocs`
+Capability layers `bin/check-docs` on top. Plugin-agnostic, so the
+`lex` plugin renders `.lex` natively. First consumer: `lex-fmt/comms`
+(release#353 §A).
 
 ## Adoption matrix — Stack × Repo
 
