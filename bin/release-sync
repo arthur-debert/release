@@ -442,7 +442,15 @@ while IFS= read -r -d '' link; do
   target=$(readlink "$link")
   case "$target" in
     *.release/*)
-      if [ ! -e "$link" ]; then
+      # A link is only stale if its target is absent from BOTH the current
+      # .release/ AND the new tree we're about to apply. Checking only the
+      # live tree ([ ! -e "$link" ]) wrongly removes a link whose target is
+      # materialized THIS sync — e.g. a consumer that committed bin/check-shell
+      # as a symlink but never committed its .release/ target. The create loop
+      # won't re-add it (the link already points correctly), so the tool would
+      # silently vanish. Guard against the new tree (tmp_release) too.
+      rel="${target##*.release/}"
+      if [ ! -e "$link" ] && [ ! -e "$tmp_release/$rel" ]; then
         symlinks_to_remove+=("$link")
       fi
       ;;
