@@ -4,7 +4,8 @@ name: release-sync + fleet tests
 #   tests/release-sync — provenance marker (ADR-0002) + drift detection,
 #     syncing a synthetic consumer from this checkout (RELEASE_REF=HEAD).
 #   tests/fleet        — managed-repos zero-logic path resolution against a
-#     fixture manifest (offline; no gh/network).
+#     fixture manifest, and release-inbox clustering over a stub-gh inbox
+#     (offline; no gh/network).
 # Regressions surface here before riding out to consumers.
 
 on:
@@ -14,6 +15,7 @@ on:
       - 'bin/release-sync'
       - 'bin/release-drift-check'
       - 'bin/managed-repos'
+      - 'bin/release-inbox'
       - 'bin/release-verify-fleet'
       - 'bin/detect-kind'
       - 'managed-repos.yaml'
@@ -26,6 +28,7 @@ on:
       - 'bin/release-sync'
       - 'bin/release-drift-check'
       - 'bin/managed-repos'
+      - 'bin/release-inbox'
       - 'bin/release-verify-fleet'
       - 'bin/detect-kind'
       - 'managed-repos.yaml'
