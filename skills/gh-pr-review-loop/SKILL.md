@@ -20,7 +20,7 @@ The canonical PR loop for repos onboarded to the GitHub-side standardization (ru
 To get the current authoritative list:
 
 ```sh
-audit-portfolio --only-failing  # discovers via main-branch-protection ruleset, skips audit-exclude.yml entries
+audit-portfolio --only-failing  # reads managed-repos.yaml (the hardcoded fleet; no discovery)
 ```
 
 All have:
@@ -30,7 +30,7 @@ All have:
 - `RELEASE_TOKEN` secret set (propagated by `install-release-token`)
 - `.github/copilot-instructions.md`, `CODEOWNERS`, `dependabot.yml`, `pull_request_template.md` (rust stacks); some non-rust stacks have only the stack-agnostic subset (CODEOWNERS + dependabot.yml + copilot-review.yml) until per-stack templates are written.
 
-Excluded by design (in `audit-exclude.yml`): `arthur-debert/{homebrew-tools,treex,simple-gal-action}`. Reasons in that file.
+Out of scope (commented out in `managed-repos.yaml`, with reasons): `arthur-debert/{homebrew-tools,simple-gal-action}` and inactive repos like `treex`.
 
 ## The helpers
 
@@ -54,7 +54,7 @@ Single home: **`~/h/release/bin/`** — both the policy/setup tools and the day-
 | `enable-dependabot-security [--repos ...]` | Enable Dependabot vulnerability-alerts + auto-fix on every onboarded repo via the API toggle. |
 | `migrate-copilot-review` | Sweep onboarded consumers still pointing at the legacy `gh-dagentic@main` reusable workflow and PR them to `release/@v1`. Should be a no-op now (sweep ran 2026-05-08); kept for future bulk migrations. |
 | `audit-repo [--repo <r>]` | Per-repo readout: ruleset, RELEASE_TOKEN, copilot-review pointer, CODEOWNERS, dep_security, dep_policy, ci_main_green, private go module auth. PASS/FAIL/WARN per row. |
-| `audit-portfolio [--only-failing]` | Loop `audit-repo` over auto-discovered onboarded repos (minus `audit-exclude.yml` entries). Summary table + detail of problem repos. |
+| `audit-portfolio [--only-failing]` | Loop `audit-repo` over the `managed-repos.yaml` fleet (the hardcoded source of truth; no discovery). Summary table + detail of problem repos. |
 | `audit-smoke-test <repo>` | Open a no-op PR, verify Copilot fires + checks trigger + Copilot is added as reviewer (timeline event), close the PR. Real end-to-end verification. Use after a config change to confirm the loop actually still works. |
 
 Templates live at `~/h/release/templates/<stack>/`; ruleset JSON at `~/h/release/rulesets/main-protection.json.tmpl`. Scripts resolve these relative to their own location, so no XDG/symlink indirection is needed.

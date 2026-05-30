@@ -1,75 +1,88 @@
 # Canonical list of repos this release/ portfolio manages.
-# Source of truth for audit-portfolio + any future per-fleet tooling.
-# README.md's "Managed repos" table is the human-readable mirror.
+# Source of truth for audit-portfolio, managed-repos, release-verify-fleet,
+# and any future per-fleet tooling. README.md's "Managed repos" table is
+# the human-readable mirror.
 #
-# Adding a repo: append it under the right project + run audit-repo
-# to confirm onboarding. Removing a repo: delete the line; if removal
-# is permanent and the repo still carries the main-branch-protection
-# ruleset, also note it in this file's tail comment so future maintainers
-# don't accidentally re-add it via ruleset discovery.
+# THIS FILE IS THE ONLY SOURCE OF TRUTH FOR THE FLEET. There is no
+# ruleset/gh-api auto-discovery — that path caused recurring bugs and is
+# deliberately gone. To add a repo: append it under the right project. To
+# remove: delete the entry.
+#
+# Each entry is `{ repo: <owner>/<name>, path: <dir-relative-to-REPOS_ROOT> }`.
+# The `path` is stated EXPLICITLY so on-disk location needs zero inference:
+# a tool resolves a repo to `$REPOS_ROOT/<path>` and nothing else. No
+# single-vs-multi heuristics, no org-vs-project-name guessing. $REPOS_ROOT
+# defaults to ~/h on a dev machine; release-verify-fleet points it at a
+# throwaway dir for a hermetic sweep.
+#
+# Note the path is NOT derivable from `repo`: the lex project's repos are
+# `lex-fmt/*` but live under `lex-fmt/` while arami's `arthur-debert/arami-*`
+# live under `arami/`, and single-repo projects collapse to a bare dir
+# (`arthur-debert/dodot` -> `dodot`, not `dodot/dodot`). That non-derivability
+# is exactly why the path is written down rather than computed.
 
 projects:
   arami:
-    - arthur-debert/arami-app
-    - arthur-debert/arami-core
+    - { repo: arthur-debert/arami-app,  path: arami/arami-app }
+    - { repo: arthur-debert/arami-core, path: arami/arami-core }
 
   burgertocow:
-    - arthur-debert/burgertocow
+    - { repo: arthur-debert/burgertocow, path: burgertocow }
 
   clapfig:
-    - arthur-debert/clapfig
+    - { repo: arthur-debert/clapfig, path: clapfig }
 
   dodot:
-    - arthur-debert/dodot
+    - { repo: arthur-debert/dodot, path: dodot }
 
   # Secondary stack — brew-tap. Different lifecycle (formulas land via
   # release-workflow pushes, not PR loop). Out of audit scope for now;
   # uncomment when the brew-tap stack workstream picks up.
   # homebrew-tools:
-  #   - arthur-debert/homebrew-tools
+  #   - { repo: arthur-debert/homebrew-tools, path: homebrew-tools }
 
   lex:
-    - lex-fmt/comms
-    - lex-fmt/lex
-    - lex-fmt/lexed
-    - lex-fmt/nvim
-    - lex-fmt/tree-sitter-lex
-    - lex-fmt/vscode
-    - lex-fmt/zed-lex
+    - { repo: lex-fmt/comms,           path: lex-fmt/comms }
+    - { repo: lex-fmt/lex,             path: lex-fmt/lex }
+    - { repo: lex-fmt/lexed,           path: lex-fmt/lexed }
+    - { repo: lex-fmt/nvim,            path: lex-fmt/nvim }
+    - { repo: lex-fmt/tree-sitter-lex, path: lex-fmt/tree-sitter-lex }
+    - { repo: lex-fmt/vscode,          path: lex-fmt/vscode }
+    - { repo: lex-fmt/zed-lex,         path: lex-fmt/zed-lex }
 
   padz:
-    - arthur-debert/padz
+    - { repo: arthur-debert/padz, path: padz }
 
   # release/ itself — the source-of-truth repo doesn't carry many of
   # the per-consumer baseline files (it IS the source). Out of audit
   # scope for now; will need a release/-specific check set if we
   # want to track its own hygiene.
   # release:
-  #   - arthur-debert/release
+  #   - { repo: arthur-debert/release, path: release }
 
   rustloc:
-    - arthur-debert/rustloc
+    - { repo: arthur-debert/rustloc, path: rustloc }
 
   simple-gal:
-    - arthur-debert/simple-gal
+    - { repo: arthur-debert/simple-gal,    path: simple-gal/simple-gal }
     # gh-action stack — secondary, not yet tackled (#108).
     # Uncomment when the gh-action stack workstream picks up.
-    # - arthur-debert/simple-gal-action
-    - arthur-debert/simple-gal-ui
+    # - { repo: arthur-debert/simple-gal-action, path: simple-gal/simple-gal-action }
+    - { repo: arthur-debert/simple-gal-ui, path: simple-gal/simple-gal-ui }
 
   standout:
-    - arthur-debert/standout
+    - { repo: arthur-debert/standout, path: standout }
 
   supage:
-    - arthur-debert/supage
+    - { repo: arthur-debert/supage, path: supage }
 
   wave-term:
-    - arthur-debert/wave-term
+    - { repo: arthur-debert/wave-term, path: wave-term }
 
 # NOT managed even though they carry the main-branch-protection
 # ruleset (which was applied broadly across arthur-debert/* for
-# unrelated reasons). Listed here so audit-portfolio's old auto-discover
-# path is self-documenting for the day someone tries to reintroduce it:
+# unrelated reasons). Listed here so it's self-documenting for the day
+# someone tries to reintroduce auto-discovery (don't):
 # - arthur-debert/treex                — inactive
 # - arthur-debert/dotcat               — unrelated personal project
 # - arthur-debert/falala               — unrelated personal project

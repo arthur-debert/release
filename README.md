@@ -217,7 +217,7 @@ how complete the local files look.
 | tree-sitter   | **fleet-adopted (1/1)**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
 | zed-extension | **fleet-adopted (1/1)**: `lex-fmt/zed-lex` v0.1.1 (2026-05-23) via `zed-extension.yml@v1` — canonical authored same day in [#190](https://github.com/arthur-debert/release/pull/190); validates both `extension.toml` and `Cargo.toml` are in sync at the tag |
 | go-cli        | **fleet-adopted (1/1)**: `arthur-debert/supage` `0.0.1` + `0.0.2` via `go-cli.yml@v1` incl. brew-private-repo |
-| gh-action     | **fleet-adopted (1/1 eligible)**: `arthur-debert/release` (dogfood) v1.7.1 → v1.7.5 (2026-05-19) via `gh-action.yml@v1`; `simple-gal-action` excluded per `audit-exclude.yml` (minimal active development) |
+| gh-action     | **fleet-adopted (1/1 eligible)**: `arthur-debert/release` (dogfood) v1.7.1 → v1.7.5 (2026-05-19) via `gh-action.yml@v1`; `simple-gal-action` excluded (commented out in `managed-repos.yaml`; minimal active development) |
 | brew-tap      | **out-of-scope**: `homebrew-tools` is a passive registry (formulas pushed by rust-cli/go-cli `push-brew-tap`); no release semantics. CI canonicalization deferred to [#107](https://github.com/arthur-debert/release/issues/107) |
 | python-pkg    | (no managed-portfolio repos yet) |
 
@@ -239,8 +239,11 @@ brew-tap need their canonical workflows written first.
 
 ## Managed repos
 
-Canonical list. 22 repos across 3 multi-repo "projects" (lex, arami,
-simple-gal) plus single-repo projects.
+Human mirror of `managed-repos.yaml` (the authoritative source). 19
+active repos across 3 multi-repo "projects" (lex, arami, simple-gal)
+plus single-repo projects. Three rows below (`homebrew-tools`,
+`release`, `simple-gal-action`) are listed for reference but are
+currently out of scope — commented out in the manifest.
 
 | Project | Repo | Local path |
 |---|---|---|
@@ -249,7 +252,7 @@ simple-gal) plus single-repo projects.
 | burgertocow | `arthur-debert/burgertocow` | `~/h/burgertocow` |
 | clapfig | `arthur-debert/clapfig` | `~/h/clapfig` |
 | dodot | `arthur-debert/dodot` | `~/h/dodot` |
-| homebrew-tools | `arthur-debert/homebrew-tools` | `~/h/homebrew-tools` |
+| homebrew-tools _(out of scope)_ | `arthur-debert/homebrew-tools` | `~/h/homebrew-tools` |
 | lex | `lex-fmt/comms` | `~/h/lex-fmt/comms` |
 | lex | `lex-fmt/lex` | `~/h/lex-fmt/lex` |
 | lex | `lex-fmt/lexed` | `~/h/lex-fmt/lexed` |
@@ -258,18 +261,20 @@ simple-gal) plus single-repo projects.
 | lex | `lex-fmt/vscode` | `~/h/lex-fmt/vscode` |
 | lex | `lex-fmt/zed-lex` | `~/h/lex-fmt/zed-lex` |
 | padz | `arthur-debert/padz` | `~/h/padz` |
-| release | `arthur-debert/release` | `~/h/release` |
+| release _(out of scope)_ | `arthur-debert/release` | `~/h/release` |
 | rustloc | `arthur-debert/rustloc` | `~/h/rustloc` |
 | simple-gal | `arthur-debert/simple-gal` | `~/h/simple-gal/simple-gal` |
-| simple-gal | `arthur-debert/simple-gal-action` | `~/h/simple-gal/simple-gal-action` |
+| simple-gal _(out of scope)_ | `arthur-debert/simple-gal-action` | `~/h/simple-gal/simple-gal-action` |
 | simple-gal | `arthur-debert/simple-gal-ui` | `~/h/simple-gal/simple-gal-ui` |
 | standout | `arthur-debert/standout` | `~/h/standout` |
 | supage | `arthur-debert/supage` | `~/h/supage` |
 | wave-term | `arthur-debert/wave-term` | `~/h/wave-term` |
 
-Repos NOT in this list are out of scope. The `audit-portfolio`
-discovery uses the `main-branch-protection` ruleset as a convenience
-proxy, but the authoritative set is the table above.
+Repos NOT in this list are out of scope. `managed-repos.yaml` is the
+single source of truth — there is no auto-discovery (ruleset/gh-api
+discovery was removed after it caused recurring scope bugs). `managed-repos`
+resolves each entry to `$REPOS_ROOT/<path>` with zero inference; the
+table above is the human mirror.
 
 ## What every onboarded repo gets
 
