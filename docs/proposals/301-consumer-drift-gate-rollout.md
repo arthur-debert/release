@@ -15,8 +15,9 @@ records the phased plan to turn it into a fleet-wide gate.
   variable, so `--check` / `--dry-run` silently fell through to apply.
   They are now genuinely read-only.
 - `bin/release-drift-check` — marker-aware gate: rebuilds against the
-  recorded SHA (drift, not staleness), plus a `.release-sync.yaml`
-  over-override check. Exits 0 clean / 1 drift / 0 when no marker yet.
+  recorded SHA (drift, not staleness), plus a check for forbidden
+  `.release-sync.yaml` keys beyond `capabilities`. Exits 0 clean / 1
+  drift / 0 when no marker yet.
 - `tests/release-sync/*.bats` + `release-sync-tests.yml` CI.
 
 `release-drift-check` is on `$PATH`, so it is usable **today** agent-side:

@@ -55,6 +55,20 @@ EOF
   [[ "$output" == *"beyond"* ]]
 }
 
+@test "drift-check tolerates an empty/capabilities-only .release-sync.yaml" {
+  "$BIN/release-sync" >/dev/null
+  printf 'capabilities: []\n' > .release-sync.yaml
+  run "$BIN/release-drift-check"
+  [ "$status" -eq 0 ]
+}
+
+@test "drift-check hard-fails (non-zero) on malformed .release-sync.yaml" {
+  "$BIN/release-sync" >/dev/null
+  printf 'this: [unclosed\n' > .release-sync.yaml
+  run "$BIN/release-drift-check"
+  [ "$status" -ne 0 ]
+}
+
 @test "drift-check is a no-op (exit 0) when there is no marker" {
   # A repo not on the marker-aware sync must not fail the gate.
   mkdir -p .release

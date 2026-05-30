@@ -37,10 +37,14 @@ jobs:
           fetch-depth: 0   # release-sync reads templates from the git ref
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
-      - name: Install yq (mikefarah v4)
+      - name: Install yq (mikefarah v4 — pinned)
+        # Pin an explicit v4 release, NOT releases/latest: the determinism
+        # of the marker round-trip depends on the yq major that composes
+        # lefthook.yml. A jump to v5 as "latest" could change serialization
+        # and turn this into spurious churn instead of a real regression.
         run: |
           sudo wget -qO /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+            https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           yq --version
       - name: Run BATS suite

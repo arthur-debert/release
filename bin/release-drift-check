@@ -62,7 +62,7 @@ if [ ! -f "$SOURCE_MARKER" ]; then
   exit 0
 fi
 
-sha=$(grep -E '^[0-9a-f]{40}$' "$SOURCE_MARKER" | head -1 || true)
+sha=$(tr -d '\r' < "$SOURCE_MARKER" | grep -E '^[0-9a-f]{40}$' | head -n 1 || true)
 if [ -z "$sha" ]; then
   echo "release-drift-check: $SOURCE_MARKER has no 40-char SHA line" >&2
   exit 2
@@ -93,7 +93,13 @@ fi
 # is per-repo rule tuning that release-sync silently ignores — so it never
 # shows up as managed-file drift, but it IS forbidden divergence.
 if [ -f .release-sync.yaml ]; then
-  extra=$(yq 'keys | .[]' .release-sync.yaml 2>/dev/null | grep -vx 'capabilities' || true)
+  # No `2>/dev/null || true` here: malformed YAML is a developer bug, not
+  # a transient failure — let yq's non-zero exit trip `set -e` and fail
+  # hard rather than silently reporting "no extra keys".
+  # `(. // {})` coerces an empty/null document to a map so `keys` doesn't
+  # error on it — only a genuine YAML *parse* error trips set -e (the
+  # intended hard failure for malformed config).
+  extra=$(yq '(. // {}) | keys | .[] | select(. != "capabilities")' .release-sync.yaml)
   if [ -n "$extra" ]; then
     drift=1
     bullets=""

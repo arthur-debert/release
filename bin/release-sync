@@ -465,8 +465,11 @@ if [ "$mode" = check ]; then
   # refuses to clobber it. --check must report it as non-clean, or a
   # consumer that replaced a managed symlink with a hand-edited real file
   # would pass the gate. (This is the headline drift case.)
-  [ "$total_changes" -eq 0 ] && [ "${#conflicts[@]}" -eq 0 ]
-  exit
+  if [ "$total_changes" -eq 0 ] && [ "${#conflicts[@]}" -eq 0 ]; then
+    exit 0
+  else
+    exit 1
+  fi
 fi
 
 if [ "$mode" = dryrun ]; then
