@@ -1,0 +1,26 @@
+# Virtual workspace root for release/'s Python code.
+#
+# Two members, split by the environment line (see
+# docs/proposals/dev-workflow-state-engine.lex §6.2):
+#   - lib/release_gh : the PR state engine. stdlib + `gh` only, runs in CI
+#                      and Cloud. ZERO third-party runtime deps.
+#   - orchestrator   : local-only harness. May use the Claude Agent SDK
+#                      because it never runs in CI/Cloud.
+#
+# Toolchain (ruff, pytest) is configured ONCE here and covers both.
+[tool.uv.workspace]
+members = ["lib/release_gh", "orchestrator"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["**/.venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+# Import release_gh without a build/install step — mirrors the runtime
+# sys.path-shim model, so tests exercise the same import path bin/ does.
+pythonpath = ["lib/release_gh"]
