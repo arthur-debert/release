@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Advance the floating major branch (v1, v2, …) to the current main
+# (fast-forward only).
+#
+# Consumers pin `@vN`; that branch must always point at the latest
+# non-breaking commit on main. After merging a release-side change to main,
+# run this to publish it to every `@vN` consumer in one step instead of the
+# four-command `fetch && checkout vN && merge --ff-only main && push` dance.
+#
+# The target major is auto-detected as the HIGHEST `origin/vN` branch, so it
+# tracks the current major (v2 today, v3 later) without re-wiring. Override
+# with `--major vN`.
+#
+# Usage:
+#   release-advance-major              # ff highest vN -> origin/main, then push
+#   release-advance-major --major v2   # advance a specific major branch
+#   release-advance-major --dry-run    # show what would happen, push nothing
+#   release-advance-major <ref>        # ff the major -> <ref> instead of origin/main
+#
+# Runs from inside the release repo (or $RELEASE_HOME). It updates the
+# remote major ref directly via a server-side fast-forward push, so it never
+# touches your working tree or current checkout. Refuses if the
+# fast-forward is impossible (the major has commits the target doesn't) —
+# that's a divergence signal (likely a breaking change on main; cut the next
+# major instead) to resolve by hand.
+#
+# Exit codes:
+#   0  — major advanced (or already up to date)
+#   1  — fatal error / non-fast-forward
+#   64 — bad usage
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+dry_run=0
+ref=""
+major=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) dry_run=1; shift ;;
+    --major) major=${2:-}; shift 2 ;;
+    -h|--help) show_help; exit 0 ;;
+    -*) echo "unknown arg: $1" >&2; show_help >&2; exit 64 ;;
+    *)
+      [ -z "$ref" ] || { echo "release-advance-major: too many args" >&2; exit 64; }
+      ref=$1; shift ;;
+  esac
+done
+
+# Locate the release repo: prefer $RELEASE_HOME, else the current repo.
+RELEASE_HOME=${RELEASE_HOME:-$HOME/release}
+if [ -d "$RELEASE_HOME/.git" ]; then
+  cd "$RELEASE_HOME"
+elif git rev-parse --show-toplevel >/dev/null 2>&1; then
+  cd "$(git rev-parse --show-toplevel)"
+else
+  echo "release-advance-major: not inside the release repo and \$RELEASE_HOME unset" >&2
+  exit 1
+fi
+
+# Sanity: refuse to push on a repo that isn't arthur-debert/release.
+origin_url=$(git remote get-url origin 2>/dev/null || true)
+case "$origin_url" in
+  *arthur-debert/release*) : ;;
+  *) echo "release-advance-major: origin ('$origin_url') doesn't look like arthur-debert/release; refusing" >&2; exit 1 ;;
+esac
+
+git fetch --quiet origin
+
+# Resolve the target major branch: explicit --major, else the highest origin/vN.
+if [ -z "$major" ]; then
+  major=$(git branch -r | grep -oE 'origin/v[0-9]+$' | sed 's|origin/||' | sort -V | tail -1 || true)
+  [ -n "$major" ] || {
+    echo "release-advance-major: no origin/vN branch found; pass --major vN" >&2; exit 1; }
+fi
+case "$major" in
+  v[0-9]*) : ;;
+  *) echo "release-advance-major: --major must look like vN (got '$major')" >&2; exit 64 ;;
+esac
+
+src=${ref:-origin/main}
+target_sha=$(git rev-parse --verify "$src" 2>/dev/null) || {
+  echo "release-advance-major: bad ref '$src'" >&2; exit 1; }
+target_short=$(git rev-parse --short "$target_sha")
+
+if git rev-parse --verify --quiet "origin/$major" >/dev/null; then
+  current=$(git rev-parse "origin/$major")
+  current_short=$(git rev-parse --short "$current")
+  if [ "$current" = "$target_sha" ]; then
+    echo "$major already at $src ($target_short) — nothing to do."
+    exit 0
+  fi
+  if ! git merge-base --is-ancestor "$current" "$target_sha"; then
+    echo "release-advance-major: $major ($current_short) is NOT an ancestor of $src ($target_short)." >&2
+    echo "A fast-forward is impossible — $major has commits $src doesn't (likely a breaking" >&2
+    echo "change landed on main; cut the next major instead). Resolve by hand." >&2
+    exit 1
+  fi
+  echo "advancing $major: $current_short -> $target_short ($src)"
+else
+  echo "release-advance-major: origin/$major doesn't exist yet; creating it at $src ($target_short)." >&2
+fi
+
+if [ "$dry_run" = 1 ]; then
+  echo "(dry-run) would: git push origin ${target_sha}:refs/heads/$major"
+  exit 0
+fi
+
+git push origin "${target_sha}:refs/heads/$major"
+echo "$major -> $target_short"

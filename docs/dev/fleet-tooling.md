@@ -54,8 +54,8 @@ It is **hermetic**: clones into a throwaway root (default
 `/tmp/release-fleet-verify`), syncs each consumer from the candidate
 revision, runs `lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
-before `release-advance-v1` to catch a commons/lint regression in release's
-own tree instead of one consumer at a time after `@v1` moves.
+before `release-advance-major` to catch a commons/lint regression in release's
+own tree instead of one consumer at a time after the floating `@vN` moves.
 
 Caveats:
 
