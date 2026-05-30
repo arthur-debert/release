@@ -40,6 +40,7 @@ Single home: **`~/h/release/bin/`** — both the policy/setup tools and the day-
 
 | Command | What it does |
 |---|---|
+| `gh-task-status [<pr>] [--json]` | **The orient step.** Reads the PR once and reports one lifecycle state (`REVIEWS_PENDING` / `ADDRESSING` / `REVIEWED` / `VALIDATING` / `READY` / `BLOCKED`) plus the next action. Reviewer-agnostic (Copilot required, Gemini best-effort), with circuit breakers folded in. Read-only. Resolves the current branch's PR if `<pr>` is omitted. See "Orienting with gh-task-status" below. |
 | `gh-copilot-on <pr>` | Request Copilot review (`gh pr edit --add-reviewer @copilot` — goes through GraphQL with the bot's real node_id; the `requested_reviewers` REST POST silently no-ops with `reviewers[]=copilot-pull-request-reviewer[bot]`). |
 | `gh-copilot-off <pr>` | Remove Copilot reviewer. |
 | `gh-copilot-wait <pr>` | Block until Copilot posts a review on the PR's current head SHA. 7m initial sleep, 2m polling, 30m hard cap. Exit 0 = posted; 2 = timeout. |
@@ -77,6 +78,29 @@ This is the canonical sequence when driving a feature branch through the loop:
    Merge only on explicit authorization ("merge it", "go ahead and merge").
 9. ALWAYS close with the structured report block (see "The final-report contract").
 ```
+
+### Orienting with `gh-task-status`
+
+Instead of piecing the PR's state together by hand on every wake — which review landed? are the threads resolved? are checks green? is it mergeable? — ask one command:
+
+```sh
+gh-task-status <PR>          # human-readable; add --json to parse
+```
+
+It reads the PR once and reports exactly one lifecycle state plus the next action. It *orchestrates* the primitives below — it does not replace them. Map the state to where you are in the flow:
+
+| State | Meaning | What to do |
+|---|---|---|
+| `REVIEWS_PENDING` | a required reviewer (Copilot) hasn't finished | step 4 — `gh-copilot-wait` |
+| `ADDRESSING` | reviews in, open threads remain | steps 5–5b — triage, fix/reply, resolve |
+| `REVIEWED` | reviews done, mergeability still computing | re-check shortly |
+| `VALIDATING` | reviews done, CI running | step 7 — `gh-pr-checks-wait` |
+| `READY` | reviewed + CI green + mergeable | step 8 — flip draft→ready if drafted, page the user |
+| `BLOCKED` | failing check, merge conflict, **or a circuit breaker fired** | stop; surface the reason to the user |
+
+**Gemini is best-effort.** A silent or quota'd Gemini never holds the PR in `REVIEWS_PENDING` — only Copilot (required) gates. The snapshot is stateless and has no clock, so the *skip-after-timeout* call for a slow best-effort reviewer is yours: if you've already waited out `gh-copilot-wait` and Gemini still shows `in_progress`, proceed.
+
+**Circuit breakers.** When `gh-task-status` returns `BLOCKED` with a `breaker:` line (`cycle-cap`, `diff-trajectory`, `comment-set`, `repeat-finding`), the review loop is diverging — do **not** push another fixup cycle. Stop and surface the breaker reason to the user. This is the first-class "stop and hand back" outcome, not a failure. Background: `docs/proposals/pr-review-loop-circuit-breakers.md`.
 
 ### A note on draft PRs
 
@@ -151,6 +175,8 @@ The end state of a healthy PR: only contested threads (and the original review s
 
 Push to the same branch. CI re-runs automatically. **Do NOT** re-request Copilot on minor rounds — the workflow only auto-triggers on `opened`/`ready_for_review`, and one review per PR is the convention. Re-request only if the round of changes is substantial enough to warrant a fresh look.
 
+Before opening *another* fixup cycle, run `gh-task-status <PR>`. If it returns `BLOCKED` with a `breaker:` line, the loop is diverging — stop, don't iterate, and surface the breaker to the user (see "Orienting with gh-task-status").
+
 ### Step 7: waiting for checks
 
 ```sh
@@ -160,6 +186,12 @@ gh-pr-checks-wait <PR>
 Run in background. Exits 0 when all checks pass, 1 if any fail.
 
 ### Step 8: stop at "ready to merge" and notify the user
+
+`gh-task-status <PR>` returning `READY` is the signal that this point is reached (reviewed + CI green + mergeable). If the PR is a draft (e.g. a stacked feature-branch PR), flip it first so the human gate opens:
+
+```sh
+gh pr ready <PR>      # only if it was a draft
+```
 
 **Do NOT auto-merge.** The agent's job ends when the PR is in a *mergeable* state — checks green, threads resolved, CI clean. At that point, post a short status comment summarizing where things landed (or just the assistant turn — whatever's appropriate to the session) and stop. The user does the final read and merges.
 
