@@ -4,6 +4,12 @@
 # arthur-debert/release#234.
 CHANGELOG.md
 CHANGELOG/
+# Changelog-staging files (the "Unreleased" section some repos keep as a
+# separate file) are the same class: they lead with an HTML comment / `###`
+# rather than a top-level heading (MD041) and accrete bullet fragments. Exempt
+# them like CHANGELOG. See docs/references/lint-debt-model.md.
+UNRELEASED.md
+CHANGELOG_UNRELEASED.md
 
 # CLAUDE.md is agent-instruction content, not published prose — the same
 # class as the skills exclude below. release-sync also injects a managed

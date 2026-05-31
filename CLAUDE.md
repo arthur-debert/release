@@ -129,6 +129,18 @@ lex-fmt/lex v0.9.1.
 
 ## Operational rules
 
+- **Lint debt → the three-case model** (`docs/references/lint-debt-model.md`).
+  Before "fixing a lint error," classify the file. **Don't want it linted?
+  gitignore it** — the gate only runs on tracked files, so gitignored
+  third-party/vendor/build content is never linted or tested (that's the point
+  of gitignore). The linter therefore only ever sees files we own, so the only
+  responses are *fix*: authored → fix the file once; tool-generated → fix the
+  generator (never hand-fix or ignore). The managed `.markdownlintignore` is
+  ONLY for committed-but-not-authored conventions (generated `CHANGELOG` /
+  `UNRELEASED`, mdbook `SUMMARY`, fixtures) — not a per-repo escape hatch.
+  Don't whack-a-mole per file: run `lefthook run pre-commit --all-files` and
+  categorize the whole repo once. Release-owned file failing the gate = release
+  bug; consumer-owned = fix there.
 - **Bug fixes go here, not in consumers.** A bug surfaced by a
   consumer is fixed here, tagged as a PATCH, and the `v1` branch
   advanced. Consumers re-run; nothing for them to edit.
