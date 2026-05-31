@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# release-notify-source — close the feedback loop on a consumer-filed issue.
+#
+# When the fleet-triage run (release#348 §5.2, the `release-fleet-triage` skill)
+# ships a fix for an issue that consumers escalated via `gh-release-issue` /
+# the `release-issue-relay` skill, the consumers who reported it need to know:
+# the fix lives upstream, bump the `@vN` pin (or re-sync) and re-run.
+#
+# This reads ONE release issue, extracts every source PR it points at (the
+# `**PR:** <url>` line in the body plus the `- PR: <url>` lines the relay skill
+# appends on each "Also hit on" duplicate), and posts a consistent notification
+# comment on each. The message shape is owned here, not hand-written per repo
+# (per docs/references/fleet-telemetry-via-issues.md §2).
+#
+# Outward-facing fan-out across consumer repos, so it is DRY-RUN BY DEFAULT:
+# it prints the plan and the exact comment body. Pass --post to actually comment.
+#
+# Usage:
+#   release-notify-source <issue-#> --fix "<text>" [--post] [--close]
+#
+#   <issue-#>      a release issue number (on arthur-debert/release)
+#   --fix <text>   one line describing the shipped fix (e.g. "release#371,
+#                  v2 advanced to 9588a8f") — embedded in the notification
+#   --post         actually post the comments (default: dry-run, prints only)
+#   --close        after posting, close the release issue with a back-reference
+#                  (ignored in dry-run)
+#   --repo <o/r>   override the inbox repo (default: arthur-debert/release)
+#
+# Exit codes:
+#   0  — done (dry-run or posted)
+#   2  — dependency/auth error, or no such issue
+#   3  — the issue points at no source PR (nothing to notify; reported loud)
+#   64 — bad usage
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+repo="arthur-debert/release"
+issue=""
+fix=""
+post=0
+close=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fix)   [ $# -ge 2 ] || { echo "release-notify-source: --fix needs a value" >&2; exit 64; }; fix=$2; shift 2 ;;
+    --repo)  [ $# -ge 2 ] || { echo "release-notify-source: --repo needs a value" >&2; exit 64; }; repo=$2; shift 2 ;;
+    --post)  post=1; shift ;;
+    --close) close=1; shift ;;
+    -h|--help) show_help; exit 0 ;;
+    -*) echo "release-notify-source: unknown argument '$1'" >&2; show_help >&2; exit 64 ;;
+    *)
+      [ -z "$issue" ] || { echo "release-notify-source: too many positional args" >&2; exit 64; }
+      issue=$1; shift ;;
+  esac
+done
+
+[ -n "$issue" ] || { echo "release-notify-source: need a release issue number" >&2; show_help >&2; exit 64; }
+[ -n "$fix" ]   || { echo "release-notify-source: --fix is required (describe the shipped fix)" >&2; exit 64; }
+case "$issue" in *[!0-9]*) echo "release-notify-source: issue must be a number, got '$issue'" >&2; exit 64 ;; esac
+
+for dep in gh jq; do
+  command -v "$dep" >/dev/null 2>&1 || { echo "release-notify-source: '$dep' not found on PATH" >&2; exit 2; }
+done
+
+meta=$(gh issue view "$issue" --repo "$repo" --json number,title,url,body,comments 2>/dev/null) || {
+  echo "release-notify-source: could not read $repo#$issue (no such issue, auth, or network?)" >&2
+  exit 2
+}
+
+issue_url=$(printf '%s' "$meta" | jq -r '.url')
+issue_title=$(printf '%s' "$meta" | jq -r '.title')
+
+# Flatten body + every comment body into one text blob, then pull out the
+# distinct consumer PR URLs it references. PR URLs are unambiguous comment
+# targets (each encodes its own repo), so we don't have to pair repo↔PR by hand.
+blob=$(printf '%s' "$meta" | jq -r '.body, (.comments[]?.body // "")')
+mapfile -t pr_urls < <(printf '%s\n' "$blob" \
+  | grep -oE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' \
+  | sort -u)
+
+# Also surface any "Reported from" repo with no PR link — it can't be
+# auto-notified (no comment target), so the operator must follow up by hand.
+mapfile -t reported_repos < <(printf '%s\n' "$blob" \
+  | grep -oE '(Reported from:|Also hit on) ?\*{0,2} ?[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' \
+  | grep -oE '[A-Za-z0-9._-]+/[A-Za-z0-9._-]+' | sort -u)
+
+notify_body=$(cat <<EOF
+✅ **Upstream fix shipped.** This resolves the infrastructure issue escalated to [arthur-debert/release#${issue}](${issue_url}) — _${issue_title}_.
+
+**Fix:** ${fix}
+
+To pick it up: bump your \`arthur-debert/release\` pin to the advanced major (e.g. \`@v2\`) or re-run \`release-sync\`, then re-run the check that originally failed. Nothing to change in this repo.
+
+_Automated close-the-loop from the release fleet-triage run (release#348 §5.2)._
+EOF
+)
+
+echo "release issue:  $repo#$issue — $issue_title"
+echo "source PRs:     ${#pr_urls[@]}"
+if [ "${#pr_urls[@]}" -eq 0 ]; then
+  echo "release-notify-source: $repo#$issue points at no source PR — nothing to comment on." >&2
+  if [ "${#reported_repos[@]}" -gt 0 ]; then
+    echo "  Reported from (notify by hand): ${reported_repos[*]}" >&2
+  fi
+  exit 3
+fi
+
+if [ "$post" -eq 0 ]; then
+  echo
+  echo "DRY-RUN — would comment on each PR below (pass --post to send):"
+  for u in "${pr_urls[@]}"; do echo "  • $u"; done
+  echo
+  echo "--- comment body ------------------------------------------------------"
+  printf '%s\n' "$notify_body"
+  echo "-----------------------------------------------------------------------"
+  [ "$close" -eq 1 ] && echo "(--close) would then close $repo#$issue with a back-reference."
+  exit 0
+fi
+
+rc=0
+for u in "${pr_urls[@]}"; do
+  if gh pr comment "$u" --body "$notify_body" >/dev/null 2>&1; then
+    echo "notified: $u"
+  else
+    echo "FAILED to comment on $u" >&2
+    rc=1
+  fi
+done
+
+if [ "${#reported_repos[@]}" -gt 0 ]; then
+  echo "note — reported-from repos seen (verify each got a PR comment above): ${reported_repos[*]}"
+fi
+
+if [ "$close" -eq 1 ] && [ "$rc" -eq 0 ]; then
+  gh issue close "$issue" --repo "$repo" \
+    --comment "Closed by fleet-triage: ${fix}. Notified source PR(s): ${pr_urls[*]}." >/dev/null \
+    && echo "closed: $repo#$issue"
+fi
+
+exit "$rc"
