@@ -157,7 +157,7 @@ workspace with one or more wasm-bindgen members. Each member is
 built via wasm-pack, tarballed, attached to the GH release, and
 (if `NPM_TOKEN` is set) published to npm. Pairs with
 `publish-crates: false` for workspaces that ship only wasm
-artifacts. Proven on `arami-core` (3 wasm members + arami-cli
+artifacts. Proven on `phos-core` (3 wasm members + phos-cli
 binaries shipped 2026-05-23 via v0.4.1) and `lex-fmt/lex` (single
 wasm member via the deprecated `wasm-package` input).
 
@@ -180,7 +180,7 @@ path. Token regen + Open VSX support follow-up pending.
   each with notarized arm64 DMG + Linux AppImage + Windows Setup.exe.
 - `tauri-app.yml@v1` uses `tauri build` with `APPLE_*` env vars
   (Tauri's own signing path, NOT electron-builder). **Fleet-adopted**
-  — `arami-app` shipped v0.1.7 (2026-05-19), v0.1.8 + v0.1.9
+  — `phos-app` shipped v0.1.7 (2026-05-19), v0.1.8 + v0.1.9
   (2026-05-23 post-canonical fixes #180/#182), all Gatekeeper-
   accepted DMGs with stapled notarization tickets.
 
@@ -218,10 +218,10 @@ how complete the local files look.
 
 | Stack         | Repos (state) |
 |---------------|---|
-| rust-cli      | **fleet-adopted (7/7)**: `arthur-debert/padz` v1.8.2, `arthur-debert/dodot` v5.0.0 (2026-05-15), `lex-fmt/lex` v0.14.1, `arthur-debert/rustloc` v0.16.0, `arthur-debert/simple-gal` v0.20.4, `arthur-debert/burgertocow` v0.4.0, `arthur-debert/arami-core` v0.4.1 (multi-wasm, 2026-05-23) — all shipped via `rust-cli.yml@v1` |
+| rust-cli      | **fleet-adopted (7/7)**: `arthur-debert/padz` v1.8.2, `arthur-debert/dodot` v5.0.0 (2026-05-15), `lex-fmt/lex` v0.14.1, `arthur-debert/rustloc` v0.16.0, `arthur-debert/simple-gal` v0.20.4, `arthur-debert/burgertocow` v0.4.0, `arthur-debert/phos-core` v0.4.1 (multi-wasm, 2026-05-23) — all shipped via `rust-cli.yml@v1` |
 | rust-lib      | **fleet-adopted (2/2)**: `arthur-debert/clapfig` v0.21.4 + `arthur-debert/standout` v7.6.3 (first canonical release, 8 workspace crates, 2026-05-23) |
 | electron-app  | **fleet-adopted (2/2)**: `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both via `electron-app.yml@v1` + both gating on canonical `e2e: true` in `electron-ci.yml@v1` |
-| tauri-app     | **fleet-adopted (1/1)**: `arami-app` v0.1.7 (2026-05-19) + v0.1.8 + v0.1.9 (2026-05-23) via `tauri-app.yml@v1`, gating on canonical `e2e: true` + per-platform `app-bin/smoke-hook.sh` |
+| tauri-app     | **fleet-adopted (1/1)**: `phos-app` v0.1.7 (2026-05-19) + v0.1.8 + v0.1.9 (2026-05-23) via `tauri-app.yml@v1`, gating on canonical `e2e: true` + per-platform `app-bin/smoke-hook.sh` |
 | vscode-ext    | **fleet-adopted (1/1)** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX is downstream config — see ᵇ and [#189](https://github.com/arthur-debert/release/issues/189) |
 | nvim-plugin   | **fleet-adopted (1/1)**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107)) |
 | tree-sitter   | **fleet-adopted (1/1)**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
@@ -250,15 +250,15 @@ brew-tap need their canonical workflows written first.
 ## Managed repos
 
 Human mirror of `managed-repos.yaml` (the authoritative source). 19
-active repos across 3 multi-repo "projects" (lex, arami, simple-gal)
+active repos across 3 multi-repo "projects" (lex, phos, simple-gal)
 plus single-repo projects. Three rows below (`homebrew-tools`,
 `release`, `simple-gal-action`) are listed for reference but are
 currently out of scope — commented out in the manifest.
 
 | Project | Repo | Local path |
 |---|---|---|
-| arami | `arthur-debert/arami-app` | `~/h/arami/arami-app` |
-| arami | `arthur-debert/arami-core` | `~/h/arami/arami-core` |
+| phos | `arthur-debert/phos-app` | `~/h/phos/phos-app` |
+| phos | `arthur-debert/phos-core` | `~/h/phos/phos-core` |
 | burgertocow | `arthur-debert/burgertocow` | `~/h/burgertocow` |
 | clapfig | `arthur-debert/clapfig` | `~/h/clapfig` |
 | dodot | `arthur-debert/dodot` | `~/h/dodot` |
@@ -333,7 +333,7 @@ caller of `arthur-debert/release/.github/workflows/<stack>.yml@v1`.
 
 **The CI / PR-time check path is partially reusable.** `rust-ci.yml`,
 `electron-ci.yml`, and `tauri-ci.yml` exist and are piloted (dodot,
-lexed/simple-gal-ui, arami-app respectively). `go-ci.yml`,
+lexed/simple-gal-ui, phos-app respectively). `go-ci.yml`,
 `vscode-ci.yml`, `nvim-ci.yml`, `tree-sitter-ci.yml`, and
 `zed-extension-ci.yml` do not exist yet. Remaining consumers hand-roll
 `ci.yml` / `test.yml`.

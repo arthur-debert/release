@@ -76,7 +76,7 @@ on:
           in env. The script handles its own `git add`. Use for
           consumer-specific work the workflow doesn't cover:
           multiple version sources, submodule refreshes,
-          upstream-dep pin syncs, code generation. arami-app +
+          upstream-dep pin syncs, code generation. phos-app +
           tauri-app stack support the same input — kept
           consistent across stacks.
         type: string

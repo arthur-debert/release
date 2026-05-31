@@ -263,14 +263,14 @@ EOF
   # and package.json are present.
   cat > package.json <<'EOF'
 {
-  "name": "arami",
+  "name": "phos",
   "version": "0.7.2-rc.2"
 }
 EOF
   mkdir -p src-tauri
   cat > src-tauri/Cargo.toml <<EOF
 [package]
-name = "arami"
+name = "phos"
 version = "0.7.2-rc.2"
 EOF
   _stub_gh

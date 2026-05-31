@@ -108,14 +108,14 @@ fi
 #                     from github.com/neovim/neovim/releases instead
 #   xvfb            — virtual framebuffer; binary is env-side, starting the
 #                     :99 daemon is per-repo in scripts/setup-dev-env.sh for
-#                     GUI-test consumers (lexed, arami-app, future Electron)
+#                     GUI-test consumers (lexed, phos-app, future Electron)
 #   libnss3-tools   — provides `certutil` so the canonical setup-dev-env.sh
 #                     can import the sandbox-egress CA into the per-user
 #                     Chromium NSS DB (needed by every Electron / Playwright
 #                     consumer; lexed surfaced this first)
 #   uuid-runtime    — provides `uuidgen` (padz live-tests; cheap, ~30KB)
 #   Tauri/GTK system libs — required to build Tauri apps from source
-#                           (arami-core today; any future Tauri consumer)
+#                           (phos-core today; any future Tauri consumer)
 
 # bats — single-binary apt install
 if ! command -v bats >/dev/null 2>&1; then
@@ -214,7 +214,7 @@ apt install -y ${TAURI_PKGS} \
 # --with-deps` would install on a fresh Ubuntu, minus the packages
 # already provided transitively by libgtk-3-dev / libwebkit2gtk-4.1-dev
 # / libnss3-tools (installed above). Pre-installing them here is the
-# fix for arami-app's cloud-session e2e flow: `playwright install
+# fix for phos-app's cloud-session e2e flow: `playwright install
 # --with-deps` invokes `apt update` internally, which 403s on the
 # deadsnakes/ondrej PPAs in the sandbox and fails the whole step —
 # even though every required package is already on disk.

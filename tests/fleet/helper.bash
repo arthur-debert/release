@@ -18,8 +18,8 @@ projects:
   lex:
     - { repo: lex-fmt/lex,   path: lex-fmt/lex }
     - { repo: lex-fmt/comms, path: lex-fmt/comms }
-  arami:
-    - { repo: arthur-debert/arami-app, path: arami/arami-app }
+  phos:
+    - { repo: arthur-debert/phos-app, path: phos/phos-app }
   dodot:
     - { repo: arthur-debert/dodot, path: dodot }
 EOF
@@ -30,7 +30,7 @@ EOF
   export REPOS_ROOT="$PWD/root"
   mkdir -p "$REPOS_ROOT/lex-fmt/lex/.git"
   mkdir -p "$REPOS_ROOT/dodot/.git"
-  # lex-fmt/comms and arami/arami-app intentionally absent → missing.
+  # lex-fmt/comms and phos/phos-app intentionally absent → missing.
 }
 
 teardown() {

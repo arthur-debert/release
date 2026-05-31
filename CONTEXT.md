@@ -30,7 +30,7 @@ Replaces the former term "Component".
 
 A repository/project that uses release as its infrastructure manager. Release provides its build, test, release, and policy infrastructure.
 
-Examples: `arthur-debert/arami-app`, `lex-fmt/lex`, `arthur-debert/padz`.
+Examples: `arthur-debert/phos-app`, `lex-fmt/lex`, `arthur-debert/padz`.
 
 ## Task
 

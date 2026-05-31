@@ -8,7 +8,7 @@
 #
 # Examples:
 #   ./run.sh arthur-debert/dodot
-#   ./run.sh arthur-debert/arami-core claude/check-environment-setup-DEWLx
+#   ./run.sh arthur-debert/phos-core claude/check-environment-setup-DEWLx
 #   ./run.sh lex-fmt/lexed main "pnpm test"
 #
 # Inputs from environment:

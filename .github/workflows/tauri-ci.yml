@@ -20,7 +20,7 @@ name: Tauri CI
 #  * **Auto-detect package manager from lockfile.** pnpm-lock.yaml →
 #    pnpm, yarn.lock → yarn, default → npm. Same logic as
 #    electron-ci.yml (Tauri apps follow the same npm-stack
-#    convention; arami-app uses pnpm).
+#    convention; phos-app uses pnpm).
 #
 #  * **`Swatinem/rust-cache@v2` scoped to src-tauri/.** Caching is
 #    mandatory per CLAUDE.md. The `workspaces: src-tauri` input
@@ -46,7 +46,7 @@ name: Tauri CI
 #  * **`pre-test`** is the generic escape hatch — any shell command
 #    that needs to run after deps are installed but before
 #    `bin/check` fires (fetch sibling binaries, download upstream
-#    WASM, codegen). arami-app uses this for `pnpm fetch:wasm`.
+#    WASM, codegen). phos-app uses this for `pnpm fetch:wasm`.
 #
 #  * **Minimal permissions, declared at both levels.** Same rationale
 #    as rust-ci.yml — GitHub validates reusable-workflow permission
@@ -89,7 +89,7 @@ on:
         description: |
           Rust toolchain channel. If empty (default), the workflow
           honors `rust-toolchain.toml` at repo root when present
-          (arami-app pins this way) and falls back to `stable`
+          (phos-app pins this way) and falls back to `stable`
           otherwise. Set explicitly (e.g. `'1.85.0'`, `'nightly'`,
           `'stable'`) to override the file. Default empty.
         type: string
@@ -115,7 +115,7 @@ on:
         description: |
           Optional shell command run after deps are installed but
           BEFORE `bin/check`. Use for upstream WASM fetches, fixture
-          prep, codegen. Empty (default) skips. arami-app's value is
+          prep, codegen. Empty (default) skips. phos-app's value is
           `pnpm fetch:wasm` (its frontend tests import from a WASM
           package that's not in the lockfile).
         type: string
@@ -197,8 +197,8 @@ on:
           private sibling repo — `GITHUB_TOKEN` from the default
           job context only has access to the calling repo, so
           fetching artifacts from a separate private repo (e.g.
-          arami-app pulling WASM from a private `arami-core`)
-          needs a PAT. arami-app passes `secrets.RELEASE_TOKEN`
+          phos-app pulling WASM from a private `phos-core`)
+          needs a PAT. phos-app passes `secrets.RELEASE_TOKEN`
           here. Falls back to the default `GITHUB_TOKEN` when not
           set. Name matches the convention used in
           `copilot-review.yml`.
@@ -256,7 +256,7 @@ jobs:
         # `version:` HERE while the
         # consumer's package.json also pins triggers
         # ERR_PNPM_BAD_PM_VERSION ("Multiple versions of pnpm
-        # specified") on the runner. arami-app surfaced this on
+        # specified") on the runner. phos-app surfaced this on
         # first adoption.
         uses: pnpm/action-setup@v4
 
@@ -277,7 +277,7 @@ jobs:
       - name: Resolve Rust toolchain channel
         # Tauri's Cargo workspace lives at src-tauri/, not at repo
         # root. Consumers that pin their toolchain put
-        # rust-toolchain.toml at the REPO ROOT (arami-app does this).
+        # rust-toolchain.toml at the REPO ROOT (phos-app does this).
         # When the `rust-toolchain` input is empty, honor the file;
         # otherwise the input wins. Mirrors the resolution logic in
         # the shared `setup-rust` composite — but kept inline here
@@ -328,7 +328,7 @@ jobs:
         # `cargo clippy` and `cargo test` (run by bin/check) walk
         # the dep graph and trigger compilation of glib-sys /
         # webkit2gtk-sys, which fail at pkg-config lookup without
-        # the system libs. arami-app surfaced this on first
+        # the system libs. phos-app surfaced this on first
         # adoption (glib-2.0 not found in pkg-config search path).
         #
         # Always install on Linux; skipped on macOS/Windows runners
@@ -363,9 +363,9 @@ jobs:
         env:
           # Scoped here (not job-wide) so the PAT — when a caller
           # passes one — is only visible to consumer-controlled
-          # commands, not third-party setup actions. arami-app's
+          # commands, not third-party setup actions. phos-app's
           # `pnpm fetch:wasm` shells to `gh release download` against
-          # private `arami-core`; `GITHUB_TOKEN` only sees the calling
+          # private `phos-core`; `GITHUB_TOKEN` only sees the calling
           # repo. Falls back to `github.token` when no PAT is plumbed.
           GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: ${{ inputs.pre-test }}

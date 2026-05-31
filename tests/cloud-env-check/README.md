@@ -68,7 +68,7 @@ export GH_TOKEN=ghp_...
 ./run.sh arthur-debert/dodot
 
 # Single repo, a feature branch (e.g. an open PR's headRef)
-./run.sh arthur-debert/arami-core claude/check-environment-setup-DEWLx
+./run.sh arthur-debert/phos-core claude/check-environment-setup-DEWLx
 
 # Override the test command
 ./run.sh lex-fmt/lexed main "pnpm -s preview:test"

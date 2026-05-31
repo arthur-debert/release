@@ -27,7 +27,7 @@ load helper
   run "$BIN/managed-repos" --paths
   [ "$status" -eq 0 ]
   [[ "$output" == *"lex-fmt/comms	$REPOS_ROOT/lex-fmt/comms	missing"* ]]
-  [[ "$output" == *"arthur-debert/arami-app	$REPOS_ROOT/arami/arami-app	missing"* ]]
+  [[ "$output" == *"arthur-debert/phos-app	$REPOS_ROOT/phos/phos-app	missing"* ]]
 }
 
 @test "a trailing owner/name filter restricts every mode" {

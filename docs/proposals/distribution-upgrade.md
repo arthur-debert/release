@@ -47,7 +47,7 @@ i.e. **binary only**. No man pages, no shell completions, no
 - `lex-fmt/lexed` (electron-app `@v1`): ships signed + notarized
   per-arch `.dmg` on every release. Asset is on the GH release
   page; users download manually and drag to `/Applications`.
-- `arthur-debert/arami-app` (tauri-app `@v1` slice 1): will ship
+- `arthur-debert/phos-app` (tauri-app `@v1` slice 1): will ship
   signed + notarized per-arch `.dmg` once first release cuts.
 - `arthur-debert/simple-gal-ui` (electron-app, pending
   migration): not yet signed.
@@ -73,7 +73,7 @@ Plus the other 4 current tap occupants (`treex`, `dotcat`,
 GUI apps that benefit from `brew install --cask`:
 
 - `lexed`
-- `arami-app`
+- `phos-app`
 - `simple-gal-ui` (once migrated)
 
 Target per-CLI deliverables:
@@ -87,7 +87,7 @@ Target per-CLI deliverables:
 Target per-GUI deliverables:
 
 1. **Signed + notarized `.dmg`** (already shipped for lexed; coming
-   for arami; pending for simple-gal-ui)
+   for phos; pending for simple-gal-ui)
 2. **Brew cask** that pulls the `.dmg` from GH release and
    installs the `.app` into `/Applications` (currently missing)
 

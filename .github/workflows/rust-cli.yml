@@ -129,16 +129,16 @@ on:
           crates to build via wasm-pack. One member per line; blank
           lines ignored. Each member is built + tarballed + attached
           to the GH release, and (if NPM_TOKEN is set) published to
-          npm. Use this for workspaces with >1 wasm crate (arami-core
-          ships arami-color-wasm + arami-editor-wasm +
-          arami-viewer-wasm under a single release). Empty = falls
+          npm. Use this for workspaces with >1 wasm crate (phos-core
+          ships phos-color-wasm + phos-editor-wasm +
+          phos-viewer-wasm under a single release). Empty = falls
           back to `wasm-package` (single) or no WASM build.
 
           Example:
             wasm-packages: |
-              arami-color-wasm
-              arami-editor-wasm
-              arami-viewer-wasm
+              phos-color-wasm
+              phos-editor-wasm
+              phos-viewer-wasm
         type: string
         required: false
         default: ''
@@ -693,8 +693,8 @@ jobs:
     # tarball to the GH release alongside native binaries. Downstream
     # publish-npm pulls the same artifact instead of rebuilding. Matrix
     # over the wasm-packages list so workspaces with multiple wasm
-    # members (arami-core: arami-color-wasm + arami-editor-wasm +
-    # arami-viewer-wasm) all build + attach in one release.
+    # members (phos-core: phos-color-wasm + phos-editor-wasm +
+    # phos-viewer-wasm) all build + attach in one release.
     needs: [prepare, create-release, wasm-setup]
     if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
     runs-on: ubuntu-latest

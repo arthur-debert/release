@@ -22,7 +22,7 @@ version files with `jq` / `awk` / `perl`; none of those preserve
 consumer formatting. The consumer's regular CI then runs
 `prettier --check` / `eslint` / `ruff` on main, sees the bot's
 formatting drift, and fails — even though the release workflow
-itself succeeded end-to-end. Caught on `arami-app` 0.1.6.
+itself succeeded end-to-end. Caught on `phos-app` 0.1.6.
 
 **What was rejected:** an ad-hoc per-stack prettier patch in
 tauri-app.yml (closed PR #92). Fragments ops; the whole point of
@@ -68,8 +68,8 @@ is locally testable in isolation. If GitHub later supports
 composite-action cross-references without ref pinning, we can
 refactor to a single `uses:` call.
 
-**Verified locally** against `/tmp/arami-app` (real
-arthur-debert/arami-app clone): simulated jq bump, ran the
+**Verified locally** against `/tmp/phos-app` (real
+arthur-debert/phos-app clone): simulated jq bump, ran the
 inlined gate snippet verbatim, observed:
 - Prettier reformatted both bumped JSON files with consumer's
   tab style.
@@ -176,7 +176,7 @@ After this fix, lex-fmt/nvim's caller wires
 
 `.github/workflows/tauri-app.yml` — reusable release pipeline
 for Tauri 2.x desktop apps. Pilot consumer:
-`arthur-debert/arami-app`.
+`arthur-debert/phos-app`.
 
 ### Slice 1 scope
 
@@ -187,7 +187,7 @@ for Tauri 2.x desktop apps. Pilot consumer:
   prepare-release-python), `src-tauri/tauri.conf.json` (jq;
   optional field).
 - Optional `prep-script` input for consumer-specific bumps
-  (arami-app's `arami-core-deps.json` upstream pin; future
+  (phos-app's `deps.json` upstream pin; future
   Tauri apps with submodules, codegen, additional configs).
 - macOS code-signing via Tauri's canonical `APPLE_CERTIFICATE`
   + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`

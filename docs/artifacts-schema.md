@@ -135,17 +135,17 @@ differs from the actual asset name.
 
 ```json
 {
-  "arami-color-wasm": {
+  "phos-color-wasm": {
     "version": "v0.4.0",
-    "repo": "arthur-debert/arami-core",
-    "asset": "arami-color-wasm-v0.4.0.tar.gz"
+    "repo": "arthur-debert/phos-core",
+    "asset": "phos-color-wasm-v0.4.0.tar.gz"
   }
 }
 ```
 
-(The version in the asset name is a current arami-core convention; if
-arami-core later drops the version-in-filename, the asset field
-shortens to `arami-color-wasm.tar.gz`.)
+(The version in the asset name is a current phos-core convention; if
+phos-core later drops the version-in-filename, the asset field
+shortens to `phos-color-wasm.tar.gz`.)
 
 ### Multiple artifacts in one manifest
 
