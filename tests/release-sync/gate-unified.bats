@@ -27,6 +27,24 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   [ "$status" -eq 0 ]
 }
 
+@test "check-shell skips a .sh whose shebang is zsh (shebang vetoes the extension)" {
+  # release#374: a zsh script named *.sh was forced into shellcheck → SC1071.
+  # The shebang is authoritative — a non-shellcheck interpreter wins over the
+  # .sh/.bash extension shortcut.
+  command -v shellcheck >/dev/null || skip "shellcheck not installed"
+  printf '#!/usr/bin/env zsh\nprint hi\n' > generate_icons.sh
+  run "$CHECK_SHELL" generate_icons.sh
+  [ "$status" -eq 0 ]
+}
+
+@test "check-shell still lints a .sh whose shebang is bash" {
+  command -v shellcheck >/dev/null || skip "shellcheck not installed"
+  printf '#!/usr/bin/env bash\nrm $UNQUOTED\n' > tool.sh
+  run "$CHECK_SHELL" tool.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SC2086"* ]]
+}
+
 @test "check-shell follows a symlink and skips a shim pointing at Python" {
   command -v shellcheck >/dev/null || skip "shellcheck not installed"
   mkdir -p real && printf '#!/usr/bin/env python3\nimport sys\n' > real/task.py
