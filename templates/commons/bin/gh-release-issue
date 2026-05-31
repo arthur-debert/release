@@ -96,9 +96,14 @@ from the links above._
 EOF
 )
 
+# The `consumer-filed` label is the marker the fleet inbox (release-inbox,
+# release#348 Phase C) filters on — title-prefix search is best-effort, a label
+# is reliable. It must exist on arthur-debert/release (it does; part of the
+# inbox contract).
 url=$(gh issue create \
   --repo arthur-debert/release \
   --title "$title" \
-  --body "$body")
+  --body "$body" \
+  --label consumer-filed)
 
 echo "$url"

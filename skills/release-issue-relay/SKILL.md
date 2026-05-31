@@ -192,7 +192,11 @@ EOF
 )
 
 # Build the JSON payload via jq (avoids quoting hazards) and POST via gh api.
-jq -n --arg title "$TITLE" --arg body "$BODY" '{title: $title, body: $body}' \
+# The `consumer-filed` label is the marker the fleet inbox (release-inbox,
+# release#348 Phase C) filters on — title-prefix search is best-effort, a label
+# is reliable. It exists on arthur-debert/release as part of the inbox contract.
+jq -n --arg title "$TITLE" --arg body "$BODY" \
+  '{title: $title, body: $body, labels: ["consumer-filed"]}' \
   | gh api "repos/arthur-debert/release/issues" -X POST --input - \
   | jq -r '"filed: \(.html_url)"'
 ```

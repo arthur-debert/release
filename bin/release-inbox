@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# release-inbox — triage view over consumer-filed issues on this repo.
+#
+# The self-improving feedback loop (release#348) routes fleet friction into ONE
+# inbox: the arthur-debert/release issue tracker. Producers — the escalation
+# contract (`gh-release-issue` / the `release-issue-relay` skill) and the Phase D
+# CI sweep — file issues here tagged `consumer-filed`, titled `[<component>]
+# <symptom>`, with a `Reported from: <repo>` line in the body.
+#
+# This accessor reads that inbox and renders a triage-ready digest for the
+# Phase C batch-processing run: open issues grouped by component, clusters
+# sorted by recurrence (comment count is the "also hit here" signal that the
+# relay skill appends on a duplicate), each issue showing its source repo and
+# age. Read-only — it files and mutates nothing.
+#
+# Usage:
+#   release-inbox                  # human-readable digest (default)
+#   release-inbox --json           # machine-readable clusters (Phase C consumes this)
+#   release-inbox --label <name>   # override the marker label (default: consumer-filed)
+#   release-inbox --repo <o/r>     # override the inbox repo (default: arthur-debert/release)
+#
+# Exit codes:
+#   0  — rendered (including when the inbox is empty)
+#   2  — dependency or auth error
+#   64 — bad usage
+
+set -euo pipefail
+
+show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+
+repo="arthur-debert/release"
+label="consumer-filed"
+out=human
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --json)    out=json; shift ;;
+    # Explicit arity check so a value-less flag exits 64 (bad usage) with a
+    # clean message, not the bash-default 1 that ${2:?} raises under set -u.
+    --label)   [ $# -ge 2 ] || { echo "release-inbox: --label needs a value" >&2; exit 64; }; label=$2; shift 2 ;;
+    --repo)    [ $# -ge 2 ] || { echo "release-inbox: --repo needs a value" >&2; exit 64; }; repo=$2; shift 2 ;;
+    -h|--help) show_help; exit 0 ;;
+    *) echo "release-inbox: unknown argument '$1'" >&2; show_help >&2; exit 64 ;;
+  esac
+done
+
+for dep in gh jq; do
+  command -v "$dep" >/dev/null 2>&1 || { echo "release-inbox: '$dep' not found on PATH" >&2; exit 2; }
+done
+
+raw=$(gh issue list --repo "$repo" --state open --label "$label" --limit 200 \
+  --json number,title,body,createdAt,url,comments 2>/dev/null) || {
+  echo "release-inbox: could not read issues from $repo (auth or network?)" >&2
+  exit 2
+}
+
+# One jq pass: normalize each issue (component from the title prefix, source
+# repo from the body, recurrence from the comment count), then group into
+# clusters sorted by recurrence. Shared by both render modes.
+clusters=$(printf '%s' "$raw" | jq '
+  def component: (.title | capture("^\\[(?<c>[^\\]]+)\\]").c) // "other";
+  def source_repo:
+    ((.body // "") | capture("Reported from:\\**\\s*(?<r>[^\\n*]+)").r // "unknown")
+    | gsub("^\\s+|\\s+$"; "");
+  def symptom: (.title | sub("^\\[[^\\]]+\\]\\s*"; ""));
+  def age_days: ((now - (.createdAt | fromdateiso8601)) / 86400 | floor);
+  map({
+    number, url,
+    component:  component,
+    repo:       source_repo,
+    symptom:    symptom,
+    comments:   (.comments | length),
+    age_days:   age_days,
+  })
+  | group_by(.component)
+  | map({
+      component:   .[0].component,
+      issue_count: length,
+      recurrence:  ((map(.comments) | add) + length),
+      issues:      sort_by(-.comments, .age_days),
+    })
+  | sort_by(-.recurrence)
+')
+
+if [ "$out" = json ]; then
+  printf '%s\n' "$clusters" | jq .
+  exit 0
+fi
+
+printf '%s' "$clusters" | jq -r '
+  (map(.issue_count) | add) as $total
+  | if (length == 0) then
+      "Fleet inbox: no open `'"$label"'` issues — clear."
+    else
+      "Fleet inbox — \($total) open issue(s) across \(length) component(s), by recurrence:",
+      "",
+      (.[]
+        | "▌ \(.component)   \(.issue_count) issue(s) · recurrence \(.recurrence)",
+          (.issues[]
+            | "    #\(.number)  \(.repo)  —  \(.symptom)\n        \(.comments) comment(s) · \(.age_days)d old · \(.url)"),
+          ""
+      )
+    end
+'
