@@ -16,7 +16,7 @@ and excluded from totals.
 | Variant | Count | Repos |
 |---|---|---|
 | **cargo-release** (single `CHANGELOG.md` with `## [Unreleased]`, `release.toml` drives promotion) | 4 | `padz`, `simple-gal`, `standout`, `lex-fmt/lex` |
-| **ad-hoc `## Unreleased` block** (single `CHANGELOG.md`, no `release.toml`, promotion via per-repo `scripts/*` or manual) | 13 | `arami-app`, `arami-core`, `burgertocow`, `clapfig`, `dodot`, `rustloc`, `simple-gal-ui`, `supage`, `wave-term`, `lex-fmt/comms`, `lex-fmt/lexed`, `lex-fmt/tree-sitter-lex`, `lex-fmt/vscode` |
+| **ad-hoc `## Unreleased` block** (single `CHANGELOG.md`, no `release.toml`, promotion via per-repo `scripts/*` or manual) | 13 | `phos-app`, `phos-core`, `burgertocow`, `clapfig`, `dodot`, `rustloc`, `simple-gal-ui`, `supage`, `wave-term`, `lex-fmt/comms`, `lex-fmt/lexed`, `lex-fmt/tree-sitter-lex`, `lex-fmt/vscode` |
 | **ad-hoc, no `## Unreleased` block** (`CHANGELOG.md` exists but has no staging section) | 2 | `lex-fmt/nvim`, `lex-fmt/zed-lex` |
 | **none** (no `CHANGELOG.md` at all) | 0 | — |
 | **two-file** (`CHANGELOG_UNRELEASED.md` + `CHANGELOG.md`) | 0 | — |
@@ -40,8 +40,8 @@ noted separately rather than double-counted; cleanup tracked in
 
 | Repo | Variant | Unreleased file | Promotion script | Tag annotation src | GH release body src |
 |---|---|---|---|---|---|
-| arthur-debert/arami-app | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/release/{trigger,update}-release` | auto/empty | auto/empty |
-| arthur-debert/arami-core | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/phos-app | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/release/{trigger,update}-release` | auto/empty | auto/empty |
+| arthur-debert/phos-core | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
 | arthur-debert/burgertocow | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
 | arthur-debert/clapfig | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
 | arthur-debert/dodot | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
@@ -76,7 +76,7 @@ For each repo, checked against the local clone:
 - Promotion script: `grep -lrE 'changelog|CHANGELOG' scripts/`.
 - Tag / release body source: `grep -E 'git tag.*-F|gh release create.*-F|--notes-file' .github/workflows/*` — falls back to "auto/empty" if nothing matches and the repo isn't cargo-release-driven.
 
-Spot-checked manually against repo contents: `padz` (cargo-release confirmed via `release.toml` + populated GH release body), `arami-core` (ad-hoc confirmed via `## [Unreleased]` block + no `release.toml`), `wave-term` (ad-hoc, confirmed via shallow clone).
+Spot-checked manually against repo contents: `padz` (cargo-release confirmed via `release.toml` + populated GH release body), `phos-core` (ad-hoc confirmed via `## [Unreleased]` block + no `release.toml`), `wave-term` (ad-hoc, confirmed via shallow clone).
 
 To reproduce, walk the yaml's `projects` list and apply the
 checks above against each repo's local clone (or a shallow clone

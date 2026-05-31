@@ -27,8 +27,8 @@ done
 
 REPOS=(
   "arthur-debert/release|$HOME/h/release"
-  "arthur-debert/arami-app|$HOME/h/arami/arami-app"
-  "arthur-debert/arami-core|$HOME/h/arami/arami-core"
+  "arthur-debert/phos-app|$HOME/h/phos/phos-app"
+  "arthur-debert/phos-core|$HOME/h/phos/phos-core"
   "arthur-debert/burgertocow|$HOME/h/burgertocow"
   "arthur-debert/clapfig|$HOME/h/clapfig"
   "arthur-debert/dodot|$HOME/h/dodot"

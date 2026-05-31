@@ -10,7 +10,7 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
         Larger projects, expected to grow:
 
             - lex-fmt (5 repos): CLIs, editor plugins for VS Code, neovim, Zed, and a full desktop app
-            - arami (2 repos): Rust backend and web frontend
+            - phos (2 repos): Rust backend and web frontend
 
         Smaller projects, stable in scope:
 

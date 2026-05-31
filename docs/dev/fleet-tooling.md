@@ -16,8 +16,8 @@ project. Two hard rules:
 - **Zero layout logic.** A repo's location is `$REPOS_ROOT/<path>` — a pure
   join. No single-vs-multi-repo heuristics, no org-vs-project-name guessing,
   no probing. The `path` is non-derivable from `repo` on purpose (the `lex`
-  project's `lex-fmt/*` repos live under `lex-fmt/`; arami's
-  `arthur-debert/arami-*` live under `arami/`; single-repo projects collapse
+  project's `lex-fmt/*` repos live under `lex-fmt/`; phos's
+  `arthur-debert/phos-*` live under `phos/`; single-repo projects collapse
   to a bare dir), so it is written down rather than computed.
 
 `$REPOS_ROOT` defaults to `~/h` (a dev machine). The same manifest + the

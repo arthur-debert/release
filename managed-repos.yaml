@@ -16,15 +16,15 @@
 # throwaway dir for a hermetic sweep.
 #
 # Note the path is NOT derivable from `repo`: the lex project's repos are
-# `lex-fmt/*` but live under `lex-fmt/` while arami's `arthur-debert/arami-*`
-# live under `arami/`, and single-repo projects collapse to a bare dir
+# `lex-fmt/*` but live under `lex-fmt/` while phos's `arthur-debert/phos-*`
+# live under `phos/`, and single-repo projects collapse to a bare dir
 # (`arthur-debert/dodot` -> `dodot`, not `dodot/dodot`). That non-derivability
 # is exactly why the path is written down rather than computed.
 
 projects:
-  arami:
-    - { repo: arthur-debert/arami-app,  path: arami/arami-app }
-    - { repo: arthur-debert/arami-core, path: arami/arami-core }
+  phos:
+    - { repo: arthur-debert/phos-app,  path: phos/phos-app }
+    - { repo: arthur-debert/phos-core, path: phos/phos-core }
 
   burgertocow:
     - { repo: arthur-debert/burgertocow, path: burgertocow }

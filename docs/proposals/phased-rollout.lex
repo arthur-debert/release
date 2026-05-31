@@ -99,8 +99,8 @@ Source location: arthur-debert/release, branch main, path docs/proposals/. Compa
 
         Higher to lower:
 
-            - Electron (arami-app, simple-gal-ui)
-            - Web / frontend npm (arami frontend, if separate from arami-app)
+            - Electron (phos-app, simple-gal-ui)
+            - Web / frontend npm (phos frontend, if separate from phos-app)
             - VS Code extension (lex-fmt/vscode)
             - Neovim plugin (lex-fmt/nvim)
             - Zed extension (lex-fmt/zed-lex)

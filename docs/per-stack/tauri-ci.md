@@ -107,7 +107,7 @@ jobs:
     ...
 ```
 
-`arami-app` is the reference adopter.
+`phos-app` is the reference adopter.
 
 ## Required-checks rename (do this in the same PR)
 
@@ -194,7 +194,7 @@ convention is:
   already does — typically `"typecheck": "svelte-kit sync &&
   svelte-check --tsconfig ./tsconfig.json"`. Don't rename your
   existing `check` script — just add a `typecheck` alias pointing
-  at the same command. arami-app does it this way.
+  at the same command. phos-app does it this way.
 
 ## Inputs
 
@@ -203,7 +203,7 @@ All inputs are optional.
 | Input | Default | Description |
 |---|---|---|
 | `node-version` | `'22'` | Forwarded to `actions/setup-node`. Match the consumer's `engines.node` pin. |
-| `rust-toolchain` | `''` (empty) | When empty, the workflow honors `rust-toolchain.toml` at repo root if present (arami-app pins this way); otherwise falls back to `stable`. Set to an explicit channel (`'stable'`, `'1.85.0'`, `'nightly'`) to override the file. |
+| `rust-toolchain` | `''` (empty) | When empty, the workflow honors `rust-toolchain.toml` at repo root if present (phos-app pins this way); otherwise falls back to `stable`. Set to an explicit channel (`'stable'`, `'1.85.0'`, `'nightly'`) to override the file. |
 | `tauri-build` | `false` | When true, runs `tauri build` after `bin/check` as a smoke gate (invoked as `npx --no-install tauri build` for npm; `pnpm tauri build` / `yarn tauri build` for the other managers). Slow — leave off unless you need it. (Note: Linux Tauri system libs — libwebkit2gtk etc. — are installed unconditionally on Linux runners because `cargo clippy`/`cargo test` need them to compile the Tauri crate, not just `tauri build`.) |
 | `pre-test` | `''` | Shell command run after deps are installed but before `bin/check`. Use for upstream WASM fetches, fixture prep, codegen. |
 | `playwright` | `false` | When true, `npx playwright install --with-deps` runs after deps are installed. Browsers only — does NOT add an e2e job. |
@@ -215,7 +215,7 @@ All inputs are optional.
 
 | Secret | Required | Description |
 |---|---|---|
-| `gh_token` | no | Exposed as `GH_TOKEN` to the `pre-test`, `bin/check`, and `tauri-build` smoke steps (step-scoped, not job-wide — third-party setup actions don't see it). Pass when your `pre-test` (or any check script) calls `gh release download` / `gh api` against a *private sibling repo*. The default `GITHUB_TOKEN` only has access to the calling repo. arami-app passes `${{ secrets.RELEASE_TOKEN }}` here so `pnpm fetch:wasm` can pull WASM from the private `arami-core`. Falls back to `github.token` when not set. Name matches the existing `copilot-review.yml` convention. |
+| `gh_token` | no | Exposed as `GH_TOKEN` to the `pre-test`, `bin/check`, and `tauri-build` smoke steps (step-scoped, not job-wide — third-party setup actions don't see it). Pass when your `pre-test` (or any check script) calls `gh release download` / `gh api` against a *private sibling repo*. The default `GITHUB_TOKEN` only has access to the calling repo. phos-app passes `${{ secrets.RELEASE_TOKEN }}` here so `pnpm fetch:wasm` can pull WASM from the private `phos-core`. Falls back to `github.token` when not set. Name matches the existing `copilot-review.yml` convention. |
 
 Same-org consumers can also use `secrets: inherit` to forward every
 caller secret, but the explicit `gh_token` shape is preferred — it
