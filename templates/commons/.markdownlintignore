@@ -45,3 +45,9 @@ vendor/
 # pages, deliberately broken markdown), so forcing them to pass
 # markdownlint corrupts what's under test. Caught via simple-gal#107.
 **/fixtures/**
+# Generated regression/benchmark corpora are the same DATA class: golden
+# converter output (e.g. lex→markdown) that deliberately exercises edge
+# cases which by design DON'T produce clean markdown (citation/section-ref
+# anchors without in-doc targets, etc.). Linting golden output fights the
+# test. Fix the generator (e.g. lex#715), not the fixture. Caught via comms.
+**/benchmark/**

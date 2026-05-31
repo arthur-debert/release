@@ -60,8 +60,10 @@ Orthogonal to the three cases — *who owns the thing being fixed*:
 
 A few files are *committed* (so can't be gitignored) yet aren't prose to
 author-lint: the generated `CHANGELOG`, mdbook `SUMMARY.md`, test `fixtures/`,
-agent skill-docs. Those — and only those — live in the small, **release-owned**
-managed `.markdownlintignore`. It is **not** a per-repo escape hatch; it's the
+generated regression/`benchmark/` corpora (golden converter output that
+deliberately exercises edge cases → intentionally not clean markdown; fix the
+generator, not the fixture), agent skill-docs. Those — and only those — live in
+the small, **release-owned** managed `.markdownlintignore`. It is **not** a per-repo escape hatch; it's the
 fleet-wide list of committed-but-generated conventions, and it changes rarely and
 deliberately. There is deliberately **no consumer-local ignore**: third-party is
 gitignored, authored is fixed, generated is fixed at the tool.
