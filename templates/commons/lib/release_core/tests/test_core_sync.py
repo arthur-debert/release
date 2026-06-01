@@ -13,6 +13,7 @@ find-style traversal order, and the orientation-block computation.
 from __future__ import annotations
 
 import os
+import shutil
 
 import pytest
 from release_core import sync
@@ -194,6 +195,18 @@ def test_validate_capabilities_missing_tree_raises(monkeypatch):
         sync.validate_capabilities("/home", "ref", ["ghost"])
 
 
+@pytest.mark.skipif(shutil.which("yq") is None, reason="`yq` not on PATH")
+def test_resolve_capabilities_malformed_yaml_raises_yamlerror():
+    # A malformed consumer override drives the real yq seam to a parse error,
+    # which yamlio surfaces as YamlError; the verb catches it at the CLI boundary.
+    from release_core import yamlio
+
+    with pytest.raises(yamlio.YamlError):
+        sync.resolve_capabilities(
+            "/home", "ref", "docs-site", sync_yaml_text="capabilities: [a, b\n  : : :\n"
+        )
+
+
 def test_validate_capabilities_ok(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "templates/components/x\n")
     sync.validate_capabilities("/home", "ref", ["x"])  # no raise
@@ -353,6 +366,18 @@ def test_stale_managed_copy_skips_rewritten(tmp_path):
     # In copy_set → being (re)written this sync → not stale.
     out = sync._find_stale_managed_copies(str(tmp_path), {".github/workflows/keep.yml"})
     assert out == []
+
+
+def test_stale_managed_copy_rel_uses_forward_slashes(tmp_path):
+    # The membership test against copy_set (forward-slash keyed) and the emitted
+    # rel must always use '/', never the OS separator — guards the cross-platform
+    # path normalization at the relpath call.
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "old.yml").write_text(sync.MANAGED_MARKER + "\non: push\n")
+    out = sync._find_stale_managed_copies(str(tmp_path), set())
+    assert out == [".github/workflows/old.yml"]
+    assert all("\\" not in p for p in out)
 
 
 # ── CLAUDE.md orientation block ───────────────────────────────────────────────

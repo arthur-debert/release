@@ -135,7 +135,17 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     if os.path.isfile(".release-sync.yaml"):
         with open(".release-sync.yaml", encoding="utf-8", errors="replace") as fh:
             sync_yaml_text = fh.read()
-    caps = sync.resolve_capabilities(release_home, ref, kind, sync_yaml_text=sync_yaml_text)
+    # A malformed .release-sync.yaml / Kind manifest.yaml drives yq to a parse
+    # error, which yamlio surfaces as YamlError. Catch it at the CLI boundary and
+    # exit non-zero with yq's message rather than letting a traceback escape — the
+    # same hard-fail-with-clean-message contract release-drift-check enforces.
+    from .. import yamlio
+
+    try:
+        caps = sync.resolve_capabilities(release_home, ref, kind, sync_yaml_text=sync_yaml_text)
+    except yamlio.YamlError as exc:
+        _err(f"release-sync: {exc}")
+        return 1
     try:
         sync.validate_capabilities(release_home, ref, caps.names)
     except sync.SyncError as exc:

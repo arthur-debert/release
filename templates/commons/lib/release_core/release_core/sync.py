@@ -502,7 +502,11 @@ def _find_stale_managed_copies(repo_root: str, copy_set: set[str]) -> list[str]:
     for dirpath, _dirnames, filenames in os.walk(wf_dir):
         for name in filenames:
             full = os.path.join(dirpath, name)
-            rel = os.path.relpath(full, repo_root)
+            # copy_set is keyed with forward slashes (git/POSIX paths); force the
+            # separator so the membership test holds on every platform. On the
+            # supported macOS/Linux runners os.sep is already "/", so this is a
+            # no-op there and purely defensive for a hypothetical Windows host.
+            rel = os.path.relpath(full, repo_root).replace(os.sep, "/")
             if rel in copy_set:
                 continue
             if os.path.islink(full):
