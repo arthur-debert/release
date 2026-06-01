@@ -36,9 +36,10 @@ jobs:
         run: bin-internal/lint-skills.sh
 
   py-lint:
-    # Lint + test the stdlib-only PR state engine (templates/commons/lib/release_gh).
-    # Mirrors this repo's lefthook `ruff` pre-commit hook. Deliberately
-    # light: release_gh has ZERO runtime deps and its tests import it via
+    # Lint + test the stdlib-only Python packages (templates/commons/lib/
+    # release_gh — PR state engine; release_core — shell→Python migration
+    # substrate). Mirrors this repo's lefthook `ruff` pre-commit hook.
+    # Deliberately light: both packages have ZERO runtime deps and import via
     # pytest `pythonpath`, so no build/install and no orchestrator SDK is
     # needed — just ruff + pytest. Config is the workspace-root pyproject.
     runs-on: ubuntu-latest
@@ -52,9 +53,9 @@ jobs:
         # findings; bump deliberately.
         run: pip install ruff==0.15.12 pytest
       - name: ruff check
-        run: ruff check templates/commons/lib/release_gh orchestrator tests/python
+        run: ruff check templates/commons/lib/release_gh templates/commons/lib/release_core orchestrator tests/python
       - name: ruff format --check
-        run: ruff format --check templates/commons/lib/release_gh orchestrator tests/python
+        run: ruff format --check templates/commons/lib/release_gh templates/commons/lib/release_core orchestrator tests/python
       - name: pytest
         run: pytest
 

@@ -59,6 +59,24 @@ _write_release_yml() {
   [[ "$output" == *"version must be"* ]]
 }
 
+@test "leading-zero version field is rejected (semver-tool NAT parity)" {
+  # The vendored semver-tool's SEMVER_REGEX uses NAT='0|[1-9][0-9]*', which
+  # rejects a leading zero on any numeric field. release_core.version.parse is
+  # laxer and would silently accept + normalize (01.0.0 -> 1.0.0); the strict
+  # validation gate must reject it exactly as the bash did. (release FU2.)
+  _write_release_yml
+  run "$BIN/release-cut" 01.0.0
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"version must be"* ]]
+}
+
+@test "leading-zero prerelease identifier is rejected" {
+  _write_release_yml
+  run "$BIN/release-cut" 1.0.0-01
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"version must be"* ]]
+}
+
 # ---------------------------------------------------------------------
 # Graceful no-op when there's nothing to dispatch.
 # ---------------------------------------------------------------------

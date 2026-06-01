@@ -1,199 +1,27 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # list-repo-pr — for each managed repo, list open PRs with status info.
 #
-# Shows: PR number, draft/ready, CI status, mergeable, review comments,
-# unresolved threads, title, and PR link. Designed as a daily dashboard.
-# The PR link is colored green when the PR is merge-ready (CI passes,
-# mergeable, no unresolved threads).
-#
-# Usage:
-#   list-repo-pr                 # all managed repos
-#   list-repo-pr --only-present  # skip repos missing locally
-#   list-repo-pr --owner lex-fmt # filter by owner prefix
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. list-repo-pr is a
+# release-only tool (a real file in bin/, NOT synced to consumers), so realpath
+# lands in bin/ and the package sits at ../templates/commons/lib/release_core
+# (the contract's variant (b)). The columnar/ANSI dashboard matches the old bash.
+import os
+import sys
 
-set -uo pipefail
-
-only_present=0
-owner_filter=""
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --only-present) only_present=1; shift ;;
-    --owner)        owner_filter=$2; shift 2 ;;
-    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 64 ;;
-  esac
-done
-
-REPOS=(
-  "arthur-debert/release|$HOME/h/release"
-  "arthur-debert/phos-app|$HOME/h/phos/phos-app"
-  "arthur-debert/phos-core|$HOME/h/phos/phos-core"
-  "arthur-debert/burgertocow|$HOME/h/burgertocow"
-  "arthur-debert/clapfig|$HOME/h/clapfig"
-  "arthur-debert/dodot|$HOME/h/dodot"
-  "arthur-debert/homebrew-tools|$HOME/h/homebrew-tools"
-  "arthur-debert/padz|$HOME/h/padz"
-  "arthur-debert/rustloc|$HOME/h/rustloc"
-  "arthur-debert/simple-gal|$HOME/h/simple-gal/simple-gal"
-  "arthur-debert/simple-gal-action|$HOME/h/simple-gal/simple-gal-action"
-  "arthur-debert/simple-gal-ui|$HOME/h/simple-gal/simple-gal-ui"
-  "arthur-debert/standout|$HOME/h/standout"
-  "lex-fmt/comms|$HOME/h/lex-fmt/comms"
-  "lex-fmt/lex|$HOME/h/lex-fmt/lex"
-  "lex-fmt/lexed|$HOME/h/lex-fmt/lexed"
-  "lex-fmt/nvim|$HOME/h/lex-fmt/nvim"
-  "lex-fmt/tree-sitter-lex|$HOME/h/lex-fmt/tree-sitter-lex"
-  "lex-fmt/vscode|$HOME/h/lex-fmt/vscode"
-  "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
 )
 
-# $owner/$name are GraphQL variables (substituted by gh via -F), not shell.
-# shellcheck disable=SC2016
-QUERY='
-query($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) {
-    pullRequests(states: OPEN, first: 50, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {
-        number
-        title
-        url
-        isDraft
-        mergeable
-        author { login }
-        headRefName
-        reviewThreads(first: 100) {
-          totalCount
-          nodes { isResolved }
-        }
-        reviews(first: 100) {
-          totalCount
-          nodes { comments { totalCount } }
-        }
-        comments { totalCount }
-        commits(last: 1) {
-          nodes {
-            commit {
-              statusCheckRollup { state }
-            }
-          }
-        }
-      }
-    }
-  }
-}'
+from release_core.verbs import list_repo_pr  # noqa: E402 — sys.path set above
 
-R='\033[0m'
-RED='\033[31m'
-GRN='\033[32m'
-YLW='\033[33m'
-
-cell() {
-  local width=$1 clr=$2 text=$3
-  printf '%b%-*s%b' "$clr" "$width" "$text" "$R"
-}
-
-first=1
-for entry in "${REPOS[@]}"; do
-  repo=${entry%%|*}
-  path=${entry##*|}
-  owner=${repo%%/*}
-  name=${repo##*/}
-
-  if [ -n "$owner_filter" ] && [ "$owner" != "$owner_filter" ]; then
-    continue
-  fi
-
-  if [ "$only_present" = "1" ] && [ ! -d "$path" ]; then
-    continue
-  fi
-
-  json=$(gh api graphql \
-    -f query="$QUERY" \
-    -f owner="$owner" \
-    -f name="$name" 2>&1) || {
-    [ "$first" = "1" ] || echo
-    first=0
-    echo "=== $repo ==="
-    echo "  (API error: $json)"
-    continue
-  }
-
-  count=$(printf '%s' "$json" | jq '.data.repository.pullRequests.nodes | length')
-  if [ "$count" = "0" ]; then
-    continue
-  fi
-
-  [ "$first" = "1" ] || echo
-  first=0
-  echo "=== $repo ($count open) ==="
-  printf "  %-6s %-7s %-8s %-10s %-8s %-10s %-52s %s\n" "#" "status" "CI" "merge" "cmnts" "unresolvd" "title" "url"
-  printf "  %-6s %-7s %-8s %-10s %-8s %-10s %-52s %s\n" "------" "-------" "--------" "----------" "--------" "----------" "------------------------------" "---"
-
-  printf '%s' "$json" | jq -c '.data.repository.pullRequests.nodes[]' | while IFS= read -r pr; do
-    num=$(printf '%s' "$pr" | jq -r '.number')
-    url=$(printf '%s' "$pr" | jq -r '.url')
-    title=$(printf '%s' "$pr" | jq -r '.title' | cut -c1-50)
-    is_draft=$(printf '%s' "$pr" | jq -r '.isDraft')
-    mergeable=$(printf '%s' "$pr" | jq -r '.mergeable')
-    ci_state=$(printf '%s' "$pr" | jq -r '.commits.nodes[0].commit.statusCheckRollup.state // "null"')
-    threads_unresolved=$(printf '%s' "$pr" | jq '[.reviewThreads.nodes[] | select(.isResolved == false)] | length')
-    inline_comments=$(printf '%s' "$pr" | jq '[.reviews.nodes[].comments.totalCount] | add // 0')
-    pr_comments=$(printf '%s' "$pr" | jq '.comments.totalCount')
-    total_comments=$(( inline_comments + pr_comments ))
-
-    if [ "$is_draft" = "true" ]; then
-      st_text="draft"; st_clr=$YLW
-    else
-      st_text="ready"; st_clr=$GRN
-    fi
-
-    case "$ci_state" in
-      SUCCESS) ci_text="+ pass"; ci_clr=$GRN ;;
-      PENDING) ci_text="~ pend"; ci_clr=$YLW ;;
-      FAILURE) ci_text="x fail"; ci_clr=$RED ;;
-      ERROR)   ci_text="x err";  ci_clr=$RED ;;
-      *)       ci_text="-";      ci_clr=""   ;;
-    esac
-
-    case "$mergeable" in
-      MERGEABLE)   mg_text="yes";      mg_clr=$GRN ;;
-      CONFLICTING) mg_text="conflict"; mg_clr=$RED ;;
-      *)           mg_text="?";        mg_clr=$YLW ;;
-    esac
-
-    if [ "$total_comments" -gt 0 ]; then
-      cm_text="$total_comments"
-    else
-      cm_text="-"
-    fi
-
-    if [ "$threads_unresolved" -gt 0 ]; then
-      ur_text="$threads_unresolved"; ur_clr=$YLW
-    else
-      ur_text="-"; ur_clr=""
-    fi
-
-    url_clr=""
-    if [ "$ci_state" = "SUCCESS" ] && [ "$mergeable" = "MERGEABLE" ] && [ "$threads_unresolved" -eq 0 ]; then
-      url_clr=$GRN
-    fi
-
-    printf '  %-6s ' "#$num"
-    cell 7  "$st_clr" "$st_text"
-    printf ' '
-    cell 8  "$ci_clr" "$ci_text"
-    printf ' '
-    cell 10 "$mg_clr" "$mg_text"
-    printf ' '
-    cell 8  ""      "$cm_text"
-    printf ' '
-    cell 10 "$ur_clr" "$ur_text"
-    printf ' %-52s ' "$title"
-    printf '%b%s%b\n' "$url_clr" "$url" "$R"
-  done
-done
-
-if [ "$first" = "1" ]; then
-  echo "(no open PRs across managed repos)"
-fi
+if __name__ == "__main__":
+    sys.exit(list_repo_pr.main(sys.argv[1:]))

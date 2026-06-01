@@ -1,88 +1,29 @@
-#!/usr/bin/env bash
-# Enable Dependabot security updates (alerts + automated fixes) on every repo
-# onboarded to the canonical main-branch-protection ruleset.
+#!/usr/bin/env python3
+# enable-dependabot-security — enable Dependabot security updates on onboarded repos.
 #
-# Why: per the release/README.md "Dependabot policy", security updates are the
-# only flow worth automating across the portfolio. They're toggled via the
-# GitHub API, not the dependabot.yml file — so this script is the canonical
-# way to apply the policy.
-#
-# Endpoints used:
-#   PUT /repos/{repo}/vulnerability-alerts      — enables Dependabot alerts
-#   PUT /repos/{repo}/automated-security-fixes  — enables auto-PR for security
-#
-# Usage:
-#   enable-dependabot-security                              # auto-discover
-#   enable-dependabot-security --owners arthur-debert,lex-fmt
-#   enable-dependabot-security --repos arthur-debert/dodot,lex-fmt/lex
-#   enable-dependabot-security --dry-run
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch.
+# enable-dependabot-security is a release-only tool (a real file in bin/, NOT
+# synced to consumers), so realpath lands in bin/ and the package sits at
+# ../templates/commons/lib/release_core (the contract's variant (b)). The
+# discovery header, per-repo ok/FAIL lines, summary, and exit codes match the
+# old bash byte-for-byte.
+import os
+import sys
 
-set -euo pipefail
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-owners="arthur-debert,lex-fmt"
-explicit_repos=""
-dry_run=false
+from release_core.verbs import enable_dependabot_security  # noqa: E402 — sys.path set above
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --owners)  owners=$2; shift 2 ;;
-    --repos)   explicit_repos=$2; shift 2 ;;
-    --dry-run) dry_run=true; shift ;;
-    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 64 ;;
-  esac
-done
-
-repos=()
-if [ -n "$explicit_repos" ]; then
-  IFS=',' read -ra repos <<< "$explicit_repos"
-else
-  echo "discovering onboarded repos in: $owners"
-  for owner in $(echo "$owners" | tr ',' ' '); do
-    while read -r repo; do
-      rs=$(gh api "repos/$repo/rulesets" 2>/dev/null || echo '[]')
-      id=$(jq -r '.[]? | select(.name == "main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
-      [ -n "$id" ] && repos+=("$repo")
-    done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
-  done
-fi
-
-if [ ${#repos[@]} -eq 0 ]; then
-  echo "no onboarded repos found" >&2
-  exit 1
-fi
-
-echo "found ${#repos[@]} repo(s):"
-printf '  %s\n' "${repos[@]}"
-echo
-
-failed=0
-for repo in "${repos[@]}"; do
-  printf '  %s\n' "$repo"
-  if [ "$dry_run" = "true" ]; then
-    printf '    [dry] PUT vulnerability-alerts\n'
-    printf '    [dry] PUT automated-security-fixes\n'
-    continue
-  fi
-  fail=0
-  if gh api -X PUT "repos/$repo/vulnerability-alerts" --silent 2>&1; then
-    printf '    ok   alerts\n'
-  else
-    printf '    FAIL alerts\n'
-    fail=$((fail+1))
-  fi
-  if gh api -X PUT "repos/$repo/automated-security-fixes" --silent 2>&1; then
-    printf '    ok   automated-fixes\n'
-  else
-    printf '    FAIL automated-fixes\n'
-    fail=$((fail+1))
-  fi
-  [ "$fail" -gt 0 ] && failed=$((failed+1))
-done
-
-echo
-if [ "$failed" -gt 0 ]; then
-  echo "summary: ${#repos[@]} repos, $failed with failures" >&2
-  exit 1
-fi
-echo "summary: ${#repos[@]} repos, alerts + automated fixes enabled"
+if __name__ == "__main__":
+    sys.exit(enable_dependabot_security.main(sys.argv[1:]))

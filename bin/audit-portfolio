@@ -1,144 +1,25 @@
-#!/usr/bin/env bash
-# Audit every managed repo against the portfolio "good state" baseline.
+#!/usr/bin/env python3
+# audit-portfolio — audit every managed repo against the "good state" baseline.
 #
-# Source of truth: managed-repos.yaml at the release/ repo root — the ONLY
-# fleet list. There is no auto-discovery: ruleset/gh-api discovery caused
-# recurring scope bugs and was removed. To audit a one-off set, pass
-# --repos.
-#
-# Usage:
-#   audit-portfolio                              # read managed-repos.yaml
-#   audit-portfolio --repos arthur-debert/dodot,lex-fmt/lex   # explicit set
-#   audit-portfolio --json                       # one JSON object per line
-#   audit-portfolio --only-failing               # hide all-green repos in table
-#
-# Exit codes:
-#   0  — every audited repo all-green
-#   1  — at least one repo has FAIL
-#   2  — at least one repo has WARN (no FAILs)
-#   64 — bad usage
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. audit-portfolio is
+# a release-only tool (a real file in bin/, NOT synced to consumers), so
+# realpath lands in bin/ and the package sits at
+# ../templates/commons/lib/release_core (the contract's variant (b)). We export
+# the script's own bin/ dir so the verb resolves bin/../managed-repos.yaml
+# exactly as the bash did. Output (--json stream, summary table) + exit codes
+# match the old bash byte-for-byte.
+import os
+import sys
 
-set -uo pipefail
+_HERE = os.path.dirname(os.path.realpath(__file__))
+os.environ.setdefault("AUDIT_PORTFOLIO_SCRIPT_DIR", _HERE)
+sys.path.insert(
+    0,
+    os.path.join(_HERE, "..", "templates", "commons", "lib", "release_core"),
+)
 
-explicit_repos=""
-json_mode=0
-only_failing=0
+from release_core.verbs import audit_portfolio  # noqa: E402 — sys.path set above
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --repos)        explicit_repos=$2; shift 2 ;;
-    --json)         json_mode=1; shift ;;
-    --only-failing) only_failing=1; shift ;;
-    -h|--help)      sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 64 ;;
-  esac
-done
-
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-audit_repo="$script_dir/audit-repo"
-manifest_file="$script_dir/../managed-repos.yaml"
-[ -x "$audit_repo" ] || { echo "error: $audit_repo not found or not executable" >&2; exit 1; }
-
-# Repo set: explicit --repos, else the managed-repos.yaml fleet. No discovery.
-repos=()
-if [ -n "$explicit_repos" ]; then
-  IFS=',' read -ra repos <<< "$explicit_repos"
-else
-  [ -f "$manifest_file" ] || { echo "error: $manifest_file not found; pass --repos" >&2; exit 1; }
-  command -v yq >/dev/null || { echo "error: yq required to read $manifest_file (mikefarah/yq v4)" >&2; exit 1; }
-  while IFS= read -r r; do
-    [ -n "$r" ] && repos+=("$r")
-  done < <(yq '.projects[][].repo' "$manifest_file")
-  [ "$json_mode" = "0" ] && echo "auditing managed repos from $manifest_file (${#repos[@]} repos)" >&2
-fi
-
-if [ ${#repos[@]} -eq 0 ]; then
-  echo "no onboarded repos found" >&2
-  exit 1
-fi
-
-[ "$json_mode" = "0" ] && echo "auditing ${#repos[@]} repo(s)..." >&2
-
-# Run audit-repo for each, capture status counts
-declare -a summary_rows
-declare -a detail_repos
-total_fails=0
-total_warns=0
-
-for r in "${repos[@]}"; do
-  if [ "$json_mode" = "1" ]; then
-    "$audit_repo" --repo "$r" --json
-    continue
-  fi
-
-  out=$("$audit_repo" --repo "$r" 2>&1)
-  ec=$?
-  fails=$(printf '%s\n' "$out" | grep -cE '^\s*\[FAIL\]')
-  warns=$(printf '%s\n' "$out" | grep -cE '^\s*\[WARN\]')
-  passes=$(printf '%s\n' "$out" | grep -cE '^\s*\[PASS\]')
-  skips=$(printf '%s\n' "$out" | grep -cE '^\s*\[SKIP\]')
-  # Conformance = pass rate excluding SKIPs (which are N/A rows).
-  applicable=$((passes + fails + warns))
-  if [ "$applicable" -gt 0 ]; then
-    conf_pct=$((100 * passes / applicable))
-  else
-    conf_pct=0
-  fi
-  summary_rows+=("$ec|$fails|$warns|$passes|$skips|$conf_pct|$r")
-  if [ "$fails" -gt 0 ] || [ "$warns" -gt 0 ]; then
-    detail_repos+=("$r")
-  fi
-  total_fails=$((total_fails + fails))
-  total_warns=$((total_warns + warns))
-done
-
-if [ "$json_mode" = "1" ]; then
-  exit 0
-fi
-
-# --- Table summary ---
-# Conformance column: passes / (passes + fails + warns), excluding SKIPs.
-# A skipped check is N/A and shouldn't count against or for the score.
-echo
-printf '%-40s %5s %5s %5s %s\n' "REPO" "FAIL" "WARN" "CONF" "STATUS"
-printf '%-40s %5s %5s %5s %s\n' "----" "----" "----" "----" "------"
-total_passes=0
-total_applicable=0
-for row in "${summary_rows[@]}"; do
-  IFS='|' read -r ec fails warns passes skips conf_pct r <<<"$row"
-  total_passes=$((total_passes + passes))
-  total_applicable=$((total_applicable + passes + fails + warns))
-  if [ "$only_failing" = "1" ] && [ "$fails" = "0" ] && [ "$warns" = "0" ]; then
-    continue
-  fi
-  case "$ec" in
-    0) status="green" ;;
-    1) status="FAIL" ;;
-    2) status="warn" ;;
-    *) status="?($ec)" ;;
-  esac
-  printf '%-40s %5s %5s %4s%% %s\n' "$r" "$fails" "$warns" "$conf_pct" "$status"
-done
-
-# --- Detail view: re-invoke audit-repo --quiet for problem repos ---
-if [ "${#detail_repos[@]}" -gt 0 ]; then
-  echo
-  echo "=== details for repos with failures or warnings ==="
-  for r in "${detail_repos[@]}"; do
-    echo
-    "$audit_repo" --repo "$r" --quiet
-  done
-fi
-
-# --- Summary line ---
-if [ "$total_applicable" -gt 0 ]; then
-  portfolio_conf=$((100 * total_passes / total_applicable))
-else
-  portfolio_conf=0
-fi
-printf 'summary: %d repo(s), %d failure(s), %d warning(s), portfolio conformance: %d%% (%d/%d applicable rows pass)\n' \
-  "${#repos[@]}" "$total_fails" "$total_warns" "$portfolio_conf" "$total_passes" "$total_applicable"
-
-if [ "$total_fails" -gt 0 ]; then exit 1; fi
-if [ "$total_warns" -gt 0 ]; then exit 2; fi
-exit 0
+if __name__ == "__main__":
+    sys.exit(audit_portfolio.main(sys.argv[1:]))

@@ -7,22 +7,24 @@ name: changelog tests
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
     paths:
-      - 'templates/commons/bin/changelog*'
-      - 'templates/commons/bin/share/semver-tool/**'
-      - 'tests/changelog/**'
-      - 'tests/changelog-check-fixtures/**'
-      - '.github/actions/changelog-check/**'
-      - '.github/workflows/changelog-tests.yml'
+      - "templates/commons/bin/changelog*"
+      - "templates/commons/bin/share/semver-tool/**"
+      - "templates/commons/lib/release_core/**"
+      - "tests/changelog/**"
+      - "tests/changelog-check-fixtures/**"
+      - ".github/actions/changelog-check/**"
+      - ".github/workflows/changelog-tests.yml"
   pull_request:
     paths:
-      - 'templates/commons/bin/changelog*'
-      - 'templates/commons/bin/share/semver-tool/**'
-      - 'tests/changelog/**'
-      - 'tests/changelog-check-fixtures/**'
-      - '.github/actions/changelog-check/**'
-      - '.github/workflows/changelog-tests.yml'
+      - "templates/commons/bin/changelog*"
+      - "templates/commons/bin/share/semver-tool/**"
+      - "templates/commons/lib/release_core/**"
+      - "tests/changelog/**"
+      - "tests/changelog-check-fixtures/**"
+      - ".github/actions/changelog-check/**"
+      - ".github/workflows/changelog-tests.yml"
 
 permissions:
   contents: read
