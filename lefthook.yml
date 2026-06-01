@@ -115,12 +115,18 @@ pre-commit:
           echo "ERROR: ruff not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
           exit 1
         fi
-        py_files=()
+        # POSIX sh — lefthook runs hooks under `sh` (dash on Linux), not bash,
+        # so no arrays. Accumulate matched files in the positional params via
+        # `set --` (the portable list).
+        set --
         for f in {staged_files}; do
           [ -f "$f" ] || continue
           case "$f" in
             */share/*) continue ;; # vendored (own provenance) — exempt
-            *.py) py_files+=("$f"); continue ;;
+            *.py)
+              set -- "$@" "$f"
+              continue
+              ;;
           esac
           # No .py extension: route by shebang, like bin/check-shell. A python
           # shebang (python / python3 / `env python…`) ⇒ lint; anything else
@@ -128,12 +134,12 @@ pre-commit:
           first=""
           read -r first < "$f" 2>/dev/null || true
           case "$first" in
-            '#!'*python*) py_files+=("$f") ;;
+            '#!'*python*) set -- "$@" "$f" ;;
           esac
         done
-        [ ${#py_files[@]} -eq 0 ] && exit 0
-        ruff check "${py_files[@]}"
-        ruff format --check "${py_files[@]}"
+        [ "$#" -eq 0 ] && exit 0
+        ruff check "$@"
+        ruff format --check "$@"
 
     lint-skills:
       # Markdownlint our OWN skill docs. Vendored skills (those carrying
