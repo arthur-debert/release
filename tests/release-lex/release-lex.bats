@@ -4,12 +4,13 @@
 # release-lex: shim CLI contract. release-lex is a thin Python shim over
 # release_core.verbs.release_lex. These tests pin the CLI edge — usage
 # text, the usage exit code (64), the bad bump-kind / no-repos /
-# unknown-arg paths, and the validation aborts (exit 1) — for the new
-# post-`scripts/release` model: the cut path needs the managed
-# `bin/release` tool (re-synced from arthur-debert/release), and release
-# is driven by `bin/release` (= release-cut, which dispatches release.yml;
-# CI does the mutation). The should-release decision is computed
-# generically via git — there is no per-repo `bin/diff-since-release`.
+# unknown-arg paths, and the validation aborts (exit 1) — for the
+# self-contained model: the cut path dispatches via the MAINTAINER's
+# `release-cut` (resolved from PATH, run in each repo's cwd), so it
+# requires `release-cut` on PATH (checked once, up front) and NOT a
+# per-repo `bin/release` shim (which is missing on stale chain repos).
+# The should-release decision is computed generically via git — there is
+# no per-repo `bin/diff-since-release` either.
 #
 # The live multi-repo orchestration (fetch / dispatch / CI-watch) is
 # faithful side-effecting glue and is NOT exercised here (it needs real
@@ -23,6 +24,13 @@ BIN="$BATS_TEST_DIRNAME/../../bin"
 setup() {
   WORK="$(mktemp -d "${BATS_TMPDIR:-/tmp}/rlx.XXXXXX")"
   cd "$WORK"
+  # A fake `release-cut` on PATH so cut-mode validation's up-front PATH
+  # check passes; tests that need it ABSENT scrub PATH explicitly.
+  FAKEBIN="$WORK/fakebin"
+  mkdir -p "$FAKEBIN"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$FAKEBIN/release-cut"
+  chmod +x "$FAKEBIN/release-cut"
+  PATH="$FAKEBIN:$PATH"
 }
 
 teardown() {
@@ -30,20 +38,12 @@ teardown() {
   rm -rf "$WORK"
 }
 
-# Build a fake lex-fmt repo carrying the managed bin/ release tool.
-# $1 = dir, remaining args = tool names to OMIT (of: release).
+# Build a fake lex-fmt repo. release-lex no longer requires a per-repo
+# bin/ tool — cut mode dispatches via the maintainer's `release-cut` on
+# PATH — so this is just a directory that exists.
 _make_repo() {
-  local dir="$1"; shift
-  local omit=" $* "
-  mkdir -p "$dir/bin"
-  local tool
-  for tool in release; do
-    case "$omit" in
-      *" $tool "*) continue ;;
-    esac
-    printf '#!/usr/bin/env bash\n' > "$dir/bin/$tool"
-    chmod +x "$dir/bin/$tool"
-  done
+  local dir="$1"
+  mkdir -p "$dir"
 }
 
 # ---------------------------------------------------------------------
@@ -103,12 +103,13 @@ _make_repo() {
   [[ "$output" == *"(for --comms)"* ]]
 }
 
-@test "missing managed bin/release exits 1" {
-  _make_repo "$WORK/comms" release
-  run "$BIN/release-lex" patch --comms "$WORK/comms"
+@test "release-cut not on PATH exits 1" {
+  _make_repo "$WORK/comms"
+  # Scrub PATH down to the system dirs so our fake release-cut is gone.
+  PATH="/usr/bin:/bin" run "$BIN/release-lex" patch --comms "$WORK/comms"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"missing bin/release"* ]]
-  [[ "$output" == *"release-sync"* ]]
+  [[ "$output" == *"release-cut not on PATH"* ]]
+  [[ "$output" == *"add the release repo's bin/ to PATH"* ]]
 }
 
 # ---------------------------------------------------------------------

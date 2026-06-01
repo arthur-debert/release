@@ -2,23 +2,24 @@
 
 Post `scripts/release` retirement: release-lex computes the should-release
 decision GENERICALLY via plain git (commits since the last final release tag) and
-drives each repo via the managed `bin/release` (= release-cut, which reads the
-version from the manifest, computes the bump, and dispatches release.yml; CI does
-the bump/CHANGELOG/commit/tag/build). The per-repo `bin/diff-since-release`
-dependency was dropped — it was absent for 3 of the 6 lex-chain Kinds. The live
-multi-repo orchestration (fetch/checkout/pull/submodule, release-cut dispatch, gh
-run list/watch) is genuine side-effecting glue requiring real repos + GitHub, so
-it is NOT unit-tested (that is the script's whole point). NO real release is ever
+dispatches each repo via the MAINTAINER's `release-cut` (resolved from PATH, run
+in the repo's cwd — it reads the version from cwd's manifest, computes the bump,
+and dispatches cwd's release.yml; CI does the bump/CHANGELOG/commit/tag/build).
+The per-repo `bin/release` and `bin/diff-since-release` dependencies were dropped
+— they were absent / stale on chain repos whose mains lag. The live multi-repo
+orchestration (fetch/checkout/pull/submodule, release-cut dispatch, gh run
+list/watch) is genuine side-effecting glue requiring real repos + GitHub, so it
+is NOT unit-tested (that is the script's whole point). NO real release is ever
 cut here. Tested: the github-slug map, the generic git should-release decision
 (last-final-tag selection + log, mocked at the proc layer — NO real git/network),
 the bump-kind / version recognizers, the --only filter, the run-id extractor, the
-status-line renderer, and the arg-parse + validation exit codes (data layer
-mocked via tmp dirs)."""
+status-line renderer, and the arg-parse + validation exit codes (release-cut
+on PATH stubbed via shutil.which; data layer mocked via tmp dirs)."""
 
 from __future__ import annotations
 
 import os
-import stat
+import shutil
 
 import pytest
 from release_core.verbs import release_lex as rlx
@@ -286,7 +287,8 @@ def test_parse_unknown_arg_exits_64(capsys):
 
 
 def test_parse_bad_bump_kind_exits_64(capsys, tmp_path):
-    _make_repo(tmp_path, with_tools=True)
+    # bad bump-kind is rejected before any PATH / path validation.
+    _make_repo(tmp_path)
     rc = rlx.main(["frobnicate", "--comms", str(tmp_path)])
     assert rc == 64
     assert "bad bump-kind" in capsys.readouterr().err
@@ -395,23 +397,41 @@ def test_relative_paths_resolve_independent_of_iteration_order(tmp_path, monkeyp
 # --------------------------------------------------------------------------
 
 
-def _make_repo(path, *, with_tools: bool, missing=()):
-    """Materialize a repo dir with the executable bin/release managed release
-    tool, optionally omitting it to exercise the missing-tool abort. (The
-    should-release decision is generic git now — no bin/diff-since-release.)"""
-    binv = os.path.join(str(path), "bin")
-    os.makedirs(binv, exist_ok=True)
-    if with_tools:
-        for tool in ("release",):
-            if tool in missing:
-                continue
-            p = os.path.join(binv, tool)
-            with open(p, "w") as fh:
-                fh.write("#!/usr/bin/env bash\n")
-            os.chmod(p, os.stat(p).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+def _make_repo(path):
+    """Materialize a bare repo dir. release-lex no longer requires any per-repo
+    bin/ tool — cut mode dispatches via the maintainer's `release-cut` on PATH
+    and the should-release decision is generic git — so the repo is just a
+    directory that must exist."""
+    os.makedirs(str(path), exist_ok=True)
 
 
-def test_validate_not_a_directory_exits_1(capsys, tmp_path):
+@pytest.fixture
+def _release_cut_on_path(monkeypatch):
+    """Pretend `release-cut` is on PATH so cut-mode validation gets past the
+    up-front PATH check and reaches the per-repo path validation under test."""
+    real_which = shutil.which
+
+    def fake_which(name, *a, **k):
+        if name == rlx.RELEASE_CUT:
+            return "/fake/bin/release-cut"
+        return real_which(name, *a, **k)
+
+    monkeypatch.setattr(rlx.shutil, "which", fake_which)
+
+
+def test_validate_release_cut_not_on_path_exits_1(capsys, tmp_path, monkeypatch):
+    # Cut mode requires `release-cut` on the maintainer's PATH, checked once up
+    # front. Absent it -> exit 1 with a clear maintainer-facing message.
+    _make_repo(tmp_path)
+    monkeypatch.setattr(rlx.shutil, "which", lambda *a, **k: None)
+    rc = rlx.main(["patch", "--comms", str(tmp_path)])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "release-cut not on PATH" in err
+    assert "add the release repo's bin/ to PATH" in err
+
+
+def test_validate_not_a_directory_exits_1(capsys, tmp_path, _release_cut_on_path):
     missing = tmp_path / "nope"
     rc = rlx.main(["patch", "--comms", str(missing)])
     assert rc == 1
@@ -420,29 +440,25 @@ def test_validate_not_a_directory_exits_1(capsys, tmp_path):
     assert "(for --comms)" in err
 
 
-def test_validate_missing_release_tool_exits_1(capsys, tmp_path):
-    _make_repo(tmp_path, with_tools=True, missing=("release",))
-    rc = rlx.main(["patch", "--comms", str(tmp_path)])
-    assert rc == 1
-    err = capsys.readouterr().err
-    assert "missing bin/release" in err
-    assert "release-sync" in err
-
-
-def test_validate_non_executable_tool_exits_1(capsys, tmp_path):
-    _make_repo(tmp_path, with_tools=True)
-    # Strip the exec bit from one tool: the executability check must fail.
-    p = os.path.join(str(tmp_path), "bin", "release")
-    os.chmod(p, stat.S_IRUSR | stat.S_IWUSR)
-    rc = rlx.main(["patch", "--comms", str(tmp_path)])
-    assert rc == 1
-    assert "missing bin/release" in capsys.readouterr().err
+def test_validate_cut_mode_needs_no_per_repo_bin_tool(tmp_path, _release_cut_on_path):
+    # With release-cut on PATH, a bare repo dir (no bin/ at all) passes cut-mode
+    # validation — no per-repo bin/release is required anymore.
+    _make_repo(tmp_path)
+    cfg = {
+        "status_mode": False,
+        "bump_kind": "patch",
+        "dry_run": False,
+        "only": "",
+        "repos": {"comms": str(tmp_path)},
+    }
+    assert rlx._validate(cfg) is None
 
 
 def test_validate_status_mode_needs_no_bin_tool(tmp_path):
-    # In --status mode the decision is generic git — a repo with no bin/ tool at
-    # all (just a directory) passes validation (returns None — proceed).
-    _make_repo(tmp_path, with_tools=False)
+    # In --status mode the decision is generic git and there is no dispatch — a
+    # repo with no bin/ tool (just a directory) passes validation, and PATH is
+    # not consulted (no release-cut required for read-only status).
+    _make_repo(tmp_path)
     cfg = {
         "status_mode": True,
         "bump_kind": "status",
@@ -525,7 +541,7 @@ def test_release_one_success_with_commits_proceeds_to_dispatch(monkeypatch, caps
     assert rc == 0
     out = capsys.readouterr().out
     assert "2 commit(s) since v1.2.3" in out
-    assert "./bin/release patch" in out
+    assert "release-cut patch" in out
 
 
 # --------------------------------------------------------------------------

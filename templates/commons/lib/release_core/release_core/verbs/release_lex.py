@@ -2,9 +2,15 @@
 repo chain (comms -> lex/tree-sitter-lex -> vscode/nvim/lexed).
 
 Layer 1 of the cross-repo release automation (lex-fmt/lex#640). Walks the
-dependency chain and drives each repo's release via the managed `bin/release`
-(= `release-cut`) tool. There are no longer any per-repo `scripts/release/*`
-primitives — those were retired (the feat/retire-scripts-dir line).
+dependency chain and drives each repo's release by invoking `release-cut`
+(resolved from the MAINTAINER's PATH — the release repo's bin/) directly in each
+repo's cwd. It no longer calls each repo's `bin/release` shim: that shim just
+`exec`s the same `release-cut`, and it is missing on stale chain repos
+(tree-sitter-lex, nvim — mains behind), which stalled the cascade. release-cut
+reads cwd's manifest + dispatches cwd's release.yml, so a cwd-local call is
+per-repo-correct AND self-contained (no dependency on each target repo's tooling
+being current). There are no longer any per-repo `scripts/release/*` primitives
+— those were retired (the feat/retire-scripts-dir line).
 
 The should-release decision is computed GENERICALLY here via plain git (commits
 since the last final release tag), NOT via a per-repo `bin/diff-since-release`.
@@ -13,19 +19,24 @@ nvim-plugin — 3 of the 6 lex-chain repos) and diverged across the others, so t
 cascade died at the first repo lacking it. The generic decision replicates the
 old `diff-since-release` contract exactly (see `decide_release` below): commits
 since the last NON-prerelease tag reachable from HEAD; no final tags ⇒ the
-no-tags case (a first release is human-driven). Release is still done by the
-managed tooling synced into every consumer under `bin/`:
+no-tags case (a first release is human-driven). Release is dispatched by the
+maintainer's `release-cut`, run in each repo's cwd:
 
-  bin/release             — thin shim that execs `release-cut`. release-cut is
-                            Kind-aware: it reads the current version from the
-                            Consumer's canonical manifest source (Cargo.toml,
-                            package.json, extension.toml, or the latest git tag
-                            for manifest-less Kinds), computes the new version
-                            from a bump shortcut or literal X.Y.Z, and
-                            DISPATCHES `.github/workflows/release.yml` with that
-                            version. CI (the reusable per-Kind release workflow)
-                            does the actual bump + CHANGELOG roll + commit + tag
-                            + build + GitHub Release.
+  release-cut <bump>      — resolved from the maintainer's PATH (the release
+                            repo's bin/), invoked with the repo as cwd.
+                            release-cut is Kind-aware: it reads the current
+                            version from cwd's canonical manifest source
+                            (Cargo.toml, package.json, extension.toml, or the
+                            latest git tag for manifest-less Kinds), computes the
+                            new version from a bump shortcut or literal X.Y.Z, and
+                            DISPATCHES cwd's `.github/workflows/release.yml` with
+                            that version. CI (the reusable per-Kind release
+                            workflow) does the actual bump + CHANGELOG roll +
+                            commit + tag + build + GitHub Release. We call
+                            release-cut directly rather than the repo's
+                            `bin/release` shim (which only execs release-cut and
+                            is missing on stale chain repos) so the maintainer-run
+                            cascade is self-contained.
 
 The old primitive→responsibility mapping, for the record:
   get-current-version       -> release-cut reads it from the Kind manifest.
@@ -73,11 +84,23 @@ Exit codes:
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
 
 from .. import gh, proc
+
+# The maintainer-side dispatch tool. release-lex runs from the maintainer's
+# release clone, so `release-cut` is on the maintainer's PATH (the release repo's
+# bin/ dir). We invoke it DIRECTLY in each repo's cwd rather than the repo's
+# `bin/release` shim — release-cut reads cwd's manifest + dispatches cwd's
+# release.yml, so calling it per-repo-cwd is per-repo-correct, and it drops the
+# dependency on each target repo carrying a current `bin/release` (which is
+# missing on stale chain repos — tree-sitter-lex, nvim — whose mains lag). This
+# is the same self-contained pattern already applied to the should-release
+# decision (generic git, no per-repo bin/diff-since-release).
+RELEASE_CUT = "release-cut"
 
 # should-release decision states (the generic git decision, computed by
 # `decide_release`). Replaces the old `diff-since-release` exit-code contract —
@@ -341,10 +364,14 @@ def _validate(cfg: dict) -> int | None:
     proceed:
       1. bad bump-kind (non-status mode) -> 64
       2. no repos -> 64
-      3. each repo: dir exists -> 1; and in cut mode the managed bin/release tool
-         is present and executable -> 1. The should-release decision is now
-         computed generically via git, so NO bin/diff-since-release is required
-         in any repo / mode (it was absent for 3 of the 6 lex-chain Kinds).
+      3. cut mode only: `release-cut` is on the maintainer's PATH -> 1 (checked
+         ONCE, up front — it is the maintainer-side dispatch tool, not a per-repo
+         dep). --status needs no repo tool at all.
+      4. each repo: dir exists -> 1.
+    The should-release decision is computed generically via git and the dispatch
+    goes through the maintainer's `release-cut`, so NO per-repo bin/ tool
+    (bin/release, bin/diff-since-release) is required in any repo / mode — they
+    were absent / stale on chain repos whose mains lag.
     """
     if not cfg["status_mode"]:
         bump = cfg["bump_kind"]
@@ -361,31 +388,24 @@ def _validate(cfg: dict) -> int | None:
         print("release-lex: no repo paths supplied", file=sys.stderr)
         return 64
 
-    # Validate paths + the managed tools each repo must carry under bin/. We
-    # iterate in the stable ORDER so the first failure reported is deterministic.
+    # Cut mode dispatches via the maintainer's `release-cut` (run in each repo's
+    # cwd), so require it on PATH ONCE here rather than a bin/release per repo.
+    if not cfg["status_mode"] and shutil.which(RELEASE_CUT) is None:
+        print(
+            f"release-lex: {RELEASE_CUT} not on PATH — add the release repo's bin/ to PATH",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Validate paths. We iterate in the stable ORDER so the first failure
+    # reported is deterministic. No per-repo bin/ tool is required anymore.
     keys = [k for k in ORDER if k in cfg["repos"]]
     keys += [k for k in cfg["repos"] if k not in ORDER]
-    # --status only computes the generic git decision (no bin/ tool); the cut
-    # path additionally needs bin/release. Validate exactly that.
-    needed = () if cfg["status_mode"] else ("release",)
     for key in keys:
         path = cfg["repos"][key]
         if not os.path.isdir(path):
             print(f"release-lex: not a directory: {path} (for --{key})", file=sys.stderr)
             return 1
-        for tool in needed:
-            tool_path = os.path.join(path, "bin", tool)
-            if not (os.path.isfile(tool_path) and os.access(tool_path, os.X_OK)):
-                print(
-                    f"release-lex: {key} at {path} is missing bin/{tool}",
-                    file=sys.stderr,
-                )
-                print(
-                    f"  (re-sync the managed release tooling into lex-fmt/"
-                    f"{_repo_name(key)} — run `release-sync` there)",
-                    file=sys.stderr,
-                )
-                return 1
     return None
 
 
@@ -421,11 +441,13 @@ def _release_one(key: str, cfg: dict) -> int:
     """Cut one repo's release. Returns 0 on success/skip, 1 on failure.
 
     New model (post scripts/release retirement): the bump + CHANGELOG roll +
-    commit + tag all happen IN CI, dispatched by `bin/release` (= release-cut).
-    There is no local file mutation to branch/commit/PR/admin-merge anymore, so
-    this is now: refresh main -> decide generically via git (commits since the
-    last final release tag) -> `bin/release <bump>` (dispatch release.yml) ->
-    watch the resulting CI run.
+    commit + tag all happen IN CI, dispatched by the maintainer's `release-cut`
+    (run in the repo's cwd — NOT the repo's `bin/release` shim, which is missing
+    on stale chain repos). There is no local file mutation to
+    branch/commit/PR/admin-merge anymore, so this is now: refresh main -> decide
+    generically via git (commits since the last final release tag) ->
+    `release-cut <bump>` in the repo cwd (dispatch release.yml) -> watch the
+    resulting CI run.
     """
     path = cfg["repos"][key]
     dry_run = cfg["dry_run"]
@@ -463,20 +485,23 @@ def _release_one(key: str, cfg: dict) -> int:
         return 0
     print(f"  ↳ {decision.count} commit(s) since {decision.tag}")
 
-    # `bin/release <bump>` is Kind-aware: it reads the current version from the
-    # manifest, computes the new version, and dispatches release.yml. CI does
-    # the bump + CHANGELOG roll + commit + tag + build + GitHub Release.
+    # `release-cut <bump>` (maintainer's PATH tool, run in the repo cwd) is
+    # Kind-aware: it reads the current version from cwd's manifest, computes the
+    # new version, and dispatches cwd's release.yml. CI does the bump + CHANGELOG
+    # roll + commit + tag + build + GitHub Release. We call it directly rather
+    # than the repo's `bin/release` shim so the cascade doesn't depend on each
+    # target repo's tooling being current.
     if dry_run:
-        print(f"  $ ./bin/release {bump_kind}")
+        print(f"  $ {RELEASE_CUT} {bump_kind}")
         print("  ↳ dry-run: skipping release-cut dispatch + CI wait")
         return 0
 
-    print(f"  $ ./bin/release {bump_kind}")
+    print(f"  $ {RELEASE_CUT} {bump_kind}")
     cut = subprocess.run(  # noqa: S603 — constructed list, no shell
-        ["./bin/release", bump_kind], check=False
+        [RELEASE_CUT, bump_kind], check=False
     )
     if cut.returncode != 0:
-        print(f"  ✗ bin/release {bump_kind} failed (exit {cut.returncode})", file=sys.stderr)
+        print(f"  ✗ {RELEASE_CUT} {bump_kind} failed (exit {cut.returncode})", file=sys.stderr)
         return 1
     print(f"  ↳ release.yml dispatched for {key} ({bump_kind})")
 
