@@ -12,12 +12,15 @@ name: Cascade handler (reusable)
 #       secrets:
 #         RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 #
-# The contract: the consumer must implement the five `scripts/release/`
-# primitives documented in arthur-debert/release `docs/lex-release-
-# cascade.md` (get-current-version, get-commits-since-release,
-# should-release, update-release, trigger-release). This workflow runs
-# them in the right order, with all 10 gotchas from the cascade doc
-# already folded in.
+# The contract: the consumer ships the managed release tooling under
+# `bin/` (re-synced from arthur-debert/release via `release-sync`):
+# `bin/diff-since-release` (is there anything to release? + what changed)
+# and `bin/release` (the Kind-aware `release-cut` shim that DISPATCHES
+# `.github/workflows/release.yml`, which does the bump + CHANGELOG roll +
+# commit + tag + build + GitHub Release in CI). The per-repo
+# `scripts/release/*` primitives were retired — this handler now just
+# decides + dispatches; CI owns every mutation. See
+# arthur-debert/release `docs/lex-release-cascade.md`.
 
 on:
   workflow_call:
@@ -44,13 +47,13 @@ on:
           1. The default GITHUB_TOKEN cannot fire cross-repo
              `repository_dispatch` events (silent 403); downstream
              handlers fan via this PAT.
-          2. The release PR is admin-merged to bypass the branch-
-             protection review requirement (cascade PRs are pure
-             chore — version + deps + CHANGELOG — and don't need
-             Copilot review).
+          2. `bin/release` dispatches the repo's `release.yml`, whose
+             CI does the bump + tag + push; that push needs a token
+             with write/admin scope (the default GITHUB_TOKEN's pushes
+             do not re-trigger workflows and may be blocked by rulesets).
         required: true
 
-# Avoid concurrent handler runs racing on the same release branch.
+# Avoid concurrent handler runs racing on the same release dispatch.
 # Set inside the reusable workflow so callers don't have to remember.
 concurrency:
   group: layer2-handler
@@ -83,8 +86,8 @@ jobs:
           ref: main
           fetch-depth: 0
           submodules: recursive
-          # RELEASE_TOKEN so subsequent `git push` of branch + tag
-          # works, and so we have admin scope for `gh pr merge --admin`.
+          # RELEASE_TOKEN so the release.yml dispatch (and the bump/tag
+          # push it performs in CI) has write + admin scope.
           token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Configure git identity
@@ -96,164 +99,49 @@ jobs:
           git config user.name  "${GIT_NAME}"
 
       # Every gh-using step gets GH_TOKEN env explicitly — without it
-      # `gh release view` etc inside the primitives fail auth and the
+      # `gh` / `bin/release`'s `gh workflow run` fail auth and the
       # handler bails. Documented gotcha #1 in docs/lex-release-cascade.md.
       - name: Decide whether to release
         id: decide
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
+          # should-release decision: are there commits since the last
+          # final release tag? `bin/diff-since-release` prints a
+          # `Changes since <tag>:` / `---` header then the oneline log;
+          # a non-empty log section means "release". It exits 1 when no
+          # release tags exist yet — treat that as "nothing to release"
+          # (a first release is a human-driven `bin/release X.Y.Z`).
           set +e
-          ./scripts/release/should-release
+          out="$(./bin/diff-since-release 2>/dev/null)"
           rc=$?
           set -e
-          if [ "$rc" = 0 ]; then
+          body="$(printf '%s\n' "$out" | sed -n '/^---$/,$p' | tail -n +2 | sed '/^[[:space:]]*$/d')"
+          if [ "$rc" = 0 ] && [ -n "$body" ]; then
+            n="$(printf '%s\n' "$body" | grep -c .)"
             echo "release=yes" >> "$GITHUB_OUTPUT"
-          elif [ "$rc" = 1 ]; then
-            echo "release=no" >> "$GITHUB_OUTPUT"
+            echo "Releasable: ${n} commit(s) since last release."
           else
-            echo "::error::should-release exited $rc — bailing out"
-            exit "$rc"
+            echo "release=no" >> "$GITHUB_OUTPUT"
+            echo "No release needed (rc=${rc}; no commits since last release tag)."
           fi
 
       - name: Skip if not needed
         if: steps.decide.outputs.release == 'no'
         run: echo "No release needed; nothing to do."
 
-      - name: Compute new version
+      # `bin/release <bump>` is the Kind-aware release-cut shim. It reads
+      # the current version from this repo's canonical manifest, computes
+      # the new version from the bump-kind, and dispatches
+      # `.github/workflows/release.yml`. CI does the bump + CHANGELOG roll
+      # + commit + tag + build + GitHub Release. No local branch / commit
+      # / PR / admin-merge — the mutation lives entirely in CI now.
+      - name: Cut release (dispatch release.yml)
         if: steps.decide.outputs.release == 'yes'
-        id: ver
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           BUMP: ${{ inputs.bump-kind }}
         run: |
           set -e
-          # Take max(manifest, latest GH release tag) before bumping —
-          # if past releases were cut without bumping the manifest, the
-          # naive (manifest + 1) may collide with an existing tag.
-          # Gotcha #7 in docs/lex-release-cascade.md (tree-sitter-lex
-          # hit this — package.json said 0.8.0 while the highest tag
-          # was v0.10.1; patch bumped to a long-since-released
-          # v0.8.1).
-          manifest_ver="$(./scripts/release/get-current-version)"
-          latest_tag="$(gh release list --limit 1 --json tagName \
-                          --jq '.[0].tagName // empty' \
-                        | sed 's/^v//')"
-          if [ -n "${latest_tag}" ]; then
-            # sort -V gives version-aware ordering for bare semver.
-            current="$(printf '%s\n%s\n' "${manifest_ver}" "${latest_tag}" \
-                       | sort -V | tail -1)"
-          else
-            current="${manifest_ver}"
-          fi
-          IFS='.' read -r major minor patch <<< "$current"
-          case "${BUMP}" in
-            patch) new="$major.$minor.$((patch + 1))" ;;
-            minor) new="$major.$((minor + 1)).0" ;;
-            major) new="$((major + 1)).0.0" ;;
-            *) echo "::error::unknown bump-kind: ${BUMP}"; exit 1 ;;
-          esac
-          echo "manifest=${manifest_ver}" >> "$GITHUB_OUTPUT"
-          echo "current=${current}"       >> "$GITHUB_OUTPUT"
-          echo "new=${new}"               >> "$GITHUB_OUTPUT"
-          echo "Manifest=${manifest_ver}; latest tag=${latest_tag:-(none)}; using current=${current}; new=${new} (${BUMP})"
-
-      # Clean up any stale release branch / PR from a previous handler
-      # run that failed before admin-merge. Without this, a re-fired
-      # dispatch would die at `git push -u origin "$branch"` with a
-      # non-fast-forward error and the release would get stuck —
-      # contradicting the "failed pre-tag handlers can be re-fired
-      # cleanly" recovery contract in docs/lex-release-cascade.md.
-      - name: Clean up stale release branch
-        if: steps.decide.outputs.release == 'yes'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          NEW: ${{ steps.ver.outputs.new }}
-        run: |
-          set -e
-          branch="release/v$NEW"
-          stale_pr="$(gh pr list --head "$branch" --state open \
-                       --json number --jq '.[0].number // empty')"
-          if [ -n "$stale_pr" ]; then
-            echo "Closing stale PR #${stale_pr} for ${branch}"
-            gh pr close "$stale_pr" --delete-branch || true
-          elif git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-            echo "Deleting stale remote branch ${branch} (no open PR)"
-            git push origin --delete "$branch" || true
-          fi
-
-      # Seed UNRELEASED.md before update-release runs — some repos'
-      # update-release hard-fails on an empty UNRELEASED.md (nvim is
-      # the canonical case), and cascade runs have no human-authored
-      # notes. Gotcha #10 in docs/lex-release-cascade.md.
-      - name: Seed UNRELEASED.md if empty
-        if: steps.decide.outputs.release == 'yes'
-        env:
-          SOURCE: ${{ github.event.client_payload.source }}
-          UP_VER: ${{ github.event.client_payload.version }}
-        run: |
-          set -e
-          if [ -f UNRELEASED.md ] && [ ! -s UNRELEASED.md ]; then
-            echo "- Triggered by upstream release of ${SOURCE}@${UP_VER}." > UNRELEASED.md
-            echo "Seeded empty UNRELEASED.md with cascade note."
-          fi
-
-      - name: Branch + bump + commit
-        if: steps.decide.outputs.release == 'yes'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          NEW: ${{ steps.ver.outputs.new }}
-        run: |
-          set -e
-          branch="release/v$NEW"
-          git checkout -b "$branch"
-          ./scripts/release/update-release "$NEW"
-          git commit -m "chore: release v$NEW"
-          git push -u origin "$branch"
-
-      - name: PR + admin-merge
-        if: steps.decide.outputs.release == 'yes'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          NEW: ${{ steps.ver.outputs.new }}
-          UPSTREAM: ${{ github.event.client_payload.source }}
-          UP_VER: ${{ github.event.client_payload.version }}
-        run: |
-          set -e
-          body="Cascade-triggered release. Upstream: $UPSTREAM@$UP_VER.
-
-          Cut by the cascade-handler reusable workflow at \
-          arthur-debert/release/.github/workflows/cascade-handler.yml.
-          See $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID for the handler run."
-          pr_url=$(gh pr create --title "chore: release v$NEW" --body "$body")
-          pr=$(echo "$pr_url" | grep -oE 'pull/[0-9]+' | grep -oE '[0-9]+$')
-          echo "Opened PR #$pr ($pr_url)"
-          # --admin bypasses ruleset; cascade PRs are pure chore and
-          # don't need Copilot/Gemini review (gotcha #5).
-          gh pr merge "$pr" --squash --delete-branch --admin
-          echo "Admin-merged PR #$pr"
-
-      - name: Trigger release CI
-        if: steps.decide.outputs.release == 'yes'
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          NEW: ${{ steps.ver.outputs.new }}
-        run: |
-          set -e
-          # Some repos' pre-commit hooks regenerate state during the
-          # update-release commit (tree-sitter-lex regenerates
-          # src/parser.c; lexed husky touches build artefacts). The
-          # regenerated state is unstaged, so a plain `git pull
-          # --ff-only` fails. `git reset --hard` discards the side-
-          # effects and fast-forwards in one step. Gotcha #6.
-          git fetch origin
-          git checkout main
-          git reset --hard origin/main
-          if [ -f .gitmodules ]; then
-            git submodule update --init --recursive
-          fi
-          ./scripts/release/trigger-release "$NEW"
-          # The primitive's mechanism varies (tag-push for most repos,
-          # workflow_dispatch for lex); log generically so the message
-          # isn't wrong for the lex-style case.
-          echo "Triggered release for v$NEW; release.yml will fire per this repo's configured trigger."
+          ./bin/release "$BUMP"
+          echo "Dispatched release.yml (${BUMP} bump); CI will bump + tag + build + release."

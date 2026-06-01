@@ -2,30 +2,54 @@
 repo chain (comms -> lex/tree-sitter-lex -> vscode/nvim/lexed).
 
 Layer 1 of the cross-repo release automation (lex-fmt/lex#640). Walks the
-dependency chain, calls each repo's `scripts/release/*` primitives (Layer 0),
-and drives the actual git + GitHub state transitions: branch, version bump,
-commit, PR, admin-merge, tag, wait for release CI to finish before moving to
-dependents.
+dependency chain and drives each repo's release via the managed `bin/release`
+(= `release-cut`) tool plus `diff-since-release`. There are no longer any
+per-repo `scripts/release/*` primitives — those were retired (the
+feat/retire-scripts-dir line). Release is done by the managed tooling synced
+into every consumer under `bin/`:
 
-Each repo provides these primitives under `scripts/release/`:
-  get-current-version          — bare semver from this repo's manifest
-  get-commits-since-release    — `<sha> <subject>` lines since latest tag
-  update-release <new-version> — bumps manifest, deps, CHANGELOG; git-adds
-  trigger-release <new-version>— fires the repo's release CI
-  should-release               — (status mode only) cascade decision
+  bin/diff-since-release  — commits on the current branch since the last final
+                            release tag (the "is there anything to release?"
+                            and "what changed?" source). Exits 1 if no release
+                            tags exist yet.
+  bin/release             — thin shim that execs `release-cut`. release-cut is
+                            Kind-aware: it reads the current version from the
+                            Consumer's canonical manifest source (Cargo.toml,
+                            package.json, extension.toml, or the latest git tag
+                            for manifest-less Kinds), computes the new version
+                            from a bump shortcut or literal X.Y.Z, and
+                            DISPATCHES `.github/workflows/release.yml` with that
+                            version. CI (the reusable per-Kind release workflow)
+                            does the actual bump + CHANGELOG roll + commit + tag
+                            + build + GitHub Release.
 
-Shell->Python migration (docs/proposals/shell-to-python.md): release-lex is a
-release-only tool (a real file in bin/, NOT synced to consumers), so its shim
-is the contract's variant (b). The orchestration sequence, stdout, exit codes,
-and the dry-run / --only / --status gates are preserved byte-for-byte — pinned
-by tests/release-lex/release-lex.bats and the pure-decision pytest unit tests.
+The old primitive→responsibility mapping, for the record:
+  get-current-version       -> release-cut reads it from the Kind manifest.
+  get-commits-since-release -> diff-since-release.
+  should-release            -> diff-since-release has commit lines (non-empty).
+  update-release            -+ both fold into `release-cut`: the bump + CHANGELOG
+  trigger-release           -+ roll + commit + tag now happen IN CI, dispatched
+                               by release-cut. There is no longer a local
+                               "bump files + git add" step to commit/PR/merge,
+                               so the old per-repo "branch -> update-release ->
+                               commit -> PR -> admin-merge -> trigger-release"
+                               tail collapses into a single `release-cut`
+                               dispatch + a `gh run watch` on the resulting
+                               release.yml run. See the PR body for the design
+                               note on why the local PR/admin-merge mechanics
+                               are gone (CI owns the mutation now).
 
-The live multi-repo orchestration (fetch/checkout/pull/commit/push/reset/
-submodule, gh pr create/merge, gh run list/watch) is genuine side-effecting
-glue and is NOT unit-tested (it requires live repos + GitHub — that is the
-script's whole point). What IS pure and tested: the github-slug map,
-compute_new_version, arg parsing + validation exit codes, the --only filter,
-the PR-number / run-id extractors, and the status-line rendering.
+release-lex is a release-only tool (a real file in bin/, NOT synced to
+consumers). The orchestration sequence, stdout, exit codes, and the dry-run /
+--only / --status gates are preserved where they still have meaning — pinned by
+tests/release-lex/release-lex.bats and the pure-decision pytest unit tests.
+
+The live multi-repo orchestration (fetch/checkout/pull/submodule, `release-cut`
+dispatch, `gh run list/watch`) is genuine side-effecting glue and is NOT
+unit-tested (it requires live repos + GitHub — that is the script's whole
+point). What IS pure and tested: the github-slug map, arg parsing + validation
+exit codes, the --only filter, the run-id extractor, the should-release
+decision over diff-since-release output, and the status-line rendering.
 
 Usage:
   release-lex <bump-kind> \\
@@ -44,7 +68,6 @@ Exit codes:
 from __future__ import annotations
 
 import os
-import re
 import subprocess
 import sys
 import time
@@ -78,7 +101,7 @@ Usage:
 <bump-kind>:  patch | minor | major | <X.Y.Z>
 --dry-run:    print everything but make no real state changes
 --only:       restrict to a subset of repos (still dependency-ordered)
---status:     read-only — run should-release in each repo and print
+--status:     read-only — run diff-since-release in each repo and print
               a one-line answer per repo. Useful answer to "what
               would cascade if I cut comms now?"
 """
@@ -90,52 +113,56 @@ Usage:
 
 
 def github_slug_for(name: str) -> str:
-    """The lex-fmt GitHub slug for a repo key (empty string if unknown —
-    matches the bash `case` with no default arm)."""
+    """The lex-fmt GitHub slug for a repo key (empty string if unknown)."""
     return _GITHUB_SLUGS.get(name, "")
 
 
-def compute_new_version(current: str, bump: str) -> str:
-    """Return the new semver string. ``bump`` is patch/minor/major or an
-    explicit X.Y.Z (returned as-is, minus any leading 'v').
+def has_releasable_commits(diff_output: str, rc: int) -> bool:
+    """Decide whether a repo has releasable commits, from `diff-since-release`
+    output + exit code.
 
-    Mirrors the bash: an explicit version matches `^[0-9]+\\.[0-9]+\\.[0-9]+`
-    (a *prefix* match — any trailing pre-release/build is kept verbatim) and is
-    returned with a leading 'v' stripped; otherwise the part is bumped against
-    ``current`` (also 'v'-stripped). An unrecognized bump yields '' (the bash
-    `case` had no default arm)."""
-    current = current[1:] if current.startswith("v") else current
-    if re.match(r"^[0-9]+\.[0-9]+\.[0-9]+", bump):
-        return bump[1:] if bump.startswith("v") else bump
-    parts = current.split(".")
-    # Mirror bash `IFS='.' read -r major minor patch`: only the first three
-    # fields are used; missing ones default to empty (bash leaves them unset).
-    major = parts[0] if len(parts) > 0 else ""
-    minor = parts[1] if len(parts) > 1 else ""
-    patch = parts[2] if len(parts) > 2 else ""
-    if bump == "patch":
-        return f"{major}.{minor}.{int(patch) + 1}"
-    if bump == "minor":
-        return f"{major}.{int(minor) + 1}.0"
-    if bump == "major":
-        return f"{int(major) + 1}.0.0"
-    return ""
+    `diff-since-release` prints a two-line header (`Changes since <tag>:` then
+    `---`) followed by `git log --oneline <tag>..HEAD`. When nothing is new the
+    log section is empty, so "releasable" = at least one line AFTER the `---`
+    separator. rc != 0 means no release tags exist yet (the `exit 1` path); we
+    treat that as "no decision possible / nothing to release" so the
+    orchestrator skips rather than guesses a first version.
+    """
+    if rc != 0:
+        return False
+    lines = diff_output.splitlines()
+    try:
+        sep = lines.index("---")
+    except ValueError:
+        # No separator (unexpected shape) — be conservative: nothing to release.
+        return False
+    body = [ln for ln in lines[sep + 1 :] if ln.strip()]
+    return len(body) > 0
 
 
-def render_status_line(key: str, current: str, rc: int, decision: str) -> str:
-    """Render one status-mode line. Mirrors the bash printf formats exactly:
-      rc 0 -> '⚠ ...'  (release would happen)
-      rc 1 -> '✓ ...'  (no release needed)
-      other -> '✗ should-release exited <rc>: ...'
-    The label is left-padded to 18 cols (printf '%-18s'); the version slot is
-    'v' + the version left-padded to 8 (printf 'v%-8s')."""
+def count_commits(diff_output: str) -> int:
+    """Number of commit lines in `diff-since-release` output (lines after the
+    `---` separator). 0 if the separator is absent or no commits follow."""
+    lines = diff_output.splitlines()
+    try:
+        sep = lines.index("---")
+    except ValueError:
+        return 0
+    return sum(1 for ln in lines[sep + 1 :] if ln.strip())
+
+
+def render_status_line(key: str, releasable: bool, rc: int, count: int) -> str:
+    """Render one status-mode line.
+      releasable      -> '⚠ would release: N commit(s) since last release'
+      not, rc 0       -> '✓ up to date (no commits since last release)'
+      rc != 0         -> '✗ no release tags yet (diff-since-release exited <rc>)'
+    The label is left-padded to 18 cols for column alignment."""
     label = f"{key:<18}"
-    ver = f"v{current:<8}"
-    if rc == 0:
-        return f"{label} {ver} ⚠ {decision}"
-    if rc == 1:
-        return f"{label} {ver} ✓ {decision}"
-    return f"{label} {ver} ✗ should-release exited {rc}: {decision}"
+    if rc != 0:
+        return f"{label} ✗ no release tags yet (diff-since-release exited {rc})"
+    if releasable:
+        return f"{label} ⚠ would release: {count} commit(s) since last release"
+    return f"{label} ✓ up to date (no commits since last release)"
 
 
 def parse_only(only: str) -> list[str]:
@@ -146,19 +173,10 @@ def parse_only(only: str) -> list[str]:
 
 
 def _looks_like_version(bump: str) -> bool:
-    """Mirror the bash `*.*.*` glob arm in the bump-kind validation: at least
-    two literal dots (so the string has >=3 dot-separated pieces, each possibly
-    empty). Note this is LOOSER than compute_new_version's `^[0-9]+\\.…` regex —
-    the validation accepted anything dot-dotted; faithfully preserved."""
+    """The loose `*.*.*` validation arm: at least two literal dots (so the
+    string has >=3 dot-separated pieces). Looser than a strict semver check —
+    release-cut itself does the strict validation when it runs."""
     return bump.count(".") >= 2
-
-
-def _extract_pr_number(gh_output: str) -> str:
-    """Pull the PR number out of `gh pr create` output. Mirrors the bash
-    `grep -oE 'pull/[0-9]+' | grep -oE '[0-9]+$'`: find a `pull/<n>` token and
-    return its trailing number. Empty string if none (the `|| true` path)."""
-    m = re.search(r"pull/([0-9]+)", gh_output)
-    return m.group(1) if m else ""
 
 
 def _first_database_id(runs_json: str) -> str:
@@ -197,12 +215,11 @@ class _Usage(Exception):
 def _parse_args(argv: list[str]) -> dict:
     """Parse argv into a config dict, or raise _Usage / SystemExit.
 
-    Mirrors the bash control flow precisely:
-      - no args -> usage() to stdout, exit 64
-      - first arg '--status' -> status mode, BUMP_KIND='status'; else the first
-        positional is BUMP_KIND
-      - remaining: --<repo> <path>, --dry-run, --only <val>, --status
-      - unknown arg -> 'release-lex: unknown arg: <arg>' to stderr, exit 64
+    - no args -> usage() to stdout, exit 64
+    - first arg '--status' -> status mode, BUMP_KIND='status'; else the first
+      positional is BUMP_KIND
+    - remaining: --<repo> <path>, --dry-run, --only <val>, --status
+    - unknown arg -> 'release-lex: unknown arg: <arg>' to stderr, exit 64
     """
     if len(argv) < 1:
         print(USAGE, end="")
@@ -227,7 +244,6 @@ def _parse_args(argv: list[str]) -> dict:
         arg = rest[i]
         if arg in ("--comms", "--lex", "--tree-sitter", "--vscode", "--nvim", "--lexed"):
             key = arg[2:]
-            # Bash `shift 2` past the end leaves an empty value, not an error.
             repos[key] = rest[i + 1] if i + 1 < len(rest) else ""
             i += 2
         elif arg == "--dry-run":
@@ -253,10 +269,11 @@ def _parse_args(argv: list[str]) -> dict:
 
 def _validate(cfg: dict) -> int | None:
     """Post-parse validation; returns an exit code to abort on, or None to
-    proceed. Mirrors the bash validation order:
+    proceed:
       1. bad bump-kind (non-status mode) -> 64
       2. no repos -> 64
-      3. each repo: dir exists + 4 primitives executable -> 1
+      3. each repo: dir exists + the managed bin/release + bin/diff-since-release
+         tools are present and executable -> 1
     """
     if not cfg["status_mode"]:
         bump = cfg["bump_kind"]
@@ -273,39 +290,43 @@ def _validate(cfg: dict) -> int | None:
         print("release-lex: no repo paths supplied", file=sys.stderr)
         return 64
 
-    # Validate paths + primitives. Bash iterated `"${!REPOS[@]}"` (an unordered
-    # associative-array key set); we iterate in the stable ORDER so the first
-    # failure reported is deterministic. Either way the first failure aborts.
+    # Validate paths + the managed tools each repo must carry under bin/. We
+    # iterate in the stable ORDER so the first failure reported is deterministic.
     keys = [k for k in ORDER if k in cfg["repos"]]
     keys += [k for k in cfg["repos"] if k not in ORDER]
+    # --status only reads diff-since-release; the cut path additionally needs
+    # bin/release. Validate exactly the tools the chosen mode will invoke.
+    needed = ("diff-since-release",) if cfg["status_mode"] else ("diff-since-release", "release")
     for key in keys:
         path = cfg["repos"][key]
         if not os.path.isdir(path):
             print(f"release-lex: not a directory: {path} (for --{key})", file=sys.stderr)
             return 1
-        for prim in (
-            "get-current-version",
-            "get-commits-since-release",
-            "update-release",
-            "trigger-release",
-        ):
-            prim_path = os.path.join(path, "scripts", "release", prim)
-            if not (os.path.isfile(prim_path) and os.access(prim_path, os.X_OK)):
+        for tool in needed:
+            tool_path = os.path.join(path, "bin", tool)
+            if not (os.path.isfile(tool_path) and os.access(tool_path, os.X_OK)):
                 print(
-                    f"release-lex: {key} at {path} is missing scripts/release/{prim}",
+                    f"release-lex: {key} at {path} is missing bin/{tool}",
                     file=sys.stderr,
                 )
                 print(
-                    f"  (Layer 0 must be merged in lex-fmt/{github_slug_for(key)} first)",
+                    f"  (re-sync the managed release tooling into lex-fmt/"
+                    f"{_repo_name(key)} — run `release-sync` there)",
                     file=sys.stderr,
                 )
                 return 1
     return None
 
 
+def _repo_name(key: str) -> str:
+    """Bare repo name (slug minus the `lex-fmt/` owner) for error messages."""
+    slug = github_slug_for(key)
+    return slug.split("/", 1)[1] if "/" in slug else (slug or key)
+
+
 def _is_allowed(name: str, allowed: list[str], only_raw: str) -> bool:
-    """Mirror the bash `is_allowed`: with no --only, everything is allowed;
-    otherwise only names present in the comma-split --only list."""
+    """With no --only, everything is allowed; otherwise only names present in
+    the comma-split --only list."""
     if not only_raw:
         return True
     return name in allowed
@@ -317,9 +338,9 @@ def _is_allowed(name: str, allowed: list[str], only_raw: str) -> bool:
 
 
 def _run(cmd: list[str], dry_run: bool, *, cwd: str | None = None) -> None:
-    """echo + execute, OR echo only if --dry-run. Mirrors the bash `run()`:
-    prints `  $ <space-joined cmd>` then runs it (inheriting the parent's
-    stdout/stderr) when not in dry-run. A nonzero exit raises (bash `set -e`)."""
+    """echo + execute, OR echo only if --dry-run. Prints `  $ <cmd>` then runs
+    it (inheriting the parent's stdout/stderr) when not in dry-run. A nonzero
+    exit raises (CalledProcessError)."""
     print("  $ " + " ".join(cmd))
     if not dry_run:
         subprocess.run(cmd, cwd=cwd, check=True)  # noqa: S603 — cmd is a constructed list
@@ -327,7 +348,13 @@ def _run(cmd: list[str], dry_run: bool, *, cwd: str | None = None) -> None:
 
 def _release_one(key: str, cfg: dict) -> int:
     """Cut one repo's release. Returns 0 on success/skip, 1 on failure.
-    Faithful port of the bash `release_one` — same sequence, same stdout."""
+
+    New model (post scripts/release retirement): the bump + CHANGELOG roll +
+    commit + tag all happen IN CI, dispatched by `bin/release` (= release-cut).
+    There is no local file mutation to branch/commit/PR/admin-merge anymore, so
+    this is now: refresh main -> decide via diff-since-release -> `bin/release
+    <bump>` (dispatch release.yml) -> watch the resulting CI run.
+    """
     path = cfg["repos"][key]
     dry_run = cfg["dry_run"]
     bump_kind = cfg["bump_kind"]
@@ -344,84 +371,47 @@ def _release_one(key: str, cfg: dict) -> int:
     if os.path.isfile(".gitmodules"):
         _run(["git", "submodule", "update", "--init", "--recursive"], dry_run)
 
-    # `get-commits-since-release || true`: tolerate a nonzero exit, keep stdout.
-    res = proc.run(["./scripts/release/get-commits-since-release"], check=False)
-    commits = res.stdout
-    if not commits.strip():
-        print(f"  ↳ no new commits since latest release tag; skipping {key}")
+    # should-release decision: diff-since-release has commit lines?
+    res = proc.run(["./bin/diff-since-release"], check=False)
+    if not has_releasable_commits(res.stdout, res.returncode):
+        if res.returncode != 0:
+            print(f"  ↳ no release tags yet; skipping {key}")
+        else:
+            print(f"  ↳ no new commits since latest release tag; skipping {key}")
         return 0
-    # `echo "$commits" | grep -c .` — count non-empty lines.
-    count = sum(1 for line in commits.split("\n") if line)
+    count = count_commits(res.stdout)
     print(f"  ↳ {count} commit(s) since latest release")
 
-    current = proc.out(["./scripts/release/get-current-version"])
-    new = compute_new_version(current, bump_kind)
-    print(f"  ↳ version: {current} → {new}")
-
-    branch = f"release/v{new}"
-    _run(["git", "checkout", "-b", branch], dry_run)
-    _run(["./scripts/release/update-release", new], dry_run)
-    _run(["git", "commit", "-m", f"chore: release v{new}"], dry_run)
-    _run(["git", "push", "-u", "origin", branch], dry_run)
-    print(f"  ↳ branch pushed: https://github.com/{gh_repo}/tree/{branch}")
-
+    # `bin/release <bump>` is Kind-aware: it reads the current version from the
+    # manifest, computes the new version, and dispatches release.yml. CI does
+    # the bump + CHANGELOG roll + commit + tag + build + GitHub Release.
     if dry_run:
-        print("  ↳ dry-run: skipping PR creation, admin-merge, tag, CI wait")
-        # Roll back the local branch so we don't accumulate dry-run state.
-        _run(["git", "checkout", "main"], dry_run)
-        _run(["git", "branch", "-D", branch], dry_run)
+        print(f"  $ ./bin/release {bump_kind}")
+        print("  ↳ dry-run: skipping release-cut dispatch + CI wait")
         return 0
 
-    # Open PR + admin-merge. The ruleset on main blocks direct push, so PR is
-    # the only mechanism — `--admin` bypasses the review requirement for this
-    # batch of automated releases.
-    pr_out = gh.pr_create(
-        repo=gh_repo,
-        title=f"chore: release v{new}",
-        body="Cut by `release-lex` (Layer 1). Part of lex-fmt/lex#640.",
-    ).stdout
-    pr = _extract_pr_number(pr_out)
-    if not pr:
-        print("  ✗ gh pr create did not return a PR number", file=sys.stderr)
+    print(f"  $ ./bin/release {bump_kind}")
+    cut = subprocess.run(  # noqa: S603 — constructed list, no shell
+        ["./bin/release", bump_kind], check=False
+    )
+    if cut.returncode != 0:
+        print(f"  ✗ bin/release {bump_kind} failed (exit {cut.returncode})", file=sys.stderr)
         return 1
-    print(f"  ↳ PR #{pr} opened")
-    gh.pr_merge(pr, repo=gh_repo, squash=True, delete_branch=True, admin=True)
-    print(f"  ↳ PR #{pr} admin-merged")
+    print(f"  ↳ release.yml dispatched for {key} ({bump_kind})")
 
-    # Fast-forward to the merge commit on main, then delegate to the repo's own
-    # `trigger-release` primitive (Layer 0). `git reset --hard origin/main`
-    # (not `pull --ff-only`) is deliberate: some repos' pre-commit hooks leave
-    # the tree dirty (regenerated parser.c / electron build artifacts), which
-    # would fail `pull --ff-only`. Reset is safe — the bump is already merged to
-    # origin/main and any leftover tree state is regeneratable artefact.
-    subprocess.run(["git", "fetch", "origin"], check=True)  # noqa: S603
-    subprocess.run(["git", "checkout", "main"], check=True)  # noqa: S603
-    subprocess.run(["git", "reset", "--hard", "origin/main"], check=True)  # noqa: S603
-    if os.path.isfile(".gitmodules"):
-        subprocess.run(  # noqa: S603
-            ["git", "submodule", "update", "--init", "--recursive"], check=True
-        )
-
-    commit_sha = proc.out(["git", "rev-parse", "HEAD"])
-    _run(["./scripts/release/trigger-release", new], dry_run)
-    print(f"  ↳ release triggered for v{new}")
-
-    # Find the release-CI run just triggered. Filter by commit SHA (consistent
-    # for both tag-push and workflow_dispatch — no clock skew) and restrict to
-    # release.yml to ignore unrelated CI on the same push.
+    # Find the release-CI run release-cut just dispatched and watch it. Filter
+    # to release.yml and take the most recent run (dispatch is near-instant;
+    # the brief sleep lets the run register before we query).
     time.sleep(8)
     runs = gh.run_list(
         repo=gh_repo,
         workflow_eq="release.yml",
-        commit=commit_sha,
         limit=1,
         json_fields=["databaseId"],
     )
     run_id = _first_database_id(runs.stdout)
     if not run_id:
         if runs.returncode != 0:
-            # gh failed outright: surface BOTH streams (gh splits progress/JSON
-            # across stdout and the error onto stderr) before the generic line.
             print(
                 f"  ✗ gh run list failed:\n"
                 f"STDOUT: {runs.stdout.strip()}\n"
@@ -429,7 +419,7 @@ def _release_one(key: str, cfg: dict) -> int:
                 file=sys.stderr,
             )
         print(
-            f"  ✗ could not find release CI run for v{new} (commit {commit_sha})",
+            f"  ✗ could not find dispatched release CI run for {key}",
             file=sys.stderr,
         )
         print(
@@ -439,29 +429,23 @@ def _release_one(key: str, cfg: dict) -> int:
         return 1
     print(f"  ↳ watching release CI run {run_id}...")
     gh.run_watch(run_id, repo=gh_repo, exit_status=True)
-    print(f"  ✓ release CI complete for {key} v{new}")
+    print(f"  ✓ release CI complete for {key}")
     return 0
 
 
 def _status_one(key: str, cfg: dict) -> None:
-    """Read-only: fetch remote state, run should-release, print one line.
-    Faithful port of the bash `status_one` (a subshell there; here we
-    save/restore cwd to preserve the same isolation)."""
+    """Read-only: fetch remote state, run diff-since-release, print one line.
+    (A subshell-equivalent: we save/restore cwd to preserve isolation.)"""
     path = cfg["repos"][key]
     saved = os.getcwd()
     try:
         os.chdir(path)
-        # `git fetch --quiet origin 2>/dev/null || true` — best-effort, ignored.
+        # Best-effort fetch so the tag/log view is current; ignore failures.
         proc.run(["git", "fetch", "--quiet", "origin"], check=False)
-        # The bash `git diff --quiet HEAD` probe had only a `:` no-op branch —
-        # purely informational, no output, no effect. Dropped.
-        current_res = proc.run(["./scripts/release/get-current-version"], check=False)
-        current = current_res.stdout.strip() if current_res.returncode == 0 else "?"
-        decision_res = proc.run(["./scripts/release/should-release"], check=False)
-        # Bash `2>&1`: should-release's stderr is folded into the captured value.
-        decision = (decision_res.stdout + decision_res.stderr).strip()
-        rc = decision_res.returncode
-        print(render_status_line(key, current, rc, decision))
+        res = proc.run(["./bin/diff-since-release"], check=False)
+        releasable = has_releasable_commits(res.stdout, res.returncode)
+        count = count_commits(res.stdout)
+        print(render_status_line(key, releasable, res.returncode, count))
     finally:
         os.chdir(saved)
 
@@ -472,10 +456,6 @@ def _status_one(key: str, cfg: dict) -> None:
 
 
 def main(argv: list[str]) -> int:
-    # The bash had no explicit -h/--help arm; with no args it printed usage and
-    # exited 64. We preserve the no-arg path and additionally treat a leading
-    # -h/--help as a help request (exit 0) — a benign superset for parity with
-    # the other migrated verbs. Flagged in the PR body.
     if argv and argv[0] in ("-h", "--help"):
         print(USAGE, end="")
         return 0
@@ -494,17 +474,17 @@ def main(argv: list[str]) -> int:
         return abort
 
     if cfg["status_mode"]:
-        print("Cascade status (read-only — runs should-release in each repo):")
+        print("Cascade status (read-only — runs diff-since-release in each repo):")
         print()
         for key in ORDER:
             if cfg["repos"].get(key):
                 _status_one(key, cfg)
         print()
-        print("Legend: ✓ no release needed  ⚠ release would happen  ✗ error")
+        print("Legend: ✓ up to date  ⚠ release would happen  ✗ error / no tags")
         return 0
 
     if cfg["dry_run"]:
-        print("release-lex: dry-run mode — no commits, pushes, merges, or tags will be made")
+        print("release-lex: dry-run mode — no dispatches will be made")
 
     allowed = parse_only(cfg["only"])
     for key in ORDER:
@@ -512,8 +492,7 @@ def main(argv: list[str]) -> int:
             try:
                 rc = _release_one(key, cfg)
             except (proc.ProcError, subprocess.CalledProcessError, gh.GhError):
-                # bash `set -e`: any failed command aborts the whole run with a
-                # nonzero status. Mirror that — stop the walk, exit 1.
+                # Any failed command aborts the whole run with a nonzero status.
                 return 1
             if rc != 0:
                 return rc

@@ -26,38 +26,79 @@ comms ──┬─→ lex ──┐
 - **tree-sitter-lex**: grammar package publishing a tarball. Editors pin via `shared/lex-deps.json`. Submodule of `comms`.
 - **vscode / nvim / lexed**: leaf editor packages. Submodule of `comms`. Pin `lexd-lsp` and `tree-sitter` via `shared/lex-deps.json` (flat schema for vscode/nvim, nested `.deps.<name>.{version,repo}` schema for lexed).
 
-## The three layers
+## The two layers
 
-The automation is built in three layers. Each layer is independently useful and can be debugged in isolation.
+The automation is built in two layers. Each layer is independently useful and can be debugged in isolation.
 
-### Layer 0 — per-repo primitive scripts
+> **Historical note.** Earlier revisions of this cascade had a "Layer 0" of five
+> per-repo `scripts/release/*` primitives (`get-current-version`,
+> `get-commits-since-release`, `should-release`, `update-release`,
+> `trigger-release`). Those were **retired**. There are no per-repo release
+> scripts anymore: release is driven by the managed `bin/` tooling that
+> `release-sync` materializes into every consumer —
+> [`bin/diff-since-release`](#binbin-diff-since-release) and
+> [`bin/release`](#binrelease-release-cut). The orchestrator and the
+> event-cascade handler both compose those two managed tools.
 
-Each of the six repos ships five executable scripts under `scripts/release/`:
+### The managed release tools
 
-| Script | Args | Stdout | Exit | Side effects |
-|---|---|---|---|---|
-| `get-current-version` | none | bare semver (e.g. `0.14.0`, no `v`) | 0 / non-zero on error | none |
-| `get-commits-since-release` | none | one line per commit since the latest `vX.Y.Z` tag (`<short-sha> <subject>`); empty if none | 0 always | none |
-| `should-release` | none | `yes: <reason>` or `no: <reason>` | 0=yes, 1=no, 2+=error | none |
-| `update-release <new-version>` | bare semver | summary | 0 / non-zero on error | bumps manifests, comms submodule, dep pins, CHANGELOG; runs `git add` |
-| `trigger-release <new-version>` | bare semver | summary | 0 / non-zero on error | fires this repo's release CI (tag-push for most repos; `gh workflow run release.yml -f version=...` for lex) |
+Each repo carries these two executables under `bin/` (re-synced from
+`arthur-debert/release` via `release-sync` — not hand-authored per repo):
 
-The orchestrator and the event-cascade handler both compose the same five primitives. Adding a new repo to the chain means writing these five scripts.
+#### `bin/diff-since-release`
 
-#### Per-repo manifest surfaces
+| | |
+|---|---|
+| Args | none |
+| Stdout | a `Changes since <tag>:` / `---` header, then `git log --oneline <last-final-tag>..HEAD` (one line per commit; empty log section if nothing new) |
+| Exit | `0` normally; `1` if no release tags exist yet |
+| Side effects | none |
 
-| Repo | Version source | Dep updates in `update-release` | Trigger mode |
-|---|---|---|---|
-| `comms` | git tags (no version file) | none | tag-push (`on: push: tags: [v*]`) |
-| `lex` | `[workspace.package].version` in root `Cargo.toml` | `comms` submodule | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v1`) |
-| `tree-sitter-lex` | `package.json` `"version"` | `comms` submodule | tag-push |
-| `vscode` | `package.json` `"version"` | `comms` + `shared/lex-deps.json` (flat) | tag-push |
-| `nvim` | `M.version = "..."` in `lua/lex/init.lua` | `comms` + `shared/lex-deps.json` (flat) | tag-push |
-| `lexed` | `package.json` `"version"` | `comms` + `shared/lex-deps.json` (nested) | tag-push |
+It is the source for both "**is there anything to release?**" (a non-empty log
+section after the `---`) and "**what changed?**". Pre-release tags (`-rc.N`) are
+skipped, so the diff is against the last *final* release.
+
+#### `bin/release` (= `release-cut`)
+
+`bin/release` is a thin shim that execs `release-cut` from
+`arthur-debert/release`. It is **Kind-aware**: it reads the current version from
+the consumer's canonical manifest source (`Cargo.toml`, `package.json`,
+`extension.toml`, or the latest git tag for manifest-less Kinds), computes the
+new version from a bump shortcut (`patch`/`minor`/`major`) or a literal
+`X.Y.Z[-PRERELEASE]`, and **dispatches `.github/workflows/release.yml`** with
+that version.
+
+Everything that mutates state then runs **in CI**: the reusable per-Kind release
+workflow (`rust-cli.yml`, `tauri-app.yml`, …) does the version bump, the
+CHANGELOG roll, the commit, the tag, the build, and the GitHub Release. There is
+no longer any local "bump files + `git add` + commit + PR + admin-merge" step —
+that responsibility moved entirely into CI.
+
+| | |
+|---|---|
+| Args | `patch` \| `minor` \| `major` \| `X.Y.Z[-PRERELEASE]` |
+| Stdout | the computed version + a `gh workflow run release.yml` dispatch |
+| Exit | `0` on a successful dispatch; non-zero on bad version / missing `release.yml` / `gh` failure |
+| Side effects | dispatches `release.yml` (workflow_dispatch). CI does all mutation. |
+
+##### Per-repo manifest surfaces
+
+`release-cut` reads each repo's current version from its canonical source; the
+dep-pin updates (comms submodule, `shared/lex-deps.json`) and the build itself
+all happen in CI via the reusable workflow.
+
+| Repo | Version source (read by release-cut) | CI trigger |
+|---|---|---|
+| `comms` | git tags (no version file) | tag-push (`on: push: tags: [v*]`) |
+| `lex` | `[workspace.package].version` in root `Cargo.toml` | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v1`) |
+| `tree-sitter-lex` | `package.json` `"version"` | tag-push |
+| `vscode` | `package.json` `"version"` | tag-push |
+| `nvim` | `lua/lex/init.lua` `M.version` (via `version-file` input) | tag-push |
+| `lexed` | `package.json` `"version"` | tag-push |
 
 ### Layer 1 — local orchestrator (`release-lex`)
 
-`release-lex` in `arthur-debert/release/bin/` walks the dep chain locally and runs each repo's primitives in sequence. Useful for:
+`release-lex` in `arthur-debert/release/bin/` walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `bin/release` to cut) in sequence. Useful for:
 
 - **Local debugging** — surface primitive bugs in isolation (the `--dry-run` mode echoes every step without making changes).
 - **Recovery** — re-run from a known-good point if a cascade gets wedged mid-flight.
@@ -81,7 +122,7 @@ release-lex --status \
 Every repo's `release.yml` ends with a `notify-downstreams` step that fires `repository_dispatch` events to its direct consumers. Every downstream repo has a `.github/workflows/on-upstream-released.yml` handler that:
 
 1. Receives the dispatch
-2. Runs `scripts/release/should-release` → if yes, computes a patch-bump and runs the rest of the chain (update-release → commit → PR + admin-merge → trigger-release)
+2. Decides via `bin/diff-since-release` (commits since the last final release?) → if yes, runs `bin/release <bump-kind>`, which dispatches `release.yml`; CI does the bump + CHANGELOG roll + commit + tag + build + release
 3. Cutting this repo's release fires its own `notify-downstreams` → fans further down the chain
 
 #### The cascade flow
@@ -91,25 +132,26 @@ push tag v0.16.3 to comms
   → comms/release.yml runs (specs.tar.gz, assets.tar.gz, GH release)
     → notify-downstreams fires repository_dispatch upstream-released
         → lex/on-upstream-released.yml
-            → should-release: yes (comms submodule stale)
-            → update-release → commit + PR + admin-merge → workflow_dispatch
-                → rust-cli@v1 publishes crates, builds binaries, tags v0.x.y
+            → diff-since-release: commits present (comms submodule stale)
+            → bin/release patch → dispatches release.yml (workflow_dispatch)
+                → rust-cli@v1 bumps + rolls CHANGELOG + commits + tags + publishes
+                  crates + builds binaries v0.x.y
                     → lex/release.yml notify-downstreams fires upstream-released to editors
         → tree-sitter-lex/on-upstream-released.yml
-            → ... same shape ... → tag-push v0.x.y
+            → ... same shape ... → release.yml CI tags v0.x.y
                 → notify-downstreams fires to editors
                     → vscode/nvim/lexed handlers each fire
-                        → should-release: yes (multiple pins stale)
-                        → cut their own release
+                        → diff-since-release: commits present (multiple pins stale)
+                        → bin/release patch → cut their own release
 ```
 
 #### Two-hop cascade for editors
 
-Editors submodule `comms` AND pin `lexd-lsp` + `tree-sitter`. When comms releases, the editors *could* react directly — but their `lexd-lsp` and `tree-sitter` pins would still be on the old upstream version. Better to wait for lex + tree-sitter to release first; their `update-release` will pull a current comms anyway. So:
+Editors submodule `comms` AND pin `lexd-lsp` + `tree-sitter`. When comms releases, the editors *could* react directly — but their `lexd-lsp` and `tree-sitter` pins would still be on the old upstream version. Better to wait for lex + tree-sitter to release first; their release CI will pull a current comms anyway. So:
 
 - comms only emits to **lex + tree-sitter-lex** (NOT editors).
 - lex + tree-sitter-lex emit to **vscode + nvim + lexed**.
-- Editors get two events (one from lex, one from tree-sitter). Each handler re-checks all pins via `should-release`. Whichever event arrives later wins.
+- Editors get two events (one from lex, one from tree-sitter). Each handler re-checks via `bin/diff-since-release`. Whichever event arrives later wins.
 
 #### `repository_dispatch` mechanics
 
@@ -149,11 +191,11 @@ release-lex --status --comms ../comms --lex ../lex \
   --nvim ../nvim --lexed ../lexed
 ```
 
-Runs `should-release` against each repo, prints a one-line answer per repo. Read-only. No state changes.
+Runs `bin/diff-since-release` against each repo, prints a one-line answer per repo. Read-only. No state changes.
 
 ### Local one-button cut (Layer 1)
 
-If you want to drive the cascade locally instead of using GH events (e.g. debugging primitive changes), use the orchestrator:
+If you want to drive the cascade locally instead of using GH events (e.g. debugging a stuck cascade), use the orchestrator:
 
 ```sh
 release-lex patch \
@@ -165,7 +207,7 @@ Add `--dry-run` to echo every step without doing anything. Add `--only repo1,rep
 
 ### Recovery: a handler failed mid-cascade
 
-The cascade is idempotent at the should-release level — if a handler failed before tagging, you can re-fire the same dispatch and it'll resume cleanly. If a handler failed after tagging but before the release CI finished, the next attempt will see `should-release: no` (everything's caught up) and exit cleanly; you only need to re-fire the *release CI* (e.g. `gh workflow run release.yml --repo lex-fmt/lex -f version=X.Y.Z`).
+The cascade is idempotent at the decide level — if a handler failed before its `release.yml` CI committed the tag, you can re-fire the same dispatch and it'll resume cleanly (`bin/diff-since-release` still shows commits). If a handler failed after the tag landed, the next attempt sees an empty `diff-since-release` (everything's caught up) and exits cleanly; you only need to re-fire the *release CI* (e.g. `gh workflow run release.yml --repo lex-fmt/lex -f version=X.Y.Z`, or `bin/release X.Y.Z` from a clone).
 
 Manual dispatch fire (handler will re-evaluate):
 
@@ -180,30 +222,27 @@ gh api repos/lex-fmt/<downstream>/dispatches --method POST \
 
 These all appeared at least once during the cascade's first cut. Documented so future sessions don't re-discover them.
 
-### Workflow gotchas
+### Handler gotchas (the parts the cascade-handler still owns)
 
-1. **`GH_TOKEN` on every `gh`-using step.** The handler's `Decide` and `Branch + bump + commit` steps invoke `should-release` / `update-release`, both of which call `gh release view` etc. Without `env: GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}` on those steps, `gh` fails auth and the handler bails.
+1. **`GH_TOKEN` on every `gh`-using step.** The handler's `Decide` and `Cut release` steps run `bin/diff-since-release` / `bin/release`, and `bin/release`'s `gh workflow run` needs auth. Without `env: GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}` on those steps, `gh` fails auth and the handler bails.
 2. **Shell-injection on payload reads.** `${{ github.event.client_payload.X }}` interpolated directly into a `run:` is a code-execution vector if the upstream is compromised. Always route through `env:`.
-3. **Annotated tags, not lightweight.** `release.yml` workflows read the tag message via `git tag -l --format='%(contents)'`. A lightweight tag (`git tag v...`) has an empty body; the release notes come out blank. The `trigger-release` primitive uses `git tag -a` annotated; manual cuts must too.
-4. **`--allow-same-version` on `npm version`.** vscode's release.yml runs `npm version <tag>`. The orchestrator/handler pre-bumps package.json, so `npm version` errors with "Version not changed" unless `--allow-same-version` is set.
-5. **`--admin` flag bypasses ruleset.** Release PRs are pure chore (version + deps + CHANGELOG); driving them through full Copilot review is overhead. The handler/orchestrator uses `gh pr merge <pr> --admin --squash --delete-branch` since the workflow has admin scope via `RELEASE_TOKEN`.
-6. **`git reset --hard origin/main` after the admin-merge.** Some repos' pre-commit hooks regenerate state during the commit step (`tree-sitter-lex`'s hook regenerates `src/parser.c`; lexed's husky touches build artifacts). The regenerated state is unstaged, so a subsequent `git pull --ff-only` fails. Reset discards the side effects and fast-forwards in one step.
+3. **`bin/release` only *dispatches*; CI owns the mutation.** The handler no longer bumps files, commits, opens a PR, or admin-merges. `bin/release <bump>` fires `release.yml`; the reusable per-Kind workflow does the bump + CHANGELOG roll + commit + tag + build + release. So all the old "local pre-bump" gotchas (annotated tags, `git reset --hard` after merge, stale-branch cleanup, UNRELEASED.md seed) now live in the reusable workflow / `prepare-release` action, not in the handler.
 
-### Versioning gotchas
+### Reusable-workflow (CI) gotchas — now handled where the mutation happens
 
-7. **Manifest may drift behind tags.** `get-current-version` reads the manifest; if past releases were cut without bumping the manifest, the next computed version may collide with a real existing tag. `tree-sitter-lex` hit this — `package.json` said `0.8.0` while the highest tag was `v0.10.1`, so `patch` bumped to a long-since-released `v0.8.1`. Workaround: pass an explicit `X.Y.Z` to the orchestrator. Long-term: `get-current-version` should max(manifest, latest GH release).
-8. **Resume-on-existing-tag in `arthur-debert/release/.github/actions/prepare-release`.** When lex's reusable workflow sees an existing tag matching the requested version, it validates the manifest matches and skips the bump+commit+tag. That's how the local orchestrator's "I already pre-bumped" pre-cut composes cleanly with lex's workflow-driven model.
+These were originally handler/primitive concerns; after the `scripts/release` retirement they belong to the reusable release workflow that `release.yml` calls. Listed here so the history is traceable.
 
-### CHANGELOG / UNRELEASED.md gotchas
-
-9. **CHANGELOG format must be Keep-a-Changelog.** `update-release` for comms/lex requires `## [Unreleased]` at the top. Repos with older `## vX.Y.Z (date)` format need a one-time migration.
-10. **Empty `UNRELEASED.md` is a hard-fail in some repos.** nvim's `update-release` errors if `UNRELEASED.md` is empty; cascade runs have no human-authored notes. The handler seeds a bullet (`- Triggered by upstream release of X@Y.`) before calling `update-release`.
+4. **Annotated tags, not lightweight.** `release.yml` reads the tag message via `git tag -l --format='%(contents)'`; the workflow's tag step uses `git tag -a`. Manual cuts must too.
+5. **`--allow-same-version` on `npm version`.** Where the workflow bumps `package.json` then runs `npm version <tag>`, the flag avoids the "Version not changed" error if the bump already matched.
+6. **Manifest may drift behind tags.** `release-cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `bin/release` / the orchestrator.
+7. **Resume-on-existing-tag in `arthur-debert/release/.github/actions/prepare-release`.** When a reusable workflow sees an existing tag matching the requested version, it validates the manifest matches and skips the bump+commit+tag — making re-dispatch idempotent.
+8. **CHANGELOG / UNRELEASED.md.** The CI bump requires Keep-a-Changelog `## [Unreleased]`; the workflow handles the empty-UNRELEASED seed for cascade runs that carry no human-authored notes.
 
 ## Adding a new repo to the cascade
 
 Three pieces. None is hard individually; the order matters.
 
-1. **Write the five `scripts/release/` primitives.** Each one is ~30-80 lines of bash. Copy a similar repo's implementation as a starting point. Test each in isolation.
+1. **Sync the managed release tooling.** Run `release-sync` in the new repo so it carries `bin/diff-since-release` + `bin/release` (and add a `.github/workflows/release.yml` thin caller of the right reusable per-Kind workflow). No per-repo release scripts to author — `release-cut` is Kind-aware.
 2. **Add `.github/workflows/on-upstream-released.yml`.** Use the
    reusable workflow (recommended) — a 6-line thin caller:
 
@@ -221,11 +260,10 @@ Three pieces. None is hard individually; the order matters.
          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
    ```
 
-   The reusable workflow folds in every gotcha listed earlier
-   (GH_TOKEN on every primitive step, admin-merge, post-merge
-   `git reset --hard`, submodule restore, manifest-vs-tag drift guard,
-   stale-release-branch cleanup, UNRELEASED.md seed, shell-injection
-   guard on dispatch payload reads). New repos onboard without
+   The handler folds in the decide-and-dispatch gotchas (GH_TOKEN on
+   every `gh`-using step, shell-injection guard on dispatch payload
+   reads); the bump/tag/CHANGELOG gotchas now live in the reusable
+   release workflow that `release.yml` calls. New repos onboard without
    re-deriving the gotcha list.
 
    Optional inputs:
