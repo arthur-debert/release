@@ -22,7 +22,7 @@
 # Options:
 #   --all              Clone every repo in the canonical lex-fmt stack.
 #                      Mutually exclusive with positional <repo> args.
-#   --with-setup       After clone, run scripts/setup-dev-env.sh in each
+#   --with-setup       After clone, run bin/setup-dev-env.sh in each
 #                      repo if it exists. Opt-in; most read-only tasks
 #                      don't need it.
 #   --depth=N          Shallow clone with the given depth. Default: full.
@@ -165,16 +165,16 @@ clone_one() {
   fi
 
   if $with_setup && [[ "$status" =~ ^(cloned|refreshed|skipped-exists)$ ]]; then
-    local setup="$dir/scripts/setup-dev-env.sh"
+    local setup="$dir/bin/setup-dev-env.sh"
     if [ -x "$setup" ]; then
       echo "→ $repo: running setup-dev-env.sh" >&2
-      if ( cd "$dir" && ./scripts/setup-dev-env.sh ) >&2; then
+      if ( cd "$dir" && ./bin/setup-dev-env.sh ) >&2; then
         status="setup-ok"
       else
         status="setup-failed"
       fi
     else
-      echo "→ $repo: no scripts/setup-dev-env.sh, skipping setup" >&2
+      echo "→ $repo: no bin/setup-dev-env.sh, skipping setup" >&2
     fi
   fi
 

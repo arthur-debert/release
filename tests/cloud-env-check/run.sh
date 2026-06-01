@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run env/setup.sh + a consumer repo's scripts/setup-dev-env.sh + lefthook
+# Run env/setup.sh + a consumer repo's bin/setup-dev-env.sh + lefthook
 # + tests inside the cloud-env-approximating Docker image. Reports which
 # step (if any) failed.
 #
@@ -93,7 +93,7 @@ cd repo
 git remote set-url origin "https://github.com/${REPO}.git"
 unset GH_TOKEN
 
-# --- Step 3: scripts/setup-dev-env.sh ------------------------------------
+# --- Step 3: bin/setup-dev-env.sh ----------------------------------------
 # Run as a child process — sourcing the consumer's script would let any
 # `exit 0` in it terminate the harness. The downside is that exports
 # from the child (e.g. `export DISPLAY=:99` for the Xvfb wrapper) die
@@ -104,14 +104,14 @@ unset GH_TOKEN
 # script-level exports (PATH additions, language-specific vars) won't
 # propagate; consumers that need those at lefthook/tests time should
 # set them in lefthook.yml or in the test command directly.
-if [ -f scripts/setup-dev-env.sh ]; then
-  step dev-env "running scripts/setup-dev-env.sh"
-  bash scripts/setup-dev-env.sh || fail dev-env
+if [ -f bin/setup-dev-env.sh ]; then
+  step dev-env "running bin/setup-dev-env.sh"
+  bash bin/setup-dev-env.sh || fail dev-env
   if grep -qs '^export DISPLAY=:99' "${HOME}/.bashrc" 2>/dev/null; then
     export DISPLAY=:99
   fi
 else
-  step dev-env "(no scripts/setup-dev-env.sh — skipping)"
+  step dev-env "(no bin/setup-dev-env.sh — skipping)"
 fi
 
 # --- Step 4: lefthook pre-commit -----------------------------------------

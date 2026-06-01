@@ -57,7 +57,6 @@ pre-commit:
       # holds); the runner does the real selection, so no `exclude` is needed.
       glob:
         - "**/*.{sh,bash}"
-        - "scripts/**"
         - "bin/**"
         - "app-bin/**"
       run: bin/check-shell {staged_files}

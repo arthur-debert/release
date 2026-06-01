@@ -8,7 +8,7 @@ set -euo pipefail
 # queries, exercised via bats.
 #
 # Discovery order:
-#   1. ./scripts/check-tests        consumer override (full control)
+#   1. ./app-bin/check-tests        consumer override (full control)
 #   2. bats ./test/                  zed-lex convention: manifest +
 #                                   queries .bats live at test/*.bats
 #   3. bats ./tests/                 alternate plural form
@@ -21,9 +21,9 @@ set -euo pipefail
 
 echo "Running tests..."
 
-if [ -x scripts/check-tests ]; then
-    echo "Running tests via scripts/check-tests (consumer override)..."
-    exec scripts/check-tests "$@"
+if [ -x app-bin/check-tests ]; then
+    echo "Running tests via app-bin/check-tests (consumer override)..."
+    exec app-bin/check-tests "$@"
 fi
 
 run_bats_dir() {
