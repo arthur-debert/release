@@ -75,6 +75,13 @@ pip install -U "$url"
 release-core init
 ```
 
+This snippet (frozen verbatim in the contract doc) assumes exactly one wheel asset
+per release matches the regex — the publish job uploads a single
+`release_core-<ver>-py3-none-any.whl`. Hardening the resolver to select one URL
+and error otherwise, and to pick the latest release whose tag matches the
+consumer's pinned `vN` instead of `releases/latest`, is the major-line-resolution
+follow-up below, not part of this PoC.
+
 ## What this changes
 
 This supersedes the package-distribution half of ADR-0001 and reframes several
@@ -149,7 +156,3 @@ interfaces. This ADR records the decision; the PoC's boundaries are:
 - **The PoC is self-contained.** Mechanics are proven in release's own CI smoke
   job; consumer rollout and curl/sync retirement are sequenced as follow-ups, so
   the fleet is not disturbed by proving the model.
-
-```
-
-```
