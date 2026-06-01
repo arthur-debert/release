@@ -23,12 +23,22 @@ name: Cascade handler (reusable)
 # `scripts/release/*` primitives were retired — this handler now just
 # decides + dispatches; CI owns every mutation. See
 # arthur-debert/release `docs/lex-release-cascade.md`.
+#
+# TAG-AUTHORITATIVE version: because the decision is computed off the latest
+# FINAL git tag, this handler also DERIVES the next version from that same tag
+# (apply the bump-kind to the tag) and dispatches it EXPLICITLY as
+# `./bin/release <X.Y.Z>` — it does NOT let release-cut recompute from the
+# per-consumer manifest. That manifest can drift from the tag (vscode's
+# package.json froze at 0.4.1-rc.1 ~25 releases ago while the real version is
+# the tag v0.10.8, so a manifest-driven patch bump yields 0.4.2 instead of
+# 0.10.9). Deriving from the tag makes the cascade robust to manifest drift
+# fleet-wide. Same pattern as dropping the per-repo diff-since-release.
 
 on:
   workflow_call:
     inputs:
       bump-kind:
-        description: 'How to bump the version (patch | minor | major). Cascade default is patch.'
+        description: "How to bump the version (patch | minor | major). Cascade default is patch."
         type: string
         default: patch
         required: false
@@ -107,6 +117,7 @@ jobs:
         id: decide
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          BUMP: ${{ inputs.bump-kind }}
         run: |
           # should-release decision, computed GENERICALLY via plain git
           # (no per-repo bin/diff-since-release — it was absent for the
@@ -159,31 +170,65 @@ jobs:
           fi
           rm -f "$err"
           body="$(printf '%s\n' "$log" | sed '/^[[:space:]]*$/d')"
-          if [ -n "$body" ]; then
-            n="$(printf '%s\n' "$body" | grep -c .)"
-            echo "release=yes" >> "$GITHUB_OUTPUT"
-            echo "Releasable: ${n} commit(s) since ${latest_tag}."
-          else
+          if [ -z "$body" ]; then
             echo "release=no" >> "$GITHUB_OUTPUT"
             echo "No release needed (no commits since ${latest_tag})."
+            exit 0
           fi
+          n="$(printf '%s\n' "$body" | grep -c .)"
+          # TAG-AUTHORITATIVE next version: apply the bump-kind to the latest
+          # FINAL tag (NOT the per-consumer manifest, which can drift). Parse
+          # vMAJOR.MINOR.PATCH (strip leading 'v' + any '-prerelease'/'+build'),
+          # then increment per semver: major zeroes minor+patch, minor zeroes
+          # patch. We dispatch this EXPLICIT X.Y.Z so a stale manifest can't
+          # drive the version (the vscode 0.4.2-vs-0.10.9 bug).
+          core="${latest_tag#v}"      # strip leading v
+          core="${core%%-*}"          # strip -prerelease
+          core="${core%%+*}"          # strip +build
+          major="${core%%.*}"
+          rest="${core#*.}"
+          minor="${rest%%.*}"
+          patch="${rest#*.}"
+          if ! printf '%s' "${major}.${minor}.${patch}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::could not parse a semver core from tag '${latest_tag}'; cascade aborting"
+            exit 1
+          fi
+          case "$BUMP" in
+            major) next="$((major + 1)).0.0" ;;
+            minor) next="${major}.$((minor + 1)).0" ;;
+            patch) next="${major}.${minor}.$((patch + 1))" ;;
+            *)
+              # An explicit X.Y.Z bump-kind passes through unchanged (no tag math).
+              if printf '%s' "$BUMP" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+                next="$BUMP"
+              else
+                echo "::error::bad bump-kind '${BUMP}' (want patch|minor|major|X.Y.Z); cascade aborting"
+                exit 1
+              fi
+              ;;
+          esac
+          echo "release=yes" >> "$GITHUB_OUTPUT"
+          echo "next-version=${next}" >> "$GITHUB_OUTPUT"
+          echo "Releasable: ${n} commit(s) since ${latest_tag}; next version ${next} (from ${latest_tag} + ${BUMP})."
 
       - name: Skip if not needed
         if: steps.decide.outputs.release == 'no'
         run: echo "No release needed; nothing to do."
 
-      # `bin/release <bump>` is the Kind-aware release-cut shim. It reads
-      # the current version from this repo's canonical manifest, computes
-      # the new version from the bump-kind, and dispatches
-      # `.github/workflows/release.yml`. CI does the bump + CHANGELOG roll
-      # + commit + tag + build + GitHub Release. No local branch / commit
-      # / PR / admin-merge — the mutation lives entirely in CI now.
+      # `bin/release <X.Y.Z>` is the Kind-aware release-cut shim. We pass the
+      # EXPLICIT version the decide step derived from the latest final tag (NOT
+      # the bump-kind), so release-cut dispatches that exact version regardless
+      # of what this repo's manifest says — robust to manifest drift (the vscode
+      # 0.4.2-vs-0.10.9 bug). release-cut dispatches
+      # `.github/workflows/release.yml`; CI does the bump + CHANGELOG roll +
+      # commit + tag + build + GitHub Release. No local branch / commit / PR /
+      # admin-merge — the mutation lives entirely in CI now.
       - name: Cut release (dispatch release.yml)
         if: steps.decide.outputs.release == 'yes'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-          BUMP: ${{ inputs.bump-kind }}
+          NEXT_VERSION: ${{ steps.decide.outputs.next-version }}
         run: |
           set -e
-          ./bin/release "$BUMP"
-          echo "Dispatched release.yml (${BUMP} bump); CI will bump + tag + build + release."
+          ./bin/release "$NEXT_VERSION"
+          echo "Dispatched release.yml (version ${NEXT_VERSION}); CI will bump + tag + build + release."
