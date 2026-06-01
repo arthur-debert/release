@@ -4,7 +4,7 @@
 **Date:** 2026-05-02
 **Background:** [fleet-telemetry-via-issues.md](../references/fleet-telemetry-via-issues.md)
 **Sibling:** [pr-review-loop-circuit-breakers.md](pr-review-loop-circuit-breakers.md)
-(the circuit-breaker work is the first consumer of this mechanism)
+  (the circuit-breaker work is the first consumer of this mechanism)
 
 ## Problem
 
@@ -44,14 +44,14 @@ integration.
 Six kinds, each with a label and body schema. Add new kinds
 deliberately (PR to this proposal, then to the schema).
 
-| Kind                       | Label                   | Triggers                                                                                                                       |
-| -------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **circuit-breaker-fired**  | `incident:breaker`      | A `gh-pr-review-loop` circuit breaker stopped a review cycle.                                                                  |
-| **release-failed**         | `incident:release`      | A release-pipeline workflow failed mid-stage (build/sign/publish/notarize/tag).                                                |
-| **deploy-failed**          | `incident:deploy`       | A publish step failed (cargo publish, brew tap update, gh release upload, apt repo push).                                      |
-| **workflow-broken**        | `incident:workflow`     | A CI workflow itself is broken — wrong `uses:` ref, missing secret, schema error — distinct from "the code under test failed." |
-| **policy-drift**           | `incident:policy-drift` | `sweep-github-policy` or `apply-ruleset` detected a consumer repo out of sync with templates.                                  |
-| **secret-rotation-needed** | `incident:secret`       | A token/cert/key is expired or within the rotation window.                                                                     |
+| Kind | Label | Triggers |
+|---|---|---|
+| **circuit-breaker-fired** | `incident:breaker` | A `gh-pr-review-loop` circuit breaker stopped a review cycle. |
+| **release-failed** | `incident:release` | A release-pipeline workflow failed mid-stage (build/sign/publish/notarize/tag). |
+| **deploy-failed** | `incident:deploy` | A publish step failed (cargo publish, brew tap update, gh release upload, apt repo push). |
+| **workflow-broken** | `incident:workflow` | A CI workflow itself is broken — wrong `uses:` ref, missing secret, schema error — distinct from "the code under test failed." |
+| **policy-drift** | `incident:policy-drift` | `sweep-github-policy` or `apply-ruleset` detected a consumer repo out of sync with templates. |
+| **secret-rotation-needed** | `incident:secret` | A token/cert/key is expired or within the rotation window. |
 
 Per-event source repo also gets a label: `repo:<name>` (e.g.
 `repo:dodot`, `repo:lex`). Combined with the kind labels, this gives
@@ -70,7 +70,6 @@ filed is "the user should look at this." If volume grows, add
 ```
 
 Examples:
-
 - `[breaker] diff trajectory — 234→412→891 (dodot#118)`
 - `[release] cargo publish failed at v1.4.2 (padz)`
 - `[policy-drift] copilot-instructions.md outdated (clapfig)`
@@ -81,25 +80,21 @@ Examples:
 Markdown, structured into fixed sections so it's both human-readable
 and machine-parseable:
 
-````markdown
+```markdown
 ## Source
-
 - **Repo:** arthur-debert/dodot
 - **Reference:** PR #118 — https://github.com/arthur-debert/dodot/pull/118
 - **Commit:** abc1234 (head at time of event)
 - **Workflow run:** https://github.com/arthur-debert/dodot/actions/runs/12345 (if applicable)
 
 ## Event
-
 - **Kind:** circuit-breaker-fired
 - **Subkind:** diff-trajectory
 - **Time:** 2026-05-02T14:32:00Z
 - **Reporter:** gh-pr-loop-status v1.0
 
 ## Data
-
 <!-- Structured payload, fenced as YAML or JSON. Schema varies per kind. -->
-
 ```yaml
 breaker: 3
 trajectory:
@@ -113,21 +108,16 @@ trajectory:
     diff_lines: 891
     head: i7j8k9l
 ```
-````
 
 ## Diagnosis
-
 <!-- Short paragraph from the reporter explaining what the data suggests. -->
 
 ## Suggested action
-
 <!-- Optional. What the reporter thinks should happen. Numbered list. -->
 
 ---
-
 _Filed by `bin/report-incident`. See [the proposal](https://github.com/arthur-debert/release/blob/main/docs/proposals/incident-reporting-mechanism.md)._
-
-````
+```
 
 The `## Source`, `## Event`, and `## Data` sections are required.
 `## Diagnosis` and `## Suggested action` are optional but encouraged
@@ -152,10 +142,9 @@ report-incident \
   --data-file /tmp/breaker-data.yaml \
   --diagnosis "Diff grew 234→412→891 across cycles 1–3..." \
   --suggested-action-file /tmp/actions.md
-````
+```
 
 Behavior:
-
 - Reads `GH_TOKEN` (or `GITHUB_TOKEN`) for auth.
 - Validates `--kind` against the taxonomy. Unknown kind → exit 2.
 - Constructs title + body per schema.
@@ -192,15 +181,13 @@ boilerplate to one `uses:` block.
 ## Authentication
 
 A new fine-grained PAT, `INCIDENT_TOKEN`, scoped to:
-
 - `arthur-debert/release` only
 - Permission: `issues: write` (no other access)
 
 Distribution:
-
 - Add to `bin/install-release-secrets` so onboarded repos get it.
 - Document in `docs/secrets.md` (alongside the existing 7 release secrets).
-- For lex-fmt/\* (cross-org), the consumer must list `INCIDENT_TOKEN`
+- For lex-fmt/* (cross-org), the consumer must list `INCIDENT_TOKEN`
   explicitly under `secrets:` in their reusable-workflow `uses:` block —
   same caveat as the existing cross-org pattern.
 
@@ -220,7 +207,6 @@ Distribution:
   the reporter shouldn't have.)
 
 Stale-issue sweep (separate scheduled task):
-
 - Issues open >30 days with no comments → digest agent posts
   "still relevant?" and labels `stale`.
 - Twice-stale (60 days) → close with `wontfix`.
@@ -250,9 +236,9 @@ Document `INCIDENT_TOKEN`: scope, rotation cadence, how to mint.
 
 ### E. `~/h/release/templates/rust/copilot-instructions.md` (existing — small note)
 
-Add a line: _"This repo files incident reports to `arthur-debert/release/issues`
+Add a line: *"This repo files incident reports to `arthur-debert/release/issues`
 when tooling-related events occur (circuit breakers, release failures, etc.).
-Don't suggest removing or restructuring those reporting calls."_
+Don't suggest removing or restructuring those reporting calls."*
 
 ### F. Cross-link from `pr-review-loop-circuit-breakers.md`
 

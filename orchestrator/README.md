@@ -43,7 +43,7 @@ while exploring the SDK surface.
 The poll-loop transport for the PR state engine. Instead of webhooks, a
 long-running local process imports `release_gh.state` and polls a few PRs
 (~zero agent tokens — it's `gh` calls, not an awake agent), dispatching only
-when a PR's lifecycle _state changes_.
+when a PR's lifecycle *state changes*.
 
 ```sh
 orc watch 350 351                 # notify-only: ping you at the moments that matter
@@ -54,12 +54,12 @@ orc watch 350 --repo ~/h/dodot --interval 60
 Two human gates are never automated: the **merge** (READY flips draft→ready and
 pages you) and a fired **circuit breaker** (always pages, never acts).
 
-| Transition                                | notify-only            | `--auto`                  |
-| ----------------------------------------- | ---------------------- | ------------------------- |
-| `ADDRESSING` / `BLOCKED` (check/conflict) | ping you to drive      | spawn a fresh fixer agent |
-| `BLOCKED` (breaker)                       | page — never act       | page — never act          |
-| `READY`                                   | flip draft→ready, page | flip draft→ready, page    |
-| pending / validating                      | quiet                  | quiet                     |
+| Transition | notify-only | `--auto` |
+|---|---|---|
+| `ADDRESSING` / `BLOCKED` (check/conflict) | ping you to drive | spawn a fresh fixer agent |
+| `BLOCKED` (breaker) | page — never act | page — never act |
+| `READY` | flip draft→ready, page | flip draft→ready, page |
+| pending / validating | quiet | quiet |
 
 **Why a fresh agent, not session-resume:** resume reloads the whole
 implementation conversation (100–200k tokens) every wake, goes stale when

@@ -38,11 +38,11 @@ the fields below.
 }
 ```
 
-| Field     | Required | Type   | Description                                                                                                                                                                                                                                                  |
-| --------- | -------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `version` | yes      | string | Semver string with a mandatory `v` prefix, matching the GH release tag (e.g. `v0.14.1`, `v1.0.0-rc.3`). The fetcher resolves the release by exact tag — not range, not "latest".                                                                             |
-| `repo`    | yes      | string | `<org>/<repo>` slug. Used by `gh release download --repo`.                                                                                                                                                                                                   |
-| `asset`   | no       | string | Asset-name pattern for the release. Supports the `{arch}` substitution (see below). **Default:** `<artifact-name>-{arch}.tar.gz`.                                                                                                                            |
+| Field     | Required | Type   | Description |
+|-----------|----------|--------|-------------|
+| `version` | yes      | string | Semver string with a mandatory `v` prefix, matching the GH release tag (e.g. `v0.14.1`, `v1.0.0-rc.3`). The fetcher resolves the release by exact tag — not range, not "latest". |
+| `repo`    | yes      | string | `<org>/<repo>` slug. Used by `gh release download --repo`. |
+| `asset`   | no       | string | Asset-name pattern for the release. Supports the `{arch}` substitution (see below). **Default:** `<artifact-name>-{arch}.tar.gz`. |
 | `type`    | no       | string | `binary` (default) or `tree`. Selects install shape — see "Install shape" below. Explicit > auto-detect, so use this when the archive contents could change shape upstream (e.g. a binary release gaining a `LICENSE` file shouldn't flip the install mode). |
 
 Top-level keys outside the artifact-name set are **reserved**. The
@@ -59,14 +59,14 @@ When the `asset` pattern contains the literal substring `{arch}`, the
 fetcher substitutes the host's rust-target-triple at fetch time. The
 host detection rule is `uname -s` + `uname -m`:
 
-| `uname -s`                   | `uname -m` | `{arch}` substitution       |
-| ---------------------------- | ---------- | --------------------------- |
-| `Linux`                      | `x86_64`   | `x86_64-unknown-linux-gnu`  |
-| `Linux`                      | `aarch64`  | `aarch64-unknown-linux-gnu` |
-| `Darwin`                     | `x86_64`   | `x86_64-apple-darwin`       |
-| `Darwin`                     | `arm64`    | `aarch64-apple-darwin`      |
-| `MINGW*` / `MSYS*` (Windows) | `x86_64`   | `x86_64-pc-windows-msvc`    |
-| `MINGW*` / `MSYS*` (Windows) | `aarch64`  | `aarch64-pc-windows-msvc`   |
+| `uname -s` | `uname -m`        | `{arch}` substitution            |
+|------------|-------------------|----------------------------------|
+| `Linux`    | `x86_64`          | `x86_64-unknown-linux-gnu`       |
+| `Linux`    | `aarch64`         | `aarch64-unknown-linux-gnu`      |
+| `Darwin`   | `x86_64`          | `x86_64-apple-darwin`            |
+| `Darwin`   | `arm64`           | `aarch64-apple-darwin`           |
+| `MINGW*` / `MSYS*` (Windows) | `x86_64` | `x86_64-pc-windows-msvc` |
+| `MINGW*` / `MSYS*` (Windows) | `aarch64` | `aarch64-pc-windows-msvc` |
 
 If the pattern does **not** contain `{arch}`, it is used verbatim. This
 is the right shape for source-tree artifacts (one tarball serves all
@@ -174,7 +174,7 @@ binary (move to `<target>/<name>`) or a directory tree (extract to
 `<target>/<name>/`). Two ways to declare it, in priority order:
 
 1. **Explicit `type` field** in the manifest entry: `"type":
-"binary"` or `"type": "tree"`. Recommended when there's any
+   "binary"` or `"type": "tree"`. Recommended when there's any
    ambiguity, or when the upstream archive might evolve (e.g. a
    binary release gaining a `LICENSE` file that would confuse
    auto-detect).

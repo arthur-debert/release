@@ -12,12 +12,11 @@ canonical reference is the workflow file itself at
 
 Until this workflow landed, every electron-app consumer's `test.yml`
 was hand-rolled: a `setup-node + npm ci + (build shared) + typecheck
-
-- lint + test` sequence repeated verbatim across the fleet. Same
-  "CI workflow reusability gap" called out for rust — see the top-level
-  README — applied to the electron-app Stack. A change to the canonical
-  node version, the cache config, the umbrella order, or the umbrella
-  itself did not propagate to anyone.
++ lint + test` sequence repeated verbatim across the fleet. Same
+"CI workflow reusability gap" called out for rust — see the top-level
+README — applied to the electron-app Stack. A change to the canonical
+node version, the cache config, the umbrella order, or the umbrella
+itself did not propagate to anyone.
 
 `electron-ci.yml` collapses every consumer's check job to a thin
 caller. The canonical sequence — `setup-node` + `npm ci` + optional
@@ -42,7 +41,7 @@ bespoke in the consumer's caller workflow.
 name: CI
 on:
   push:
-    branches: ["**"]
+    branches: ['**']
   pull_request:
 
 permissions:
@@ -52,7 +51,7 @@ jobs:
   check:
     uses: arthur-debert/release/.github/workflows/electron-ci.yml@v1
     with:
-      node-version: "22"
+      node-version: '22'
 ```
 
 With a sibling `e2e` job (the most common shape — see lexed):
@@ -61,7 +60,7 @@ With a sibling `e2e` job (the most common shape — see lexed):
 name: Lexed CI
 on:
   push:
-    branches: ["**"]
+    branches: ['**']
   pull_request:
     branches: [main]
 
@@ -72,9 +71,9 @@ jobs:
   check:
     uses: arthur-debert/release/.github/workflows/electron-ci.yml@v1
     with:
-      node-version: "22.18.0"
+      node-version: '22.18.0'
       shared-build-dir: shared
-      submodules: "true"
+      submodules: 'true'
 
   e2e:
     # Existing bespoke job — fetch sibling artifacts, xvfb,
@@ -95,7 +94,7 @@ bespoke `e2e` job, the check names GitHub reports change:
 
 - before: `Build and Test`, `E2E Tests` (or whatever the consumer
   named their job-display names)
-- after: `check / check`, `e2e` (the caller's job ID + the callee's
+- after:  `check / check`, `e2e` (the caller's job ID + the callee's
   job ID for the reusable side; the bespoke job keeps its own name)
 
 If the repo's `main-branch-protection` ruleset still requires the
@@ -158,15 +157,15 @@ Same pattern will apply to any future electron consumer.
 
 All inputs are optional.
 
-| Input              | Default           | Description                                                                                                                 |
-| ------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `node-version`     | `'22'`            | Forwarded to `actions/setup-node`. Match the consumer's `engines.node` pin.                                                 |
-| `pre-test`         | `''`              | Shell command run after `npm ci` (+ shared-build) but before `bin/check`. Use for grammar fetches, fixture prep, codegen.   |
-| `shared-build-dir` | `''`              | Relative path to a sub-package whose deps + build need to land before the renderer/main typecheck (e.g. `shared` in lexed). |
-| `playwright`       | `false`           | When true, `npx playwright install --with-deps` runs after `npm ci`. Browsers only — does NOT add an e2e job.               |
-| `runner`           | `'ubuntu-latest'` | Runner label.                                                                                                               |
-| `timeout`          | `30`              | Per-job timeout (minutes).                                                                                                  |
-| `submodules`       | `'false'`         | Forwarded to `actions/checkout`. `'true'` for first-level, `'recursive'` for nested.                                        |
+| Input | Default | Description |
+|---|---|---|
+| `node-version` | `'22'` | Forwarded to `actions/setup-node`. Match the consumer's `engines.node` pin. |
+| `pre-test` | `''` | Shell command run after `npm ci` (+ shared-build) but before `bin/check`. Use for grammar fetches, fixture prep, codegen. |
+| `shared-build-dir` | `''` | Relative path to a sub-package whose deps + build need to land before the renderer/main typecheck (e.g. `shared` in lexed). |
+| `playwright` | `false` | When true, `npx playwright install --with-deps` runs after `npm ci`. Browsers only — does NOT add an e2e job. |
+| `runner` | `'ubuntu-latest'` | Runner label. |
+| `timeout` | `30` | Per-job timeout (minutes). |
+| `submodules` | `'false'` | Forwarded to `actions/checkout`. `'true'` for first-level, `'recursive'` for nested. |
 
 ## Permissions
 

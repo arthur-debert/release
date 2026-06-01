@@ -24,20 +24,20 @@ checked-in location (e.g. inside `${{ github.workspace }}`).
 
 ## Inputs
 
-| Name       | Required | Default            | Description                                                          |
-| ---------- | -------- | ------------------ | -------------------------------------------------------------------- |
-| `artifact` | yes      | —                  | Top-level key in the manifest (e.g. `lexd-lsp`).                     |
-| `manifest` | no       | `artifacts.json`   | Path to the manifest relative to the consumer repo root.             |
-| `target`   | no       | `$HOME/.local/bin` | Install directory. Created if missing.                               |
-| `arch`     | no       | (auto-detect)      | Override host arch (rust-target-triple, e.g. `x86_64-apple-darwin`). |
-| `no-cache` | no       | `false`            | Force re-download even if the version stamp matches.                 |
+| Name        | Required | Default          | Description                                                  |
+|-------------|----------|------------------|--------------------------------------------------------------|
+| `artifact`  | yes      | —                | Top-level key in the manifest (e.g. `lexd-lsp`).             |
+| `manifest`  | no       | `artifacts.json` | Path to the manifest relative to the consumer repo root.     |
+| `target`    | no       | `$HOME/.local/bin` | Install directory. Created if missing.                     |
+| `arch`      | no       | (auto-detect)    | Override host arch (rust-target-triple, e.g. `x86_64-apple-darwin`). |
+| `no-cache`  | no       | `false`          | Force re-download even if the version stamp matches.         |
 
 ## Outputs
 
-| Name             | Description                                                   |
-| ---------------- | ------------------------------------------------------------- |
-| `installed-path` | Absolute path where the artifact was installed (file or dir). |
-| `version`        | Pinned version that was installed (read from the stamp file). |
+| Name             | Description                                                       |
+|------------------|-------------------------------------------------------------------|
+| `installed-path` | Absolute path where the artifact was installed (file or dir).     |
+| `version`        | Pinned version that was installed (read from the stamp file).     |
 
 ## Required env
 
@@ -49,7 +49,7 @@ Composite actions can't read secrets directly; the standard pattern is:
   with:
     artifact: lexd-lsp
   env:
-    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }} # or secrets.RELEASE_TOKEN for cross-org
+    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # or secrets.RELEASE_TOKEN for cross-org
 ```
 
 Use `RELEASE_TOKEN` instead of `GITHUB_TOKEN` when the artifact lives

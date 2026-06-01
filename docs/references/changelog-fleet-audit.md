@@ -13,13 +13,13 @@ and excluded from totals.
 
 ## Summary
 
-| Variant                                                                                                                   | Count | Repos                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **cargo-release** (single `CHANGELOG.md` with `## [Unreleased]`, `release.toml` drives promotion)                         | 4     | `padz`, `simple-gal`, `standout`, `lex-fmt/lex`                                                                                                                                              |
-| **ad-hoc `## Unreleased` block** (single `CHANGELOG.md`, no `release.toml`, promotion via per-repo `scripts/*` or manual) | 13    | `phos-app`, `phos-core`, `burgertocow`, `clapfig`, `dodot`, `rustloc`, `simple-gal-ui`, `supage`, `wave-term`, `lex-fmt/comms`, `lex-fmt/lexed`, `lex-fmt/tree-sitter-lex`, `lex-fmt/vscode` |
-| **ad-hoc, no `## Unreleased` block** (`CHANGELOG.md` exists but has no staging section)                                   | 2     | `lex-fmt/nvim`, `lex-fmt/zed-lex`                                                                                                                                                            |
-| **none** (no `CHANGELOG.md` at all)                                                                                       | 0     | —                                                                                                                                                                                            |
-| **two-file** (`CHANGELOG_UNRELEASED.md` + `CHANGELOG.md`)                                                                 | 0     | —                                                                                                                                                                                            |
+| Variant | Count | Repos |
+|---|---|---|
+| **cargo-release** (single `CHANGELOG.md` with `## [Unreleased]`, `release.toml` drives promotion) | 4 | `padz`, `simple-gal`, `standout`, `lex-fmt/lex` |
+| **ad-hoc `## Unreleased` block** (single `CHANGELOG.md`, no `release.toml`, promotion via per-repo `scripts/*` or manual) | 13 | `phos-app`, `phos-core`, `burgertocow`, `clapfig`, `dodot`, `rustloc`, `simple-gal-ui`, `supage`, `wave-term`, `lex-fmt/comms`, `lex-fmt/lexed`, `lex-fmt/tree-sitter-lex`, `lex-fmt/vscode` |
+| **ad-hoc, no `## Unreleased` block** (`CHANGELOG.md` exists but has no staging section) | 2 | `lex-fmt/nvim`, `lex-fmt/zed-lex` |
+| **none** (no `CHANGELOG.md` at all) | 0 | — |
+| **two-file** (`CHANGELOG_UNRELEASED.md` + `CHANGELOG.md`) | 0 | — |
 
 **Total: 19 in-scope managed repos** (4 + 13 + 2 + 0 + 0 = 19).
 
@@ -38,27 +38,27 @@ noted separately rather than double-counted; cleanup tracked in
 
 ## Per-repo detail
 
-| Repo                        | Variant                          | Unreleased file                  | Promotion script                                                                               | Tag annotation src | GH release body src |
-| --------------------------- | -------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------- | ------------------ | ------------------- |
-| arthur-debert/phos-app      | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | `scripts/release/{trigger,update}-release`                                                     | auto/empty         | auto/empty          |
-| arthur-debert/phos-core     | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/burgertocow   | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/clapfig       | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/dodot         | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/padz          | cargo-release                    | `CHANGELOG.md` `## [Unreleased]` | cargo-release (built-in)                                                                       | cargo-release      | cargo-release       |
-| arthur-debert/rustloc       | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/simple-gal    | cargo-release                    | `CHANGELOG.md` `## [Unreleased]` | cargo-release (built-in)                                                                       | cargo-release      | cargo-release       |
-| arthur-debert/simple-gal-ui | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/standout      | cargo-release                    | `CHANGELOG.md` `## [Unreleased]` | cargo-release (built-in)                                                                       | cargo-release      | cargo-release       |
-| arthur-debert/supage        | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| arthur-debert/wave-term     | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | — (manual)                                                                                     | auto/empty         | auto/empty          |
-| lex-fmt/comms               | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | `scripts/create-release`, `scripts/release/{trigger,update}-release`                           | auto/empty         | auto/empty          |
-| lex-fmt/lex                 | cargo-release (+ legacy scripts) | `CHANGELOG.md` `## [Unreleased]` | `scripts/release/{get-commits-since-release,update-release}` + cargo-release                   | cargo-release      | cargo-release       |
-| lex-fmt/lexed               | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | `scripts/release/update-release`                                                               | auto/empty         | auto/empty          |
-| lex-fmt/nvim                | ad-hoc (no `## Unreleased`)      | —                                | `scripts/create-release`, `scripts/release/{trigger,update}-release`                           | auto/empty         | auto/empty          |
-| lex-fmt/tree-sitter-lex     | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | `scripts/create-release`, `scripts/release/{get-commits-since-release,trigger,update}-release` | auto/empty         | auto/empty          |
-| lex-fmt/vscode              | ad-hoc `## Unreleased`           | `CHANGELOG.md` `## Unreleased`   | `scripts/create-release`, `scripts/release/{trigger,update}-release`                           | auto/empty         | auto/empty          |
-| lex-fmt/zed-lex             | ad-hoc (no `## Unreleased`)      | —                                | `scripts/create-release`, `scripts/build`                                                      | auto/empty         | auto/empty          |
+| Repo | Variant | Unreleased file | Promotion script | Tag annotation src | GH release body src |
+|---|---|---|---|---|---|
+| arthur-debert/phos-app | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/release/{trigger,update}-release` | auto/empty | auto/empty |
+| arthur-debert/phos-core | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/burgertocow | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/clapfig | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/dodot | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/padz | cargo-release | `CHANGELOG.md` `## [Unreleased]` | cargo-release (built-in) | cargo-release | cargo-release |
+| arthur-debert/rustloc | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/simple-gal | cargo-release | `CHANGELOG.md` `## [Unreleased]` | cargo-release (built-in) | cargo-release | cargo-release |
+| arthur-debert/simple-gal-ui | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/standout | cargo-release | `CHANGELOG.md` `## [Unreleased]` | cargo-release (built-in) | cargo-release | cargo-release |
+| arthur-debert/supage | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| arthur-debert/wave-term | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | — (manual) | auto/empty | auto/empty |
+| lex-fmt/comms | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/create-release`, `scripts/release/{trigger,update}-release` | auto/empty | auto/empty |
+| lex-fmt/lex | cargo-release (+ legacy scripts) | `CHANGELOG.md` `## [Unreleased]` | `scripts/release/{get-commits-since-release,update-release}` + cargo-release | cargo-release | cargo-release |
+| lex-fmt/lexed | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/release/update-release` | auto/empty | auto/empty |
+| lex-fmt/nvim | ad-hoc (no `## Unreleased`) | — | `scripts/create-release`, `scripts/release/{trigger,update}-release` | auto/empty | auto/empty |
+| lex-fmt/tree-sitter-lex | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/create-release`, `scripts/release/{get-commits-since-release,trigger,update}-release` | auto/empty | auto/empty |
+| lex-fmt/vscode | ad-hoc `## Unreleased` | `CHANGELOG.md` `## Unreleased` | `scripts/create-release`, `scripts/release/{trigger,update}-release` | auto/empty | auto/empty |
+| lex-fmt/zed-lex | ad-hoc (no `## Unreleased`) | — | `scripts/create-release`, `scripts/build` | auto/empty | auto/empty |
 
 ## Method
 

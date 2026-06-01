@@ -47,16 +47,16 @@ Each repo carries these two executables under `bin/` (re-synced from
 
 #### `bin/diff-since-release`
 
-|              |                                                                                                                                                  |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Args         | none                                                                                                                                             |
-| Stdout       | a `Changes since <tag>:` / `---` header, then `git log --oneline <last-final-tag>..HEAD` (one line per commit; empty log section if nothing new) |
-| Exit         | `0` normally; `1` if no release tags exist yet                                                                                                   |
-| Side effects | none                                                                                                                                             |
+| | |
+|---|---|
+| Args | none |
+| Stdout | a `Changes since <tag>:` / `---` header, then `git log --oneline <last-final-tag>..HEAD` (one line per commit; empty log section if nothing new) |
+| Exit | `0` normally; `1` if no release tags exist yet |
+| Side effects | none |
 
 It is the source for both "**is there anything to release?**" (a non-empty log
 section after the `---`) and "**what changed?**". Pre-release tags (`-rc.N`) are
-skipped, so the diff is against the last _final_ release.
+skipped, so the diff is against the last *final* release.
 
 #### `bin/release` (= `release-cut`)
 
@@ -74,12 +74,12 @@ CHANGELOG roll, the commit, the tag, the build, and the GitHub Release. There is
 no longer any local "bump files + `git add` + commit + PR + admin-merge" step —
 that responsibility moved entirely into CI.
 
-|              |                                                                                              |
-| ------------ | -------------------------------------------------------------------------------------------- |
-| Args         | `patch` \| `minor` \| `major` \| `X.Y.Z[-PRERELEASE]`                                        |
-| Stdout       | the computed version + a `gh workflow run release.yml` dispatch                              |
-| Exit         | `0` on a successful dispatch; non-zero on bad version / missing `release.yml` / `gh` failure |
-| Side effects | dispatches `release.yml` (workflow_dispatch). CI does all mutation.                          |
+| | |
+|---|---|
+| Args | `patch` \| `minor` \| `major` \| `X.Y.Z[-PRERELEASE]` |
+| Stdout | the computed version + a `gh workflow run release.yml` dispatch |
+| Exit | `0` on a successful dispatch; non-zero on bad version / missing `release.yml` / `gh` failure |
+| Side effects | dispatches `release.yml` (workflow_dispatch). CI does all mutation. |
 
 ##### Per-repo manifest surfaces
 
@@ -87,14 +87,14 @@ that responsibility moved entirely into CI.
 dep-pin updates (comms submodule, `shared/lex-deps.json`) and the build itself
 all happen in CI via the reusable workflow.
 
-| Repo              | Version source (read by release-cut)                      | CI trigger                                                                 |
-| ----------------- | --------------------------------------------------------- | -------------------------------------------------------------------------- |
-| `comms`           | git tags (no version file)                                | tag-push (`on: push: tags: [v*]`)                                          |
-| `lex`             | `[workspace.package].version` in root `Cargo.toml`        | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v1`) |
-| `tree-sitter-lex` | `package.json` `"version"`                                | tag-push                                                                   |
-| `vscode`          | `package.json` `"version"`                                | tag-push                                                                   |
-| `nvim`            | `lua/lex/init.lua` `M.version` (via `version-file` input) | tag-push                                                                   |
-| `lexed`           | `package.json` `"version"`                                | tag-push                                                                   |
+| Repo | Version source (read by release-cut) | CI trigger |
+|---|---|---|
+| `comms` | git tags (no version file) | tag-push (`on: push: tags: [v*]`) |
+| `lex` | `[workspace.package].version` in root `Cargo.toml` | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v1`) |
+| `tree-sitter-lex` | `package.json` `"version"` | tag-push |
+| `vscode` | `package.json` `"version"` | tag-push |
+| `nvim` | `lua/lex/init.lua` `M.version` (via `version-file` input) | tag-push |
+| `lexed` | `package.json` `"version"` | tag-push |
 
 ### Layer 1 — local orchestrator (`release-lex`)
 
@@ -147,7 +147,7 @@ push tag v0.16.3 to comms
 
 #### Two-hop cascade for editors
 
-Editors submodule `comms` AND pin `lexd-lsp` + `tree-sitter`. When comms releases, the editors _could_ react directly — but their `lexd-lsp` and `tree-sitter` pins would still be on the old upstream version. Better to wait for lex + tree-sitter to release first; their release CI will pull a current comms anyway. So:
+Editors submodule `comms` AND pin `lexd-lsp` + `tree-sitter`. When comms releases, the editors *could* react directly — but their `lexd-lsp` and `tree-sitter` pins would still be on the old upstream version. Better to wait for lex + tree-sitter to release first; their release CI will pull a current comms anyway. So:
 
 - comms only emits to **lex + tree-sitter-lex** (NOT editors).
 - lex + tree-sitter-lex emit to **vscode + nvim + lexed**.
@@ -207,7 +207,7 @@ Add `--dry-run` to echo every step without doing anything. Add `--only repo1,rep
 
 ### Recovery: a handler failed mid-cascade
 
-The cascade is idempotent at the decide level — if a handler failed before its `release.yml` CI committed the tag, you can re-fire the same dispatch and it'll resume cleanly (`bin/diff-since-release` still shows commits). If a handler failed after the tag landed, the next attempt sees an empty `diff-since-release` (everything's caught up) and exits cleanly; you only need to re-fire the _release CI_ (e.g. `gh workflow run release.yml --repo lex-fmt/lex -f version=X.Y.Z`, or `bin/release X.Y.Z` from a clone).
+The cascade is idempotent at the decide level — if a handler failed before its `release.yml` CI committed the tag, you can re-fire the same dispatch and it'll resume cleanly (`bin/diff-since-release` still shows commits). If a handler failed after the tag landed, the next attempt sees an empty `diff-since-release` (everything's caught up) and exits cleanly; you only need to re-fire the *release CI* (e.g. `gh workflow run release.yml --repo lex-fmt/lex -f version=X.Y.Z`, or `bin/release X.Y.Z` from a clone).
 
 Manual dispatch fire (handler will re-evaluate):
 
@@ -226,7 +226,7 @@ These all appeared at least once during the cascade's first cut. Documented so f
 
 1. **`GH_TOKEN` on every `gh`-using step.** The handler's `Decide` and `Cut release` steps run `bin/diff-since-release` / `bin/release`, and `bin/release`'s `gh workflow run` needs auth. Without `env: GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}` on those steps, `gh` fails auth and the handler bails.
 2. **Shell-injection on payload reads.** `${{ github.event.client_payload.X }}` interpolated directly into a `run:` is a code-execution vector if the upstream is compromised. Always route through `env:`.
-3. **`bin/release` only _dispatches_; CI owns the mutation.** The handler no longer bumps files, commits, opens a PR, or admin-merges. `bin/release <bump>` fires `release.yml`; the reusable per-Kind workflow does the bump + CHANGELOG roll + commit + tag + build + release. So all the old "local pre-bump" gotchas (annotated tags, `git reset --hard` after merge, stale-branch cleanup, UNRELEASED.md seed) now live in the reusable workflow / `prepare-release` action, not in the handler.
+3. **`bin/release` only *dispatches*; CI owns the mutation.** The handler no longer bumps files, commits, opens a PR, or admin-merges. `bin/release <bump>` fires `release.yml`; the reusable per-Kind workflow does the bump + CHANGELOG roll + commit + tag + build + release. So all the old "local pre-bump" gotchas (annotated tags, `git reset --hard` after merge, stale-branch cleanup, UNRELEASED.md seed) now live in the reusable workflow / `prepare-release` action, not in the handler.
 
 ### Reusable-workflow (CI) gotchas — now handled where the mutation happens
 
@@ -267,6 +267,7 @@ Three pieces. None is hard individually; the order matters.
    re-deriving the gotcha list.
 
    Optional inputs:
+
    - `bump-kind` — `patch` (default) | `minor` | `major`.
    - `git-author-name` — defaults to `release-bot`.
    - `git-author-email` — defaults to `release-bot@users.noreply.github.com`.
@@ -274,13 +275,12 @@ Three pieces. None is hard individually; the order matters.
    Run lookups happen under the **caller's** filename
    (`on-upstream-released.yml` by convention) — not under the reusable
    workflow's filename. `gh run list --repo <repo>
---workflow=on-upstream-released.yml` is the canonical way to see
+   --workflow=on-upstream-released.yml` is the canonical way to see
    handler activity. See [`.github/workflows/cascade-handler.yml`](../.github/workflows/cascade-handler.yml).
 
    The older copy-per-repo `on-upstream-released.yml` shape (~120 lines)
    still works during the Wave-3 migration sweep but is being phased
    out.
-
 3. **Add `notify-downstreams` step to `.github/workflows/release.yml`.** Fires `repository_dispatch upstream-released` to the new repo's direct consumers (if any).
 
 Then add the repo to `release-lex`'s `ORDER` array and dep-chain validation. Done.

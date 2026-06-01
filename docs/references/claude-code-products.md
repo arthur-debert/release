@@ -1,13 +1,13 @@
 ## Claude coding products — final matrix
 
-| Product                    | Execution            | Driver                      | Transport               | Billing                           |
-| -------------------------- | -------------------- | --------------------------- | ----------------------- | --------------------------------- |
-| **Claude Code (TUI)**      | Local                | Interactive `claude`        | Local pty               | Subscription (Pro/Max) or API key |
-| **Claude Code (headless)** | Local                | `claude -p`                 | Subprocess, JSON I/O    | Subscription or API key           |
-| **Claude Agent SDK**       | Local (your process) | Python/TS library           | In-process, wraps CLI   | Subscription or API key           |
-| **Claude Code Cloud**      | Anthropic sandbox    | Web / mobile / desktop apps | HTTPS to Anthropic      | Subscription only                 |
-| **Managed Agents API**     | Anthropic sandbox    | Your code (REST/SDK)        | HTTPS + SSE             | API key only                      |
-| **Messages API**           | None (no agent loop) | Your code                   | HTTPS to `/v1/messages` | API key only                      |
+| Product | Execution | Driver | Transport | Billing |
+|---|---|---|---|---|
+| **Claude Code (TUI)** | Local | Interactive `claude` | Local pty | Subscription (Pro/Max) or API key |
+| **Claude Code (headless)** | Local | `claude -p` | Subprocess, JSON I/O | Subscription or API key |
+| **Claude Agent SDK** | Local (your process) | Python/TS library | In-process, wraps CLI | Subscription or API key |
+| **Claude Code Cloud** | Anthropic sandbox | Web / mobile / desktop apps | HTTPS to Anthropic | Subscription only |
+| **Managed Agents API** | Anthropic sandbox | Your code (REST/SDK) | HTTPS + SSE | API key only |
+| **Messages API** | None (no agent loop) | Your code | HTTPS to `/v1/messages` | API key only |
 
 ### Notes per row
 

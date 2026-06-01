@@ -19,7 +19,7 @@ Synced by `release-sync` when a consumer's Stack manifest lists
   - `prettier` — globs the same plus styling files
     (`.svelte`, `.json`, `.html`, `.css`, `.scss`, `.md`, `.yml`,
     `.yaml`). Runs `npx --no-install prettier --check
-{staged_files}` (per-file scope).
+    {staged_files}` (per-file scope).
   - `typecheck` — fires when any `.ts` / `.tsx` / `tsconfig*.json`
     is staged. Invokes `npm run --silent typecheck --if-present`
     (no per-file argument — tsc operates on the project).
@@ -64,7 +64,7 @@ For a Stack that doesn't yet default to `npm-quality` (`tauri-app`,
 ```yaml
 components:
   - <other defaults>
-  - npm-quality # opt-in until tauri-app's manifest defaults it
+  - npm-quality         # opt-in until tauri-app's manifest defaults it
 ```
 
 ## Why no CI workflow
@@ -84,12 +84,12 @@ they will follow the same shape: setup-node + `bin/check` —
 The hooks (and the Stack-level `bin/check-*` scripts) assume the
 consumer's `package.json` exposes the standard portfolio aliases:
 
-| Alias          | Purpose                                                                                                                      |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `lint`         | ESLint over the project. `eslint . --max-warnings 0` is the canonical shape.                                                 |
-| `format:check` | Prettier check (no write). `prettier --check .` or a narrower glob.                                                          |
-| `typecheck`    | `tsc --noEmit`. The hook fires only when TS files are staged.                                                                |
-| `test:unit`    | Vitest (or other unit-only runner). The umbrella's `bin/check-tests` forwards `-- --run` so vitest doesn't enter watch mode. |
+| Alias | Purpose |
+|---|---|
+| `lint` | ESLint over the project. `eslint . --max-warnings 0` is the canonical shape. |
+| `format:check` | Prettier check (no write). `prettier --check .` or a narrower glob. |
+| `typecheck` | `tsc --noEmit`. The hook fires only when TS files are staged. |
+| `test:unit` | Vitest (or other unit-only runner). The umbrella's `bin/check-tests` forwards `-- --run` so vitest doesn't enter watch mode. |
 
 The pre-commit hooks DON'T use these aliases — they call the tool
 directly via `npx --no-install` against staged files (see "What

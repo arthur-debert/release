@@ -51,15 +51,9 @@ reusable workflow they all call):
 drift-check:
   runs-on: ubuntu-latest
   steps:
-    - uses: actions/checkout@v4 # the consumer
+    - uses: actions/checkout@v4                      # the consumer
     - uses: actions/checkout@v4
-      with:
-        {
-          repository: arthur-debert/release,
-          ref: v1,
-          path: .release-src,
-          fetch-depth: 0,
-        }
+      with: { repository: arthur-debert/release, ref: v1, path: .release-src, fetch-depth: 0 }
     - run: |
         sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
         sudo chmod +x /usr/local/bin/yq

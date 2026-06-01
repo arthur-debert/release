@@ -26,7 +26,7 @@ code. The linter therefore only ever faces files we wrote or generated.
 ### 1. Third-party — we don't control it → it's **gitignored** (already out)
 
 Not our code: deps, vendored libs, fetched assets. They live in gitignored dirs;
-the gate never touches them. If a third-party file is somehow _tracked_, the fix
+the gate never touches them. If a third-party file is somehow *tracked*, the fix
 is to **gitignore it** — not to lint it, and not to hand-fix it (our fix breaks
 on their next update). "Ignore" always means "gitignore"; there is no separate
 lint-ignore escape hatch for third-party content.
@@ -34,7 +34,7 @@ lint-ignore escape hatch for third-party content.
 ### 2. Authored — we wrote it → **fix the file, once**
 
 Our own prose: READMEs, docs, notes. `markdownlint --fix` silently handles
-_style_ (whitespace, blank lines, list markers); _content_ rules (`MD040` fence
+*style* (whitespace, blank lines, list markers); *content* rules (`MD040` fence
 language, `MD051` link anchors, `MD041` first heading) need a human edit. Do it
 once — it stays fixed. Never ignore authored content to dodge a content rule.
 
@@ -47,7 +47,7 @@ regenerate. If the output shouldn't be committed at all, gitignore it (case 1).
 
 ## Ownership: where the fix lands
 
-Orthogonal to the three cases — _who owns the thing being fixed_:
+Orthogonal to the three cases — *who owns the thing being fixed*:
 
 - **Release-owned** — the gate config, a release-distributed file, a release-run
   generator → fix in `arthur-debert/release`; propagates via `@vN`. (A
@@ -58,7 +58,7 @@ Orthogonal to the three cases — _who owns the thing being fixed_:
 
 ## The one tracked-but-not-authored exception
 
-A few files are _committed_ (so can't be gitignored) yet aren't prose to
+A few files are *committed* (so can't be gitignored) yet aren't prose to
 author-lint: the generated `CHANGELOG`, mdbook `SUMMARY.md`, test `fixtures/`,
 generated regression/`benchmark/` corpora (golden converter output that
 deliberately exercises edge cases → intentionally not clean markdown; fix the
@@ -71,7 +71,7 @@ gitignored, authored is fixed, generated is fixed at the tool.
 ## Do it wholesale, not per file
 
 The gate runs on changed files, so legacy debt surfaces one file at a time and
-gets re-adjudicated on every brush-past — that _is_ the whack-a-mole. Break the
+gets re-adjudicated on every brush-past — that *is* the whack-a-mole. Break the
 loop by categorizing a repo's whole tracked markdown set once:
 
 ```sh

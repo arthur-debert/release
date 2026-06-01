@@ -50,26 +50,35 @@ if ! command -v lefthook >/dev/null 2>&1 \
     npm install -g lefthook prettier markdownlint-cli >/dev/null 2>&1 || true
   fi
 fi
+command -v lefthook >/dev/null 2>&1 || _warn_unarmed lefthook
 command -v prettier >/dev/null 2>&1 || _warn_unarmed prettier
 command -v markdownlint >/dev/null 2>&1 || _warn_unarmed markdownlint
 
 # ruff, pinned to the CI version so local and CI never disagree on findings.
+# Modern Debian/Ubuntu (PEP 668) reject a global pip install without
+# --break-system-packages; try that first, fall back to a plain install (older
+# distros / venvs reject the flag). Install stderr is left visible — a failure
+# reason should surface, not be swallowed.
+_RUFF_VERSION="0.15.12"
 if ! command -v ruff >/dev/null 2>&1; then
   if command -v pip3 >/dev/null 2>&1; then
-    pip3 install --quiet 'ruff==0.15.12' >/dev/null 2>&1 || true
+    pip3 install --quiet --break-system-packages "ruff==${_RUFF_VERSION}" >/dev/null \
+      || pip3 install --quiet "ruff==${_RUFF_VERSION}" >/dev/null || true
   elif command -v brew >/dev/null 2>&1; then
-    brew install ruff >/dev/null 2>&1 || true
+    brew install ruff >/dev/null || true
   fi
 fi
 command -v ruff >/dev/null 2>&1 || _warn_unarmed ruff
 
-# System tools: shellcheck + actionlint (brew on macOS, apt on Linux).
+# System tools: shellcheck + actionlint (brew on macOS, apt on Linux). `sudo -n`
+# (non-interactive) so a password prompt fails fast instead of hanging a
+# session-start hook; install stderr stays visible for diagnostics.
 for _gate_tool in shellcheck actionlint; do
   command -v "${_gate_tool}" >/dev/null 2>&1 && continue
   if command -v brew >/dev/null 2>&1; then
-    brew install "${_gate_tool}" >/dev/null 2>&1 || true
+    brew install "${_gate_tool}" >/dev/null || true
   elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get install -y "${_gate_tool}" >/dev/null 2>&1 || true
+    sudo -n apt-get install -y "${_gate_tool}" >/dev/null || true
   fi
   command -v "${_gate_tool}" >/dev/null 2>&1 || _warn_unarmed "${_gate_tool}"
 done

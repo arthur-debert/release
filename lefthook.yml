@@ -53,14 +53,13 @@ pre-commit:
         exit $fail
 
     prettier:
-      # Markdown + JSON repo-wide (the gate must cover the files we own, not
-      # just templates/ — docs/, README, CLAUDE.md were previously ungated).
-      # yml/yaml stays scoped to templates/ so workflow YAML isn't mass-
-      # reformatted here. Generated/vendored/fixture trees are excluded via
-      # .prettierignore.
+      # Scoped to the distributed templates/ tree (what consumers receive).
+      # Extending prettier to format prose under docs/ is a separate policy
+      # change — mass `prettier --write` mangles prose (+ sequences → bullets,
+      # org/* globs → emphasis), so it needs per-file prose hardening first.
+      # Tracked as a follow-up; not bundled into the gate-hardening change.
       glob:
-        - "**/*.{md,json}"
-        - "templates/**/*.{yml,yaml}"
+        - "templates/**/*.{json,md,yml,yaml}"
       run: |
         if ! command -v prettier >/dev/null 2>&1; then
           echo "ERROR: prettier not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2

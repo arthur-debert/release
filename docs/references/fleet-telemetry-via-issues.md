@@ -10,8 +10,8 @@ The arthur-debert / lex-fmt fleet is ~10 repos sharing tooling that
 lives here in `release/`: reusable workflows, policy templates,
 helper scripts, the `gh-pr-review-loop` skill. As the tooling does
 more — circuit breakers, policy sweeps, release pipelines — the
-question of _how the author knows whether the tooling is working
-across the fleet_ becomes structural.
+question of *how the author knows whether the tooling is working
+across the fleet* becomes structural.
 
 Two architectural shapes are available, and they have very different
 implications at this scale.
@@ -25,13 +25,11 @@ schedule) walks each consumer repo every interval, reads CI runs,
 PR states, recent commits, and reports a digest.
 
 Strengths:
-
 - Stateless. No per-repo integration; everything is read-only `gh api`.
 - Captures aggregate state ("3 PRs are stale" requires looking at all of them).
 - Easy to add new signals — just extend the polling script.
 
 Weaknesses at this scale:
-
 - Misses transient events. A circuit breaker that fires at 2am and is
   resolved by the time the 6am poll runs leaves no trace.
 - Wastes work in steady state. Most polls find nothing interesting.
@@ -49,10 +47,9 @@ weekly digest agent) walks `gh issue list` on this one repo to see
 the fleet pulse.
 
 Strengths at this scale:
-
 - Single inbox. `gh issue list` on release/ becomes the dashboard.
   Native UX, no custom plumbing.
-- Captures _moments_, not state. Every breaker firing is a row;
+- Captures *moments*, not state. Every breaker firing is a row;
   trends over time are free (issue creation timestamps + labels).
 - Push is cheaper than poll in steady state. Nothing happens when
   nothing happens.
@@ -62,10 +59,9 @@ Strengths at this scale:
   notifications, CLI.
 
 Weaknesses:
-
 - Requires per-repo integration (a token + a workflow call).
 - Requires a taxonomy upfront, or the inbox becomes prose-soup.
-- Doesn't capture _aggregate state_ — a question like "which PRs
+- Doesn't capture *aggregate state* — a question like "which PRs
   are stale right now?" still wants a poll. (In practice this is
   a small handful of digest-style queries that can be one
   scheduled agent reading a single inbox.)
@@ -90,15 +86,14 @@ into being a parallel discussion venue, which it should not be.
 
 ### 1. The issue is a report, not a discussion venue
 
-When a circuit breaker fires on `dodot#118`, the _resolution_
+When a circuit breaker fires on `dodot#118`, the *resolution*
 happens on `dodot#118` — that's where the code is, where the PR
 review thread lives, where the merge button is. The
 release/ issue is a pointer + summary + suggested action. It exists
-so the user can _find_ the situation, not so they can _resolve_ it
+so the user can *find* the situation, not so they can *resolve* it
 in two places at once.
 
 Concretely:
-
 - Every report includes the source URL.
 - The source PR/issue/run links back to the report ("filed:
   release/#42").
@@ -110,15 +105,14 @@ Concretely:
 Consumer repos do not hand-write issue bodies. They call into a
 shared mechanism (script or reusable workflow) that this repo
 provides, with structured inputs. This means:
-
 - The body shape is consistent and queryable.
 - Changing the format is a release/ change, not an N-repo change.
 - New event types are gated through this repo's review.
 
 ### 3. Events, not state
 
-A report represents _something happened at time T_. It does not
-represent _something is currently true_. If the underlying
+A report represents *something happened at time T*. It does not
+represent *something is currently true*. If the underlying
 condition resolves, the issue is closed (manually or by digest
 agent), not edited to say "no longer true." This keeps the inbox
 queryable as a time-series.
@@ -152,7 +146,7 @@ an existing kind with a richer body rather than minting a new one.
 - **Coupling.** Consumer repos now know a name: `arthur-debert/release`.
   If this repo is ever renamed or moved, every consumer's CI breaks.
   Mitigation: the reusable-workflow indirection (`uses:
-arthur-debert/release/.github/workflows/report-incident.yml@v1`)
+  arthur-debert/release/.github/workflows/report-incident.yml@v1`)
   is a single rename target; consumers don't hardcode the issue
   endpoint themselves.
 
@@ -194,5 +188,5 @@ do. Useful scheduled work in this model:
   PRs across the fleet have been open >2 weeks") — these legitimately
   want a poll, but they're rare and on-demand.
 
-What scheduled agents _don't_ do anymore: poll for events. The
+What scheduled agents *don't* do anymore: poll for events. The
 events come to them.

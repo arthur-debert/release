@@ -116,14 +116,14 @@ Target per-GUI deliverables:
 
 ### Buy-vs-build for this portfolio
 
-| Concern                                           | dist                                  | cargo-deb  | Our `rust-cli.yml`                               |
-| ------------------------------------------------- | ------------------------------------- | ---------- | ------------------------------------------------ |
-| Cross-compile + tarball                           | ✅                                    | —          | ✅ (today)                                       |
-| Homebrew formula + push                           | ✅                                    | —          | ✅ (our `render-brew-formula` + `push-brew-tap`) |
-| Shell / PS installer                              | ✅                                    | —          | ❌ (we don't have this)                          |
-| **`.deb`**                                        | ❌                                    | ✅         | ❌                                               |
-| Cascade-handler / `workflow_dispatch` integration | ❌ (opinionated about workflow shape) | irrelevant | ✅ portfolio-specific                            |
-| Layer 0 release primitives integration            | ❌                                    | irrelevant | ✅ (Mode B in stack workflows)                   |
+| Concern | dist | cargo-deb | Our `rust-cli.yml` |
+|---|---|---|---|
+| Cross-compile + tarball | ✅ | — | ✅ (today) |
+| Homebrew formula + push | ✅ | — | ✅ (our `render-brew-formula` + `push-brew-tap`) |
+| Shell / PS installer | ✅ | — | ❌ (we don't have this) |
+| **`.deb`** | ❌ | ✅ | ❌ |
+| Cascade-handler / `workflow_dispatch` integration | ❌ (opinionated about workflow shape) | irrelevant | ✅ portfolio-specific |
+| Layer 0 release primitives integration | ❌ | irrelevant | ✅ (Mode B in stack workflows) |
 
 **Decision (tentative):** use `cargo-deb` for `.deb`; do NOT
 migrate to `dist`. Reasoning:
@@ -222,7 +222,7 @@ Reusable workflow that runs ON the tap repo
   PRs touching `Formula/` or `Casks/`
 - Smoke install in clean Docker per formula:
   `brew install <tap>/<formula>` + sanity check (`<bin>
---version`, `man <bin>` not 404, completion file exists)
+  --version`, `man <bin>` not 404, completion file exists)
 - Optional periodic stale-formula sweep (cron): detect upstream
   tag deletions
 

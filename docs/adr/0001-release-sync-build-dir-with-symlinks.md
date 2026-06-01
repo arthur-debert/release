@@ -13,7 +13,6 @@ release-sync copies managed files from the release repo's templates directly int
 Sync materializes ALL managed files into a single `.release/` directory in the consumer repo, rebuilt from scratch on every sync. Files at their expected locations (`bin/check`, `lefthook.yml`, `.claude/skills/*`, etc.) are symlinks pointing into `.release/`. Both `.release/` and the symlinks are checked into git.
 
 The sync cycle:
-
 1. Remove `.release/` entirely
 2. Rebuild it from current templates (commons + capabilities + kind)
 3. Create symlinks for any new files that appeared

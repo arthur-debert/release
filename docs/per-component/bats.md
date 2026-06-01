@@ -10,15 +10,15 @@ Synced by `release-sync` when a consumer opts in:
 
 - `bin/check-e2e` — convention-discovery runner. Picks the first match:
 
-  | Order | Looks for                          | Pattern in the fleet             |
-  | ----- | ---------------------------------- | -------------------------------- |
-  | 1     | `scripts/check-e2e`                | consumer override (full control) |
-  | 2     | `live-tests/run-tests`             | padz                             |
-  | 3     | `live-tests/run`                   | too                              |
-  | 4     | `tests/integration/run.sh`         | supage                           |
-  | 5     | `tests/e2e/bats/` (any `*.bats`)   | dodot                            |
-  | 6     | `tests/e2e/` (any `*.bats`)        | generic flat                     |
-  | 7     | `live-tests/tests/` (any `*.bats`) | padz fallback                    |
+  | Order | Looks for                              | Pattern in the fleet           |
+  |-------|----------------------------------------|--------------------------------|
+  | 1     | `scripts/check-e2e`                    | consumer override (full control) |
+  | 2     | `live-tests/run-tests`                 | padz                            |
+  | 3     | `live-tests/run`                       | too                             |
+  | 4     | `tests/integration/run.sh`             | supage                          |
+  | 5     | `tests/e2e/bats/` (any `*.bats`)       | dodot                           |
+  | 6     | `tests/e2e/` (any `*.bats`)            | generic flat                    |
+  | 7     | `live-tests/tests/` (any `*.bats`)     | padz fallback                   |
 
   No match: exits 0 with a notice. Repos without e2e tests don't fail
   the umbrella `bin/check`.
@@ -41,8 +41,8 @@ include the defaults you want to keep:**
 ```yaml
 # .release-sync.yaml — example for a rust-cli consumer
 components:
-  - rust-quality # Stack default
-  - bats # opt-in
+  - rust-quality    # Stack default
+  - bats            # opt-in
 # (the shell/markdown/yaml lint gate ships universally from commons —
 #  not listed as a Component; see release#320)
 ```
@@ -63,7 +63,7 @@ jobs:
   e2e:
     uses: arthur-debert/release/.github/workflows/bats-e2e.yml@v1
     with:
-      pre-test: scripts/build-for-e2e # optional — typical: build binary, prep fixtures
+      pre-test: scripts/build-for-e2e   # optional — typical: build binary, prep fixtures
 ```
 
 The default `runner: bin/check-e2e` picks up the discovery; override
