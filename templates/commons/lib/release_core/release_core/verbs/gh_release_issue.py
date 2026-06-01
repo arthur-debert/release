@@ -1,4 +1,4 @@
-"""gh-release-issue — file a bug against arthur-debert/release from a consumer.
+"""File a bug against arthur-debert/release from inside a consumer repo.
 
 Usage:
   gh-release-issue <component> <one-line-symptom>
