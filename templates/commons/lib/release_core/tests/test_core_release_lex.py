@@ -454,6 +454,40 @@ def test_validate_cut_mode_needs_no_per_repo_bin_tool(tmp_path, _release_cut_on_
     assert rlx._validate(cfg) is None
 
 
+def test_validate_stores_resolved_absolute_release_cut_path(tmp_path, monkeypatch):
+    # _validate must resolve release-cut to an ABSOLUTE path ONCE (before any
+    # os.chdir) and stash it in cfg["release_cut_path"]; dispatch then uses that
+    # rather than re-resolving the bare name against a changed cwd. Same spirit
+    # as the #404 abs-path fix.
+    _make_repo(tmp_path)
+    monkeypatch.setattr(rlx.shutil, "which", lambda name, *a, **k: "/abs/bin/release-cut")
+    cfg = {
+        "status_mode": False,
+        "bump_kind": "patch",
+        "dry_run": False,
+        "only": "",
+        "repos": {"comms": str(tmp_path)},
+    }
+    assert rlx._validate(cfg) is None
+    assert cfg["release_cut_path"] == "/abs/bin/release-cut"
+    assert os.path.isabs(cfg["release_cut_path"])
+
+
+def test_validate_status_mode_does_not_store_release_cut_path(tmp_path):
+    # Read-only --status mode never dispatches, so it must NOT consult PATH or
+    # set release_cut_path.
+    _make_repo(tmp_path)
+    cfg = {
+        "status_mode": True,
+        "bump_kind": "status",
+        "dry_run": False,
+        "only": "",
+        "repos": {"comms": str(tmp_path)},
+    }
+    assert rlx._validate(cfg) is None
+    assert "release_cut_path" not in cfg
+
+
 def test_validate_status_mode_needs_no_bin_tool(tmp_path):
     # In --status mode the decision is generic git and there is no dispatch — a
     # repo with no bin/ tool (just a directory) passes validation, and PATH is
@@ -542,6 +576,42 @@ def test_release_one_success_with_commits_proceeds_to_dispatch(monkeypatch, caps
     out = capsys.readouterr().out
     assert "2 commit(s) since v1.2.3" in out
     assert "release-cut patch" in out
+
+
+def test_release_one_dispatch_uses_resolved_path_via_proc_run(monkeypatch, capsys):
+    # The live (non-dry-run) dispatch must invoke the ABSOLUTE release-cut path
+    # stashed by _validate, routed through the centralized proc.run chokepoint —
+    # not the bare name via subprocess.run directly. We make release-cut return
+    # nonzero so _release_one returns right after dispatch (no gh/sleep needed).
+    cfg = {
+        **_CFG,
+        "dry_run": False,
+        "release_cut_path": "/abs/bin/release-cut",
+    }
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd, **kw):
+        if "tag" in cmd:
+            return _Res(0, stdout="v1.2.3\n")
+        if "log" in cmd:
+            return _Res(0, stdout="abc1234 feat: a\n")
+        # The release-cut dispatch: capture argv + kwargs, fail it to bail early.
+        captured["cmd"] = cmd
+        captured["kw"] = kw
+        return _Res(1)
+
+    monkeypatch.setattr(rlx.proc, "run", fake_run)
+    monkeypatch.setattr(rlx, "_run", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os.path, "isfile", lambda *a, **k: False)
+
+    rc = rlx._release_one("comms", cfg)
+    assert rc == 1  # release-cut failed -> surfaced, not a silent 0
+    assert captured["cmd"] == ["/abs/bin/release-cut", "patch"]
+    # Honors the proc.run contract used for a live, streaming dispatch.
+    assert captured["kw"].get("check") is False
+    assert captured["kw"].get("capture_output") is False
+    assert "release-cut patch failed" in capsys.readouterr().err
 
 
 # --------------------------------------------------------------------------

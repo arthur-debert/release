@@ -390,12 +390,18 @@ def _validate(cfg: dict) -> int | None:
 
     # Cut mode dispatches via the maintainer's `release-cut` (run in each repo's
     # cwd), so require it on PATH ONCE here rather than a bin/release per repo.
-    if not cfg["status_mode"] and shutil.which(RELEASE_CUT) is None:
-        print(
-            f"release-lex: {RELEASE_CUT} not on PATH — add the release repo's bin/ to PATH",
-            file=sys.stderr,
-        )
-        return 1
+    # Resolve to an ABSOLUTE path now: dispatch runs after os.chdir into each
+    # repo, so a relative PATH entry (`.`/`bin`) would otherwise re-resolve
+    # against the changed cwd and break. Same spirit as the #404 abs-path fix.
+    if not cfg["status_mode"]:
+        resolved = shutil.which(RELEASE_CUT)
+        if resolved is None:
+            print(
+                f"release-lex: {RELEASE_CUT} not on PATH — add the release repo's bin/ to PATH",
+                file=sys.stderr,
+            )
+            return 1
+        cfg["release_cut_path"] = resolved
 
     # Validate paths. We iterate in the stable ORDER so the first failure
     # reported is deterministic. No per-repo bin/ tool is required anymore.
@@ -497,9 +503,10 @@ def _release_one(key: str, cfg: dict) -> int:
         return 0
 
     print(f"  $ {RELEASE_CUT} {bump_kind}")
-    cut = subprocess.run(  # noqa: S603 — constructed list, no shell
-        [RELEASE_CUT, bump_kind], check=False
-    )
+    # Use the absolute path resolved in _validate (before any os.chdir) and
+    # route through the centralized subprocess chokepoint (proc.run).
+    release_cut_cmd = cfg.get("release_cut_path", RELEASE_CUT)
+    cut = proc.run([release_cut_cmd, bump_kind], check=False, capture_output=False)
     if cut.returncode != 0:
         print(f"  ✗ {RELEASE_CUT} {bump_kind} failed (exit {cut.returncode})", file=sys.stderr)
         return 1
