@@ -1,157 +1,28 @@
-#!/usr/bin/env bash
-# Smoke-test the canonical PR loop end-to-end on a real repo.
+#!/usr/bin/env python3
+# audit-smoke-test — smoke-test the canonical PR loop end-to-end on a real repo.
 #
-# Opens a no-op PR, verifies that the loop *starts*:
-#   - Copilot Review workflow run is created within 90s
-#   - The 'request' job adds Copilot as a reviewer (timeline event)
-#   - Required CI workflows are triggered on the PR
-# Then closes the PR (or keeps it with --keep).
-#
-# This is "really works", not "should work" — verifies that the
-# config, secrets, and workflow files actually produce the expected
-# behavior in real GitHub Actions.
-#
-# Usage:
-#   audit-smoke-test owner/repo
-#   audit-smoke-test owner/repo --keep        # don't close PR / delete branch
-#   audit-smoke-test owner/repo --base custom # base branch (default: main)
-#
-# Exit codes:
-#   0  — smoke test passed (PR opened, Copilot fired, CI triggered)
-#   1  — smoke test failed (one or more checks below)
-#   64 — bad usage
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. audit-smoke-test is
+# a release-only tool (a real file in bin/, NOT synced to consumers), so
+# realpath lands in bin/ and the package sits at
+# ../templates/commons/lib/release_core (the contract's variant (b)). The PR
+# loop verdict + exit codes match the old bash byte-for-byte.
+import os
+import sys
 
-set -uo pipefail
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-repo=""
-keep=0
-base=""
+from release_core.verbs import audit_smoke_test  # noqa: E402 — sys.path set above
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --keep)    keep=1; shift ;;
-    --base)    base=$2; shift 2 ;;
-    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    -*)        echo "unknown arg: $1" >&2; exit 64 ;;
-    *)         if [ -z "$repo" ]; then repo=$1; else echo "extra arg: $1" >&2; exit 64; fi; shift ;;
-  esac
-done
-
-[ -z "$repo" ] && { echo "usage: audit-smoke-test owner/repo" >&2; exit 64; }
-
-# Validate repo
-if ! gh repo view "$repo" >/dev/null 2>&1; then
-  echo "error: cannot access $repo via gh" >&2
-  exit 1
-fi
-
-# Default branch
-[ -z "$base" ] && base=$(gh api "repos/$repo" --jq .default_branch 2>/dev/null)
-[ -z "$base" ] && { echo "error: could not determine default branch" >&2; exit 1; }
-
-# Workdir
-workdir=$(mktemp -d -t audit-smoke-XXXXXX)
-trap '[ "$keep" = "0" ] && rm -rf "$workdir"' EXIT
-
-echo "[smoke] cloning $repo into $workdir"
-git clone --depth=1 --branch="$base" "https://github.com/$repo" "$workdir/clone" 2>&1 | tail -2
-
-cd "$workdir/clone" || { echo "[smoke] FAIL cd to clone" >&2; exit 1; }
-
-# Pick a smoke target: prefer a file that's safe to touch.
-target=""
-for candidate in CHANGELOG_UNRELEASED.md CHANGELOG.md README.md; do
-  if [ -f "$candidate" ]; then target=$candidate; break; fi
-done
-if [ -z "$target" ]; then
-  target=$(find . -maxdepth 2 -name '*.md' -not -path '*/node_modules/*' | head -1 | sed 's|^\./||')
-fi
-[ -z "$target" ] || [ ! -f "$target" ] && { echo "error: no markdown file to touch" >&2; exit 1; }
-
-echo "[smoke] targeting $target for no-op edit"
-
-branch="audit-smoke-$(date +%s)"
-git checkout -b "$branch" >/dev/null 2>&1
-
-# Append a no-op HTML comment (invisible in rendered markdown)
-{ printf '\n<!-- audit-smoke-test %s -->\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; } >> "$target"
-
-git add "$target"
-git -c user.email='audit-smoke@local' -c user.name='audit-smoke-test' \
-  commit -m "chore: audit-smoke-test (no-op, will be closed)" --no-verify >/dev/null 2>&1
-
-git push -u origin "$branch" >/dev/null 2>&1 || { echo "[smoke] FAIL push" >&2; exit 1; }
-
-pr_url=$(gh pr create --repo "$repo" --base "$base" --head "$branch" \
-  --title "audit-smoke-test (auto-generated, will be closed)" \
-  --body "Automated smoke test from \`bin/audit-smoke-test\`. This PR will be closed automatically.
-
-Verifies the canonical PR loop starts: Copilot Review workflow fires + required checks trigger." 2>&1 | tail -1)
-pr_num=$(printf '%s' "$pr_url" | grep -oE '[0-9]+$')
-[ -z "$pr_num" ] && { echo "[smoke] FAIL pr create: $pr_url" >&2; exit 1; }
-
-echo "[smoke] opened PR #$pr_num: $pr_url"
-
-# Cleanup function — close PR + delete branch unless --keep.
-# shellcheck disable=SC2329  # invoked indirectly via the EXIT trap below.
-cleanup_pr() {
-  if [ "$keep" = "0" ] && [ -n "${pr_num:-}" ]; then
-    echo "[smoke] closing PR #$pr_num"
-    gh pr close "$pr_num" --repo "$repo" --delete-branch --comment "audit-smoke-test complete" >/dev/null 2>&1 || true
-  fi
-}
-trap 'cleanup_pr; [ "$keep" = "0" ] && rm -rf "$workdir"' EXIT
-
-# --- Check 1: Copilot Review workflow run created within 90s ---
-echo "[smoke] waiting for Copilot Review workflow run (up to 90s)..."
-copilot_run_id=""
-for _ in $(seq 1 18); do
-  copilot_run_id=$(gh api "repos/$repo/actions/runs?branch=$branch&per_page=20" \
-    --jq '[.workflow_runs[] | select(.name=="Copilot Review")][0].id // empty' 2>/dev/null)
-  [ -n "$copilot_run_id" ] && break
-  sleep 5
-done
-
-# --- Check 2: required CI workflows triggered ---
-echo "[smoke] checking other CI workflows on PR branch..."
-ci_runs=$(gh api "repos/$repo/actions/runs?branch=$branch&per_page=20" \
-  --jq '[.workflow_runs[] | select(.name != "Copilot Review") | .name] | unique | join(",")' 2>/dev/null)
-
-# --- Check 3: Copilot review-request timeline event ---
-echo "[smoke] checking PR timeline for review-request event..."
-sleep 5  # give the workflow's job a moment to register the request
-copilot_requested=$(gh api "repos/$repo/issues/$pr_num/timeline?per_page=30" \
-  --jq '[.[] | select(.event=="review_requested" and .requested_reviewer.login=="Copilot")] | length' 2>/dev/null || echo 0)
-
-# --- Report ---
-echo
-echo "=== smoke test results: $repo PR #$pr_num ==="
-fails=0
-
-if [ -n "$copilot_run_id" ]; then
-  printf '  [PASS] %-30s run=%s\n' "copilot_review_fired" "$copilot_run_id"
-else
-  printf '  [FAIL] %-30s no run within 90s\n' "copilot_review_fired"
-  fails=$((fails+1))
-fi
-
-if [ "$copilot_requested" -gt 0 ]; then
-  printf '  [PASS] %-30s Copilot added as reviewer\n' "copilot_review_requested"
-else
-  printf '  [FAIL] %-30s no review_requested event for Copilot\n' "copilot_review_requested"
-  fails=$((fails+1))
-fi
-
-if [ -n "$ci_runs" ]; then
-  printf '  [PASS] %-30s %s\n' "ci_workflows_triggered" "$ci_runs"
-else
-  printf '  [WARN] %-30s no non-copilot workflows on PR branch\n' "ci_workflows_triggered"
-fi
-
-echo
-if [ "$fails" -gt 0 ]; then
-  echo "smoke test FAILED ($fails check(s))"
-  exit 1
-fi
-echo "smoke test PASSED"
-exit 0
+if __name__ == "__main__":
+    sys.exit(audit_smoke_test.main(sys.argv[1:]))
