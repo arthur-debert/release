@@ -17,13 +17,13 @@ in the rendered output, which is what actually matters. This lets a single
 script serve projects whose templates use different subsets of placeholders
 (e.g. arm-only mac vs arm+intel).
 """
+
 from __future__ import annotations
 
 import os
 import re
 import sys
 from pathlib import Path
-
 
 # Values that, when present in the env, get embedded inside a Ruby `"..."`
 # literal and must therefore be escaped.
@@ -84,7 +84,7 @@ def normalize_brew_desc(s: str) -> str:
     s = s.strip()
     for article in ("A ", "An ", "The "):
         if s.startswith(article):
-            s = s[len(article):]
+            s = s[len(article) :]
             if s and s[0].islower():
                 s = s[0].upper() + s[1:]
             break

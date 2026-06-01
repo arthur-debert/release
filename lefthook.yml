@@ -67,20 +67,52 @@ pre-commit:
         SHELLCHECK_OPTS='-S warning' actionlint -color
 
     ruff:
-      # Lint + format-check the Python workspace (release_gh + orchestrator).
+      # Lint + format-check the Python workspace (release_gh + orchestrator)
+      # PLUS the extensionless Python shims under bin/ and templates/commons/bin/
+      # (changelog, gh-task-status, release-*, …) which carry no .py extension.
       # Config lives at the workspace-root pyproject.toml [tool.ruff]. Mirrors
       # the CI `py-lint` job.
+      #
+      # The bin/ + app-bin/ globs deliberately match NON-python files too (the
+      # bash shims `release`, `check-shell`, `setup-dev-env.sh`, the vendored
+      # share/ tools). We can't hand a bash file to ruff — it errors as invalid
+      # Python — so file selection is done by CONTENT, not glob, exactly like
+      # bin/check-shell: keep only `*.py` plus shebang-detected python shims,
+      # drop everything else. This mirrors the repo's unified content-based gate
+      # (release#348 / docs/proposals/unified-gate.lex) and stays mode-invariant
+      # across staged vs --all-files.
       glob:
         - "templates/commons/lib/**/*.py"
         - "orchestrator/**/*.py"
         - "tests/python/**/*.py"
+        - "bin/**"
+        - "app-bin/**"
+        - "templates/commons/bin/**"
+        - "templates/commons/app-bin/**"
       run: |
         if ! command -v ruff >/dev/null 2>&1; then
           echo "ruff not installed; skipping (install: brew install ruff)"
           exit 0
         fi
-        ruff check {staged_files}
-        ruff format --check {staged_files}
+        py_files=()
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          case "$f" in
+            */share/*) continue ;; # vendored (own provenance) — exempt
+            *.py) py_files+=("$f"); continue ;;
+          esac
+          # No .py extension: route by shebang, like bin/check-shell. A python
+          # shebang (python / python3 / `env python…`) ⇒ lint; anything else
+          # (bash/sh shims sharing bin/) is skipped.
+          first=""
+          read -r first < "$f" 2>/dev/null || true
+          case "$first" in
+            '#!'*python*) py_files+=("$f") ;;
+          esac
+        done
+        [ ${#py_files[@]} -eq 0 ] && exit 0
+        ruff check "${py_files[@]}"
+        ruff format --check "${py_files[@]}"
 
     lint-skills:
       # Markdownlint our OWN skill docs. Vendored skills (those carrying
