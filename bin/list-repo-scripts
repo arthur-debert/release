@@ -1,205 +1,27 @@
-#!/usr/bin/env bash
-# list-repo-scripts — for each managed repo, list the contents of its
-# bin/, scripts/, and app-bin/ directories in side-by-side columns.
+#!/usr/bin/env python3
+# list-repo-scripts — list bin/ scripts/ app-bin/ across managed repos.
 #
-# The repo list is the canonical "managed by arthur-debert/release" set
-# (NOT auto-discovered from the main-branch-protection ruleset — that
-# signal includes unrelated repos). Update REPOS below when the
-# managed set changes.
-#
-# Usage:
-#   list-repo-scripts                 # all managed repos, all dirs
-#   list-repo-scripts --only-present  # skip repos missing locally or without any dir
-#   list-repo-scripts --owner lex-fmt # filter by owner prefix
-#   list-repo-scripts --only-bin      # show only bin/ column
-#   list-repo-scripts --only-scripts  # show only scripts/ column
-#   list-repo-scripts --only-app-bin  # show only app-bin/ column
-#   list-repo-scripts --only-bin --only-scripts  # composable
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. list-repo-scripts is
+# a release-only tool (a real file in bin/, NOT synced to consumers), so realpath
+# lands in bin/ and the package sits at ../templates/commons/lib/release_core
+# (the contract's variant (b)). The side-by-side columns + totals match the bash.
+import os
+import sys
 
-set -uo pipefail
-
-only_present=0
-owner_filter=""
-show_bin=0
-show_scripts=0
-show_app_bin=0
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --only-present)  only_present=1; shift ;;
-    --owner)         owner_filter=$2; shift 2 ;;
-    --only-bin)      show_bin=1; shift ;;
-    --only-scripts)  show_scripts=1; shift ;;
-    --only-app-bin)  show_app_bin=1; shift ;;
-    -h|--help)       sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 64 ;;
-  esac
-done
-
-if [ "$show_bin" = "0" ] && [ "$show_scripts" = "0" ] && [ "$show_app_bin" = "0" ]; then
-  show_bin=1; show_scripts=1; show_app_bin=1
-fi
-
-# repo|local-path. Keep aligned with
-# ~/.claude/projects/-Users-adebert-h-release/memory/project_managed_repos.md
-REPOS=(
-  "arthur-debert/release|$HOME/h/release"
-  "arthur-debert/phos-app|$HOME/h/phos/phos-app"
-  "arthur-debert/phos-core|$HOME/h/phos/phos-core"
-  "arthur-debert/burgertocow|$HOME/h/burgertocow"
-  "arthur-debert/clapfig|$HOME/h/clapfig"
-  "arthur-debert/dodot|$HOME/h/dodot"
-  "arthur-debert/homebrew-tools|$HOME/h/homebrew-tools"
-  "arthur-debert/padz|$HOME/h/padz"
-  "arthur-debert/rustloc|$HOME/h/rustloc"
-  "arthur-debert/simple-gal|$HOME/h/simple-gal/simple-gal"
-  "arthur-debert/simple-gal-action|$HOME/h/simple-gal/simple-gal-action"
-  "arthur-debert/simple-gal-ui|$HOME/h/simple-gal/simple-gal-ui"
-  "arthur-debert/standout|$HOME/h/standout"
-  "lex-fmt/comms|$HOME/h/lex-fmt/comms"
-  "lex-fmt/lex|$HOME/h/lex-fmt/lex"
-  "lex-fmt/lexed|$HOME/h/lex-fmt/lexed"
-  "lex-fmt/nvim|$HOME/h/lex-fmt/nvim"
-  "lex-fmt/tree-sitter-lex|$HOME/h/lex-fmt/tree-sitter-lex"
-  "lex-fmt/vscode|$HOME/h/lex-fmt/vscode"
-  "lex-fmt/zed-lex|$HOME/h/lex-fmt/zed-lex"
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
 )
 
-ACTIVE_DIRS=()
-[ "$show_bin" = "1" ]     && ACTIVE_DIRS+=(bin)
-[ "$show_scripts" = "1" ] && ACTIVE_DIRS+=(scripts)
-[ "$show_app_bin" = "1" ] && ACTIVE_DIRS+=(app-bin)
+from release_core.verbs import list_repo_scripts  # noqa: E402 — sys.path set above
 
-COL=30
-
-count_real_files() {
-  local dir="$1"
-  if [ -d "$dir" ]; then
-    local count=0 entry
-    for entry in "$dir"/*; do
-      # -e OR -L so a broken symlink (which fails -e) still counts.
-      if [ -e "$entry" ] || [ -L "$entry" ]; then
-        count=$((count + 1))
-      fi
-    done
-    echo "$count"
-  else
-    echo 0
-  fi
-}
-
-col_lines() {
-  local dir="$1"
-  if [ ! -d "$dir" ]; then
-    echo "(not present)"
-  elif contents=$(ls -1 "$dir") && [ -n "$contents" ]; then
-    printf '%s\n' "$contents"
-  else
-    echo "(empty)"
-  fi
-}
-
-print_columns() {
-  local ncols=${#ACTIVE_DIRS[@]}
-  local -a files=("$@")
-  local -a counts=()
-  local max=0
-
-  for f in "${files[@]}"; do
-    local n
-    n=$(wc -l < "$f")
-    counts+=("$n")
-    [ "$n" -gt "$max" ] && max=$n
-  done
-
-  local sep
-  sep=$(printf '%0.s-' $(seq 1 $((COL-2))))
-
-  # header
-  local hdr="" rule=""
-  for i in "${!ACTIVE_DIRS[@]}"; do
-    if [ "$i" -lt $((ncols - 1)) ]; then
-      hdr+=$(printf "%-${COL}s " "${ACTIVE_DIRS[$i]}/")
-      rule+=$(printf "%-${COL}s " "$sep")
-    else
-      hdr+="${ACTIVE_DIRS[$i]}/"
-      rule+="$sep"
-    fi
-  done
-  printf '%s\n' "$hdr"
-  printf '%s\n' "$rule"
-
-  local row=1
-  while [ "$row" -le "$max" ]; do
-    local line=""
-    for i in "${!files[@]}"; do
-      local cell=""
-      if [ "$row" -le "${counts[$i]}" ]; then
-        cell=$(sed -n "${row}p" "${files[$i]}")
-      fi
-      if [ "$i" -lt $((ncols - 1)) ]; then
-        line+=$(printf "%-${COL}s " "$cell")
-      else
-        line+="$cell"
-      fi
-    done
-    printf '%s\n' "$line"
-    row=$((row + 1))
-  done
-}
-
-total_bin=0
-total_scripts=0
-total_app_bin=0
-
-first=1
-for entry in "${REPOS[@]}"; do
-  repo=${entry%%|*}
-  path=${entry##*|}
-
-  if [ -n "$owner_filter" ] && [ "${repo%%/*}" != "$owner_filter" ]; then
-    continue
-  fi
-
-  if [ ! -d "$path" ]; then
-    [ "$only_present" = "1" ] && continue
-    [ "$first" = "1" ] || echo
-    first=0
-    echo "=== $repo ==="
-    echo "(repo not cloned locally)"
-    continue
-  fi
-
-  has_any=0
-  for d in "${ACTIVE_DIRS[@]}"; do
-    [ -d "$path/$d" ] && { has_any=1; break; }
-  done
-
-  if [ "$has_any" = "0" ] && [ "$only_present" = "1" ]; then
-    continue
-  fi
-
-  # accumulate totals (always count all three for summary)
-  total_bin=$((total_bin + $(count_real_files "$path/bin")))
-  total_scripts=$((total_scripts + $(count_real_files "$path/scripts")))
-  total_app_bin=$((total_app_bin + $(count_real_files "$path/app-bin")))
-
-  [ "$first" = "1" ] || echo
-  first=0
-  echo "=== $repo ==="
-
-  tmpfiles=()
-  for d in "${ACTIVE_DIRS[@]}"; do
-    t=$(mktemp)
-    col_lines "$path/$d" > "$t"
-    tmpfiles+=("$t")
-  done
-  print_columns "${tmpfiles[@]}"
-  rm -f "${tmpfiles[@]}"
-done
-
-echo
-echo "--- totals across fleet ---"
-[ "$show_bin" = "1" ]     && printf "  bin/     %d\n" "$total_bin"
-[ "$show_scripts" = "1" ] && printf "  scripts/ %d\n" "$total_scripts"
-[ "$show_app_bin" = "1" ] && printf "  app-bin/ %d\n" "$total_app_bin"
+if __name__ == "__main__":
+    sys.exit(list_repo_scripts.main(sys.argv[1:]))
