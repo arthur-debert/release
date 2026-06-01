@@ -42,7 +42,7 @@ name: Zed extension release
 #
 # Convention hooks
 # ----------------
-# - `scripts/zed-package-extras.sh` — runs AFTER the standard bundle
+# - `app-bin/zed-package-extras.sh` — runs AFTER the standard bundle
 #   is assembled in `${GITHUB_WORKSPACE}/dist/`, BEFORE the tarball
 #   is created. Use to add consumer-specific files (e.g.
 #   `shared/embedded-grammars.json`). Working dir at hook time is
@@ -283,13 +283,13 @@ jobs:
       # at ${GITHUB_WORKSPACE}/dist. Use to add files the standard
       # layout doesn't carry (e.g. shared/*.json).
       - name: Bundle-extras hook (consumer)
-        if: hashFiles('scripts/zed-package-extras.sh') != ''
+        if: hashFiles('app-bin/zed-package-extras.sh') != ''
         shell: bash
         env:
           BUNDLE_DIR: ${{ github.workspace }}/dist
           EXTENSION_NAME: ${{ needs.prepare.outputs.extension-name }}
           VERSION: ${{ needs.prepare.outputs.version }}
-        run: bash scripts/zed-package-extras.sh
+        run: bash app-bin/zed-package-extras.sh
 
       - name: Tar the bundle
         shell: bash
