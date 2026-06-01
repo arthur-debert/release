@@ -1,28 +1,43 @@
-# Lefthook pre-commit checks. Mirrors what CI runs in
-# .github/workflows/gh-action-ci.yml so failures surface before push.
+# THE gate. ONE definition, run identically everywhere code passes through:
+#   - session start — the bootstrap installs lefthook + every tool below and
+#     runs `lefthook install`, so the gate is ARMED before any work begins
+#   - local pre-commit — the wired hook, on every commit
+#   - CI — the same `lefthook run pre-commit --all-files`, as a required check
 #
-# Bootstrap: `lefthook install` (one-time per clone).
+# This is a HARD gate, not "fast feedback deferring to CI." That earlier stance
+# is exactly why non-conforming content reached main: the local hook called
+# itself advisory and CI never ran this gate, so no layer was authoritative.
 #
-# Logs a one-liner and exits 0 if a tool is missing — the canonical
-# CI run is still the source of truth; lefthook is fast local
-# feedback, not a hard gate.
+# A missing tool is a BOOTSTRAP failure, never a reason to pass: every command
+# below exits NON-ZERO when its tool is absent (no `exit 0` skips). If a tool is
+# missing, re-run the bootstrap (setup-dev-env.sh / release-core init) — do NOT
+# bypass. `--no-verify` is defeated by CI running this same gate on a clean
+# runner where the tools are guaranteed present.
 
 pre-commit:
   parallel: true
   commands:
     shellcheck:
+      # Covers local bin/ + bin-internal/ AND the distributed templates/**/bin
+      # tools (previously a separate CI job — folded in here so the gate is the
+      # single definition). File selection is by shebang content below, so
+      # non-shell files in these dirs fall out.
       glob:
         - "bin/*"
         - "bin-internal/*.sh"
         - "bin-internal/*.bash"
+        - "templates/**/bin/*"
       run: |
         if ! command -v shellcheck >/dev/null 2>&1; then
-          echo "shellcheck not installed; skipping (install: apt-get install shellcheck)"
-          exit 0
+          echo "ERROR: shellcheck not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
         fi
         fail=0
         for f in {staged_files}; do
           [ -f "$f" ] || continue
+          # Vendored (own provenance) — exempt, same as the ruff hook. We don't
+          # fix upstream's code (e.g. the semver-tool under share/).
+          case "$f" in */share/*) continue ;; esac
           case "$f" in
             *.sh|*.bash) ;;
             *)
@@ -38,12 +53,17 @@ pre-commit:
         exit $fail
 
     prettier:
+      # Scoped to the distributed templates/ tree (what consumers receive).
+      # Extending prettier to format prose under docs/ is a separate policy
+      # change — mass `prettier --write` mangles prose (+ sequences → bullets,
+      # org/* globs → emphasis), so it needs per-file prose hardening first.
+      # Tracked as a follow-up; not bundled into the gate-hardening change.
       glob:
         - "templates/**/*.{json,md,yml,yaml}"
       run: |
         if ! command -v prettier >/dev/null 2>&1; then
-          echo "prettier not installed; skipping (install: brew install prettier)"
-          exit 0
+          echo "ERROR: prettier not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
         fi
         prettier --check -- {staged_files}
 
@@ -55,8 +75,8 @@ pre-commit:
         - ".github/actions/**/*.yaml"
       run: |
         if ! command -v actionlint >/dev/null 2>&1; then
-          echo "actionlint not installed; skipping (install: https://github.com/rhysd/actionlint)"
-          exit 0
+          echo "ERROR: actionlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
         fi
         # Run actionlint over the whole tree (it needs cross-file
         # context for reusable-workflow calls anyway). Severity gate
@@ -91,15 +111,21 @@ pre-commit:
         - "templates/commons/app-bin/**"
       run: |
         if ! command -v ruff >/dev/null 2>&1; then
-          echo "ruff not installed; skipping (install: brew install ruff)"
-          exit 0
+          echo "ERROR: ruff not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
         fi
-        py_files=()
+        # POSIX sh — lefthook runs hooks under `sh` (dash on Linux), not bash,
+        # so no arrays. Accumulate matched files in the positional params via
+        # `set --` (the portable list).
+        set --
         for f in {staged_files}; do
           [ -f "$f" ] || continue
           case "$f" in
             */share/*) continue ;; # vendored (own provenance) — exempt
-            *.py) py_files+=("$f"); continue ;;
+            *.py)
+              set -- "$@" "$f"
+              continue
+              ;;
           esac
           # No .py extension: route by shebang, like bin/check-shell. A python
           # shebang (python / python3 / `env python…`) ⇒ lint; anything else
@@ -107,12 +133,12 @@ pre-commit:
           first=""
           read -r first < "$f" 2>/dev/null || true
           case "$first" in
-            '#!'*python*) py_files+=("$f") ;;
+            '#!'*python*) set -- "$@" "$f" ;;
           esac
         done
-        [ ${#py_files[@]} -eq 0 ] && exit 0
-        ruff check "${py_files[@]}"
-        ruff format --check "${py_files[@]}"
+        [ "$#" -eq 0 ] && exit 0
+        ruff check "$@"
+        ruff format --check "$@"
 
     lint-skills:
       # Markdownlint our OWN skill docs. Vendored skills (those carrying
@@ -125,7 +151,7 @@ pre-commit:
         - "skills/**/*.md"
       run: |
         if ! command -v markdownlint >/dev/null 2>&1; then
-          echo "markdownlint not installed; skipping skill lint (install: brew install markdownlint-cli)"
-          exit 0
+          echo "ERROR: markdownlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
         fi
         bin-internal/lint-skills.sh

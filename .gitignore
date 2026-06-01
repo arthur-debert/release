@@ -19,3 +19,11 @@ __pycache__/
 *.pyc
 *.egg-info/
 local/
+
+# Python build artifacts (wheels/sdists). Never committed, and never synced
+# into a consumer's .release/ tree — a build dir left in the package source
+# rides release-sync into consumers and trips their gate (lex#723).
+dist/
+build/
+.pytest_cache/
+.ruff_cache/

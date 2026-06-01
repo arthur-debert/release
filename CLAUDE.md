@@ -129,6 +129,18 @@ lex-fmt/lex v0.9.1.
 
 ## Operational rules
 
+- **The gate is ONE definition, run everywhere — never reimplemented.**
+  `lefthook.yml` IS the gate (the WHAT: the set of checks). Every environment
+  (the WHERE) *invokes* it: session start arms it (`setup-dev-env.sh` /
+  `release-core init` installs the toolset + `lefthook install`), local commits
+  run it, and CI runs the SAME `lefthook run pre-commit --all-files` as a
+  required check. It is a HARD gate — a missing tool exits non-zero (never
+  skips), and `--no-verify` is never an acceptable workaround (CI re-runs the
+  gate on a clean runner where the tools are guaranteed). **To add or change a
+  check, edit `lefthook.yml` only; never hand-copy a check into a CI job.** "CI
+  is the source of truth" is the bug, not the design: CI is a *place* the gate
+  runs, not a second definition of it. If you're writing the check-list a second
+  time, stop — invoke, don't reimplement.
 - **Lint debt → the three-case model** (`docs/references/lint-debt-model.md`).
   Before "fixing a lint error," classify the file. **Don't want it linted?
   gitignore it** — the gate only runs on tracked files, so gitignored
