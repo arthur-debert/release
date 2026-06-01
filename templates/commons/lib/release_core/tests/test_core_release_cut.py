@@ -85,17 +85,56 @@ def test_read_rust_multiline_members(tmp_path, monkeypatch):
 # --- literal-version guard --------------------------------------------
 
 
-@pytest.mark.parametrize("good", ["1.2.3", "0.0.1", "1.0.0-rc.1", "10.20.30-beta.2"])
+@pytest.mark.parametrize(
+    "good",
+    [
+        "1.2.3",
+        "0.0.1",
+        "1.0.0-rc.1",
+        "10.20.30-beta.2",
+        # A 0 in a numeric field is fine (NAT = '0|[1-9][0-9]*'); only a
+        # LEADING zero on a multi-digit field is rejected.
+        "0.0.0",
+        "1.0.0-0",  # bare '0' prerelease identifier is NAT-valid
+    ],
+)
 def test_literal_version_accepts(good):
     assert release_cut._is_valid_literal_version(good)
 
 
 @pytest.mark.parametrize(
     "bad",
-    ["v1.2.3", "V1.2.3", "not-a-version", "1.2", "1.2.3+build.7", "minor"],
+    [
+        "v1.2.3",
+        "V1.2.3",
+        "not-a-version",
+        "1.2",
+        "1.2.3+build.7",
+        "minor",
+        # Leading-zero parity (FU2): the bash semver-tool's NAT field
+        # ('0|[1-9][0-9]*') REJECTS these; release_core.version.parse would
+        # silently ACCEPT + normalize them, which was the reject-path break.
+        "01.0.0",  # leading-zero major
+        "1.01.0",  # leading-zero minor
+        "1.0.01",  # leading-zero patch
+        "1.00.0",  # multi-zero minor
+        "1.0.0-01",  # leading-zero numeric prerelease identifier
+        "01.0.0+build",  # leading zero is still caught even with a build part
+    ],
 )
 def test_literal_version_rejects(bad):
     assert not release_cut._is_valid_literal_version(bad)
+
+
+def test_leading_zero_literal_exits_2(gh_dispatch, capsys):
+    """End-to-end: `release-cut 01.0.0` must hit the invalid-literal branch
+    (exit 2, same message), not be silently accepted + normalized to 1.0.0."""
+    rc = release_cut.main(["01.0.0"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "version must be" in err
+    # And it must NOT have dispatched a (normalized) gh workflow run.
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
 
 
 # --- main() dispatch (git/gh stubbed at the data layer) ---------------

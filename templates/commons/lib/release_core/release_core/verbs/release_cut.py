@@ -68,6 +68,7 @@ import shutil
 import sys
 
 from .. import gh, manifest, proc, version
+from .changelog import _SEMVER_TOOL_RE
 
 USAGE = """\
 usage: release-cut <major|minor|patch|X.Y.Z[-PRERELEASE]>
@@ -234,17 +235,30 @@ def _read_current_version(kind: str) -> str | None:
 
 
 def _is_valid_literal_version(arg: str) -> bool:
-    """Mirror the bash guard: reject a leading v/V, reject a +BUILD part,
-    and require a valid MAJOR.MINOR.PATCH[-PRERELEASE]."""
+    """Mirror the bash literal-version guard byte-for-byte.
+
+    The bash rejected the literal unless ALL of:
+      - it did not start with ``[vV]``                         (`^[vV]` test)
+      - the vendored semver-tool's ``validate`` said "valid"   (SEMVER_REGEX)
+      - the vendored semver-tool's ``get build`` was empty     (no ``+BUILD``)
+
+    semver-tool's SEMVER_REGEX uses NAT = ``0|[1-9][0-9]*``, so it REJECTS
+    leading-zero numeric fields (``01.0.0``, ``1.00.0``, ``1.0.0-01``) that
+    ``release_core.version.parse`` would silently ACCEPT (and normalize). We
+    therefore gate validity on the strict ``_SEMVER_TOOL_RE`` (shared with the
+    changelog migration, which reproduces that exact regex) rather than on
+    ``version.parse``. ``version.parse``/``version.bump`` stay in charge of the
+    bump-shortcut computation; only this VALIDATION gate is strict.
+
+    ``_SEMVER_TOOL_RE`` itself permits a trailing ``+BUILD`` (the regex does),
+    so we keep the explicit ``+`` rejection in front of it to reproduce the
+    bash ``get build`` guard. The leading-``v`` rejection reproduces ``^[vV]``.
+    """
     if arg[:1] in ("v", "V"):
         return False
     if "+" in arg:  # the bash checked `semver get build` was empty
         return False
-    try:
-        version.parse(arg)
-    except ValueError:
-        return False
-    return True
+    return bool(_SEMVER_TOOL_RE.match(arg))
 
 
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash control flow
