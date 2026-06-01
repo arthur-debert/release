@@ -166,6 +166,93 @@ def repo_root(start: str | None = None) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# git plumbing wrappers (added Phase 2 / s2p2-release-sync — ADDITIVE, flagged).
+#
+# release-sync reads managed file content + tree listings out of a ref in
+# $RELEASE_HOME without checking it out. These mirror the EXACT `git -C <home>`
+# plumbing the bash used (rev-parse --verify --quiet, fetch --prune, ls-tree,
+# cat-file -e, show ref:path) so the offline BATS fixtures stay valid.
+# `git_show_bytes` returns *raw bytes* (NOT proc.out, which strips) — managed
+# blobs must be written byte-for-byte, never whitespace-trimmed.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def git_rev_parse_verify(ref: str, *, cwd: str) -> bool:
+    """`git -C <cwd> rev-parse --verify --quiet <ref>` → True iff the ref resolves.
+
+    Mirrors the bash `if ! git rev-parse --verify --quiet <ref> >/dev/null`."""
+    return (
+        proc.run(
+            ["git", "-C", cwd, "rev-parse", "--verify", "--quiet", ref],
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+def git_rev_parse(ref: str, *, cwd: str) -> str:
+    """`git -C <cwd> rev-parse <ref>` → the resolved object name (full SHA)."""
+    return git(["-C", cwd, "rev-parse", ref])
+
+
+def git_fetch_prune(*, cwd: str, remote: str = "origin") -> None:
+    """`git -C <cwd> fetch --quiet --prune <remote>`."""
+    git(["-C", cwd, "fetch", "--quiet", "--prune", remote])
+
+
+def git_cat_file_exists(rev_path: str, *, cwd: str) -> bool:
+    """`git -C <cwd> cat-file -e <rev>:<path>` → True iff the blob/tree exists.
+
+    Mirrors the bash existence probe `git cat-file -e "$ref:$path" 2>/dev/null`."""
+    return proc.run(["git", "-C", cwd, "cat-file", "-e", rev_path], check=False).returncode == 0
+
+
+def git_ls_tree(
+    ref: str,
+    path: str,
+    *,
+    cwd: str,
+    recursive: bool = False,
+    dirs_only: bool = False,
+    name_only: bool = False,
+) -> str:
+    """`git -C <cwd> ls-tree [-r] [-d] [--name-only] <ref> -- <path>` → raw stdout
+    (NOT stripped — caller splits on newlines/tabs). Returns '' on failure (the
+    bash piped through `|| true` / tolerated a missing tree)."""
+    args = ["git", "-C", cwd, "ls-tree"]
+    if recursive:
+        args.append("-r")
+    if dirs_only:
+        args.append("-d")
+    if name_only:
+        args.append("--name-only")
+    args += [ref, "--", path]
+    res = proc.run(args, check=False)
+    return res.stdout if res.returncode == 0 else ""
+
+
+def git_show_bytes(rev_path: str, *, cwd: str) -> bytes:
+    """`git -C <cwd> show <rev>:<path>` → the blob's RAW bytes.
+
+    Bytes, not text: managed content (scripts, YAML, the harness lib) must be
+    materialized byte-for-byte. proc/`out` would strip and re-encode, so this
+    runs subprocess directly in binary mode through the same no-shell discipline."""
+    import subprocess
+
+    res = subprocess.run(  # noqa: S603 — fixed argv, no shell
+        ["git", "-C", cwd, "show", rev_path],
+        capture_output=True,
+        check=False,
+    )
+    if res.returncode != 0:
+        raise GhError(
+            f"git -C {cwd} show {rev_path} failed ({res.returncode}): "
+            f"{res.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    return res.stdout
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Porcelain wrappers (Phase 1 chokepoint consolidation).
 #
 # Each mirrors the EXACT `gh` command line a verb call site used before this

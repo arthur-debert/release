@@ -43,3 +43,13 @@ def loads(text: str) -> object:
     if not out.strip():
         return None
     return json.loads(out)
+
+
+def eval_all(expr: str, files: list[str]) -> str:
+    """`yq eval-all '<expr>' <files...>` → raw YAML stdout (NOT JSON).
+
+    Added for release-sync's lefthook.yml composition (Phase 2): the bash piped
+    several fragment files through ``yq eval-all '. as $i ireduce({}; . *+ $i) |
+    ... comments=""'`` to deep-merge them in order and strip comments. This is
+    the YAML→YAML transform seam; keep it here so the yq boundary stays single."""
+    return _yq(["eval-all", expr, *files])
