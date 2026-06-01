@@ -147,8 +147,16 @@ Single seam: if/when we adopt PyYAML, only this module changes.
 
 ## The shim (entry-point pattern)
 
-Every migrated `bin/<name>` becomes this (≤18 lines), identical to
-`bin/gh-task-status`:
+Every migrated script becomes a ≤18-line shim that puts `release_core` on
+`sys.path` and dispatches. There are **two placement variants**, decided by
+whether the script is distributed to consumers — determined by whether its
+current `bin/` entry is a symlink into `templates/commons/bin/` (distributed) or
+a real file in `bin/` (release-only). Check before migrating:
+
+**(a) Distributed** — real source at `templates/commons/bin/<name>`, symlink
+`bin/<name> -> ../templates/commons/bin/<name>`. `realpath` lands in
+`templates/commons/bin/`, so the package is at `../lib/release_core`. This is
+identical to `bin/gh-task-status`:
 
 ```python
 #!/usr/bin/env python3
@@ -160,10 +168,24 @@ if __name__ == "__main__":
     sys.exit(<name_module>.main(sys.argv[1:]))
 ```
 
-`release-sync` must materialize `lib/release_core/` like it does
-`lib/release_gh/` (mark `lib/release_core/*` `is_release_internal`, symlink only
-the `bin/` shim). **The PR that introduces `release_core` updates `release-sync`
-accordingly** — this is part of the Phase 0 glue.
+**(b) Release-only** — real file at `bin/<name>` (no `templates/commons`
+indirection; not synced to consumers, e.g. `detect-kind`). `realpath` lands in
+`bin/`, so the package is at `../templates/commons/lib/release_core`. Same shim,
+only the relative path differs:
+
+```python
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.realpath(__file__)), "..", "templates", "commons", "lib", "release_core"))
+```
+
+**Distribution glue:** so that variant (a) shims resolve `../lib/release_core`
+inside a consumer's `.release/`, `release-sync` must materialize
+`templates/commons/lib/release_core/` into `.release/lib/release_core/` exactly
+as it does `release_gh` — add `lib/release_core/*` to `is_release_internal`
+(materialized, not symlinked into the working tree). **The Phase 0 PR makes this
+`release-sync` change** even though the canary (`detect-kind`) is variant (b),
+so Phase 1's first distributed verb is unblocked. Verify with `release-sync
+--dry-run` against a fixture/consumer.
 
 ## Per-PR requirements (gatekeeper checklist)
 
