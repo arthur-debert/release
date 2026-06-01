@@ -67,6 +67,30 @@ def _merge_paginated(output: str) -> list:
     return merged
 
 
+def issue_list(
+    repo: str,
+    *,
+    state: str = "open",
+    label: str | None = None,
+    limit: int = 200,
+    json_fields: list[str] | None = None,
+) -> list:
+    """`gh issue list --json …` → parsed list of issue dicts. Raises GhError.
+
+    A thin wrapper over the `gh issue list` porcelain (not the raw REST search
+    API): it handles the label/state filters and `--json` field selection the
+    fleet-inbox verb needs, while keeping the gh boundary the single chokepoint.
+    """
+    args = ["issue", "list", "--repo", repo, "--state", state, "--limit", str(limit)]
+    if label:
+        args += ["--label", label]
+    args += ["--json", ",".join(json_fields or [])]
+    output = _gh(args)
+    if not output.strip():
+        return []
+    return json.loads(output)
+
+
 def graphql(query: str, **variables: object) -> dict:
     """Run a GraphQL query/mutation; check payload['errors']; return the data dict."""
     args = ["api", "graphql", "-f", f"query={query}"]
