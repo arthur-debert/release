@@ -38,7 +38,7 @@ on:
   workflow_call:
     inputs:
       bump-kind:
-        description: "How to bump the version (patch | minor | major). Cascade default is patch."
+        description: "How to bump the version (patch | minor | major, or an explicit X.Y.Z that passes through unchanged). Cascade default is patch."
         type: string
         default: patch
         required: false

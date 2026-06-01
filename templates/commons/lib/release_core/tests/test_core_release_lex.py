@@ -695,14 +695,10 @@ def test_vscode_stale_manifest_does_not_drive_version(monkeypatch):
     # version is the tag v0.10.8. We mock that stale manifest reader to PROVE it
     # is never consulted: the dispatched version is TAG-derived (0.10.9), not the
     # manifest-derived 0.4.2.
-    manifest_reads: list[str] = []
-
-    def stale_manifest_read(*a, **k):
-        manifest_reads.append("read")
-        return "0.4.1-rc.1"  # the frozen package.json version
-
-    # Mock any manifest accessor the code path might reach (it must NOT be used).
-    monkeypatch.setattr(rlx.version, "parse", _spy_parse(manifest_reads, rlx.version.parse))
+    # Spy on version.parse to PROVE it is fed the TAG, never the stale
+    # manifest version '0.4.1-rc.1' (which would yield 0.4.2).
+    parse_inputs: list[str] = []
+    monkeypatch.setattr(rlx.version, "parse", _spy_parse(parse_inputs, rlx.version.parse))
 
     cfg = {
         "dry_run": False,
@@ -731,6 +727,9 @@ def test_vscode_stale_manifest_does_not_drive_version(monkeypatch):
     # manifest's 0.4.2 — this is the regression the fix prevents.
     assert captured["cmd"] == ["/abs/bin/release-cut", "0.10.9"]
     assert captured["cmd"][1] != "0.4.2"
+    # version.parse was fed the TAG, never the stale manifest's 0.4.1-rc.1.
+    assert parse_inputs == ["v0.10.8"]
+    assert "0.4.1-rc.1" not in parse_inputs
 
 
 def _spy_parse(log, real):

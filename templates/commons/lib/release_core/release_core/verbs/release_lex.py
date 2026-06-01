@@ -548,7 +548,12 @@ def _release_one(key: str, cfg: dict) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"  ↳ next version {cut_version} (from {decision.tag} + {bump_kind})")
+    if bump_kind in ("patch", "minor", "major"):
+        # Tag math actually happened — show the derivation.
+        print(f"  ↳ next version {cut_version} (from {decision.tag} + {bump_kind})")
+    else:
+        # Explicit X.Y.Z passed straight through; no tag math, so don't claim any.
+        print(f"  ↳ next version {cut_version} (explicit; tag {decision.tag} unused)")
 
     # `release-cut <X.Y.Z>` (maintainer's PATH tool, run in the repo cwd)
     # dispatches cwd's release.yml with the EXACT version we computed. CI does the
