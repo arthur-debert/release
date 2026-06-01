@@ -1,264 +1,29 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# release-cut — canonical "cut a release" CLI across every Kind in the
-# arthur-debert/* + lex-fmt/* fleets.
+#!/usr/bin/env python3
+# release-cut — canonical "cut a release" CLI across every Kind.
 #
-# Everything that actually mutates state runs in CI. This script does
-# the local-side pre-flight:
-#   1. Detect the Consumer's Kind (via bin/detect-kind).
-#   2. Read the current version from that Kind's canonical source
-#      (Cargo.toml, package.json, extension.toml, git tag, …).
-#   3. Compute the new version (bump shortcut or literal X.Y.Z).
-#   4. Dispatch .github/workflows/release.yml with the new version.
-#
-# Usage:
-#   release-cut <new-version>          # e.g. release-cut 1.8.0
-#   release-cut <bump-level>           # e.g. release-cut minor
-#                                      #   (one of: major, minor, patch)
-#
-# Pre-releases: pass a semver pre-release suffix to cut an RC or beta,
-# e.g. `release-cut 1.8.0-rc.1`. CI marks the GitHub Release as
-# "pre-release" (so it isn't shown as Latest) and skips rolling
-# `## [Unreleased]` in CHANGELOG.md, so subsequent RCs / the final
-# release can still draw from the same unreleased entries.
-#
-# What CI does is per-Kind (see your repo's
-# `.github/workflows/release.yml` thin caller of one of
-# `arthur-debert/release`'s reusable release workflows: `rust-cli.yml`,
-# `tauri-app.yml`, `electron-app.yml`, etc.). At minimum CI bumps
-# version files (where applicable), rolls CHANGELOG, commits + tags,
-# builds, and creates the GitHub Release. Per-Kind add-ons (crates.io
-# publish, Homebrew formula push, .deb packages, codesigning,
-# Marketplace upload, …) are wired in the workflow.
-#
-# Current-version source by Kind:
-#   rust-cli, rust-lib       Cargo.toml [workspace.package].version
-#                            (falls back to first workspace member —
-#                             covers workspace-only roots like dodot's)
-#   tauri-app                src-tauri/Cargo.toml [package].version
-#   electron-app             package.json .version
-#   vscode-ext               package.json .version
-#   tree-sitter              package.json .version
-#   zed-extension            extension.toml version = "..."
-#   nvim-plugin, go-cli      git describe --tags --abbrev=0
-#                            (no manifest by design — tag IS the version;
-#                             pass an explicit X.Y.Z for the first release)
-#
-# Preconditions (checked by CI before mutating anything):
-#   - version is MAJOR.MINOR.PATCH[-PRERELEASE]
-#   - tag vX.Y.Z does not already exist
-#   - version differs from the manifest's current version
-#   - CHANGELOG.md has entries under `## [Unreleased]`
-#
-# After dispatch:
-#   gh run watch
-#   gh run list --workflow=release.yml --limit=1
+# Thin shim (shell→Python migration, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. release-cut is a
+# release-only tool (a real file in bin/, NOT synced to consumers — the
+# distributed templates/commons/bin/release shim execs whatever release-cut is
+# on $PATH), so realpath lands in bin/ and the package sits at
+# ../templates/commons/lib/release_core (the contract's variant (b)). Stdout,
+# exit codes, and the `gh workflow run` dispatch match the old bash byte-for-byte.
+import os
+import sys
 
-self_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEMVER="$self_dir/../templates/commons/bin/share/semver-tool/semver"
-DETECT_KIND="$self_dir/detect-kind"
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-usage() {
-    cat <<EOF >&2
-usage: $(basename "$0") <major|minor|patch|X.Y.Z[-PRERELEASE]>
+from release_core.verbs import release_cut  # noqa: E402 — sys.path set above
 
-Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
-pre-release suffix is stripped before bumping; to step from
-1.0.0-rc.1 to 1.0.0, type the version literally).
-
-The current version is read from the canonical source for the
-Consumer's Kind (Cargo.toml, package.json, extension.toml, or the
-latest git tag for Kinds without a manifest). See the script header
-for the per-Kind mapping.
-EOF
-}
-
-if [ $# -ne 1 ]; then
-    usage
-    exit 2
-fi
-case "$1" in
-    -h|--help) usage; exit 0 ;;
-esac
-
-arg="$1"
-repo_root=$(git rev-parse --show-toplevel)
-cd "$repo_root"
-
-# Graceful no-op for Consumers that don't ship a release workflow
-# (github-action repos, tree-sitter standalone grammars, etc.). The
-# canonical bin/release shim lands in every Consumer via release-sync;
-# not every Kind has something to dispatch.
-if [ ! -f ".github/workflows/release.yml" ]; then
-    echo "release-cut: no .github/workflows/release.yml in this repo; nothing to do."
-    exit 0
-fi
-
-# ---------------------------------------------------------------------
-# Per-Kind current-version readers.
-# Each reader prints the current version on stdout (no leading 'v') or
-# exits non-zero if it can't determine one.
-# ---------------------------------------------------------------------
-
-# Read the package version from a TOML file. Works for Cargo.toml
-# ([package] / [workspace.package]) and extension.toml (top-level
-# version key).
-#
-# Section-aware: starts in "matching" mode so top-level keys before
-# any [section] header are read (extension.toml shape); turns off on
-# any [section] header; turns back on only for [package] and
-# [workspace.package]. This avoids matching a `version = "..."` line
-# inside [dependencies], [workspace.dependencies.<dep>], [lints],
-# [features], etc.
-_read_toml_version() {
-    local f="$1"
-    [ -f "$f" ] || return 1
-    local v
-    v=$(awk '
-        BEGIN { in_sect=1 }
-        /^\[package\][[:space:]]*$/             { in_sect=1; next }
-        /^\[workspace\.package\][[:space:]]*$/  { in_sect=1; next }
-        /^\[/                                   { in_sect=0; next }
-        in_sect && /^[[:space:]]*version[[:space:]]*=/ {
-            if (match($0, /"[^"]+"/)) {
-                print substr($0, RSTART+1, RLENGTH-2)
-                exit 0
-            }
-        }
-    ' "$f") || true
-    [ -n "$v" ] || return 1
-    printf '%s\n' "$v"
-}
-
-# Read the first top-level `"version": "..."` line from a JSON file.
-# The anchor `^[[:space:]]*"version"` excludes dependency-map entries
-# like `"@scope/pkg": "^1.2.3"` and `"version-helper": "..."` keys
-# nested inside other objects (where the field name precedes `version`).
-_read_json_version() {
-    local f="$1"
-    [ -f "$f" ] || return 1
-    local v
-    v=$(grep -E '^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"' "$f" \
-        | head -1 \
-        | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/') || true
-    [ -n "$v" ] || return 1
-    printf '%s\n' "$v"
-}
-
-# Rust: try the root Cargo.toml first (single crate OR workspace with
-# [workspace.package].version — the canonical layout for ~all rust
-# consumers). If empty, probe workspace members for the first one
-# carrying a literal version (covers dodot's workspace-only root,
-# where the lib crate at crates/dodot-lib holds the canonical version
-# and the bin crate inherits via version.workspace = true).
-_read_rust_version() {
-    local v
-    if v=$(_read_toml_version Cargo.toml); then
-        printf '%s\n' "$v"
-        return 0
-    fi
-    # Extract paths from the `members = [...]` array. Handles single-
-    # line and multi-line forms, plus shell globs (e.g. "crates/*").
-    local members
-    members=$(awk '
-        /^[[:space:]]*members[[:space:]]*=[[:space:]]*\[/ { in_arr=1 }
-        in_arr {
-            print
-            if (index($0, "]")) { in_arr=0 }
-        }
-    ' Cargo.toml | grep -oE '"[^"]+"' | tr -d '"') || true
-    [ -n "$members" ] || return 1
-    local path expanded
-    while IFS= read -r path; do
-        # Word-split for glob expansion ("crates/*" → multiple paths).
-        # shellcheck disable=SC2086
-        for expanded in $path; do
-            if v=$(_read_toml_version "$expanded/Cargo.toml"); then
-                printf '%s\n' "$v"
-                return 0
-            fi
-        done
-    done <<< "$members"
-    return 1
-}
-
-# Kinds without a local manifest: the latest git tag is the version
-# source of truth.
-_read_git_tag_version() {
-    local t
-    t=$(git describe --tags --abbrev=0 2>/dev/null) || return 1
-    [ -n "$t" ] || return 1
-    printf '%s\n' "${t#v}"
-}
-
-read_current_version() {
-    case "$1" in
-        rust-cli|rust-lib)                    _read_rust_version ;;
-        tauri-app)                            _read_toml_version src-tauri/Cargo.toml ;;
-        electron-app|vscode-ext|tree-sitter)  _read_json_version package.json ;;
-        zed-extension)                        _read_toml_version extension.toml ;;
-        nvim-plugin|go-cli)                   _read_git_tag_version ;;
-        *)
-            echo "release-cut: don't know how to read current version for Kind=$1" >&2
-            return 1
-            ;;
-    esac
-}
-
-case "$arg" in
-    major|minor|patch)
-        # Detect Kind lazily — only needed for bump shortcuts that
-        # read the current version. Literal-version dispatches skip
-        # this so they work in any Consumer regardless of Kind.
-        if ! kind=$("$DETECT_KIND" 2>/dev/null); then
-            echo "release-cut: detect-kind could not identify this repo's Kind" >&2
-            echo "  (required for bump shortcuts; pass an explicit X.Y.Z to bypass)" >&2
-            exit 1
-        fi
-        if ! current=$(read_current_version "$kind"); then
-            case "$kind" in
-                nvim-plugin|go-cli)
-                    cat >&2 <<EOF
-release-cut: no git tags found — Kind=$kind reads the current version
-  from \`git describe --tags --abbrev=0\`. Pass an explicit version
-  (e.g. release-cut 0.1.0) for the first release.
-EOF
-                    ;;
-                *)
-                    cat >&2 <<EOF
-release-cut: couldn't determine current version for Kind=$kind.
-  Expected manifest not found or has no version field.
-EOF
-                    ;;
-            esac
-            exit 1
-        fi
-        new_version="$("$SEMVER" bump "$arg" "$current")"
-        echo "Bumping ${arg}: ${current} -> ${new_version}"
-        ;;
-    *)
-        if [[ "$arg" =~ ^[vV] ]] \
-            || [[ "$("$SEMVER" validate "$arg")" != "valid" ]] \
-            || [[ -n "$("$SEMVER" get build "$arg")" ]]; then
-            echo "release-cut: version must be MAJOR.MINOR.PATCH[-PRERELEASE] or one of: major, minor, patch (got: $arg)" >&2
-            exit 2
-        fi
-        new_version="$arg"
-        ;;
-esac
-
-if ! command -v gh >/dev/null 2>&1; then
-    echo "release-cut: gh CLI not found — install from https://cli.github.com/" >&2
-    exit 1
-fi
-
-echo "Triggering release.yml for v${new_version}..."
-gh workflow run release.yml -f version="$new_version"
-
-cat <<EOF
-
-Workflow queued. Follow with:
-  gh run watch
-  gh run list --workflow=release.yml --limit=1
-EOF
+if __name__ == "__main__":
+    sys.exit(release_cut.main(sys.argv[1:]))
