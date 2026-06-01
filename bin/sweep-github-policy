@@ -1,88 +1,28 @@
-#!/usr/bin/env bash
-# Drop the canonical policy + setup files into the current repo, based on
-# its detected stack.
+#!/usr/bin/env python3
+# sweep-github-policy — drop the canonical policy + setup files into a repo.
 #
-# Usage:
-#   sweep-github-policy [--stack <stack>] [--force]
-#
-# - Auto-detects kind via detect-kind (override with --stack)
-# - For each template file: creates if missing; reports if already present
-#   with different content (use --force to overwrite)
-#
-# Source layout is path-mirror: files under templates/commons/** sync to
-# every consumer, files under templates/<stack>/** sync to consumers of
-# that stack. Destination path = source path with the prefix stripped.
-# To add a new managed file, drop it where you want it to land — no code
-# edit required.
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. sweep-github-policy
+# is a release-only tool (a real file in bin/, NOT synced to consumers), so
+# realpath lands in bin/ and the package sits at
+# ../templates/commons/lib/release_core (the contract's variant (b)). The
+# per-file lines, summary, and conflict→nonzero exit match the old bash.
+import os
+import sys
 
-set -euo pipefail
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-stack=""
-force=0
+from release_core.verbs import sweep_github_policy  # noqa: E402 — sys.path set above
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --stack) stack=$2; shift 2 ;;
-    --force) force=1; shift ;;
-    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 64 ;;
-  esac
-done
-
-repo_root=$(git rev-parse --show-toplevel)
-cd "$repo_root"
-
-stack=${stack:-$(detect-kind)}
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-release_root="$script_dir/.."
-commons_dir="$release_root/templates/commons"
-stack_dir="$release_root/templates/$stack"
-
-[ -d "$stack_dir" ] || {
-  echo "no templates for stack '$stack' at $stack_dir" >&2; exit 1; }
-
-echo "repo:  $(basename "$repo_root")"
-echo "stack: $stack"
-echo
-
-created=0
-updated=0
-skipped=0
-conflicts=0
-
-process_subtree() {
-  local prefix=$1
-  [ -d "$prefix" ] || return 0
-  while IFS= read -r src; do
-    local dest=${src#"$prefix"/}
-    mkdir -p "$(dirname "$dest")"
-    if [ ! -e "$dest" ]; then
-      cp "$src" "$dest"
-      [ -x "$src" ] && chmod +x "$dest"
-      echo "  created   $dest"
-      created=$((created + 1))
-    elif cmp -s "$src" "$dest"; then
-      echo "  ok        $dest"
-      skipped=$((skipped + 1))
-    elif [ "$force" = 1 ]; then
-      cp "$src" "$dest"
-      [ -x "$src" ] && chmod +x "$dest"
-      echo "  updated   $dest"
-      updated=$((updated + 1))
-    else
-      echo "  conflict  $dest (differs; --force to overwrite)"
-      conflicts=$((conflicts + 1))
-    fi
-  done < <(find "$prefix" -type f -not -name '.DS_Store')
-}
-
-# Commons first, stack second — stack-specific files override commons on
-# collision (a stack may specialize a shared file).
-process_subtree "$commons_dir"
-process_subtree "$stack_dir"
-
-echo
-printf 'summary: %d created, %d updated, %d ok, %d conflicts\n' \
-  "$created" "$updated" "$skipped" "$conflicts"
-
-[ "$conflicts" -eq 0 ]
+if __name__ == "__main__":
+    sys.exit(sweep_github_policy.main(sys.argv[1:]))
