@@ -13,7 +13,11 @@
 # set distributed to consumers (like templates/commons/bin/*). The maintainer's
 # bin/gh-task-status is a symlink into it; release-sync materializes it into a
 # consumer's .release/lib/. It is still the single canonical copy.
-members = ["templates/commons/lib/release_gh", "orchestrator"]
+members = [
+  "templates/commons/lib/release_gh",
+  "templates/commons/lib/release_core",
+  "orchestrator",
+]
 
 [tool.ruff]
 line-length = 100
@@ -24,9 +28,17 @@ extend-exclude = ["**/.venv"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/python"]
-# Import release_gh + orchestrator without a build/install step. release_gh
-# mirrors the runtime sys.path-shim model; orchestrator.watch is importable
+# release_core's tests live ALONGSIDE the package (templates/commons/lib/
+# release_core/tests/) — the gh-task-status suite's tests/python/ split is for
+# the older release_gh package; the migration substrate keeps its tests next to
+# the code. Both roots are collected by the bare `pytest` CI step.
+testpaths = ["tests/python", "templates/commons/lib/release_core/tests"]
+# Import release_gh + release_core + orchestrator without a build/install step,
+# mirroring the runtime sys.path-shim model. orchestrator.watch is importable
 # for its pure logic because it lazy-imports the Claude Agent SDK (so these
 # tests need no SDK — they run under the light py-lint CI job).
-pythonpath = ["templates/commons/lib/release_gh", "orchestrator"]
+pythonpath = [
+  "templates/commons/lib/release_gh",
+  "templates/commons/lib/release_core",
+  "orchestrator",
+]
