@@ -49,7 +49,7 @@ runs:
       env:
         NEW_VERSION: ${{ inputs.version }}
         MANIFEST: ${{ inputs.manifest-path }}
-        SEMVER: ${{ github.action_path }}/../../../templates/commons/bin/share/semver-tool/semver
+        SEMVER: ${{ github.action_path }}/../../../bin/semver
       run: |
         set -euo pipefail
 

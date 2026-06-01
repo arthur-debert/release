@@ -11,11 +11,11 @@ One module for the tight changelog cluster; each former bash script maps to a
 The CLI contract is consumed by consumers + CI (changelog-tests.yml, the
 changelog-check action, bin-internal/roll-changelog.sh shelling to bin/changelog)
 so stdout, exit codes, flags, and the generated CHANGELOG.md / fragment bytes
-match the old bash byte-for-byte. The vendored bash semver-tool is replaced for
-THIS family by release_core.version; the tool's regex semantics (NAT — no
-leading zeros — and NAT/ALPHANUM prerelease identifiers) are reproduced exactly
-by _SEMVER_TOOL_RE so validation parity holds. (Other scripts still reference
-share/semver-tool; that tree stays.)
+match the old bash byte-for-byte. Validation reproduces the (now removed)
+vendored semver-tool's regex semantics (NAT — no leading zeros — and
+NAT/ALPHANUM prerelease identifiers) exactly via _SEMVER_TOOL_RE so validation
+parity holds. The standalone `validate`/`get` edge the rest of the pipeline
+shelled out to now lives in release_core.verbs.semver (bin/semver).
 """
 
 from __future__ import annotations

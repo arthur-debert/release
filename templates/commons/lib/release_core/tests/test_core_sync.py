@@ -77,7 +77,7 @@ def test_is_release_internal(dest, internal):
         (".editorconfig", ".release/.editorconfig"),
         ("bin/check", "../.release/bin/check"),
         (".claude/skills/x/SKILL.md", "../../../.release/.claude/skills/x/SKILL.md"),
-        ("bin/share/semver-tool/semver", "../../../.release/bin/share/semver-tool/semver"),
+        ("bin/semver", "../.release/bin/semver"),
     ],
 )
 def test_link_target(dest, target):

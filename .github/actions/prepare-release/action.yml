@@ -42,7 +42,7 @@ runs:
       shell: bash
       env:
         NEW_VERSION: ${{ inputs.version }}
-        SEMVER: ${{ github.action_path }}/../../../templates/commons/bin/share/semver-tool/semver
+        SEMVER: ${{ github.action_path }}/../../../bin/semver
       run: |
         set -euo pipefail
 

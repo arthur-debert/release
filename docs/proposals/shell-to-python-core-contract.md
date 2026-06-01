@@ -133,8 +133,10 @@ def bump(v: SemVer, part: str) -> SemVer: # part in {major,minor,patch}; strips 
 > `prerelease` field is `compare=False`. Release outranks its prereleases;
 > numeric identifiers rank below alphanumeric. The module docstring documents it.
 
-Replaces `bin/share/semver-tool/`. That vendored tree is removed only once no
-script references it (NOT in Phase 0).
+Replaces `bin/share/semver-tool/`. That vendored tree is now removed: every
+caller routes through this module — the changelog/release-cut verbs use
+`version` directly, and the prepare-* callers shell out to the `semver` verb
+(`release_core.verbs.semver`, on `$PATH` as `bin/semver`).
 
 ## Phase 0 conventions (locked in by #379 — Phase 1 follows these)
 

@@ -11,14 +11,14 @@ on:
     paths:
       - 'bin/release-cut'
       - 'templates/commons/bin/release'
-      - 'templates/commons/bin/share/semver-tool/**'
+      - 'templates/commons/lib/release_core/**'
       - 'tests/release-cut/**'
       - '.github/workflows/release-cut-tests.yml'
   pull_request:
     paths:
       - 'bin/release-cut'
       - 'templates/commons/bin/release'
-      - 'templates/commons/bin/share/semver-tool/**'
+      - 'templates/commons/lib/release_core/**'
       - 'tests/release-cut/**'
       - '.github/workflows/release-cut-tests.yml'
 
