@@ -7,12 +7,28 @@
     "mergeStateStatus": "BLOCKED",
     "reviewRequests": [],
     "statusCheckRollup": [
-      { "__typename": "CheckRun", "name": "ci / check", "status": "COMPLETED", "conclusion": "SUCCESS" },
-      { "__typename": "CheckRun", "name": "py-lint", "status": "COMPLETED", "conclusion": "FAILURE" }
+      {
+        "__typename": "CheckRun",
+        "name": "ci / check",
+        "status": "COMPLETED",
+        "conclusion": "SUCCESS"
+      },
+      {
+        "__typename": "CheckRun",
+        "name": "py-lint",
+        "status": "COMPLETED",
+        "conclusion": "FAILURE"
+      }
     ]
   },
   "reviews": [
-    { "id": 7201, "user": { "login": "Copilot" }, "state": "APPROVED", "commit_id": "f00d03", "body": "" }
+    {
+      "id": 7201,
+      "user": { "login": "Copilot" },
+      "state": "APPROVED",
+      "commit_id": "f00d03",
+      "body": ""
+    }
   ],
   "threads": [],
   "reactions": [],

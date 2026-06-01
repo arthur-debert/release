@@ -4,7 +4,7 @@ Status: locked 2026-05-19 (take-iii). Reference for issue #97.
 
 ## What a Component is
 
-A **Component** is a reusable, cross-Stack unit of tooling. Where a *Stack*
+A **Component** is a reusable, cross-Stack unit of tooling. Where a _Stack_
 captures "what kind of project is this" (rust-cli, electron-app, vsce-ext),
 a Component captures "what shared concern does this project participate
 in" (rust-quality, npm-quality, bats). (The shell/markdown/yaml lint
@@ -54,7 +54,7 @@ A **Stack** template now consists of three things:
 
 Most of what used to live in a Stack template (the hand-maintained
 `lefthook.yml`, language-specific lint configs) moves to Components.
-Stacks become *thin recipes*: name + default Components + CI workflow
+Stacks become _thin recipes_: name + default Components + CI workflow
 target.
 
 ## The manifest
@@ -100,7 +100,7 @@ paths win on collision with commons. (Highest specificity wins.)
 
 ## Generated artifacts
 
-Two files in every consumer are *generated* by release-sync (not stored
+Two files in every consumer are _generated_ by release-sync (not stored
 in templates/, regenerated each sync):
 
 ### `lefthook.yml` at consumer repo root
@@ -109,8 +109,8 @@ Composed from:
 
 - A base header (`templates/components/_lefthook-base.yaml` — the common
   output settings and skip rules)
-- + each declared Component's `lefthook.fragment.yaml`
-- + the Stack's `lefthook.fragment.yaml` (if present)
+- - each declared Component's `lefthook.fragment.yaml`
+- - the Stack's `lefthook.fragment.yaml` (if present)
 
 Merge mechanism: `yq eval-all '. as $item ireduce ({}; . *+ $item)'` (deep
 merge with array-append semantics on `commands` maps). The merged file is
@@ -153,7 +153,7 @@ files:
   # ... full list, sorted
 ```
 
-`release-sync --check` verifies the state file matches what *would* be
+`release-sync --check` verifies the state file matches what _would_ be
 generated from the current ref and the consumer's effective manifest.
 Drift in any synced file OR in the state file fails the check.
 
@@ -169,7 +169,7 @@ Derived from the empirical survey of 21 repos (issue #97 description).
 
 > **Update:** `shell-quality` is no longer a Component. Because it is
 > truly universal (every Kind listed it), the gate was promoted into
-> `templates/commons/` so release-sync applies it to *every* consumer
+> `templates/commons/` so release-sync applies it to _every_ consumer
 > structurally — including manifest-less Kinds (`tree-sitter`, `render`)
 > that never declared it. Nothing below changed except where it lives;
 > consumers no longer list it in a manifest.

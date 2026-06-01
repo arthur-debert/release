@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 0.18.0 or 1.0.0-rc.1)'
+        description: "Version to release (e.g. 0.18.0 or 1.0.0-rc.1)"
         required: true
         type: string
 
@@ -27,9 +27,9 @@ jobs:
     uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1
     with:
       version: ${{ inputs.version }}
-      crates: my-core,my-cli              # topological dep order
-      bin-name: my-cli                    # primary binary == brew formula subject
-    secrets: inherit                      # same-owner; cross-org needs explicit pass
+      crates: my-core,my-cli # topological dep order
+      bin-name: my-cli # primary binary == brew formula subject
+    secrets: inherit # same-owner; cross-org needs explicit pass
 ```
 
 Cross-org consumers (e.g. `lex-fmt/*` calling `arthur-debert/release`)
@@ -43,26 +43,26 @@ input.
 
 ### Required
 
-| Input | Description |
-|---|---|
-| `version` | `MAJOR.MINOR.PATCH[-PRERELEASE]`. Pre-release suffixes mark the GH release as `prerelease: true`. |
-| `crates` | Comma-separated crate names in publish order (topological — dependencies first). The last entry is the primary CLI crate by convention. |
-| `bin-name` | Primary binary, also the Homebrew formula subject. Built from `cargo build -p <bin-name>`. |
+| Input      | Description                                                                                                                             |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`  | `MAJOR.MINOR.PATCH[-PRERELEASE]`. Pre-release suffixes mark the GH release as `prerelease: true`.                                       |
+| `crates`   | Comma-separated crate names in publish order (topological — dependencies first). The last entry is the primary CLI crate by convention. |
+| `bin-name` | Primary binary, also the Homebrew formula subject. Built from `cargo build -p <bin-name>`.                                              |
 
 ### Optional
 
-| Input | Default | Description |
-|---|---|---|
-| `extra-binaries` | `''` | Comma-separated additional binaries to build, sign, and ship as separate tarballs (NOT brew-formulated). E.g. `lexd-lsp` for lex. |
-| `darwin-archs` | `arm64` | Comma-separated macOS archs. Set `''` to skip macOS. |
-| `linux-archs` | `x86_64,aarch64` | Comma-separated gnu-linux archs. |
-| `linux-musl-archs` | `''` | Comma-separated musl-linux archs (opt-in). |
-| `windows-archs` | `''` | Comma-separated windows archs (opt-in). |
-| `brew` | `true` | Render and push Homebrew formula to tap. |
-| `apt` | `true` | Build `.deb` packages for linux targets via cargo-deb. |
-| `brew-tap` | `arthur-debert/homebrew-tools` | Tap repo to push the formula to. |
-| `submodules` | `false` | Pass `--recurse-submodules` on checkout. |
-| `changelog-path` | `CHANGELOG.md` | Path to Keep-a-Changelog-format file with `## [Unreleased]` section. |
+| Input              | Default                        | Description                                                                                                                       |
+| ------------------ | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| `extra-binaries`   | `''`                           | Comma-separated additional binaries to build, sign, and ship as separate tarballs (NOT brew-formulated). E.g. `lexd-lsp` for lex. |
+| `darwin-archs`     | `arm64`                        | Comma-separated macOS archs. Set `''` to skip macOS.                                                                              |
+| `linux-archs`      | `x86_64,aarch64`               | Comma-separated gnu-linux archs.                                                                                                  |
+| `linux-musl-archs` | `''`                           | Comma-separated musl-linux archs (opt-in).                                                                                        |
+| `windows-archs`    | `''`                           | Comma-separated windows archs (opt-in).                                                                                           |
+| `brew`             | `true`                         | Render and push Homebrew formula to tap.                                                                                          |
+| `apt`              | `true`                         | Build `.deb` packages for linux targets via cargo-deb.                                                                            |
+| `brew-tap`         | `arthur-debert/homebrew-tools` | Tap repo to push the formula to.                                                                                                  |
+| `submodules`       | `false`                        | Pass `--recurse-submodules` on checkout.                                                                                          |
+| `changelog-path`   | `CHANGELOG.md`                 | Path to Keep-a-Changelog-format file with `## [Unreleased]` section.                                                              |
 
 ### WASM/npm slot (opt-in)
 
@@ -72,18 +72,18 @@ Set `wasm-package` to enable. Two new jobs slot in: `build-wasm` (after
 When `wasm-package` is unset, behavior is byte-identical to a non-wasm
 release.
 
-| Input | Default | Description |
-|---|---|---|
-| `wasm-package` | `''` | Workspace member with a wasm-bindgen crate. Set to enable wasm-pack build + npm publish. |
-| `wasm-pack-target` | `bundler` | `wasm-pack --target` value: `bundler` \| `web` \| `nodejs` \| `no-modules`. |
-| `wasm-npm-scope` | `''` | npm org scope. When set, publishes as `@<scope>/<wasm-package>`; when unset, publishes the bare crate name. |
+| Input              | Default   | Description                                                                                                 |
+| ------------------ | --------- | ----------------------------------------------------------------------------------------------------------- |
+| `wasm-package`     | `''`      | Workspace member with a wasm-bindgen crate. Set to enable wasm-pack build + npm publish.                    |
+| `wasm-pack-target` | `bundler` | `wasm-pack --target` value: `bundler` \| `web` \| `nodejs` \| `no-modules`.                                 |
+| `wasm-npm-scope`   | `''`      | npm org scope. When set, publishes as `@<scope>/<wasm-package>`; when unset, publishes the bare crate name. |
 
 #### What ships when `wasm-package` is set
 
 1. **`build-wasm` job** runs once after `prepare` on `ubuntu-latest`.
    Reuses the warm Swatinem cache, runs `wasm-pack build <crate-path>
-   --target <wasm-pack-target> [--scope <wasm-npm-scope>] --out-dir
-   pkg`, paranoia-checks `pkg/package.json` version against the tag,
+--target <wasm-pack-target> [--scope <wasm-npm-scope>] --out-dir
+pkg`, paranoia-checks `pkg/package.json` version against the tag,
    and:
    - Attaches `<wasm-package>-wasm.tar.gz` to the GH release (alongside
      native binary tarballs — non-npm consumers can `curl` it just like
@@ -102,17 +102,17 @@ secrets, opt-out gracefully.
 
 ## Secrets
 
-| Secret | Required when | Purpose |
-|---|---|---|
-| `RELEASE_TOKEN` | always (recommended) | PAT with `repo` + `read:org`. Bypasses branch ruleset for the version-bump push. Without it, falls back to `GITHUB_TOKEN`, which can't bypass the ruleset on ruleset-protected repos. |
-| `CRATES_IO_KEY` | publishing crates | crates.io API token. |
-| `APPLE_CERTIFICATE_P12_BASE64` | macOS sign | Developer ID Application certificate, base64-encoded. |
-| `APPLE_CERTIFICATE_PASSWORD` | macOS sign | Password for the .p12. |
-| `ASC_API_KEY_BASE64` | macOS notarize | App Store Connect API key (.p8), base64-encoded. |
-| `ASC_API_KEY_ID` | macOS notarize | API key ID. |
-| `ASC_API_ISSUER_ID` | macOS notarize | App Store Connect issuer ID. |
-| `HOMEBREW_TAP_TOKEN` | brew formula push | PAT with write access to the tap repo. |
-| `NPM_TOKEN` | wasm-package set + npm publish | npm publish token (Automation type recommended). |
+| Secret                         | Required when                  | Purpose                                                                                                                                                                               |
+| ------------------------------ | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RELEASE_TOKEN`                | always (recommended)           | PAT with `repo` + `read:org`. Bypasses branch ruleset for the version-bump push. Without it, falls back to `GITHUB_TOKEN`, which can't bypass the ruleset on ruleset-protected repos. |
+| `CRATES_IO_KEY`                | publishing crates              | crates.io API token.                                                                                                                                                                  |
+| `APPLE_CERTIFICATE_P12_BASE64` | macOS sign                     | Developer ID Application certificate, base64-encoded.                                                                                                                                 |
+| `APPLE_CERTIFICATE_PASSWORD`   | macOS sign                     | Password for the .p12.                                                                                                                                                                |
+| `ASC_API_KEY_BASE64`           | macOS notarize                 | App Store Connect API key (.p8), base64-encoded.                                                                                                                                      |
+| `ASC_API_KEY_ID`               | macOS notarize                 | API key ID.                                                                                                                                                                           |
+| `ASC_API_ISSUER_ID`            | macOS notarize                 | App Store Connect issuer ID.                                                                                                                                                          |
+| `HOMEBREW_TAP_TOKEN`           | brew formula push              | PAT with write access to the tap repo.                                                                                                                                                |
+| `NPM_TOKEN`                    | wasm-package set + npm publish | npm publish token (Automation type recommended).                                                                                                                                      |
 
 `bin/install-release-secrets` propagates all of these from canonical
 local sources (`~/h/dotfiles/apple/auth/...`, env vars) to every

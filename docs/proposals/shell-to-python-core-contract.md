@@ -2,7 +2,7 @@
 
 This is the **binding spec** for the shell→Python migration
 ([proposal](./shell-to-python.md)). Every migration PR into
-`feat/shell-to-python` is reviewed against it. Subagents implement *to* this
+`feat/shell-to-python` is reviewed against it. Subagents implement _to_ this
 contract; the orchestrator (gatekeeper) verifies fit at merge.
 
 Changing a signature here is an orchestrator-level decision — a subagent that
@@ -127,7 +127,7 @@ def bump(v: SemVer, part: str) -> SemVer: # part in {major,minor,patch}; strips 
 ```
 
 > **Amended from the original naive spec** (`order=True` over a raw `prerelease`
-> tuple): that sorts wrong (empty tuple sorts *below* a populated one — reverse
+> tuple): that sorts wrong (empty tuple sorts _below_ a populated one — reverse
 > of semver.org §11) and `TypeError`s on mixed int/str identifiers. Ordering is
 > therefore driven by a derived `compare=True` `_sort_key` while the public
 > `prerelease` field is `compare=False`. Release outranks its prereleases;

@@ -8,11 +8,11 @@
 
 ## What's already done
 
-| Phase | What | Where |
-|---|---|---|
-| **A1** | Distribute the §4 engine (`gh-task-status` + `lib/release_gh`) into consumer `.release/` | #351 — now in `templates/commons/` |
-| **A2** | Ship the consumer `CLAUDE.md` orientation template (managed block + `@.release/ORIENTATION.md`) | #360 |
-| **B** | §5.1 escalation contract baked into the orientation; `gh-release-issue` distributed to consumers | #360 |
+| Phase  | What                                                                                             | Where                              |
+| ------ | ------------------------------------------------------------------------------------------------ | ---------------------------------- |
+| **A1** | Distribute the §4 engine (`gh-task-status` + `lib/release_gh`) into consumer `.release/`         | #351 — now in `templates/commons/` |
+| **A2** | Ship the consumer `CLAUDE.md` orientation template (managed block + `@.release/ORIENTATION.md`)  | #360                               |
+| **B**  | §5.1 escalation contract baked into the orientation; `gh-release-issue` distributed to consumers | #360                               |
 
 A fresh agent landing in any managed repo is oriented (what's managed, the
 `gh-task-status` dev-flow entry, the escalation contract) and can file upstream
@@ -57,7 +57,7 @@ new cross-org PAT.
 
 The `gh-pr-review-loop` skill reaches agents today only via `env/setup.sh` →
 `~/.claude/skills/` (cloud) and the maintainer's machine. Its description is
-maintainer-scoped, says "merge" (stale — we stop at *ready-for-human-merge*),
+maintainer-scoped, says "merge" (stale — we stop at _ready-for-human-merge_),
 and omits `gh-task-status`.
 
 - Rework `skills/gh-pr-review-loop/SKILL.md` frontmatter **name/description**:
@@ -77,7 +77,7 @@ and omits `gh-task-status`.
   `.release/` is dereferenceable, so Claude Code still discovers it).
   `.claude/skills/**` is already excluded from the consumer markdownlint gate.
 
-**Acceptance:** a fresh agent in a consumer repo (cloud *and* local) has the
+**Acceptance:** a fresh agent in a consumer repo (cloud _and_ local) has the
 skill available, triggered by "open a PR" / "check PR status"; its description
 leads with `gh-task-status` and carries no auto-merge language.
 

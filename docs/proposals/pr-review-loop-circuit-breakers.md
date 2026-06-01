@@ -12,7 +12,7 @@ into runaway iteration. Concrete failure: dodot PR #118 — a bounded
 ~150-line fix turned into 22 review cycles, 3473 lines, 23 commits
 over 7 hours, including a self-induced cache-layout migration that
 was never required by the issue. Each Copilot pass surfaced edge
-cases of code added in the *previous* pass.
+cases of code added in the _previous_ pass.
 
 The current `gh-pr-review-loop` skill has no termination logic
 beyond "address all comments, push fixups, repeat." It needs
@@ -36,13 +36,14 @@ just counting cycles.
 
 ## Heuristic stack (priority order)
 
-Rules are evaluated *before* opening a new fixup cycle. If any fires, the loop stops and the user is paged. They are deliberately conservative — false positives ("paged a human when convergence was still possible") are cheaper than false negatives (a 22-cycle PR).
+Rules are evaluated _before_ opening a new fixup cycle. If any fires, the loop stops and the user is paged. They are deliberately conservative — false positives ("paged a human when convergence was still possible") are cheaper than false negatives (a 22-cycle PR).
 
 ### 1. Hard cycle cap = 3
 
-Rationale: empirical literature is consistent — Aider defaults to 3, multiple 2024–25 papers report self-critique payoff plateaus by cycle 3–5 and *degrades* beyond. Cycle 4 fires the breaker; no soft extension. If a project legitimately needs more, the user authorizes manually.
+Rationale: empirical literature is consistent — Aider defaults to 3, multiple 2024–25 papers report self-critique payoff plateaus by cycle 3–5 and _degrades_ beyond. Cycle 4 fires the breaker; no soft extension. If a project legitimately needs more, the user authorizes manually.
 
 Implementation: count of Copilot reviews on the PR (one per cycle).
+
 ```sh
 gh api "repos/$OWNER/$REPO/pulls/$PR/reviews" \
   | jq '[.[] | select(.user.login | startswith("Copilot"))] | length'
@@ -78,7 +79,7 @@ Implementation: `git log --grep="^Revert" <base>..<head>` catches the easy case.
 
 ### 6. First-class "reject with rationale"
 
-Not a circuit breaker — a missing escape hatch that *prevents* breakers 1–3 from firing in the first place. When Claude judges a Copilot finding is wrong / out of scope / lacks project context, the right response is a PR comment explaining why, not a fixup commit.
+Not a circuit breaker — a missing escape hatch that _prevents_ breakers 1–3 from firing in the first place. When Claude judges a Copilot finding is wrong / out of scope / lacks project context, the right response is a PR comment explaining why, not a fixup commit.
 
 The skill already documents this for category B comments ("Project ethos drift — push back with rationale"). Strengthen the framing: **Copilot's verdict is advisory, not authoritative.** A cycle that ends with N rejections + M fixups is normal and should not increment the "no progress" counter.
 
@@ -98,6 +99,7 @@ author only. There are no production users, no SLAs, no stability
 guarantees, no API consumers in the wild.
 
 Implications:
+
 - Backwards compatibility is not a goal. Renames, signature changes,
   and removed-fields are fine.
 - No deprecation periods, no shim layers, no `// removed` comments,
@@ -128,9 +130,11 @@ Add a scope-contract section so both agents have an explicit reference:
 ## Scope
 
 **In scope:**
+
 <!-- Files / behaviors this PR changes. Be specific. -->
 
 **Out of scope (filed separately if needed):**
+
 <!-- Adjacent concerns that surfaced but are not this PR. -->
 ```
 
@@ -172,6 +176,7 @@ Both writes happen atomically from the user's perspective: either both land or t
 The current split — policy/setup tools in `release/bin/`, day-to-day PR-loop helpers in `dotfiles/gh/bin/` — is artificial. Both sets serve the same `gh-pr-review-loop` skill and the same set of repos. The release tooling should be self-contained.
 
 Files to migrate from `~/h/dotfiles/gh/`:
+
 - `bin/gh-copilot-on` → `~/h/release/bin/gh-copilot-on`
 - `bin/gh-copilot-off` → `~/h/release/bin/gh-copilot-off`
 - `bin/gh-copilot-wait` → `~/h/release/bin/gh-copilot-wait`
@@ -181,6 +186,7 @@ Files to migrate from `~/h/dotfiles/gh/`:
 - `RELEASE-TOKEN.md` → `~/h/release/docs/dev/release-token.md`
 
 Side-effects to handle in the same migration:
+
 - Update dodot config so `dodot up release` covers what `dodot up gh` previously did. Retire the `gh` pack.
 - Update the `gh-pr-review-loop` SKILL.md "The helpers" table to drop the two-homes framing.
 - `git rm` the migrated files from dotfiles in the same change that adds them here, so PATH only finds the new location.
@@ -210,6 +216,7 @@ Then halt. Surface the situation to the user with a one-line summary
 release/#M") and wait for their decision.
 
 Categories of comment-handling now have an explicit count:
+
 - A (real issues addressed) → fixup commits
 - B (rejected with rationale) → PR-comment replies, NO commits
 - C (cosmetic skipped) → no action
@@ -226,6 +233,7 @@ The structured stop-comment posted to the PR is the artifact the user reads to m
 3: diff trajectory | 4: repeat finding | 5: revert-within-PR}
 
 **Trajectory observed:**
+
 - Cycle 1: {N₁ comments, {D₁} diff lines, head {sha₁}}
 - Cycle 2: {N₂ comments, {D₂} diff lines, head {sha₂}}
 - Cycle 3: {N₃ comments, {D₃} diff lines, head {sha₃}}
@@ -238,20 +246,22 @@ in the original PR scope per the issue."}
 
 **What the data suggests:**
 {Pick one or two of:
+
 - "Self-induced scope expansion: the diff is growing in files outside
-   the original issue's scope. Consider landing the in-scope portion
-   and filing a follow-up for the rest."
+  the original issue's scope. Consider landing the in-scope portion
+  and filing a follow-up for the rest."
 - "Combinatorial edge-case chasing: each cycle's comments are about
-   code added in the previous cycle. Consider stopping and re-reading
-   the issue to confirm the current shape is right."
+  code added in the previous cycle. Consider stopping and re-reading
+  the issue to confirm the current shape is right."
 - "Reviewer is stuck on a finding the coder has tried to address
-   twice. Consider whether this needs design rework or a push-back
-   rather than a third fix attempt."
+  twice. Consider whether this needs design rework or a push-back
+  rather than a third fix attempt."
 - "Comments raised in this cycle were all out-of-scope or stylistic;
-   the in-scope work is done. Consider merging."
-}
+  the in-scope work is done. Consider merging."
+  }
 
 **Decision points for the user:**
+
 1. **Land what's good.** Squash + merge, file follow-up issues for
    the rest. (Recommended if in-scope work is complete.)
 2. **Pause for design.** Close this PR or mark draft; re-read the
@@ -272,7 +282,7 @@ by `bin/report-incident` after the release/ issue is created. The
 release/ issue's `## Source` block in turn links back to this PR,
 so navigation is bidirectional.
 
-Update the existing category-B documentation to add a line: *"Copilot's verdict is advisory, not authoritative. Pushing back is a first-class outcome, not a last resort."*
+Update the existing category-B documentation to add a line: _"Copilot's verdict is advisory, not authoritative. Pushing back is a first-class outcome, not a last resort."_
 
 ## Rollout plan
 
@@ -305,6 +315,7 @@ These were the open questions during drafting; settled before implementation beg
 ## Success criteria
 
 We'll know this worked if:
+
 - No PR opened after rollout exceeds 5 review cycles without an explicit user override.
 - The diff-size and comment-set breakers fire on at least one drift case in the first month, and the user agrees with the call (vs. overriding).
 - Copilot stops raising "consider backwards compatibility" / "add a deprecation period" comments on these repos (template change A working).

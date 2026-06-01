@@ -21,7 +21,7 @@ via `uses:`):
   - `build` runs on every trigger: setup Python → install
     deps (`requirements` or `pre-install-cmd`) → `mkdocs build --strict`
     → upload site artifact (only on deploy-eligible runs).
-  - `deploy` runs only when `deploy` input is true *or* the trigger
+  - `deploy` runs only when `deploy` input is true _or_ the trigger
     is a push to the default branch. Uses first-party
     `actions/configure-pages` + `actions/deploy-pages` (no
     third-party deploy action). PRs and non-default-branch pushes
@@ -42,8 +42,8 @@ defaults — include any defaults you want to keep:
 ```yaml
 # .release-sync.yaml — rust-cli consumer that also ships mkdocs docs
 components:
-  - rust-quality    # Stack default
-  - mkdocs          # opt-in
+  - rust-quality # Stack default
+  - mkdocs # opt-in
 # (the shell/markdown/yaml lint gate ships universally from commons —
 #  not listed as a Component; see release#320)
 ```
@@ -59,21 +59,21 @@ name: Docs
 on:
   push:
     branches: [main]
-    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+    paths: ["docs/**", "mkdocs.yml", ".github/workflows/docs.yml"]
   pull_request:
-    paths: ['docs/**', 'mkdocs.yml']
+    paths: ["docs/**", "mkdocs.yml"]
   workflow_dispatch:
 
 permissions:
-  contents: read     # required for checkout
-  pages: write       # required even for deploy: false (see note below)
-  id-token: write    # required even for deploy: false (see note below)
+  contents: read # required for checkout
+  pages: write # required even for deploy: false (see note below)
+  id-token: write # required even for deploy: false (see note below)
 
 jobs:
   docs:
     uses: arthur-debert/release/.github/workflows/mkdocs.yml@v1
     with:
-      requirements: docs/requirements.txt   # consumer's pin file
+      requirements: docs/requirements.txt # consumer's pin file
 ```
 
 GitHub Pages setup: one-time, in repo Settings → Pages → set source
@@ -115,13 +115,13 @@ covers the lightweight check.
 
 ## Deploy semantics
 
-| Trigger                                | `deploy` input | Builds | Deploys |
-|----------------------------------------|----------------|--------|---------|
-| push to default branch (main)          | (default)      | ✓      | ✓       |
-| pull_request                           | (default)      | ✓      | —       |
-| push to non-main branch                | (default)      | ✓      | —       |
-| any trigger                            | `false`        | ✓      | —       |
-| any trigger                            | `true`         | ✓      | ✓       |
+| Trigger                       | `deploy` input | Builds | Deploys |
+| ----------------------------- | -------------- | ------ | ------- |
+| push to default branch (main) | (default)      | ✓      | ✓       |
+| pull_request                  | (default)      | ✓      | —       |
+| push to non-main branch       | (default)      | ✓      | —       |
+| any trigger                   | `false`        | ✓      | —       |
+| any trigger                   | `true`         | ✓      | ✓       |
 
 The default branch is detected via `github.event.repository.default_branch`
 so renaming `main` → `default` doesn't break consumers.

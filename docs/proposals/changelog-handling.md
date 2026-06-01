@@ -54,7 +54,7 @@ multi-stack and conflict problems together.
 - No replacement of `cargo release` itself — this slots in as a
   pre-release hook for Rust stacks and as the primary mechanism
   for non-Rust stacks.
-- No automated changelog *content* generation from commit
+- No automated changelog _content_ generation from commit
   messages. Authors write fragments by hand (or with a
   one-line helper).
 - No migration of historical `CHANGELOG.md` content. The first
@@ -81,7 +81,7 @@ multi-stack and conflict problems together.
 
 - `CHANGELOG/` is the source of truth.
 - `CHANGELOG.md` at the repo root is **generated** with the
-  structure spelled out under *Rendered format* below. It is
+  structure spelled out under _Rendered format_ below. It is
   committed (so consumers, crates.io, GitHub releases, and
   `cargo package` see the rendered file without needing to run our
   tooling).
@@ -102,7 +102,7 @@ multi-stack and conflict problems together.
   header followed by the concatenated bullets. They are produced
   by `bin/changelog-cut` and not edited by hand afterward.
 - `CHANGELOG/legacy.md` (optional) holds the pre-adoption
-  `CHANGELOG.md` content verbatim — see *Migration*.
+  `CHANGELOG.md` content verbatim — see _Migration_.
 
 ### Rendered format
 
@@ -114,7 +114,7 @@ nothing downstream breaks. The rendered file is exactly:
    `CHANGELOG/unreleased-*.md` file (sorted by filename
    ascending — stable, locale-independent).
 3. One section per `CHANGELOG/<version>.md` file, in descending
-   semver order (see *Ordering* below). Each file already
+   semver order (see _Ordering_ below). Each file already
    contains its own `## <version> - <date>` header, so render
    just concatenates them with a blank line separator.
 4. If `CHANGELOG/legacy.md` exists, its contents are appended
@@ -137,6 +137,7 @@ Example output:
 - Fix race condition in cache invalidation (#138)
 
 ## 0.4.1 - 2026-05-12
+
 ...
 ```
 
@@ -153,7 +154,7 @@ for versions.
   stable.
 - **Version files**: parse `<major>.<minor>.<patch>(-<pre>)?` from
   the filename and sort numerically (descending). Pre-releases
-  (`1.2.3-rc.1`) sort *below* their release (`1.2.3`), matching
+  (`1.2.3-rc.1`) sort _below_ their release (`1.2.3`), matching
   semver §11. Implementation: a 15-line awk/sed pipeline or a
   shelled-out `python3 -c "import packaging.version; ..."`.
   Concrete choice deferred to implementation; the contract is
@@ -167,12 +168,12 @@ All canonical entry points land in `bin/` per take-iii. The
 prefix `changelog-` keeps them discoverable without polluting the
 top-level verb namespace:
 
-| Script | Purpose |
-|---|---|
+| Script                                  | Purpose                                                                                                                                                                                                                                               |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bin/changelog-add <slug> [content...]` | Write `CHANGELOG/unreleased-<slug>.md`. Body is read from stdin if no `content` args are given, otherwise from joined args. If `<slug>` is numeric, prefixes it with `pr-`. **Fails if the target file already exists**; pass `--force` to overwrite. |
-| `bin/changelog-cut <version>` | Concat all `unreleased-*.md` into `CHANGELOG/<version>.md` (with `## <version> - <date>` header), then delete the unreleased fragments. |
-| `bin/changelog-render` | Regenerate `CHANGELOG.md` from `CHANGELOG/*.md`. Idempotent. |
-| `bin/changelog` | Orchestrator. `bin/changelog new-version <version>` runs `cut` then `render`. `bin/changelog add ...` forwards to `changelog-add`. Single entry point for humans; the dash-suffixed variants are for hooks and scripts that want to be explicit. |
+| `bin/changelog-cut <version>`           | Concat all `unreleased-*.md` into `CHANGELOG/<version>.md` (with `## <version> - <date>` header), then delete the unreleased fragments.                                                                                                               |
+| `bin/changelog-render`                  | Regenerate `CHANGELOG.md` from `CHANGELOG/*.md`. Idempotent.                                                                                                                                                                                          |
+| `bin/changelog`                         | Orchestrator. `bin/changelog new-version <version>` runs `cut` then `render`. `bin/changelog add ...` forwards to `changelog-add`. Single entry point for humans; the dash-suffixed variants are for hooks and scripts that want to be explicit.      |
 
 Invocation patterns for `changelog-add`:
 
@@ -192,7 +193,7 @@ file concat, header prepending, and `rm`.
 
 ### cargo-release integration
 
-For Rust stacks, `release.toml` gets a pre-release hook *and*
+For Rust stacks, `release.toml` gets a pre-release hook _and_
 must disable cargo-release's built-in changelog promotion:
 
 ```toml
@@ -203,7 +204,7 @@ pre-release-hook = ["bin/changelog", "new-version", "{{version}}"]
 pre-release-replacements = []
 ```
 
-This runs *before* cargo-release stages files, so the freshly
+This runs _before_ cargo-release stages files, so the freshly
 generated `CHANGELOG.md` and the new `CHANGELOG/<version>.md`
 land in the release commit alongside the `Cargo.toml` bump. The
 old "cargo-release parses the Unreleased section" mechanism is
@@ -310,7 +311,7 @@ rather than retroactively splitting it into per-version files:
    new format (which, at this point, is just the prelude + empty
    Unreleased + legacy blob — identical history, new structure).
 5. Rust stacks: update `release.toml` pre-release hook and clear
-   `pre-release-replacements` (see *cargo-release integration*).
+   `pre-release-replacements` (see _cargo-release integration_).
 6. Non-Rust stacks: update the release workflow's first step.
 
 No flag day. Repos migrate when their next release goes out. The

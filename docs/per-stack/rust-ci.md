@@ -18,8 +18,9 @@ top-level README for the consumer-level evidence and the
 
 `rust-ci.yml` collapses every consumer's `ci.yml` to a thin caller.
 The canonical sequence — `setup-rust` + cargo-nextest + `bin/check`
-+ (optional) release-binary build + (optional) bats e2e — runs
-identically across the fleet.
+
+- (optional) release-binary build + (optional) bats e2e — runs
+  identically across the fleet.
 
 ## Caller shape
 
@@ -28,7 +29,7 @@ identically across the fleet.
 name: CI
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
 
 permissions:
@@ -38,8 +39,8 @@ jobs:
   ci:
     uses: arthur-debert/release/.github/workflows/rust-ci.yml@v1
     with:
-      binary-name: my-cli      # optional — see below
-      bats: true               # optional — see below
+      binary-name: my-cli # optional — see below
+      bats: true # optional — see below
 ```
 
 `dodot` is the reference adopter — see
@@ -55,7 +56,7 @@ consumer migrates from a hand-rolled `ci.yml` (jobs named `check`,
 check names GitHub reports change:
 
 - before: `check`, `e2e`
-- after:  `ci / check`, `ci / e2e`
+- after: `ci / check`, `ci / e2e`
 
 If the repo's `main-branch-protection` ruleset still requires the
 OLD names, the migration PR hangs forever on "Waiting for status
@@ -76,14 +77,14 @@ If the caller's job ID isn't `ci`, adjust the prefix accordingly
 
 All inputs are optional.
 
-| Input | Default | Description |
-|---|---|---|
-| `extra-targets` | `''` | Space-separated extra rustup targets (e.g. `wasm32-wasip2` for zed-lex). Forwarded to the shared `setup-rust` composite, which re-runs `rustup target add` with this value — that command is strictly space-separated, so commas will fail. Most consumers only need a single target. |
-| `pre-test` | `''` | Path to a script run before `bin/check`. Use for grammar downloads, fixture prep, codegen. |
-| `bats` | `false` | When `true`, add a second `e2e` job that installs bats-core and calls `bin/check-e2e`. |
-| `binary-name` | `''` | When set, the check job runs `cargo build --release -p <binary-name>` (cargo `-p` selects a workspace **package**, not a bin target — see below) and uploads `<binary-name>-linux`. |
-| `runner` | `'ubuntu-latest'` | Runner label for both jobs. |
-| `timeout` | `30` | Per-job timeout (minutes). |
+| Input           | Default           | Description                                                                                                                                                                                                                                                                           |
+| --------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extra-targets` | `''`              | Space-separated extra rustup targets (e.g. `wasm32-wasip2` for zed-lex). Forwarded to the shared `setup-rust` composite, which re-runs `rustup target add` with this value — that command is strictly space-separated, so commas will fail. Most consumers only need a single target. |
+| `pre-test`      | `''`              | Path to a script run before `bin/check`. Use for grammar downloads, fixture prep, codegen.                                                                                                                                                                                            |
+| `bats`          | `false`           | When `true`, add a second `e2e` job that installs bats-core and calls `bin/check-e2e`.                                                                                                                                                                                                |
+| `binary-name`   | `''`              | When set, the check job runs `cargo build --release -p <binary-name>` (cargo `-p` selects a workspace **package**, not a bin target — see below) and uploads `<binary-name>-linux`.                                                                                                   |
+| `runner`        | `'ubuntu-latest'` | Runner label for both jobs.                                                                                                                                                                                                                                                           |
+| `timeout`       | `30`              | Per-job timeout (minutes).                                                                                                                                                                                                                                                            |
 
 ## On `binary-name` — package vs bin
 
@@ -137,13 +138,13 @@ opt-in needed.
 
 ## What was deliberately not added
 
-* **Matrix over OS / Rust channels.** PR-time check runs on one
+- **Matrix over OS / Rust channels.** PR-time check runs on one
   Linux runner; cross-platform validation happens at release time
   via `rust-cli.yml`'s matrix. Adding a check-time matrix would
   pay cost on every PR with little extra signal — keep it lean.
-* **`cargo-deny` / supply-chain checks.** Out of scope for the
+- **`cargo-deny` / supply-chain checks.** Out of scope for the
   umbrella; that's a separate Component / workflow.
-* **Coverage upload.** Same reasoning.
+- **Coverage upload.** Same reasoning.
 
 Add follow-up inputs when a real consumer needs them, not
 speculatively.

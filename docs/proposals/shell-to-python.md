@@ -12,7 +12,7 @@ pass (see "Evidence" below) found **~27–34% of that surface (~2,000–2,500
 LOC) is accidental shell complexity** — not domain logic:
 
 - **Arg-parse + help boilerplate: ~1,145 LOC (15%).** 23 scripts hand-roll the
-  *identical* `while [ $# ]` / `case "$1"` / `show_help()` machine. Shell has no
+  _identical_ `while [ $# ]` / `case "$1"` / `show_help()` machine. Shell has no
   import, so reuse is copy-paste.
 - **JSON/YAML gymnastics.** 19 scripts use `jq`, 6 `yq`, 12 `gh api`. Examples:
   `fetch-deps` unpacks a 4-field JSON object via `jq | join($'\x1f') | IFS= read`;
@@ -42,11 +42,11 @@ not inventing one.
 
 ## Classification of the surface
 
-| Bucket | What | LOC (approx) | Action |
-|---|---|---|---|
-| **A — pure logic / data-munging** | JSON/YAML/gh-API orchestration, clustering, ref/version math, templating | ~3,100 / 23 scripts | **Migrate first** — strong win (~40–50% LOC drop, big testability gain) |
-| **B — filesystem/git plumbing** | symlink materialize (`release-sync`), git porcelain, drift/verify | ~2,800 / 12 scripts | **Migrate after A** — modest LOC win, large testability win |
-| **C — GH-Actions-native glue** | `build-tauri`, `compute-tauri-matrix`, `setup-*-signing-env`, `install-*-deps` | ~600 / 10 scripts | **Leave in bash** — welded to `GITHUB_OUTPUT`/`GITHUB_ENV`, Python buys nothing |
+| Bucket                            | What                                                                           | LOC (approx)        | Action                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------ | ------------------- | ------------------------------------------------------------------------------- |
+| **A — pure logic / data-munging** | JSON/YAML/gh-API orchestration, clustering, ref/version math, templating       | ~3,100 / 23 scripts | **Migrate first** — strong win (~40–50% LOC drop, big testability gain)         |
+| **B — filesystem/git plumbing**   | symlink materialize (`release-sync`), git porcelain, drift/verify              | ~2,800 / 12 scripts | **Migrate after A** — modest LOC win, large testability win                     |
+| **C — GH-Actions-native glue**    | `build-tauri`, `compute-tauri-matrix`, `setup-*-signing-env`, `install-*-deps` | ~600 / 10 scripts   | **Leave in bash** — welded to `GITHUB_OUTPUT`/`GITHUB_ENV`, Python buys nothing |
 
 Highest-leverage single targets in Bucket A: `fetch-deps` (775) + `fetch-artifact`
 (271), `audit-repo` (468), `done-check` (421), `release-lex` (368),
@@ -61,14 +61,14 @@ primitives; domain verbs import it. Entry points stay as thin per-name shims on
 consumer contracts (`bin/release`, `bin/check-shell`, `detect-kind`, …) do not
 break.
 
-| `release_core` module | replaces | kills |
-|---|---|---|
-| `gh.py` | scattered `gh api` + `jq` | JSON munging — `rest()`/`graphql()` return parsed dicts |
-| `proc.py` | inline `subprocess`/git porcelain | trap / `set -e` / `\|\| true` defenses |
-| `cli.py` | 23 hand-rolled arg loops | ~1,145 LOC boilerplate → ~150 |
-| `yamlio.py` | `yq` / `yq \| jq` pipelines | YAML→JSON→jq gymnastics |
-| `version.py` | the vendored bash `semver-tool` | a vendored dependency, gone |
-| `manifest.py` | `detect-kind` + manifest/config parsing | duplicated heuristics |
+| `release_core` module | replaces                                | kills                                                   |
+| --------------------- | --------------------------------------- | ------------------------------------------------------- |
+| `gh.py`               | scattered `gh api` + `jq`               | JSON munging — `rest()`/`graphql()` return parsed dicts |
+| `proc.py`             | inline `subprocess`/git porcelain       | trap / `set -e` / `\|\| true` defenses                  |
+| `cli.py`              | 23 hand-rolled arg loops                | ~1,145 LOC boilerplate → ~150                           |
+| `yamlio.py`           | `yq` / `yq \| jq` pipelines             | YAML→JSON→jq gymnastics                                 |
+| `version.py`          | the vendored bash `semver-tool`         | a vendored dependency, gone                             |
+| `manifest.py`         | `detect-kind` + manifest/config parsing | duplicated heuristics                                   |
 
 The exact signatures are pinned in
 [`shell-to-python-core-contract.md`](./shell-to-python-core-contract.md) — the
@@ -81,7 +81,7 @@ shim). **The no-dependency rule buys exactly one thing: zero-install
 runnability.** Its cost: no stdlib YAML parser (the biggest residual shell tax),
 no semver, no nice HTTP/CLI libs.
 
-This is the *same* decision as "ship release as a pip-installed package via GH
+This is the _same_ decision as "ship release as a pip-installed package via GH
 releases": if there is an install step, dependencies are free and the no-dep
 rule stops paying for itself; if there is no install step, the rule is
 load-bearing. The two coherent positions:
@@ -93,7 +93,7 @@ load-bearing. The two coherent positions:
    YAML/semver/HTTP pain fully vanishes; takes on install-step + distribution +
    degradation concerns.
 
-The trap is doing *both* (pay the install cost, still ban deps).
+The trap is doing _both_ (pay the install cost, still ban deps).
 **Decision deferred to after Phase 1** — how the YAML-via-`yq` boundary actually
 feels during Bucket A is the empirical signal. Phases 0–1 stay stdlib-only and
 ride the existing zero-install shim, so they require **zero distribution change**

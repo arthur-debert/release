@@ -28,7 +28,53 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
 
-# --- 0. Pre-commit hook wiring (BOTH local and cloud) -------------------
+# --- 0. Arm the gate: ensure the lefthook toolset is installed ----------
+# THE gate (lefthook.yml) is HARD — a missing tool FAILS the commit, it does
+# not skip. So the bootstrap must guarantee the toolset in every environment
+# (the gate runs at session start, local pre-commit, and CI alike). Runs ABOVE
+# the cloud-only gate because the lint gate runs everywhere, not just in cloud.
+# Idempotent: each tool installs only when absent (no-op on a set-up machine);
+# a loud warning (never silent) surfaces an unarmed gate HERE rather than at
+# commit time. Best-effort installs — a transient failure shouldn't abort setup.
+
+_warn_unarmed() {
+  echo "warning: '$1' not installed and could not be auto-installed — the lefthook gate will FAIL until it is present. Install it, then re-run." >&2
+}
+
+# npm globals: lefthook + prettier + markdownlint. Installed before the hook
+# wiring below so `lefthook install` finds the binary.
+if ! command -v lefthook >/dev/null 2>&1 \
+  || ! command -v prettier >/dev/null 2>&1 \
+  || ! command -v markdownlint >/dev/null 2>&1; then
+  if command -v npm >/dev/null 2>&1; then
+    npm install -g lefthook prettier markdownlint-cli >/dev/null 2>&1 || true
+  fi
+fi
+command -v prettier >/dev/null 2>&1 || _warn_unarmed prettier
+command -v markdownlint >/dev/null 2>&1 || _warn_unarmed markdownlint
+
+# ruff, pinned to the CI version so local and CI never disagree on findings.
+if ! command -v ruff >/dev/null 2>&1; then
+  if command -v pip3 >/dev/null 2>&1; then
+    pip3 install --quiet 'ruff==0.15.12' >/dev/null 2>&1 || true
+  elif command -v brew >/dev/null 2>&1; then
+    brew install ruff >/dev/null 2>&1 || true
+  fi
+fi
+command -v ruff >/dev/null 2>&1 || _warn_unarmed ruff
+
+# System tools: shellcheck + actionlint (brew on macOS, apt on Linux).
+for _gate_tool in shellcheck actionlint; do
+  command -v "${_gate_tool}" >/dev/null 2>&1 && continue
+  if command -v brew >/dev/null 2>&1; then
+    brew install "${_gate_tool}" >/dev/null 2>&1 || true
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get install -y "${_gate_tool}" >/dev/null 2>&1 || true
+  fi
+  command -v "${_gate_tool}" >/dev/null 2>&1 || _warn_unarmed "${_gate_tool}"
+done
+
+# --- 0.1. Pre-commit hook wiring (BOTH local and cloud) -----------------
 # Wiring `.git/hooks/pre-commit` is per-clone state — every fresh clone
 # (and cloud snapshot) starts without it, so we wire it on every session
 # and in both contexts. Runs ABOVE the cloud-only gate because skipping

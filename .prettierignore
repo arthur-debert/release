@@ -1,0 +1,34 @@
+# Prettier ignore — the gate formats files we OWN and author. Excluded here:
+# generated, vendored, fixtures, and scratch trees (per the lint-debt three-case
+# model: don't-want-linted → gitignore/ignore; this is the prettier arm of that).
+
+# Build / dependency / scratch
+node_modules/
+.venv/
+**/.venv/
+dist/
+**/dist/
+*.egg-info/
+local/
+.claude/worktrees/
+
+# Generated changelog (produced by `changelog render`; not hand-authored)
+CHANGELOG.md
+CHANGELOG/
+**/CHANGELOG.md
+**/CHANGELOG/
+
+# Test fixtures are intentionally malformed / frozen — formatting them is noise
+tests/fixtures/
+tests/changelog-check-fixtures/
+**/tests/changelog-check-fixtures/
+
+# Vendored (carries its own provenance) — not ours to reformat
+**/share/
+
+# Skill docs are markdownlint's domain (the lint-skills gate); prettier would
+# double-handle them and churn vendored (.upstream) skills.
+skills/
+
+# Lex documents are not prettier-parseable
+*.lex

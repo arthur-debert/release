@@ -47,7 +47,7 @@ Five levels, used throughout the rest of this doc:
 - **State** — where a (Stack, Repo) combo sits against the contract.
   See next section.
 
-Mental model: **Stack × Component** says *what's available*; **Task**
+Mental model: **Stack × Component** says _what's available_; **Task**
 is the atomic implementation under `bin/`; **Flow** is what triggers
 which tasks; **State** is whether the consumer is actually using it.
 
@@ -55,19 +55,19 @@ which tasks; **State** is whether the consumer is actually using it.
 
 A (Stack, Repo) combo is in exactly one state.
 
-| State           | Criterion (all must hold) |
-|-----------------|---|
-| **planned**     | Repo identified for this Stack; no work landed yet. |
-| **implemented** | Thin-caller workflow wired AND `bin/<verb>` set synced AND every applicable verb passes **locally**. |
-| **pilot-running** | All of *implemented* AND ≥1 successful end-to-end run **on CI** through the canonical workflow for every applicable Flow (PR checks green, ≥1 release dispatched + completed, docs published if applicable). |
-| **fleet-adopted** | All of *pilot-running* AND ≥80% of eligible consumers of this Stack are themselves pilot-running; the canonical is the source of truth. |
+| State             | Criterion (all must hold)                                                                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **planned**       | Repo identified for this Stack; no work landed yet.                                                                                                                                                          |
+| **implemented**   | Thin-caller workflow wired AND `bin/<verb>` set synced AND every applicable verb passes **locally**.                                                                                                         |
+| **pilot-running** | All of _implemented_ AND ≥1 successful end-to-end run **on CI** through the canonical workflow for every applicable Flow (PR checks green, ≥1 release dispatched + completed, docs published if applicable). |
+| **fleet-adopted** | All of _pilot-running_ AND ≥80% of eligible consumers of this Stack are themselves pilot-running; the canonical is the source of truth.                                                                      |
 
-**Definition of done:** a (Stack, Repo) is *done* when it is at least
+**Definition of done:** a (Stack, Repo) is _done_ when it is at least
 **pilot-running** — i.e., every applicable verb works both locally
-(`bin/<verb>`) and on CI (canonical workflow) end-to-end. *Implemented*
-is "code is there"; only *pilot-running* is *done*.
+(`bin/<verb>`) and on CI (canonical workflow) end-to-end. _Implemented_
+is "code is there"; only _pilot-running_ is _done_.
 
-A Stack is *done at the fleet level* when it is *fleet-adopted* — the
+A Stack is _done at the fleet level_ when it is _fleet-adopted_ — the
 canonical works across ≥80% of its consumers.
 
 **Enforcement:** `bin/done-check <consumer>` (🚧 not yet built — see
@@ -82,19 +82,19 @@ matrix below is the manual proxy.
 > things.**
 
 A release workflow that exists but has never shipped a release is
-*implemented*, not done. A CI workflow that exists but hasn't actually
-gated a PR on its canonical run is *implemented*, not done. A
+_implemented_, not done. A CI workflow that exists but hasn't actually
+gated a PR on its canonical run is _implemented_, not done. A
 `bin/<verb>` that runs locally but isn't called from CI is
-*implemented*, not done.
+_implemented_, not done.
 
-Code that hasn't done its job yet is *implemented* at best — never
-*pilot-running*, never *done*. The states above codify this; this rule
+Code that hasn't done its job yet is _implemented_ at best — never
+_pilot-running_, never _done_. The states above codify this; this rule
 is the one-line shorthand.
 
 ## Why both axes matter
 
 The whole project goal is "same interface locally and on CI." A
-consumer at *implemented* — bin/check passes locally but CI doesn't
+consumer at _implemented_ — bin/check passes locally but CI doesn't
 run it — fails half the promise. Same for the inverse (CI runs
 canonical but local dev can't reproduce). Both sides have to be true,
 or we've just moved the inconsistency around.
@@ -111,24 +111,24 @@ Stack template, reusable workflow):
 2. **Sub-agent exercise.** Spawn a sub-agent with a prompt to drive a
    real end-to-end task using the new code — open a PR, dispatch a
    release, run e2e, whatever the work claims to do. The sub-agent is
-   a fresh-eyes proxy for *"does this actually work?"*; it can use
+   a fresh-eyes proxy for _"does this actually work?"_; it can use
    stub repos / fixtures so the exercise doesn't mutate production.
 3. **Iterate.** Tweak the canonical based on what the sub-agent
    surfaces. Re-spawn until the sub-agent reports success.
 4. **GH validation.** Trigger the same task on GitHub end-to-end (real
    workflow run, real release dispatch, real CI on a real consumer's
    PR). **The work isn't done until CI does it.** A consumer becomes
-   *pilot-running* here, not earlier.
+   _pilot-running_ here, not earlier.
 5. **Adoption.** Propagate to remaining consumers one at a time. Each
    adoption is its own PR, its own verification on its repo's CI. Not
-   a fleet-wide fan-out. A Stack becomes *fleet-adopted* when ≥80% of
+   a fleet-wide fan-out. A Stack becomes _fleet-adopted_ when ≥80% of
    its consumers clear step 4.
 
-A workstream that stops at step 1 or 2 is *implemented*, not done. A
+A workstream that stops at step 1 or 2 is _implemented_, not done. A
 workstream that stops at step 3 is implemented + locally-verified;
 still not done. Only after step 4 is a (Stack, Repo) pair
-*pilot-running*; only after step 5 across the fleet is the Stack
-*fleet-adopted*.
+_pilot-running_; only after step 5 across the fleet is the Stack
+_fleet-adopted_.
 
 ## Capability matrix — Stack × Component
 
@@ -137,20 +137,20 @@ the Stack pulls in. `✅` built and exercised end-to-end; `🚧`
 scaffolded but not exercised; `📋` planned; `—` not applicable.
 
 | Stack         | gh-release | changelog | version-bump | macos-codesign | precommit-gate | crate-publish | npm-publish | pypi-publish | brew-tap-push | bats | wasm-pack | mkdocs | commons-lint |
-|---------------|:----------:|:---------:|:------------:|:--------------:|:--------------:|:-------------:|:-----------:|:------------:|:-------------:|:----:|:---------:|:------:|:------------:|
-| rust-cli      | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅¹ | — | ✅ | ✅ | ✅¹ | ✅ | ✅ |
-| rust-lib      | ✅ | ✅ | ✅ | — | ✅ | ✅ | — | — | — | — | — | 🚧 | ✅ |
-| go-cli        | ✅ | ✅ | —⁴ | — | ✅ | — | — | — | ✅⁵ | 🚧 | — | 🚧 | 📋 |
-| electron-app  | ✅ | ✅ | ✅ | ✅³ | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
-| tauri-app     | ✅ | ✅ | ✅ | ✅³ | ✅ | — | — | — | — | — | — | 🚧 | 📋 |
-| vscode-ext    | ✅ | ✅ | ✅ | — | ✅ | — | ✅² | — | — | — | — | 🚧 | 📋 |
-| nvim-plugin   | ✅ | ✅ | ✅ | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
-| tree-sitter   | ✅ | ✅ | ✅ | — | ✅ | — | ✅ | — | — | — | — | 🚧 | 📋 |
-| zed-extension | 🚧 | 🚧 | 🚧 | — | ✅ | — | — | — | — | — | 🚧 | — | 📋 |
-| python-pkg    | ✅ | ✅ | ✅ | — | ✅ | — | — | ✅ | — | — | — | 🚧 | 📋 |
-| gh-action     | ✅ | ✅ | — | — | ✅ | — | — | — | — | 🚧 | — | 🚧 | 📋 |
-| brew-tap      | — | — | — | — | ✅ | — | — | — | (is tap) | 🚧 | — | 🚧 | 📋 |
-| docs-site     | — | — | — | — | ✅ | — | — | — | — | — | — | ✅⁶ | ✅ |
+| ------------- | :--------: | :-------: | :----------: | :------------: | :------------: | :-----------: | :---------: | :----------: | :-----------: | :--: | :-------: | :----: | :----------: |
+| rust-cli      |     ✅     |    ✅     |      ✅      |       —        |       ✅       |      ✅       |     ✅¹     |      —       |      ✅       |  ✅  |    ✅¹    |   ✅   |      ✅      |
+| rust-lib      |     ✅     |    ✅     |      ✅      |       —        |       ✅       |      ✅       |      —      |      —       |       —       |  —   |     —     |   🚧   |      ✅      |
+| go-cli        |     ✅     |    ✅     |      —⁴      |       —        |       ✅       |       —       |      —      |      —       |      ✅⁵      |  🚧  |     —     |   🚧   |      📋      |
+| electron-app  |     ✅     |    ✅     |      ✅      |      ✅³       |       ✅       |       —       |     ✅      |      —       |       —       |  —   |     —     |   🚧   |      📋      |
+| tauri-app     |     ✅     |    ✅     |      ✅      |      ✅³       |       ✅       |       —       |      —      |      —       |       —       |  —   |     —     |   🚧   |      📋      |
+| vscode-ext    |     ✅     |    ✅     |      ✅      |       —        |       ✅       |       —       |     ✅²     |      —       |       —       |  —   |     —     |   🚧   |      📋      |
+| nvim-plugin   |     ✅     |    ✅     |      ✅      |       —        |       ✅       |       —       |      —      |      —       |       —       |  🚧  |     —     |   🚧   |      📋      |
+| tree-sitter   |     ✅     |    ✅     |      ✅      |       —        |       ✅       |       —       |     ✅      |      —       |       —       |  —   |     —     |   🚧   |      📋      |
+| zed-extension |     🚧     |    🚧     |      🚧      |       —        |       ✅       |       —       |      —      |      —       |       —       |  —   |    🚧     |   —    |      📋      |
+| python-pkg    |     ✅     |    ✅     |      ✅      |       —        |       ✅       |       —       |      —      |      ✅      |       —       |  —   |     —     |   🚧   |      📋      |
+| gh-action     |     ✅     |    ✅     |      —       |       —        |       ✅       |       —       |      —      |      —       |       —       |  🚧  |     —     |   🚧   |      📋      |
+| brew-tap      |     —      |     —     |      —       |       —        |       ✅       |       —       |      —      |      —       |   (is tap)    |  🚧  |     —     |   🚧   |      📋      |
+| docs-site     |     —      |     —     |      —       |       —        |       ✅       |       —       |      —      |      —       |       —       |  —   |     —     |  ✅⁶   |      ✅      |
 
 ¹ Opt-in `wasm-packages` slot (multiline list as of #187) — Rust
 workspace with one or more wasm-bindgen members. Each member is
@@ -185,8 +185,9 @@ path. Token regen + Open VSX support follow-up pending.
   accepted DMGs with stapled notarization tickets.
 
 Closed: [#167](https://github.com/arthur-debert/release/issues/167)
-+ [#168](https://github.com/arthur-debert/release/issues/168).
-Tracked at [#122](https://github.com/arthur-debert/release/issues/122).
+
+- [#168](https://github.com/arthur-debert/release/issues/168).
+  Tracked at [#122](https://github.com/arthur-debert/release/issues/122).
 
 ⁴ **go-cli — version-bump and tag-driven distribution.** Go modules
 ship from Git tags directly; the `go release` job creating a tag IS
@@ -211,25 +212,25 @@ Capability layers `bin/check-docs` on top. Plugin-agnostic, so the
 ## Adoption matrix — Stack × Repo
 
 Where each consumer actually sits against the **States contract**.
-Honest about what's verified vs claimed: a consumer is *pilot-running*
+Honest about what's verified vs claimed: a consumer is _pilot-running_
 only if a real release / real CI run through the canonical can be
-pointed at. Everything else is *implemented* at best, regardless of
+pointed at. Everything else is _implemented_ at best, regardless of
 how complete the local files look.
 
-| Stack         | Repos (state) |
-|---------------|---|
+| Stack         | Repos (state)                                                                                                                                                                                                                                                                                                                  |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | rust-cli      | **fleet-adopted (7/7)**: `arthur-debert/padz` v1.8.2, `arthur-debert/dodot` v5.0.0 (2026-05-15), `lex-fmt/lex` v0.14.1, `arthur-debert/rustloc` v0.16.0, `arthur-debert/simple-gal` v0.20.4, `arthur-debert/burgertocow` v0.4.0, `arthur-debert/phos-core` v0.4.1 (multi-wasm, 2026-05-23) — all shipped via `rust-cli.yml@v1` |
-| rust-lib      | **fleet-adopted (2/2)**: `arthur-debert/clapfig` v0.21.4 + `arthur-debert/standout` v7.6.3 (first canonical release, 8 workspace crates, 2026-05-23) |
-| electron-app  | **fleet-adopted (2/2)**: `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both via `electron-app.yml@v1` + both gating on canonical `e2e: true` in `electron-ci.yml@v1` |
-| tauri-app     | **fleet-adopted (1/1)**: `phos-app` v0.1.7 (2026-05-19) + v0.1.8 + v0.1.9 (2026-05-23) via `tauri-app.yml@v1`, gating on canonical `e2e: true` + per-platform `app-bin/smoke-hook.sh` |
-| vscode-ext    | **fleet-adopted (1/1)** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX is downstream config — see ᵇ and [#189](https://github.com/arthur-debert/release/issues/189) |
-| nvim-plugin   | **fleet-adopted (1/1)**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107)) |
-| tree-sitter   | **fleet-adopted (1/1)**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet) |
-| zed-extension | **fleet-adopted (1/1)**: `lex-fmt/zed-lex` v0.1.1 (2026-05-23) via `zed-extension.yml@v1` — canonical authored same day in [#190](https://github.com/arthur-debert/release/pull/190); validates both `extension.toml` and `Cargo.toml` are in sync at the tag |
-| go-cli        | **fleet-adopted (1/1)**: `arthur-debert/supage` `0.0.1` + `0.0.2` via `go-cli.yml@v1` incl. brew-private-repo |
-| gh-action     | **fleet-adopted (1/1 eligible)**: `arthur-debert/release` (dogfood) v1.7.1 → v1.7.5 (2026-05-19) via `gh-action.yml@v1`; `simple-gal-action` excluded (commented out in `managed-repos.yaml`; minimal active development) |
-| brew-tap      | **out-of-scope**: `homebrew-tools` is a passive registry (formulas pushed by rust-cli/go-cli `push-brew-tap`); no release semantics. CI canonicalization deferred to [#107](https://github.com/arthur-debert/release/issues/107) |
-| python-pkg    | (no managed-portfolio repos yet) |
+| rust-lib      | **fleet-adopted (2/2)**: `arthur-debert/clapfig` v0.21.4 + `arthur-debert/standout` v7.6.3 (first canonical release, 8 workspace crates, 2026-05-23)                                                                                                                                                                           |
+| electron-app  | **fleet-adopted (2/2)**: `lex-fmt/lexed` v0.10.6 (2026-05-22) + `arthur-debert/simple-gal-ui` v0.1.3 (2026-05-23) both via `electron-app.yml@v1` + both gating on canonical `e2e: true` in `electron-ci.yml@v1`                                                                                                                |
+| tauri-app     | **fleet-adopted (1/1)**: `phos-app` v0.1.7 (2026-05-19) + v0.1.8 + v0.1.9 (2026-05-23) via `tauri-app.yml@v1`, gating on canonical `e2e: true` + per-platform `app-bin/smoke-hook.sh`                                                                                                                                          |
+| vscode-ext    | **fleet-adopted (1/1)** for Marketplace half: `lex-fmt/vscode` v0.10.8 (2026-05-21) via `vscode-ext.yml@v1`. Open VSX is downstream config — see ᵇ and [#189](https://github.com/arthur-debert/release/issues/189)                                                                                                             |
+| nvim-plugin   | **fleet-adopted (1/1)**: `lex-fmt/nvim` v0.10.4 (2026-05-21) via `nvim-plugin.yml@v1`. CI is bespoke (no `nvim-plugin-ci.yml` canonical yet — see [#107](https://github.com/arthur-debert/release/issues/107))                                                                                                                 |
+| tree-sitter   | **fleet-adopted (1/1)**: `lex-fmt/tree-sitter-lex` v0.11.0 (2026-05-21) via `tree-sitter.yml@v1`. CI bespoke (no `tree-sitter-ci.yml` canonical yet)                                                                                                                                                                           |
+| zed-extension | **fleet-adopted (1/1)**: `lex-fmt/zed-lex` v0.1.1 (2026-05-23) via `zed-extension.yml@v1` — canonical authored same day in [#190](https://github.com/arthur-debert/release/pull/190); validates both `extension.toml` and `Cargo.toml` are in sync at the tag                                                                  |
+| go-cli        | **fleet-adopted (1/1)**: `arthur-debert/supage` `0.0.1` + `0.0.2` via `go-cli.yml@v1` incl. brew-private-repo                                                                                                                                                                                                                  |
+| gh-action     | **fleet-adopted (1/1 eligible)**: `arthur-debert/release` (dogfood) v1.7.1 → v1.7.5 (2026-05-19) via `gh-action.yml@v1`; `simple-gal-action` excluded (commented out in `managed-repos.yaml`; minimal active development)                                                                                                      |
+| brew-tap      | **out-of-scope**: `homebrew-tools` is a passive registry (formulas pushed by rust-cli/go-cli `push-brew-tap`); no release semantics. CI canonicalization deferred to [#107](https://github.com/arthur-debert/release/issues/107)                                                                                               |
+| python-pkg    | (no managed-portfolio repos yet)                                                                                                                                                                                                                                                                                               |
 
 ᵇ Pilot-running for the Marketplace half — `lex-fmt/vscode` v0.10.7 +
 v0.10.8 were dispatched through `vscode-ext.yml@v1` and shipped to VS
@@ -255,30 +256,30 @@ plus single-repo projects. Three rows below (`homebrew-tools`,
 `release`, `simple-gal-action`) are listed for reference but are
 currently out of scope — commented out in the manifest.
 
-| Project | Repo | Local path |
-|---|---|---|
-| phos | `arthur-debert/phos-app` | `~/h/phos/phos-app` |
-| phos | `arthur-debert/phos-core` | `~/h/phos/phos-core` |
-| burgertocow | `arthur-debert/burgertocow` | `~/h/burgertocow` |
-| clapfig | `arthur-debert/clapfig` | `~/h/clapfig` |
-| dodot | `arthur-debert/dodot` | `~/h/dodot` |
-| homebrew-tools _(out of scope)_ | `arthur-debert/homebrew-tools` | `~/h/homebrew-tools` |
-| lex | `lex-fmt/comms` | `~/h/lex-fmt/comms` |
-| lex | `lex-fmt/lex` | `~/h/lex-fmt/lex` |
-| lex | `lex-fmt/lexed` | `~/h/lex-fmt/lexed` |
-| lex | `lex-fmt/nvim` | `~/h/lex-fmt/nvim` |
-| lex | `lex-fmt/tree-sitter-lex` | `~/h/lex-fmt/tree-sitter-lex` |
-| lex | `lex-fmt/vscode` | `~/h/lex-fmt/vscode` |
-| lex | `lex-fmt/zed-lex` | `~/h/lex-fmt/zed-lex` |
-| padz | `arthur-debert/padz` | `~/h/padz` |
-| release _(out of scope)_ | `arthur-debert/release` | `~/h/release` |
-| rustloc | `arthur-debert/rustloc` | `~/h/rustloc` |
-| simple-gal | `arthur-debert/simple-gal` | `~/h/simple-gal/simple-gal` |
-| simple-gal _(out of scope)_ | `arthur-debert/simple-gal-action` | `~/h/simple-gal/simple-gal-action` |
-| simple-gal | `arthur-debert/simple-gal-ui` | `~/h/simple-gal/simple-gal-ui` |
-| standout | `arthur-debert/standout` | `~/h/standout` |
-| supage | `arthur-debert/supage` | `~/h/supage` |
-| wave-term | `arthur-debert/wave-term` | `~/h/wave-term` |
+| Project                         | Repo                              | Local path                         |
+| ------------------------------- | --------------------------------- | ---------------------------------- |
+| phos                            | `arthur-debert/phos-app`          | `~/h/phos/phos-app`                |
+| phos                            | `arthur-debert/phos-core`         | `~/h/phos/phos-core`               |
+| burgertocow                     | `arthur-debert/burgertocow`       | `~/h/burgertocow`                  |
+| clapfig                         | `arthur-debert/clapfig`           | `~/h/clapfig`                      |
+| dodot                           | `arthur-debert/dodot`             | `~/h/dodot`                        |
+| homebrew-tools _(out of scope)_ | `arthur-debert/homebrew-tools`    | `~/h/homebrew-tools`               |
+| lex                             | `lex-fmt/comms`                   | `~/h/lex-fmt/comms`                |
+| lex                             | `lex-fmt/lex`                     | `~/h/lex-fmt/lex`                  |
+| lex                             | `lex-fmt/lexed`                   | `~/h/lex-fmt/lexed`                |
+| lex                             | `lex-fmt/nvim`                    | `~/h/lex-fmt/nvim`                 |
+| lex                             | `lex-fmt/tree-sitter-lex`         | `~/h/lex-fmt/tree-sitter-lex`      |
+| lex                             | `lex-fmt/vscode`                  | `~/h/lex-fmt/vscode`               |
+| lex                             | `lex-fmt/zed-lex`                 | `~/h/lex-fmt/zed-lex`              |
+| padz                            | `arthur-debert/padz`              | `~/h/padz`                         |
+| release _(out of scope)_        | `arthur-debert/release`           | `~/h/release`                      |
+| rustloc                         | `arthur-debert/rustloc`           | `~/h/rustloc`                      |
+| simple-gal                      | `arthur-debert/simple-gal`        | `~/h/simple-gal/simple-gal`        |
+| simple-gal _(out of scope)_     | `arthur-debert/simple-gal-action` | `~/h/simple-gal/simple-gal-action` |
+| simple-gal                      | `arthur-debert/simple-gal-ui`     | `~/h/simple-gal/simple-gal-ui`     |
+| standout                        | `arthur-debert/standout`          | `~/h/standout`                     |
+| supage                          | `arthur-debert/supage`            | `~/h/supage`                       |
+| wave-term                       | `arthur-debert/wave-term`         | `~/h/wave-term`                    |
 
 Repos NOT in this list are out of scope. `managed-repos.yaml` is the
 single source of truth — there is no auto-discovery (ruleset/gh-api
@@ -312,12 +313,12 @@ Same baseline regardless of Stack:
 
 ### Dependabot policy
 
-| Sub-role | Where enabled |
-|---|---|
-| Dependabot **security** updates | every onboarded repo (API toggle) |
-| GitHub Actions **version** freshness | only `release/` and other CI-holding repos |
-| **Application dep** freshness (npm/cargo/...) | disabled, deliberately |
-| **Security → patch release** glue | planned per-Stack |
+| Sub-role                                      | Where enabled                              |
+| --------------------------------------------- | ------------------------------------------ |
+| Dependabot **security** updates               | every onboarded repo (API toggle)          |
+| GitHub Actions **version** freshness          | only `release/` and other CI-holding repos |
+| **Application dep** freshness (npm/cargo/...) | disabled, deliberately                     |
+| **Security → patch release** glue             | planned per-Stack                          |
 
 Freshness mode at portfolio scale generates dozens of no-op PRs per
 day. Major-version sweeps are evaluation work — picked up deliberately,
@@ -409,7 +410,7 @@ Every onboarded repo follows the same review-and-merge flow.
    comments and produces one unified fix.
 4. Agent combines feedback, decides what to address and what to push
    back on (see `skills/pr-review-respond`).
-5. For each comment: reply with fix *or* pushback reason, then resolve
+5. For each comment: reply with fix _or_ pushback reason, then resolve
    the thread. Unresolved threads = something is open.
 6. CI green + threads resolved → PR is mergeable.
 7. **Human reviews the final state and merges.** The agent does not
@@ -490,9 +491,9 @@ cross-compile. Order:
 
 ## Versioning
 
-| Bump | Trigger |
-|---|---|
-| PATCH (`v1.2.3` → `v1.2.4`) | bug fix, no input changes |
+| Bump                        | Trigger                                                       |
+| --------------------------- | ------------------------------------------------------------- |
+| PATCH (`v1.2.3` → `v1.2.4`) | bug fix, no input changes                                     |
 | MINOR (`v1.2.x` → `v1.3.0`) | new optional input, new opt-in feature, new category workflow |
 | MAJOR (`v1.x.x` → `v2.0.0`) | required-input rename, default behavior change, removed input |
 

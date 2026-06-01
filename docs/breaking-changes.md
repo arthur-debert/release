@@ -58,6 +58,7 @@ equivalent gate shell before its `git commit`. The gate:
    configured.
 
 Coverage (all 6 bot-committing prepare steps):
+
 - `.github/actions/prepare-release` (rust-cli, rust-lib)
 - `.github/actions/prepare-release-npm` (electron-app, vscode-ext, tree-sitter)
 - `.github/actions/prepare-release-python` (python-pkg)
@@ -83,6 +84,7 @@ refactor to a single `uses:` call.
 **Verified locally** against `/tmp/phos-app` (real
 arthur-debert/phos-app clone): simulated jq bump, ran the
 inlined gate snippet verbatim, observed:
+
 - Prettier reformatted both bumped JSON files with consumer's
   tab style.
 - Lefthook's `stage_fixed: true` auto-restaged the fixes.
@@ -195,15 +197,15 @@ for Tauri 2.x desktop apps. Pilot consumer:
 - Cross-platform `tauri build` matrix (macos-latest, ubuntu-
   latest, windows-latest); each opt-out-able via boolean inputs.
 - Three-way version sync — `package.json` (jq), `src-tauri/
-  Cargo.toml` `[package].version` (awk, same pattern as
+Cargo.toml` `[package].version` (awk, same pattern as
   prepare-release-python), `src-tauri/tauri.conf.json` (jq;
   optional field).
 - Optional `prep-script` input for consumer-specific bumps
   (phos-app's `deps.json` upstream pin; future
   Tauri apps with submodules, codegen, additional configs).
 - macOS code-signing via Tauri's canonical `APPLE_CERTIFICATE`
-  + `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`
-  (different bindings from electron-builder's `CSC_LINK`).
+  - `APPLE_CERTIFICATE_PASSWORD` + `APPLE_SIGNING_IDENTITY`
+    (different bindings from electron-builder's `CSC_LINK`).
 - Optional notarization via `APPLE_ID` + `APPLE_PASSWORD` +
   `APPLE_TEAM_ID` (gated by `notarize` input + secret presence).
 - Preflight job validates all required Apple secrets BEFORE
@@ -220,13 +222,13 @@ for Tauri 2.x desktop apps. Pilot consumer:
 - Auto-detects npm / pnpm / yarn via lockfile presence; pnpm
   wired via pnpm/action-setup@v4 BEFORE setup-node (order
   matters — setup-node's `cache: 'pnpm'` invokes `pnpm store
-  path` at setup time).
+path` at setup time).
 
 ### Dual-mode design (documented contract)
 
 - **Mode A** — Standalone. Workflow handles version bump + tag
-  + push + build + release. Fired via `gh workflow run
-  release.yml -f version=X.Y.Z`.
+  - push + build + release. Fired via `gh workflow run
+release.yml -f version=X.Y.Z`.
 - **Mode B** — Layer 0 + workflow (lex-fmt cascade pattern). A
   Layer 0 primitive (`scripts/release/update-release`) bumps
   consumer-specific files + tags + pushes locally; workflow
@@ -273,6 +275,7 @@ for tree-sitter grammar repos. Pilot consumer:
 `lex-fmt/tree-sitter-lex`.
 
 Pipeline:
+
 - `preflight` validates `NPM_TOKEN` if `publish-npm=true`.
 - `corpus-test` (gated by `run-corpus-tests`, default true) runs
   `tree-sitter generate` + `tree-sitter test` BEFORE `prepare`.
@@ -353,6 +356,7 @@ composite GitHub Actions and reusable workflows housed in the same
 repo. The canonical consumer is `arthur-debert/release` itself.
 
 Jobs:
+
 - `prepare` — validate semver, sanity-check `action.yml` exists,
   inline awk-based changelog roll (no need to vendor
   `roll-changelog.sh` in caller repos), commit + tag + push.
@@ -367,6 +371,7 @@ The dist channel for this stack IS the floating-major branch
 via a one-time repo-settings checkbox; no publish API to call.
 
 Out of scope (deferred until first consumer needs it):
+
 - JS-action `dist/` build step + `package.json` version bump.
   Pure-composite actions have no build, no manifest.
 
@@ -537,8 +542,8 @@ without `wasm-package` see byte-identical behavior.
 1. Add three inputs to `release.yml`'s `with:` block:
    ```yaml
    wasm-package: <member>
-   wasm-npm-scope: <scope>      # if scoped publish
-   wasm-pack-target: bundler    # or web/nodejs/no-modules
+   wasm-npm-scope: <scope> # if scoped publish
+   wasm-pack-target: bundler # or web/nodejs/no-modules
    ```
 2. Add `NPM_TOKEN` to the `secrets:` block.
 3. Delete `.github/workflows/release-wasm.yml`.

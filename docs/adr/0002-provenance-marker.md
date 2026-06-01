@@ -12,8 +12,8 @@ propagate via broken-symlink cleanup, so no bookkeeping is needed.
 
 But there is a separate question ADR-0001 left unanswerable from the consumer
 alone: **which release revision generated this `.release/`?** Without it, a
-drift check (did the consumer hand-edit a managed file?) cannot tell *drift*
-from *staleness*. If it compares the consumer against a moving ref like `v1`
+drift check (did the consumer hand-edit a managed file?) cannot tell _drift_
+from _staleness_. If it compares the consumer against a moving ref like `v1`
 or `main`, every consumer that simply hasn't re-synced since canonical moved
 ahead looks "dirty" — drowning the real signal (an actually-edited managed
 file) in staleness noise. This is not hypothetical: `release-sync` already
@@ -39,7 +39,7 @@ canonical it is; only a genuinely-edited managed file shows up.
 The distinction is the whole point, so it is worth stating plainly:
 
 - The rejected `.release-sync-state.yaml` was **operational** state: a manifest
-  of what had been synced, which sync *read to decide what to remove*. It could
+  of what had been synced, which sync _read to decide what to remove_. It could
   desync from reality (shelved repos, hand edits) and corrupt those decisions.
 - The provenance marker is **informational**: sync never reads it to decide
   anything. It is rewritten wholesale on every sync, exactly like every other

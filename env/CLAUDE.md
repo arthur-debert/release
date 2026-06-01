@@ -13,7 +13,7 @@ The `gh` CLI is installed and authenticated via `GH_TOKEN` (a PAT scoped
 to the related-repo group). Use it for:
 
 - Cross-repo issue creation, comments, PR reads/writes (the relay
-  pattern across arthur-debert/* and lex-fmt/* repos)
+  pattern across arthur-debert/_ and lex-fmt/_ repos)
 - Enumerating PR review thread node IDs (`PRRT_*`) for
   `resolveReviewThread` — the GitHub MCP server's `pull_request_read`
   drops thread IDs from its response (bug:
@@ -36,7 +36,7 @@ These are the rules of the road in Claude Code on the web that don't apply to lo
 
 The cloud orchestrator scopes git-push auth to your session's assigned branch (named `claude/<task>-XXXXX`), so you usually **can't push fixups directly to the existing PR's feature branch**. Two patterns:
 
-1. **Stacked sub-PR (default in cloud).** Make your changes, push to your session branch, open a sub-PR targeting the *original PR's feature branch* (not main). Squash-merge the sub-PR into the feature branch; the original PR picks up the new commits automatically. This is the canonical cloud pattern when the agent can't push to the existing branch.
+1. **Stacked sub-PR (default in cloud).** Make your changes, push to your session branch, open a sub-PR targeting the _original PR's feature branch_ (not main). Squash-merge the sub-PR into the feature branch; the original PR picks up the new commits automatically. This is the canonical cloud pattern when the agent can't push to the existing branch.
 2. **`/teleport` the session local.** If you need to push directly to the original branch (e.g. the stacked-PR overhead isn't worth it for a one-line fix), pull the cloud session down to local Claude Code via `/teleport`, push there, and the local push doesn't go through the cloud orchestrator's branch restriction.
 
 The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR description so the human reviewer doesn't think it's a duplicate.
@@ -122,7 +122,7 @@ Pre-installed by the env setup script — don't reinstall:
   pulls pinned binaries / source trees from upstream GH releases.
   `bin/setup-dev-env.sh` in consumers that depend on cross-repo
   artifacts should call this rather than hand-rolling a `gh release
-  download` block: `fetch-artifact lexd-lsp` is one line; the inline
+download` block: `fetch-artifact lexd-lsp` is one line; the inline
   version is ~30.
 - **Multi-repo agent bootstrap:** `clone-lex-stack` (installed at
   `/usr/local/bin/clone-lex-stack`). Clones sibling lex-fmt repos into

@@ -9,7 +9,13 @@
     "statusCheckRollup": []
   },
   "reviews": [
-    { "id": 7401, "user": { "login": "Copilot" }, "state": "APPROVED", "commit_id": "f00d05", "body": "" }
+    {
+      "id": 7401,
+      "user": { "login": "Copilot" },
+      "state": "APPROVED",
+      "commit_id": "f00d05",
+      "body": ""
+    }
   ],
   "threads": [],
   "reactions": [],

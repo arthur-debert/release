@@ -28,7 +28,7 @@ the `RepositoryRole 5` bypass. Workflows that consume the PAT push successfully.
    https://github.com/settings/tokens/new?scopes=repo&description=release-bot
    ```
 
-   Set expiry to whatever you're comfortable rotating. Click *Generate*, copy
+   Set expiry to whatever you're comfortable rotating. Click _Generate_, copy
    the token.
 
 2. Propagate it as `RELEASE_TOKEN` to every onboarded repo:
