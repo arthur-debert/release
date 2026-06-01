@@ -74,6 +74,13 @@ import time
 
 from .. import gh, proc
 
+# `diff-since-release` exit-code contract (see templates/<kind>/bin/diff-since-release):
+#   0   — success; stdout has the `Changes since <tag>:` / `---` header + log
+#   1   — no final release tags exist yet (benign: first release is human-driven)
+#   >1  — genuine failure (git error, corrupt repo, etc.; surfaces under set -e,
+#         e.g. 128) — MUST be surfaced, never masked as "nothing to release".
+NO_TAGS_RC = 1
+
 # Walk order (dependency-respecting). Each repo is included only if its path
 # was supplied via flag.
 ORDER = ("comms", "lex", "tree-sitter", "vscode", "nvim", "lexed")
@@ -124,9 +131,10 @@ def has_releasable_commits(diff_output: str, rc: int) -> bool:
     `diff-since-release` prints a two-line header (`Changes since <tag>:` then
     `---`) followed by `git log --oneline <tag>..HEAD`. When nothing is new the
     log section is empty, so "releasable" = at least one line AFTER the `---`
-    separator. rc != 0 means no release tags exist yet (the `exit 1` path); we
-    treat that as "no decision possible / nothing to release" so the
-    orchestrator skips rather than guesses a first version.
+    separator. A non-zero rc is never releasable; the caller is responsible for
+    distinguishing the benign no-tags exit (``NO_TAGS_RC``) from a genuine
+    failure (rc > 1) BEFORE relying on this — see ``_release_one`` /
+    ``_status_one``. We never guess a first version, so no-tags = not releasable.
     """
     if rc != 0:
         return False
@@ -153,13 +161,18 @@ def count_commits(diff_output: str) -> int:
 
 def render_status_line(key: str, releasable: bool, rc: int, count: int) -> str:
     """Render one status-mode line.
-      releasable      -> '⚠ would release: N commit(s) since last release'
-      not, rc 0       -> '✓ up to date (no commits since last release)'
-      rc != 0         -> '✗ no release tags yet (diff-since-release exited <rc>)'
+      releasable        -> '⚠ would release: N commit(s) since last release'
+      not, rc 0         -> '✓ up to date (no commits since last release)'
+      rc == NO_TAGS_RC  -> '✗ no release tags yet (diff-since-release exited 1)'
+      rc > 1            -> '✗ diff-since-release FAILED (exited <rc>)'
+    Only ``NO_TAGS_RC`` means "no tags yet"; any other non-zero rc is a genuine
+    failure (git error, corrupt repo) and must not be reported as "no tags".
     The label is left-padded to 18 cols for column alignment."""
     label = f"{key:<18}"
     if rc != 0:
-        return f"{label} ✗ no release tags yet (diff-since-release exited {rc})"
+        if rc == NO_TAGS_RC:
+            return f"{label} ✗ no release tags yet (diff-since-release exited {rc})"
+        return f"{label} ✗ diff-since-release FAILED (exited {rc})"
     if releasable:
         return f"{label} ⚠ would release: {count} commit(s) since last release"
     return f"{label} ✓ up to date (no commits since last release)"
@@ -373,8 +386,18 @@ def _release_one(key: str, cfg: dict) -> int:
 
     # should-release decision: diff-since-release has commit lines?
     res = proc.run(["./bin/diff-since-release"], check=False)
+    # A non-zero rc other than NO_TAGS_RC is a genuine failure (git error,
+    # corrupt repo — surfaces as 128 under the script's `set -e`). NEVER mask
+    # it as "nothing to release": a silent skip here stalls the whole cascade.
+    if res.returncode not in (0, NO_TAGS_RC):
+        print(
+            f"  ✗ diff-since-release FAILED for {key} (exit {res.returncode}); aborting\n"
+            f"    {res.stderr.strip()}",
+            file=sys.stderr,
+        )
+        return res.returncode
     if not has_releasable_commits(res.stdout, res.returncode):
-        if res.returncode != 0:
+        if res.returncode == NO_TAGS_RC:
             print(f"  ↳ no release tags yet; skipping {key}")
         else:
             print(f"  ↳ no new commits since latest release tag; skipping {key}")
@@ -446,6 +469,10 @@ def _status_one(key: str, cfg: dict) -> None:
         releasable = has_releasable_commits(res.stdout, res.returncode)
         count = count_commits(res.stdout)
         print(render_status_line(key, releasable, res.returncode, count))
+        # A non-zero rc other than NO_TAGS_RC is a genuine failure — echo its
+        # stderr so an operator scanning --status output doesn't miss the cause.
+        if res.returncode not in (0, NO_TAGS_RC) and res.stderr.strip():
+            print(f"    {res.stderr.strip()}", file=sys.stderr)
     finally:
         os.chdir(saved)
 

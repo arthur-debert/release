@@ -175,8 +175,17 @@ def test_status_line_up_to_date():
 
 
 def test_status_line_no_tags():
-    line = rlx.render_status_line("vscode", False, 1, 0)
+    # rc == NO_TAGS_RC (1) is the benign "no release tags yet" case.
+    line = rlx.render_status_line("vscode", False, rlx.NO_TAGS_RC, 0)
     assert line == "vscode             ✗ no release tags yet (diff-since-release exited 1)"
+
+
+def test_status_line_genuine_error_is_not_no_tags():
+    # rc > 1 is a real failure (e.g. git error 128) — it must NOT be rendered as
+    # "no release tags yet"; that would mask a real problem from an operator.
+    line = rlx.render_status_line("nvim", False, 128, 0)
+    assert "no release tags yet" not in line
+    assert line == "nvim               ✗ diff-since-release FAILED (exited 128)"
 
 
 # --------------------------------------------------------------------------
@@ -288,3 +297,120 @@ def test_validate_status_mode_only_needs_diff_tool(tmp_path):
         "repos": {"comms": str(tmp_path)},
     }
     assert rlx._validate(cfg) is None
+
+
+# --------------------------------------------------------------------------
+# _release_one — diff-since-release exit-code routing (the should-release gate)
+#
+# We mock the proc layer so no real git/network/release ever runs. `_run`
+# (git fetch/checkout/pull) and os.chdir are stubbed; only the
+# diff-since-release result drives the branch under test.
+# --------------------------------------------------------------------------
+
+
+class _Res:
+    """Stand-in for subprocess.CompletedProcess (the proc.run shape we use)."""
+
+    def __init__(self, returncode: int, stdout: str = "", stderr: str = ""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _patch_release_one_env(monkeypatch, diff_res):
+    """Neutralize all side effects of _release_one except the diff decision.
+
+    `proc.run` returns `diff_res` for ./bin/diff-since-release and a benign 0
+    for anything else (e.g. the best-effort git fetch). `_run` and os.chdir are
+    no-ops; os.path.isfile(.gitmodules) is False; ./bin/release is never reached
+    in these tests because the decision short-circuits first.
+    """
+
+    def fake_proc_run(cmd, **kw):
+        if cmd and cmd[0] == "./bin/diff-since-release":
+            return diff_res
+        return _Res(0)
+
+    monkeypatch.setattr(rlx.proc, "run", fake_proc_run)
+    monkeypatch.setattr(rlx, "_run", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os.path, "isfile", lambda *a, **k: False)
+
+
+_CFG = {"dry_run": False, "bump_kind": "patch", "repos": {"comms": "/tmp/x"}}
+
+
+def test_release_one_no_tags_skips_cleanly(monkeypatch, capsys):
+    # (a) NO_TAGS_RC -> benign skip, returns 0, says "no release tags".
+    _patch_release_one_env(
+        monkeypatch,
+        _Res(rlx.NO_TAGS_RC, stdout="", stderr="No release tags found (on this branch)"),
+    )
+    rc = rlx._release_one("comms", _CFG)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "no release tags yet" in out
+
+
+def test_release_one_genuine_error_is_surfaced_not_masked(monkeypatch, capsys):
+    # (b) rc > 1 (e.g. git error 128) -> propagate the failure, NOT a 0 skip.
+    _patch_release_one_env(
+        monkeypatch,
+        _Res(128, stdout="", stderr="fatal: not a git repository"),
+    )
+    rc = rlx._release_one("comms", _CFG)
+    assert rc == 128  # the real error code, surfaced — not 0
+    err = capsys.readouterr().err
+    assert "FAILED" in err
+    assert "fatal: not a git repository" in err
+
+
+def test_release_one_success_empty_log_is_nothing_to_release(monkeypatch, capsys):
+    # (c) rc 0 + empty log section -> nothing to release, clean skip.
+    _patch_release_one_env(monkeypatch, _Res(0, stdout=_DIFF_NO_COMMITS))
+    rc = rlx._release_one("comms", _CFG)
+    assert rc == 0
+    assert "no new commits" in capsys.readouterr().out
+
+
+def test_release_one_success_with_commits_proceeds_to_dispatch(monkeypatch, capsys):
+    # (d) rc 0 + commits -> decision passes; in dry-run we stop at the dispatch
+    # echo (returns 0) without cutting a real release.
+    cfg = {**_CFG, "dry_run": True}
+    _patch_release_one_env(monkeypatch, _Res(0, stdout=_DIFF_WITH_COMMITS))
+    rc = rlx._release_one("comms", cfg)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "2 commit(s) since latest release" in out
+    assert "./bin/release patch" in out
+
+
+# --------------------------------------------------------------------------
+# _status_one — same routing in read-only --status mode
+# --------------------------------------------------------------------------
+
+
+def _patch_status_one_env(monkeypatch, diff_res):
+    def fake_proc_run(cmd, **kw):
+        if cmd and cmd[0] == "./bin/diff-since-release":
+            return diff_res
+        return _Res(0)
+
+    monkeypatch.setattr(rlx.proc, "run", fake_proc_run)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+
+
+def test_status_one_no_tags(monkeypatch, capsys):
+    _patch_status_one_env(monkeypatch, _Res(rlx.NO_TAGS_RC, stderr="No release tags found"))
+    rlx._status_one("comms", {"repos": {"comms": "/tmp/x"}})
+    out = capsys.readouterr().out
+    assert "no release tags yet" in out
+
+
+def test_status_one_genuine_error_surfaces_stderr(monkeypatch, capsys):
+    _patch_status_one_env(monkeypatch, _Res(128, stderr="fatal: bad object HEAD"))
+    rlx._status_one("comms", {"repos": {"comms": "/tmp/x"}})
+    captured = capsys.readouterr()
+    assert "FAILED (exited 128)" in captured.out
+    assert "no release tags yet" not in captured.out
+    assert "fatal: bad object HEAD" in captured.err

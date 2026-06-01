@@ -109,13 +109,27 @@ jobs:
           # should-release decision: are there commits since the last
           # final release tag? `bin/diff-since-release` prints a
           # `Changes since <tag>:` / `---` header then the oneline log;
-          # a non-empty log section means "release". It exits 1 when no
-          # release tags exist yet — treat that as "nothing to release"
-          # (a first release is a human-driven `bin/release X.Y.Z`).
+          # a non-empty log section means "release".
+          #
+          # Exit-code contract (set -euo pipefail in diff-since-release):
+          #   0  -> success; inspect the log body
+          #   1  -> no release tags yet — "nothing to release" (a first
+          #         release is a human-driven `bin/release X.Y.Z`)
+          #   >1 -> genuine failure (git error / corrupt repo, e.g. 128).
+          #         Surface stderr and FAIL the step loudly — never treat
+          #         it as "no release", or the cascade silently stalls.
           set +e
-          out="$(./bin/diff-since-release 2>/dev/null)"
+          err="$(mktemp)"
+          out="$(./bin/diff-since-release 2>"$err")"
           rc=$?
           set -e
+          if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then
+            echo "::error::diff-since-release failed (exit ${rc}); cascade aborting"
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          rm -f "$err"
           body="$(printf '%s\n' "$out" | sed -n '/^---$/,$p' | tail -n +2 | sed '/^[[:space:]]*$/d')"
           if [ "$rc" = 0 ] && [ -n "$body" ]; then
             n="$(printf '%s\n' "$body" | grep -c .)"
