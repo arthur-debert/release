@@ -540,7 +540,14 @@ def _release_one(key: str, cfg: dict) -> int:
     # releases ago while its real version is the tag v0.10.8 → patch must be
     # 0.10.9, not the manifest-driven 0.4.2). An explicit-X.Y.Z bump-kind passes
     # through unchanged.
-    cut_version = next_version(bump_kind, decision.tag)
+    try:
+        cut_version = next_version(bump_kind, decision.tag)
+    except ValueError as exc:
+        print(
+            f"  ✗ failed to parse tag {decision.tag!r} as semver: {exc}",
+            file=sys.stderr,
+        )
+        return 1
     print(f"  ↳ next version {cut_version} (from {decision.tag} + {bump_kind})")
 
     # `release-cut <X.Y.Z>` (maintainer's PATH tool, run in the repo cwd)

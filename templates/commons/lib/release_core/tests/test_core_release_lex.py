@@ -619,6 +619,38 @@ def test_release_one_dispatch_uses_resolved_path_via_proc_run(monkeypatch, capsy
     assert "release-cut 1.2.4 failed" in capsys.readouterr().err
 
 
+def test_release_one_malformed_tag_fails_cleanly_no_traceback(monkeypatch, capsys):
+    # A final tag that isn't strict 3-part semver (e.g. `v1.2`) makes
+    # next_version -> version.parse raise ValueError. _release_one must catch
+    # it, print a clean `✗ failed to parse tag ...` to stderr, and return 1 —
+    # NEVER let the traceback crash the orchestrator, and NEVER dispatch.
+    cfg = {
+        **_CFG,
+        "dry_run": False,
+        "release_cut_path": "/abs/bin/release-cut",
+    }
+    dispatched: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        if "tag" in cmd:
+            return _Res(0, stdout="v1.2\n")  # malformed: not X.Y.Z
+        if "log" in cmd:
+            return _Res(0, stdout="abc1234 feat: a\n")
+        dispatched.append(cmd)  # release-cut must NOT be reached
+        return _Res(0)
+
+    monkeypatch.setattr(rlx.proc, "run", fake_run)
+    monkeypatch.setattr(rlx, "_run", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os.path, "isfile", lambda *a, **k: False)
+
+    rc = rlx._release_one("comms", cfg)
+    assert rc == 1  # clean failure, not a traceback crash
+    assert dispatched == []  # no release-cut dispatch on an unparseable tag
+    err = capsys.readouterr().err
+    assert "failed to parse tag 'v1.2' as semver" in err
+
+
 # --------------------------------------------------------------------------
 # next_version — the tag-authoritative version derivation (the vscode fix)
 #
