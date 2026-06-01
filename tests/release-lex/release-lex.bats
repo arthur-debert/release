@@ -5,15 +5,16 @@
 # release_core.verbs.release_lex. These tests pin the CLI edge — usage
 # text, the usage exit code (64), the bad bump-kind / no-repos /
 # unknown-arg paths, and the validation aborts (exit 1) — for the new
-# post-`scripts/release` model: each repo must ship the managed
-# `bin/diff-since-release` + `bin/release` tools (re-synced from
-# arthur-debert/release), and release is driven by `bin/release`
-# (= release-cut, which dispatches release.yml; CI does the mutation).
+# post-`scripts/release` model: the cut path needs the managed
+# `bin/release` tool (re-synced from arthur-debert/release), and release
+# is driven by `bin/release` (= release-cut, which dispatches release.yml;
+# CI does the mutation). The should-release decision is computed
+# generically via git — there is no per-repo `bin/diff-since-release`.
 #
 # The live multi-repo orchestration (fetch / dispatch / CI-watch) is
 # faithful side-effecting glue and is NOT exercised here (it needs real
 # repos + GitHub — NO real releases are cut); the pure decision logic
-# (should-release over diff-since-release output) is covered offline by
+# (the generic git should-release decision) is covered offline by
 # pytest (test_core_release_lex.py). No remote is touched.
 # ---------------------------------------------------------------------
 
@@ -29,14 +30,14 @@ teardown() {
   rm -rf "$WORK"
 }
 
-# Build a fake lex-fmt repo carrying the managed bin/ release tools.
-# $1 = dir, remaining args = tool names to OMIT (of: diff-since-release release).
+# Build a fake lex-fmt repo carrying the managed bin/ release tool.
+# $1 = dir, remaining args = tool names to OMIT (of: release).
 _make_repo() {
   local dir="$1"; shift
   local omit=" $* "
   mkdir -p "$dir/bin"
   local tool
-  for tool in diff-since-release release; do
+  for tool in release; do
     case "$omit" in
       *" $tool "*) continue ;;
     esac
@@ -110,16 +111,10 @@ _make_repo() {
   [[ "$output" == *"release-sync"* ]]
 }
 
-@test "missing managed bin/diff-since-release exits 1" {
-  _make_repo "$WORK/comms" diff-since-release
-  run "$BIN/release-lex" patch --comms "$WORK/comms"
-  [ "$status" -eq 1 ]
-  [[ "$output" == *"missing bin/diff-since-release"* ]]
-}
-
 # ---------------------------------------------------------------------
 # --status is read-only: with no repos it still hits the no-repos guard.
-# --status only requires bin/diff-since-release (not bin/release).
+# The should-release decision is generic git, so --status requires NO
+# bin/ tool at all (just a directory).
 # ---------------------------------------------------------------------
 
 @test "status mode with no repos exits 64" {
@@ -128,11 +123,12 @@ _make_repo() {
   [[ "$output" == *"no repo paths supplied"* ]]
 }
 
-@test "status mode does not require bin/release" {
-  # A repo with only diff-since-release passes validation in --status mode.
-  # It is not a git repo, so the per-repo `git fetch` + diff-since-release
-  # stub run and the line renders; the point is validation does NOT abort 1.
-  _make_repo "$WORK/comms" release
+@test "status mode requires no bin tool" {
+  # A bare directory (no bin/ tool) passes validation in --status mode.
+  # It is not a git repo, so the per-repo `git fetch` + `git tag` error and
+  # the line renders as a FAILED decision; the point is validation does NOT
+  # abort 1 and the run completes (exit 0).
+  mkdir -p "$WORK/comms"
   run "$BIN/release-lex" --status --comms "$WORK/comms"
   [ "$status" -eq 0 ]
   [[ "$output" == *"Cascade status"* ]]

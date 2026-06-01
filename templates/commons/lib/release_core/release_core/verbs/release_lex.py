@@ -3,15 +3,19 @@ repo chain (comms -> lex/tree-sitter-lex -> vscode/nvim/lexed).
 
 Layer 1 of the cross-repo release automation (lex-fmt/lex#640). Walks the
 dependency chain and drives each repo's release via the managed `bin/release`
-(= `release-cut`) tool plus `diff-since-release`. There are no longer any
-per-repo `scripts/release/*` primitives — those were retired (the
-feat/retire-scripts-dir line). Release is done by the managed tooling synced
-into every consumer under `bin/`:
+(= `release-cut`) tool. There are no longer any per-repo `scripts/release/*`
+primitives — those were retired (the feat/retire-scripts-dir line).
 
-  bin/diff-since-release  — commits on the current branch since the last final
-                            release tag (the "is there anything to release?"
-                            and "what changed?" source). Exits 1 if no release
-                            tags exist yet.
+The should-release decision is computed GENERICALLY here via plain git (commits
+since the last final release tag), NOT via a per-repo `bin/diff-since-release`.
+That tool was absent for the manifest-less Kinds (docs-site / tree-sitter /
+nvim-plugin — 3 of the 6 lex-chain repos) and diverged across the others, so the
+cascade died at the first repo lacking it. The generic decision replicates the
+old `diff-since-release` contract exactly (see `decide_release` below): commits
+since the last NON-prerelease tag reachable from HEAD; no final tags ⇒ the
+no-tags case (a first release is human-driven). Release is still done by the
+managed tooling synced into every consumer under `bin/`:
+
   bin/release             — thin shim that execs `release-cut`. release-cut is
                             Kind-aware: it reads the current version from the
                             Consumer's canonical manifest source (Cargo.toml,
@@ -25,8 +29,8 @@ into every consumer under `bin/`:
 
 The old primitive→responsibility mapping, for the record:
   get-current-version       -> release-cut reads it from the Kind manifest.
-  get-commits-since-release -> diff-since-release.
-  should-release            -> diff-since-release has commit lines (non-empty).
+  get-commits-since-release -> the generic `git log <last-final-tag>..HEAD`.
+  should-release            -> that log is non-empty (commits since last final).
   update-release            -+ both fold into `release-cut`: the bump + CHANGELOG
   trigger-release           -+ roll + commit + tag now happen IN CI, dispatched
                                by release-cut. There is no longer a local
@@ -48,8 +52,9 @@ The live multi-repo orchestration (fetch/checkout/pull/submodule, `release-cut`
 dispatch, `gh run list/watch`) is genuine side-effecting glue and is NOT
 unit-tested (it requires live repos + GitHub — that is the script's whole
 point). What IS pure and tested: the github-slug map, arg parsing + validation
-exit codes, the --only filter, the run-id extractor, the should-release
-decision over diff-since-release output, and the status-line rendering.
+exit codes, the --only filter, the run-id extractor, the generic git
+should-release decision (last-final-tag selection + log over a mocked proc
+layer), and the status-line rendering.
 
 Usage:
   release-lex <bump-kind> \\
@@ -74,12 +79,27 @@ import time
 
 from .. import gh, proc
 
-# `diff-since-release` exit-code contract (see templates/<kind>/bin/diff-since-release):
-#   0   — success; stdout has the `Changes since <tag>:` / `---` header + log
-#   1   — no final release tags exist yet (benign: first release is human-driven)
-#   >1  — genuine failure (git error, corrupt repo, etc.; surfaces under set -e,
-#         e.g. 128) — MUST be surfaced, never masked as "nothing to release".
-NO_TAGS_RC = 1
+# should-release decision states (the generic git decision, computed by
+# `decide_release`). Replaces the old `diff-since-release` exit-code contract —
+# the decision is now computed in-process from git, so there is no external
+# tool's exit code to interpret. The four states preserve the EXACT semantics
+# the old per-Kind `diff-since-release` drove:
+#   RELEASE   — final tag found + commits since it (the old rc 0 + non-empty log)
+#   UPTODATE  — final tag found + NO commits since it (the old rc 0 + empty log)
+#   NOTAGS    — no final (non-prerelease) tag reachable from HEAD; a first
+#               release is human-driven (the old rc 1 / NO_TAGS exit)
+#   ERROR     — a genuine git failure (corrupt repo, unborn HEAD, bad ref); MUST
+#               be surfaced loudly, never masked as "nothing to release" (the old
+#               rc > 1, e.g. 128, under `set -e`)
+RELEASE = "release"
+UPTODATE = "uptodate"
+NOTAGS = "notags"
+ERROR = "error"
+
+# git exits 128 on the failures we want to surface loudly (corrupt repo, unborn
+# HEAD, bad ref). Used as the synthetic process exit code when a decision is
+# ERROR but the underlying rc wasn't captured (it always is — kept for clarity).
+GIT_ERROR_RC = 128
 
 # Walk order (dependency-respecting). Each repo is included only if its path
 # was supplied via flag.
@@ -108,8 +128,9 @@ Usage:
 <bump-kind>:  patch | minor | major | <X.Y.Z>
 --dry-run:    print everything but make no real state changes
 --only:       restrict to a subset of repos (still dependency-ordered)
---status:     read-only — run diff-since-release in each repo and print
-              a one-line answer per repo. Useful answer to "what
+--status:     read-only — compute the should-release decision (git commits
+              since the last final release tag) in each repo and print a
+              one-line answer per repo. Useful answer to "what
               would cascade if I cut comms now?"
 """
 
@@ -124,58 +145,85 @@ def github_slug_for(name: str) -> str:
     return _GITHUB_SLUGS.get(name, "")
 
 
-def has_releasable_commits(diff_output: str, rc: int) -> bool:
-    """Decide whether a repo has releasable commits, from `diff-since-release`
-    output + exit code.
+def latest_final_tag(tag_lines: str) -> str:
+    """The last FINAL (non-prerelease) release tag from `git tag --list 'v*'
+    --sort=-version:refname --merged HEAD` output, or '' if there is none.
 
-    `diff-since-release` prints a two-line header (`Changes since <tag>:` then
-    `---`) followed by `git log --oneline <tag>..HEAD`. When nothing is new the
-    log section is empty, so "releasable" = at least one line AFTER the `---`
-    separator. A non-zero rc is never releasable; the caller is responsible for
-    distinguishing the benign no-tags exit (``NO_TAGS_RC``) from a genuine
-    failure (rc > 1) BEFORE relying on this — see ``_release_one`` /
-    ``_status_one``. We never guess a first version, so no-tags = not releasable.
+    Replicates the old `diff-since-release` selection EXACTLY: tags are already
+    highest-version-first; we drop any prerelease tag (anything containing `-`,
+    e.g. `v1.0.0-rc.1`) because pre-releases share the `## [Unreleased]`
+    changelog scope with the final they lead up to — the relevant diff is against
+    the last *final*. The first surviving line is the answer. A repo with only
+    prerelease tags therefore yields '' (the no-final-tags case)."""
+    for line in tag_lines.splitlines():
+        tag = line.strip()
+        if tag and "-" not in tag:
+            return tag
+    return ""
+
+
+class Decision:
+    """The generic should-release decision for one repo (computed by
+    ``decide_release`` from plain git). ``state`` is one of RELEASE / UPTODATE /
+    NOTAGS / ERROR; ``count`` is the commit count (only meaningful for RELEASE);
+    ``tag`` is the last final tag ('' for NOTAGS/ERROR); ``rc`` is the git exit
+    code that drove an ERROR (0 otherwise); ``stderr`` carries git's error text
+    for an ERROR so the caller can surface it loudly."""
+
+    def __init__(self, state: str, *, count: int = 0, tag: str = "", rc: int = 0, stderr: str = ""):
+        self.state = state
+        self.count = count
+        self.tag = tag
+        self.rc = rc
+        self.stderr = stderr
+
+
+def decide_release(path: str) -> Decision:
+    """Compute the should-release decision for the repo at ``path`` GENERICALLY,
+    via plain git — no per-repo `bin/diff-since-release` needed.
+
+    Steps (replicating the old `diff-since-release` contract):
+      1. `git tag --list 'v*' --sort=-version:refname --merged HEAD`. A nonzero
+         exit is a genuine git failure (corrupt repo / unborn HEAD) → ERROR,
+         surfaced loudly. NEVER read as "no tags".
+      2. Pick the last FINAL (non-prerelease) tag. None → NOTAGS (a first release
+         is human-driven; we never guess a first version).
+      3. `git --no-pager log --oneline <tag>..HEAD`. A nonzero exit is a genuine
+         git failure → ERROR. Empty stdout → UPTODATE. Non-empty → RELEASE with
+         the commit count.
     """
-    if rc != 0:
-        return False
-    lines = diff_output.splitlines()
-    try:
-        sep = lines.index("---")
-    except ValueError:
-        # No separator (unexpected shape) — be conservative: nothing to release.
-        return False
-    body = [ln for ln in lines[sep + 1 :] if ln.strip()]
-    return len(body) > 0
+    tags = gh.git_tag_list_merged("v*", cwd=path)
+    if tags.returncode != 0:
+        return Decision(ERROR, rc=tags.returncode or GIT_ERROR_RC, stderr=tags.stderr or "")
+    tag = latest_final_tag(tags.stdout)
+    if not tag:
+        return Decision(NOTAGS)
+    log = gh.git_log_oneline(f"{tag}..HEAD", cwd=path)
+    if log.returncode != 0:
+        return Decision(ERROR, tag=tag, rc=log.returncode or GIT_ERROR_RC, stderr=log.stderr or "")
+    count = sum(1 for ln in log.stdout.splitlines() if ln.strip())
+    if count > 0:
+        return Decision(RELEASE, count=count, tag=tag)
+    return Decision(UPTODATE, tag=tag)
 
 
-def count_commits(diff_output: str) -> int:
-    """Number of commit lines in `diff-since-release` output (lines after the
-    `---` separator). 0 if the separator is absent or no commits follow."""
-    lines = diff_output.splitlines()
-    try:
-        sep = lines.index("---")
-    except ValueError:
-        return 0
-    return sum(1 for ln in lines[sep + 1 :] if ln.strip())
-
-
-def render_status_line(key: str, releasable: bool, rc: int, count: int) -> str:
-    """Render one status-mode line.
-      releasable        -> '⚠ would release: N commit(s) since last release'
-      not, rc 0         -> '✓ up to date (no commits since last release)'
-      rc == NO_TAGS_RC  -> '✗ no release tags yet (diff-since-release exited 1)'
-      rc > 1            -> '✗ diff-since-release FAILED (exited <rc>)'
-    Only ``NO_TAGS_RC`` means "no tags yet"; any other non-zero rc is a genuine
-    failure (git error, corrupt repo) and must not be reported as "no tags".
-    The label is left-padded to 18 cols for column alignment."""
+def render_status_line(key: str, decision: Decision) -> str:
+    """Render one status-mode line from a :class:`Decision`.
+      RELEASE   -> '⚠ would release: N commit(s) since <tag>'
+      UPTODATE  -> '✓ up to date (no commits since <tag>)'
+      NOTAGS    -> '✗ no final release tags yet (first release is human-driven)'
+      ERROR     -> '✗ should-release decision FAILED (git exited <rc>)'
+    Only NOTAGS means "no tags yet"; an ERROR is a genuine git failure (corrupt
+    repo, bad ref) and must not be reported as "no tags". The label is
+    left-padded to 18 cols for column alignment."""
     label = f"{key:<18}"
-    if rc != 0:
-        if rc == NO_TAGS_RC:
-            return f"{label} ✗ no release tags yet (diff-since-release exited {rc})"
-        return f"{label} ✗ diff-since-release FAILED (exited {rc})"
-    if releasable:
-        return f"{label} ⚠ would release: {count} commit(s) since last release"
-    return f"{label} ✓ up to date (no commits since last release)"
+    if decision.state == ERROR:
+        return f"{label} ✗ should-release decision FAILED (git exited {decision.rc})"
+    if decision.state == NOTAGS:
+        return f"{label} ✗ no final release tags yet (first release is human-driven)"
+    if decision.state == RELEASE:
+        return f"{label} ⚠ would release: {decision.count} commit(s) since {decision.tag}"
+    return f"{label} ✓ up to date (no commits since {decision.tag})"
 
 
 def parse_only(only: str) -> list[str]:
@@ -285,8 +333,10 @@ def _validate(cfg: dict) -> int | None:
     proceed:
       1. bad bump-kind (non-status mode) -> 64
       2. no repos -> 64
-      3. each repo: dir exists + the managed bin/release + bin/diff-since-release
-         tools are present and executable -> 1
+      3. each repo: dir exists -> 1; and in cut mode the managed bin/release tool
+         is present and executable -> 1. The should-release decision is now
+         computed generically via git, so NO bin/diff-since-release is required
+         in any repo / mode (it was absent for 3 of the 6 lex-chain Kinds).
     """
     if not cfg["status_mode"]:
         bump = cfg["bump_kind"]
@@ -307,9 +357,9 @@ def _validate(cfg: dict) -> int | None:
     # iterate in the stable ORDER so the first failure reported is deterministic.
     keys = [k for k in ORDER if k in cfg["repos"]]
     keys += [k for k in cfg["repos"] if k not in ORDER]
-    # --status only reads diff-since-release; the cut path additionally needs
-    # bin/release. Validate exactly the tools the chosen mode will invoke.
-    needed = ("diff-since-release",) if cfg["status_mode"] else ("diff-since-release", "release")
+    # --status only computes the generic git decision (no bin/ tool); the cut
+    # path additionally needs bin/release. Validate exactly that.
+    needed = () if cfg["status_mode"] else ("release",)
     for key in keys:
         path = cfg["repos"][key]
         if not os.path.isdir(path):
@@ -365,8 +415,9 @@ def _release_one(key: str, cfg: dict) -> int:
     New model (post scripts/release retirement): the bump + CHANGELOG roll +
     commit + tag all happen IN CI, dispatched by `bin/release` (= release-cut).
     There is no local file mutation to branch/commit/PR/admin-merge anymore, so
-    this is now: refresh main -> decide via diff-since-release -> `bin/release
-    <bump>` (dispatch release.yml) -> watch the resulting CI run.
+    this is now: refresh main -> decide generically via git (commits since the
+    last final release tag) -> `bin/release <bump>` (dispatch release.yml) ->
+    watch the resulting CI run.
     """
     path = cfg["repos"][key]
     dry_run = cfg["dry_run"]
@@ -384,26 +435,25 @@ def _release_one(key: str, cfg: dict) -> int:
     if os.path.isfile(".gitmodules"):
         _run(["git", "submodule", "update", "--init", "--recursive"], dry_run)
 
-    # should-release decision: diff-since-release has commit lines?
-    res = proc.run(["./bin/diff-since-release"], check=False)
-    # A non-zero rc other than NO_TAGS_RC is a genuine failure (git error,
-    # corrupt repo — surfaces as 128 under the script's `set -e`). NEVER mask
-    # it as "nothing to release": a silent skip here stalls the whole cascade.
-    if res.returncode not in (0, NO_TAGS_RC):
+    # should-release decision: commits since the last final release tag (generic
+    # git — no per-repo bin/diff-since-release).
+    decision = decide_release(path)
+    # An ERROR is a genuine git failure (corrupt repo, bad ref — exits 128).
+    # NEVER mask it as "nothing to release": a silent skip stalls the cascade.
+    if decision.state == ERROR:
         print(
-            f"  ✗ diff-since-release FAILED for {key} (exit {res.returncode}); aborting\n"
-            f"    {res.stderr.strip()}",
+            f"  ✗ should-release decision FAILED for {key} (git exit {decision.rc}); aborting\n"
+            f"    {decision.stderr.strip()}",
             file=sys.stderr,
         )
-        return res.returncode
-    if not has_releasable_commits(res.stdout, res.returncode):
-        if res.returncode == NO_TAGS_RC:
-            print(f"  ↳ no release tags yet; skipping {key}")
+        return decision.rc
+    if decision.state in (NOTAGS, UPTODATE):
+        if decision.state == NOTAGS:
+            print(f"  ↳ no final release tags yet; skipping {key}")
         else:
-            print(f"  ↳ no new commits since latest release tag; skipping {key}")
+            print(f"  ↳ no new commits since {decision.tag}; skipping {key}")
         return 0
-    count = count_commits(res.stdout)
-    print(f"  ↳ {count} commit(s) since latest release")
+    print(f"  ↳ {decision.count} commit(s) since {decision.tag}")
 
     # `bin/release <bump>` is Kind-aware: it reads the current version from the
     # manifest, computes the new version, and dispatches release.yml. CI does
@@ -457,22 +507,21 @@ def _release_one(key: str, cfg: dict) -> int:
 
 
 def _status_one(key: str, cfg: dict) -> None:
-    """Read-only: fetch remote state, run diff-since-release, print one line.
-    (A subshell-equivalent: we save/restore cwd to preserve isolation.)"""
+    """Read-only: fetch remote state, compute the generic git should-release
+    decision, print one line. (A subshell-equivalent: we save/restore cwd to
+    preserve isolation.)"""
     path = cfg["repos"][key]
     saved = os.getcwd()
     try:
         os.chdir(path)
         # Best-effort fetch so the tag/log view is current; ignore failures.
         proc.run(["git", "fetch", "--quiet", "origin"], check=False)
-        res = proc.run(["./bin/diff-since-release"], check=False)
-        releasable = has_releasable_commits(res.stdout, res.returncode)
-        count = count_commits(res.stdout)
-        print(render_status_line(key, releasable, res.returncode, count))
-        # A non-zero rc other than NO_TAGS_RC is a genuine failure — echo its
-        # stderr so an operator scanning --status output doesn't miss the cause.
-        if res.returncode not in (0, NO_TAGS_RC) and res.stderr.strip():
-            print(f"    {res.stderr.strip()}", file=sys.stderr)
+        decision = decide_release(path)
+        print(render_status_line(key, decision))
+        # An ERROR is a genuine git failure — echo its stderr so an operator
+        # scanning --status output doesn't miss the cause.
+        if decision.state == ERROR and decision.stderr.strip():
+            print(f"    {decision.stderr.strip()}", file=sys.stderr)
     finally:
         os.chdir(saved)
 
@@ -501,7 +550,7 @@ def main(argv: list[str]) -> int:
         return abort
 
     if cfg["status_mode"]:
-        print("Cascade status (read-only — runs diff-since-release in each repo):")
+        print("Cascade status (read-only — commits since last final tag, per repo):")
         print()
         for key in ORDER:
             if cfg["repos"].get(key):
