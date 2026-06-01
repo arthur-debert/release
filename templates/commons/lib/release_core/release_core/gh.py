@@ -33,9 +33,18 @@ def rest(
     *,
     method: str | None = None,
     fields: dict[str, str] | None = None,
+    body: object | None = None,
     paginate: bool = False,
 ) -> object:
-    """Call `gh api <path>` → parsed JSON (None on empty output). Raises GhError."""
+    """Call `gh api <path>` → parsed JSON (None on empty output). Raises GhError.
+
+    ``body``, when given, is serialized to JSON and piped to `gh api --input -`
+    — the only way to send an arbitrary nested request body (e.g. a ruleset
+    payload) that the flat `-f key=value` ``fields`` form cannot express.
+    ``fields`` and ``body`` are mutually exclusive.
+    """
+    if fields and body is not None:
+        raise GhError("rest(): pass either fields= or body=, not both")
     args = ["api"]
     if method:
         args += ["-X", method]
@@ -43,8 +52,12 @@ def rest(
         args.append("--paginate")
     for key, value in (fields or {}).items():
         args += ["-f", f"{key}={value}"]
+    input_text = None
+    if body is not None:
+        args += ["--input", "-"]
+        input_text = json.dumps(body)
     args.append(path)
-    output = _gh(args)
+    output = _gh(args, input_text=input_text)
     if not output.strip():
         return None
     if paginate:
@@ -89,6 +102,34 @@ def issue_list(
     if not output.strip():
         return []
     return json.loads(output)
+
+
+def secret_set(name: str, value: str, *, repo: str) -> None:
+    """`gh secret set <name> -R <repo>` reading the value from stdin. Raises GhError.
+
+    A helper (not a plain REST PUT) because setting an Actions secret requires
+    libsodium-sealing the value against the repo's public key — `gh secret set`
+    does that encryption transparently; a raw `gh api` call cannot.
+    """
+    _gh(["secret", "set", name, "-R", repo], input_text=value)
+
+
+def secret_list(repo: str) -> list[str]:
+    """`gh secret list -R <repo>` → list of secret names. Raises GhError.
+
+    Porcelain over the Actions-secrets surface, the read-side companion to
+    :func:`secret_set` (it is paired with it to verify a set actually persisted).
+    Output is the tab-separated `gh secret list` table; only the name column is
+    returned.
+    """
+    output = _gh(["secret", "list", "-R", repo])
+    names = []
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        names.append(line.split()[0])
+    return names
 
 
 def graphql(query: str, **variables: object) -> dict:
