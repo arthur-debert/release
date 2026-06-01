@@ -6,6 +6,8 @@ name: release-sync + fleet tests
 #   tests/fleet        — managed-repos zero-logic path resolution against a
 #     fixture manifest, and release-inbox clustering over a stub-gh inbox
 #     (offline; no gh/network).
+#   tests/detect-kind  — the shell→Python migration canary: the detect-kind
+#     shim's CLI contract (kind strings + exit codes) over inline fixtures.
 # Regressions surface here before riding out to consumers.
 
 on:
@@ -23,6 +25,7 @@ on:
       - 'templates/**'
       - 'tests/release-sync/**'
       - 'tests/fleet/**'
+      - 'tests/detect-kind/**'
       - '.github/workflows/release-sync-tests.yml'
   pull_request:
     paths:
@@ -37,6 +40,7 @@ on:
       - 'templates/**'
       - 'tests/release-sync/**'
       - 'tests/fleet/**'
+      - 'tests/detect-kind/**'
       - '.github/workflows/release-sync-tests.yml'
 
 permissions:
@@ -64,4 +68,4 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
           yq --version
       - name: Run BATS suites
-        run: bats tests/release-sync/ tests/fleet/
+        run: bats tests/release-sync/ tests/fleet/ tests/detect-kind/
