@@ -303,7 +303,7 @@ Same baseline regardless of Stack:
   fragments, shells out to `bin/check-fmt` / `bin/check-lint` /
   `bin/check-tests`. **Local hooks ARE the canonical interface;** CI
   also calls these when the Stack's CI workflow has landed.
-- **Session-start bootstrap** — `scripts/setup-dev-env.sh` runs on
+- **Session-start bootstrap** — `bin/setup-dev-env.sh` runs on
   every Claude Code session start (cloud + local). Wires lefthook,
   fetches deps, imports cert store, fixes PATH.
 - **Agent guidance** — per-repo `CLAUDE.md` for project-specific
@@ -381,7 +381,7 @@ local tooling reads them there: CODEOWNERS, `dependabot.yml`,
 `copilot-review.yml`, lefthook fragments, `bin/check-*` helpers,
 `setup-dev-env.sh`.
 
-`scripts/setup-dev-env.sh` runs `release-sync` early in every
+`bin/setup-dev-env.sh` runs `release-sync` early in every
 session-start. It pulls the canonical files from `~/release` into the
 consumer's working tree. CI's `pr-checks` Flow runs
 `release-sync --check`; if the working tree diverges, the build fails
@@ -450,7 +450,7 @@ change.
 
 ### Per-session layer
 
-Every onboarded repo carries `scripts/setup-dev-env.sh` +
+Every onboarded repo carries `bin/setup-dev-env.sh` +
 `.claude/settings.json`, both seeded from
 [`templates/commons/`](templates/commons/). The settings file
 registers a SessionStart hook that runs the script. The script:
@@ -462,7 +462,7 @@ registers a SessionStart hook that runs the script. The script:
 - Symlinks `.venv/bin/*` into `~/.local/bin/` so non-interactive Bash
   sessions resolve venv-installed CLIs.
 - Wires `lefthook install` (or falls back to symlinking
-  `scripts/pre-commit`).
+  `app-bin/pre-commit`).
 
 ### SDK orchestrator harness 🚧
 

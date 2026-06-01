@@ -1,15 +1,20 @@
 #!/usr/bin/env bats
 
 # ---------------------------------------------------------------------
-# release-lex: shim CLI contract (shell→Python migration,
-# docs/proposals/shell-to-python.md). The bash original was replaced by a
-# thin Python shim over release_core.verbs.release_lex. These tests pin the
-# byte-for-byte CLI edge — usage text, the usage exit code (64), the bad
-# bump-kind / no-repos / unknown-arg paths, and the validation aborts
-# (exit 1) — that the bash version had. The live multi-repo orchestration
-# (push / PR / merge / CI-watch) is faithful side-effecting glue and is NOT
-# exercised here (it needs real repos + GitHub); the pure decision logic is
-# covered offline by pytest (test_core_release_lex.py). No remote is touched.
+# release-lex: shim CLI contract. release-lex is a thin Python shim over
+# release_core.verbs.release_lex. These tests pin the CLI edge — usage
+# text, the usage exit code (64), the bad bump-kind / no-repos /
+# unknown-arg paths, and the validation aborts (exit 1) — for the new
+# post-`scripts/release` model: each repo must ship the managed
+# `bin/diff-since-release` + `bin/release` tools (re-synced from
+# arthur-debert/release), and release is driven by `bin/release`
+# (= release-cut, which dispatches release.yml; CI does the mutation).
+#
+# The live multi-repo orchestration (fetch / dispatch / CI-watch) is
+# faithful side-effecting glue and is NOT exercised here (it needs real
+# repos + GitHub — NO real releases are cut); the pure decision logic
+# (should-release over diff-since-release output) is covered offline by
+# pytest (test_core_release_lex.py). No remote is touched.
 # ---------------------------------------------------------------------
 
 BIN="$BATS_TEST_DIRNAME/../../bin"
@@ -24,19 +29,19 @@ teardown() {
   rm -rf "$WORK"
 }
 
-# Build a fake lex-fmt repo with the four executable Layer-0 primitives.
-# $1 = dir, remaining args = primitive names to OMIT.
+# Build a fake lex-fmt repo carrying the managed bin/ release tools.
+# $1 = dir, remaining args = tool names to OMIT (of: diff-since-release release).
 _make_repo() {
   local dir="$1"; shift
   local omit=" $* "
-  mkdir -p "$dir/scripts/release"
-  local prim
-  for prim in get-current-version get-commits-since-release update-release trigger-release; do
+  mkdir -p "$dir/bin"
+  local tool
+  for tool in diff-since-release release; do
     case "$omit" in
-      *" $prim "*) continue ;;
+      *" $tool "*) continue ;;
     esac
-    printf '#!/usr/bin/env bash\n' > "$dir/scripts/release/$prim"
-    chmod +x "$dir/scripts/release/$prim"
+    printf '#!/usr/bin/env bash\n' > "$dir/bin/$tool"
+    chmod +x "$dir/bin/$tool"
   done
 }
 
@@ -97,20 +102,38 @@ _make_repo() {
   [[ "$output" == *"(for --comms)"* ]]
 }
 
-@test "missing Layer-0 primitive exits 1" {
-  _make_repo "$WORK/comms" trigger-release
+@test "missing managed bin/release exits 1" {
+  _make_repo "$WORK/comms" release
   run "$BIN/release-lex" patch --comms "$WORK/comms"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"missing scripts/release/trigger-release"* ]]
-  [[ "$output" == *"Layer 0 must be merged"* ]]
+  [[ "$output" == *"missing bin/release"* ]]
+  [[ "$output" == *"release-sync"* ]]
+}
+
+@test "missing managed bin/diff-since-release exits 1" {
+  _make_repo "$WORK/comms" diff-since-release
+  run "$BIN/release-lex" patch --comms "$WORK/comms"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing bin/diff-since-release"* ]]
 }
 
 # ---------------------------------------------------------------------
 # --status is read-only: with no repos it still hits the no-repos guard.
+# --status only requires bin/diff-since-release (not bin/release).
 # ---------------------------------------------------------------------
 
 @test "status mode with no repos exits 64" {
   run "$BIN/release-lex" --status
   [ "$status" -eq 64 ]
   [[ "$output" == *"no repo paths supplied"* ]]
+}
+
+@test "status mode does not require bin/release" {
+  # A repo with only diff-since-release passes validation in --status mode.
+  # It is not a git repo, so the per-repo `git fetch` + diff-since-release
+  # stub run and the line renders; the point is validation does NOT abort 1.
+  _make_repo "$WORK/comms" release
+  run "$BIN/release-lex" --status --comms "$WORK/comms"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Cascade status"* ]]
 }

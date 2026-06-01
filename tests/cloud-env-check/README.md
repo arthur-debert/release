@@ -2,7 +2,7 @@
 
 Local Docker harness that approximates Anthropic's Claude Code Cloud
 Ubuntu base image so `env/setup.sh` + a consumer repo's
-`scripts/setup-dev-env.sh` can be validated without burning a cloud
+`bin/setup-dev-env.sh` can be validated without burning a cloud
 session every iteration.
 
 ## What it does
@@ -15,7 +15,7 @@ session every iteration.
 - For each consumer repo, runs in order:
   1. `env/setup.sh` (mounted read-only from this checkout)
   2. `git clone` + checkout of the target branch
-  3. `scripts/setup-dev-env.sh` (if present)
+  3. `bin/setup-dev-env.sh` (if present)
   4. `lefthook run pre-commit --all-files` (if `lefthook.yml` exists)
   5. The repo's primary test command (auto-detected by stack, or
      overridden by the caller)
@@ -31,7 +31,7 @@ catch:
   has unrestricted internet.
 - The exact preinstalled tool versions Anthropic ships.
 - `CLAUDE_CODE_REMOTE_SESSION_ID` semantics (we set
-  `CLAUDE_CODE_REMOTE=true` for the gate in `setup-dev-env.sh` but no
+  `CLAUDE_CODE_REMOTE=true` for the gate in `bin/setup-dev-env.sh` but no
   more).
 - Snapshot/cache semantics — every run is a fresh container, no
   five-minute snapshot budget pressure.

@@ -11,7 +11,7 @@ name: Python pkg release
 #                 changelog, tag + push (via prepare-release-python).
 # 2. build      — uv build → dist/*.{tar.gz,whl}. uv ships its own
 #                 isolated build env; no virtualenv dance needed.
-#                 If consumer ships scripts/pre-build.sh (e.g.
+#                 If consumer ships app-bin/pre-build.sh (e.g.
 #                 codegen, asset bundle), it runs first.
 # 3. publish-pypi (default: true)         — `uvx twine upload` → PyPI.
 # 4. publish-testpypi (default: false)    — `uvx twine upload` → TestPyPI.
@@ -173,14 +173,14 @@ jobs:
         run: uv python install "${PYTHON_VERSION}"
 
       # Convention hook. Runs only when consumer ships
-      # scripts/pre-build.sh. Use cases: codegen, asset bundle prep,
+      # app-bin/pre-build.sh. Use cases: codegen, asset bundle prep,
       # docs build that ends up shipped in the wheel.
       - name: Pre-build hook (consumer)
-        if: hashFiles('scripts/pre-build.sh') != ''
+        if: hashFiles('app-bin/pre-build.sh') != ''
         shell: bash
         env:
           PROJECT_VERSION: ${{ needs.prepare.outputs.version }}
-        run: bash scripts/pre-build.sh
+        run: bash app-bin/pre-build.sh
 
       - name: Build sdist + wheel
         shell: bash

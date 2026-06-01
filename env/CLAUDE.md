@@ -96,7 +96,7 @@ Pre-installed by the env setup script — don't reinstall:
   `nvim` ≥0.11 (binary; the apt package ships 0.9.5 which is too old for
   current `nvim-lspconfig`)
 - **GUI tests:** `xvfb` binary (start `Xvfb :99 &` per-session in your
-  scripts/setup-dev-env.sh, then `export DISPLAY=:99`). `certutil`
+  bin/setup-dev-env.sh, then `export DISPLAY=:99`). `certutil`
   (libnss3-tools) is also installed so the canonical setup-dev-env.sh
   can import the sandbox-egress CA into the per-user Chromium NSS DB
   (`~/.pki/nssdb`) — required for Electron / Playwright tests to load
@@ -120,7 +120,7 @@ Pre-installed by the env setup script — don't reinstall:
   `/usr/local/bin/fetch-artifact`). Reads `./artifacts.json` (canonical
   schema in `arthur-debert/release` `docs/artifacts-schema.md`) and
   pulls pinned binaries / source trees from upstream GH releases.
-  `scripts/setup-dev-env.sh` in consumers that depend on cross-repo
+  `bin/setup-dev-env.sh` in consumers that depend on cross-repo
   artifacts should call this rather than hand-rolling a `gh release
   download` block: `fetch-artifact lexd-lsp` is one line; the inline
   version is ~30.
@@ -140,11 +140,11 @@ arthur-debert/release main — if it should be env-level (OS-installed,
 filesystem-root state), add it there in a PR.
 
 Project-local dependencies belong in the consumer repo's
-`scripts/setup-dev-env.sh` (invoked by a SessionStart hook).
+`bin/setup-dev-env.sh` (invoked by a SessionStart hook).
 
 ## Exporting per-session env vars to the agent
 
-When a consumer's `scripts/setup-dev-env.sh` downloads a per-session
+When a consumer's `bin/setup-dev-env.sh` downloads a per-session
 resource (a pinned binary, a source tarball, a venv) that tests need to
 locate via env var (e.g. `LEX_TREESITTER_PATH=/tmp/tree-sitter-lex`),
 `export` from inside the script does NOT reach the Claude Code Bash
