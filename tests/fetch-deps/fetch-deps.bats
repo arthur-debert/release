@@ -193,7 +193,7 @@ crlf_jq_shim() {
     cat > "$HARNESS_WORKSPACE/_bin/jq" <<SHIM
 #!/usr/bin/env bash
 # Windows jq emulation: append CR to every stdout line.
-"$real_jq" "\$@" | sed 's/\$/\r/'
+"$real_jq" "\$@" | awk '{print \$0 "\r"}'
 SHIM
     chmod +x "$HARNESS_WORKSPACE/_bin/jq"
     export PATH="$HARNESS_WORKSPACE/_bin:$PATH"
