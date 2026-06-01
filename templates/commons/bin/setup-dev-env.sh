@@ -38,7 +38,7 @@ cd "${REPO_ROOT}"
 #
 # Default: lefthook (binary installed at env-setup time in cloud, by
 # brew/cargo/npm locally). Fallback for repos that ship a hand-rolled
-# scripts/pre-commit instead (zed-lex, tree-sitter-lex pattern): symlink
+# app-bin/pre-commit instead (zed-lex, tree-sitter-lex pattern): symlink
 # it into .git/hooks/.
 #
 # Husky migration: if a previous `husky install` set
@@ -52,7 +52,7 @@ cd "${REPO_ROOT}"
 # installed at `node_modules/.bin/lefthook` (via `prepare: lefthook install`
 # in package.json) — `command -v lefthook` doesn't find that location, so
 # without this check the script silently falls through to the
-# scripts/pre-commit branch in cloud sessions for npm consumers.
+# app-bin/pre-commit branch in cloud sessions for npm consumers.
 _lefthook=""
 if [ -x node_modules/.bin/lefthook ]; then
   _lefthook="node_modules/.bin/lefthook"
@@ -83,7 +83,7 @@ if [ -f lefthook.yml ] && [ -n "${_lefthook}" ]; then
   if ! "${_lefthook}" install >/dev/null; then
     echo "warning: lefthook install failed — pre-commit hook NOT wired" >&2
   fi
-elif [ -x scripts/pre-commit ]; then
+elif [ -x app-bin/pre-commit ]; then
   # Resolve the hooks dir via git plumbing rather than hardcoding
   # `.git/hooks`. In a git-worktree the per-worktree hooks live under
   # `.git/worktrees/<name>/hooks/`, and `.git` itself is a file (not
@@ -103,8 +103,8 @@ elif [ -x scripts/pre-commit ]; then
   # (e.g. "Permission denied" pinpoints the actual issue).
   if ! mkdir -p "${_hooks_dir}"; then
     echo "warning: failed to mkdir -p \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
-  elif ! ln -sf "${REPO_ROOT}/scripts/pre-commit" "${_hooks_dir}/pre-commit"; then
-    echo "warning: failed to symlink scripts/pre-commit into \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
+  elif ! ln -sf "${REPO_ROOT}/app-bin/pre-commit" "${_hooks_dir}/pre-commit"; then
+    echo "warning: failed to symlink app-bin/pre-commit into \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
   fi
 fi
 

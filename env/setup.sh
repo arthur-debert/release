@@ -125,7 +125,7 @@ fi
 #                     nvim-lspconfig; we install the official stable tarball
 #                     from github.com/neovim/neovim/releases instead
 #   xvfb            — virtual framebuffer; binary is env-side, starting the
-#                     :99 daemon is per-repo in scripts/setup-dev-env.sh for
+#                     :99 daemon is per-repo in bin/setup-dev-env.sh for
 #                     GUI-test consumers (lexed, phos-app, future Electron)
 #   libnss3-tools   — provides `certutil` so the canonical setup-dev-env.sh
 #                     can import the sandbox-egress CA into the per-user
@@ -190,7 +190,7 @@ fi
 
 # xvfb — virtual framebuffer for headless GUI-app tests. Consumers that
 # need a running display start `Xvfb :99` themselves (idempotent, in
-# their scripts/setup-dev-env.sh); this just ensures the binary is on
+# their bin/setup-dev-env.sh); this just ensures the binary is on
 # disk so that start step works.
 if ! command -v Xvfb >/dev/null 2>&1; then
   apt install -y xvfb || echo "warning: xvfb install failed" >&2
@@ -347,7 +347,7 @@ else
 fi
 
 # Install bin/fetch-artifact onto /usr/local/bin so consumer
-# scripts/setup-dev-env.sh can call it without cloning release/. The
+# bin/setup-dev-env.sh can call it without cloning release/. The
 # script reads ./artifacts.json (per docs/artifacts-schema.md) and
 # pulls pinned cross-repo artifacts from GH releases.
 if [ -f "$CLONE_DIR/bin/fetch-artifact" ]; then

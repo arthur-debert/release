@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build entry resolution for Tauri apps (in preference order):
 #   1. bin/build — canonical take-iii entry, release-sync managed
-#   2. scripts/build-tauri.sh in the CONSUMER repo — legacy hook
+#   2. app-bin/build-tauri.sh in the CONSUMER repo — legacy hook
 #   3. npx tauri build — minimal fallback
 #
 # Env vars:
@@ -23,8 +23,8 @@ fi
 
 if [ -x "${REPO_ROOT}/bin/build" ]; then
   "${REPO_ROOT}/bin/build" "${extra[@]+"${extra[@]}"}"
-elif [ -f "${REPO_ROOT}/scripts/build-tauri.sh" ]; then
-  bash "${REPO_ROOT}/scripts/build-tauri.sh" "${extra[@]+"${extra[@]}"}"
+elif [ -f "${REPO_ROOT}/app-bin/build-tauri.sh" ]; then
+  bash "${REPO_ROOT}/app-bin/build-tauri.sh" "${extra[@]+"${extra[@]}"}"
 else
   npx tauri build "${extra[@]+"${extra[@]}"}"
 fi
