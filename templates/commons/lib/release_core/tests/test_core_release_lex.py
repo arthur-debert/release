@@ -305,6 +305,92 @@ def test_status_mode_skips_bump_validation_but_needs_repos(capsys):
 
 
 # --------------------------------------------------------------------------
+# Relative-path resolution (the order-independent-walk invariant)
+#
+# release-lex iterates the 6 repos and os.chdir's into each. If a repo path is
+# relative, it MUST be resolved to an absolute path up front at parse time —
+# otherwise the second repo's relative path would resolve against the FIRST
+# repo's dir after the first chdir, breaking the cascade for relative input.
+# --------------------------------------------------------------------------
+
+
+def test_parse_args_resolves_relative_repo_paths_to_absolute(tmp_path, monkeypatch):
+    # Lay out the 6 repos as siblings under tmp_path, then cd into tmp_path and
+    # pass each as a RELATIVE path (`./comms`, `lex`, …). After parsing, every
+    # repo path must be absolute and point at the right dir.
+    rels = {
+        "comms": "./comms",
+        "lex": "lex",
+        "tree-sitter": "./nested/tree-sitter",
+        "vscode": "vscode",
+        "nvim": "./nvim",
+        "lexed": "lexed",
+    }
+    for rel in rels.values():
+        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(tmp_path)
+
+    argv = ["patch"]
+    for key, rel in rels.items():
+        argv += [f"--{key}", rel]
+    cfg = rlx._parse_args(argv)
+
+    for key, rel in rels.items():
+        got = cfg["repos"][key]
+        assert os.path.isabs(got), f"{key} path not absolute: {got!r}"
+        assert os.path.realpath(got) == os.path.realpath(tmp_path / rel)
+
+
+def test_relative_paths_resolve_independent_of_iteration_order(tmp_path, monkeypatch):
+    # The core regression: with relative input, chdir'ing into repo[0] must NOT
+    # change how repo[1..n] resolve. We parse relative paths once (resolving them
+    # to absolute), then simulate the walk — chdir into each repo in turn — and
+    # assert decide_release is always invoked with the repo's ORIGINAL absolute
+    # path, never one mangled by a previous chdir (e.g. `lex/vscode`).
+    rels = {"comms": "./comms", "lex": "lex", "vscode": "./vscode"}
+    for rel in rels.values():
+        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
+        # Make each a "git repo" enough for the real os.chdir to succeed.
+    monkeypatch.chdir(tmp_path)
+
+    argv = ["patch"]
+    for key, rel in rels.items():
+        argv += [f"--{key}", rel]
+    cfg = rlx._parse_args(argv)
+
+    expected_abs = {key: os.path.realpath(tmp_path / rel) for key, rel in rels.items()}
+
+    # Real os.chdir (the trap is order-dependent cwd); record the path
+    # decide_release receives for each repo and confirm cwd actually moved.
+    seen_paths: dict[str, str] = {}
+    seen_cwd: dict[str, str] = {}
+
+    def fake_decide(path):
+        # Capture which key this is by matching the absolute path.
+        for k, p in expected_abs.items():
+            if os.path.realpath(path) == p:
+                seen_paths[k] = path
+                seen_cwd[k] = os.path.realpath(os.getcwd())
+        return rlx.Decision(rlx.NOTAGS)
+
+    monkeypatch.setattr(rlx, "decide_release", fake_decide)
+
+    # Walk the repos in ORDER, chdir'ing into each (the real cascade behavior).
+    for key in ("comms", "lex", "vscode"):
+        path = cfg["repos"][key]
+        assert os.path.isabs(path)
+        os.chdir(path)  # this would mangle a relative repo[next] if unresolved
+        rlx.decide_release(path)
+
+    # Every repo was visited with its own absolute path, regardless of the
+    # cwd left behind by the previous repo's chdir.
+    for key in ("comms", "lex", "vscode"):
+        assert seen_paths[key] == cfg["repos"][key]
+        assert os.path.realpath(seen_paths[key]) == expected_abs[key]
+        assert seen_cwd[key] == expected_abs[key]
+
+
+# --------------------------------------------------------------------------
 # _validate  (path + managed-tool existence -> exit 1)
 # --------------------------------------------------------------------------
 

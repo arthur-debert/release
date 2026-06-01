@@ -305,7 +305,15 @@ def _parse_args(argv: list[str]) -> dict:
         arg = rest[i]
         if arg in ("--comms", "--lex", "--tree-sitter", "--vscode", "--nvim", "--lexed"):
             key = arg[2:]
-            repos[key] = rest[i + 1] if i + 1 < len(rest) else ""
+            raw = rest[i + 1] if i + 1 < len(rest) else ""
+            # Resolve to an ABSOLUTE path ONCE, here at parse time, so every
+            # later os.chdir() / git -C is absolute and order-independent. The
+            # walk chdir's into each of the 6 repos in turn; a relative path
+            # would otherwise resolve against the PREVIOUS repo's dir after the
+            # first chdir (e.g. `comms` becomes `comms/comms`), breaking the
+            # cascade for relative input. Empty stays empty so _validate still
+            # reports a clean "not a directory" / missing-arg error.
+            repos[key] = os.path.abspath(raw) if raw else ""
             i += 2
         elif arg == "--dry-run":
             dry_run = True
