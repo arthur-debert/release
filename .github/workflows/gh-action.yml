@@ -34,7 +34,7 @@ name: GH action release
 # ---------------------------
 # - JS action `dist/` build. Pure-composite actions have no build.
 #   When the first JS-action consumer surfaces, add a slice 2 with
-#   a `scripts/build-action.sh` convention hook + an artifact-
+#   a `app-bin/build-action.sh` convention hook + an artifact-
 #   reupload step.
 # - package.json version bump. Composite actions have no manifest;
 #   the tag IS the version. JS-action support will add this.

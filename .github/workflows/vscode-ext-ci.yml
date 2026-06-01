@@ -32,7 +32,7 @@ name: VS Code Extension CI
 #     ci:
 #       uses: arthur-debert/release/.github/workflows/vscode-ext-ci.yml@v1
 #       with:
-#         pre-check: scripts/build-shared.sh   # optional
+#         pre-check: app-bin/build-shared.sh   # optional
 
 on:
   workflow_call:

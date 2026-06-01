@@ -41,9 +41,9 @@ name: tree-sitter release
 #
 # Convention hooks
 # ----------------
-# - `app-bin/bundle-extras.sh` (preferred) or `scripts/bundle-extras.sh`
-#   (legacy fallback) — runs AFTER the standard bundle is assembled in
-#   `dist/`, BEFORE the tarball is created. Use to add consumer-specific
+# - `app-bin/bundle-extras.sh` — runs AFTER the standard bundle is
+#   assembled in `dist/`, BEFORE the tarball is created. Use to add
+#   consumer-specific
 #   files (e.g. `shared/embedded-grammars.json`). Working dir at hook
 #   time is the repo root; the bundle is at `${GITHUB_WORKSPACE}/dist/`.
 
@@ -322,17 +322,12 @@ jobs:
       # at ${GITHUB_WORKSPACE}/dist. Use to add files the standard
       # layout doesn't carry (e.g. shared/embedded-grammars.json).
       - name: Bundle-extras hook (consumer)
-        if: hashFiles('app-bin/bundle-extras.sh') != '' || hashFiles('scripts/bundle-extras.sh') != ''
+        if: hashFiles('app-bin/bundle-extras.sh') != ''
         shell: bash
         env:
           BUNDLE_DIR: ${{ github.workspace }}/dist
           PARSER: ${{ needs.prepare.outputs.parser-name }}
-        run: |
-          if [ -f app-bin/bundle-extras.sh ]; then
-            bash app-bin/bundle-extras.sh
-          else
-            bash scripts/bundle-extras.sh
-          fi
+        run: bash app-bin/bundle-extras.sh
 
       - name: Tar the bundle
         run: |

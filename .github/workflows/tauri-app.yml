@@ -46,7 +46,7 @@ name: tauri-app release
 # adopted release-sync get this automatically.
 #
 # Fallbacks (in order):
-#   1. `scripts/build-tauri.sh` — legacy convention hook, kept during
+#   1. `app-bin/build-tauri.sh` — legacy convention hook, kept during
 #      the take-iii transition. Consumers adopting release-sync should
 #      delete their copy.
 #   2. `npx tauri build` — minimal fallback for consumers that haven't
