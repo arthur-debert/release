@@ -17,6 +17,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# The gate runs first (one definition, via commons/bin/check-gate), then the
+# Kind-specific test step. The test step below execs, so the gate must precede it.
+"$SCRIPT_DIR/check-gate"
+
 if [ -x app-bin/test-all ]; then
     exec app-bin/test-all "$@"
 fi
