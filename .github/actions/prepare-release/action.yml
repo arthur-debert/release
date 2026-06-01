@@ -183,7 +183,12 @@ runs:
         # (canonical reference); inlined because this step is a single
         # `run:` block. Set SKIP_PRECOMMIT_GATE=true to bypass.
         if [ "${SKIP_PRECOMMIT_GATE:-false}" != "true" ]; then
-          mapfile -t staged_arr < <(git diff --cached --name-only)
+          # --diff-filter=ACMR excludes Deleted: the changelog roll deletes
+          # unreleased-*.md fragments, and a deleted path can't be
+          # linted/formatted. Feeding one to lefthook's prettier
+          # (stage_fixed: true) makes it `git add --force` a vanished file
+          # → exit 128. The deletion still commits via the staged index.
+          mapfile -t staged_arr < <(git diff --cached --name-only --diff-filter=ACMR)
           if [ "${#staged_arr[@]}" -gt 0 ]; then
             if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
               echo "Pre-commit gate: lefthook"

@@ -19,7 +19,12 @@ if [ "${SKIP_PRECOMMIT_GATE:-false}" = "true" ]; then
   exit 0
 fi
 
-mapfile -t staged_arr < <(git diff --cached --name-only)
+# --diff-filter=ACMR excludes Deleted: the changelog roll deletes
+# unreleased-*.md fragments, and a deleted path can't be linted/formatted.
+# Feeding one to lefthook's prettier (stage_fixed: true) makes it run
+# `git add --force` on a vanished file → exit 128. The deletion is still
+# committed via the staged index regardless of being in this list.
+mapfile -t staged_arr < <(git diff --cached --name-only --diff-filter=ACMR)
 if [ "${#staged_arr[@]}" -eq 0 ]; then
   echo "No staged files — pre-commit gate has nothing to check."
   exit 0
