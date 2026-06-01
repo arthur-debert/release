@@ -1,132 +1,31 @@
-#!/usr/bin/env bash
-# Detect consumer-side drift from canonical release-sync state.
+#!/usr/bin/env python3
+# release-drift-check — consumer-side drift gate (ADR-0002, release#301).
 #
-# "Drift" = a managed file was edited in the consumer instead of upstream
-# in release/ (a symlink replaced by a real file, a `.release/` file
-# hand-edited, a `# shellcheck disable` slipped into a managed script, or
-# extra keys added to `.release-sync.yaml`). All of these defeat the
-# "fix once, propagate via @v1" contract and get silently clobbered on
-# the next sync. This is the programmatic gate for the rules the
-# migrate-consumer-to-build-dir skill only documents in prose.
-#
-# Crucially, drift is NOT the same as staleness. A consumer that is simply
-# behind canonical (release/main moved ahead of what it last synced) has
-# NOT drifted. We tell them apart by rebuilding against the exact revision
-# recorded in `.release/.release-sync-source` (the provenance marker, ADR-0002)
-# — not against a moving ref like v1/main. If rebuilding from the recorded
-# revision reproduces the committed tree, there is zero drift no matter how
-# far behind canonical the consumer is.
-#
-# Usage:
-#   release-drift-check            # exit 1 if drift, 0 if clean
-#   release-drift-check --quiet    # only print on drift
-#
-# Exit codes:
-#   0  — no drift (clean, or no marker yet → nothing to compare against)
-#   1  — drift detected (managed file diverged, or .release-sync.yaml over-override)
-#   2  — usage / internal error
-#   64 — bad usage
-#
-# Requires release-sync + detect-kind on PATH and a $RELEASE_HOME clone
-# containing the recorded source revision's objects (in CI, check out
-# arthur-debert/release with fetch-depth: 0).
+# Thin shim (shell→Python Phase 2, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. release-drift-check
+# is a release-only tool (a real file in bin/, NOT synced to consumers), so
+# realpath lands in bin/ and the package sits at
+# ../templates/commons/lib/release_core (the contract's variant (b)). It runs
+# wherever release-sync runs — agent-side in the release clone, or a consumer CI
+# job that checks out arthur-debert/release and points $RELEASE_HOME / PATH at
+# it — so release_core is always reachable by the same resolution as release-sync.
+# Behavior matches the old bash byte-for-byte.
+import os
+import sys
 
-set -euo pipefail
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+from release_core.verbs import release_drift_check  # noqa: E402 — sys.path set above
 
-quiet=0
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --quiet) quiet=1; shift ;;
-    -h|--help) show_help; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; show_help >&2; exit 64 ;;
-  esac
-done
-
-command -v release-sync >/dev/null || { echo "release-drift-check: release-sync not on PATH" >&2; exit 2; }
-command -v yq >/dev/null || { echo "release-drift-check: yq is required (mikefarah/yq v4)" >&2; exit 2; }
-
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
-  echo "release-drift-check: not inside a git repo" >&2; exit 2; }
-cd "$repo_root"
-
-SOURCE_MARKER=.release/.release-sync-source
-
-if [ ! -f "$SOURCE_MARKER" ]; then
-  # No marker: either this repo predates the provenance marker (synced
-  # before ADR-0002) or it isn't on the build-dir model at all. Either
-  # way there's no recorded baseline to compare against — skip, don't
-  # fail. Re-syncing the consumer once backfills the marker.
-  [ "$quiet" = 1 ] || echo "release-drift-check: no $SOURCE_MARKER — repo not on a marker-aware sync; skipping drift gate (re-sync to backfill)."
-  exit 0
-fi
-
-sha=$(tr -d '\r' < "$SOURCE_MARKER" | grep -E '^[0-9a-f]{40}$' | head -n 1 || true)
-if [ -z "$sha" ]; then
-  echo "release-drift-check: $SOURCE_MARKER has no 40-char SHA line" >&2
-  exit 2
-fi
-
-drift=0
-report=""
-
-# --- 1. Managed-file drift -------------------------------------------------
-# Rebuild against the recorded revision. release-sync --check is read-only
-# (exits before applying) and reports any add/modify/remove/conflict in the
-# managed surface. Against the marker SHA, a clean consumer produces zero
-# changes; any change is drift, not staleness.
-check_out=$(RELEASE_REF="$sha" release-sync --check 2>&1) && managed_clean=1 || managed_clean=0
-
-if [ "$managed_clean" = 0 ]; then
-  # release-sync --check exits 1 both for "changes detected" and for fatal
-  # errors (e.g. the recorded SHA's templates are unreachable). Surface the
-  # raw output either way so a human/agent can tell which it was.
-  drift=1
-  report+="Managed-file drift (rebuilt against release@${sha:0:12}):
-$check_out
-"
-fi
-
-# --- 2. .release-sync.yaml over-override -----------------------------------
-# Only `capabilities` is an honored consumer knob. Any other top-level key
-# is per-repo rule tuning that release-sync silently ignores — so it never
-# shows up as managed-file drift, but it IS forbidden divergence.
-if [ -f .release-sync.yaml ]; then
-  # No `2>/dev/null || true` here: malformed YAML is a developer bug, not
-  # a transient failure — let yq's non-zero exit trip `set -e` and fail
-  # hard rather than silently reporting "no extra keys".
-  # `(. // {})` coerces an empty/null document to a map so `keys` doesn't
-  # error on it — only a genuine YAML *parse* error trips set -e (the
-  # intended hard failure for malformed config).
-  extra=$(yq '(. // {}) | keys | .[] | select(. != "capabilities")' .release-sync.yaml)
-  if [ -n "$extra" ]; then
-    drift=1
-    bullets=""
-    while IFS= read -r k; do
-      [ -n "$k" ] || continue
-      bullets+="  - $k"$'\n'
-    done <<<"$extra"
-    report+=".release-sync.yaml has keys beyond \`capabilities\` (per-repo rule tuning is not allowed):
-$bullets"
-  fi
-fi
-
-# --- Verdict ---------------------------------------------------------------
-if [ "$drift" = 0 ]; then
-  [ "$quiet" = 1 ] || echo "release-drift-check: clean — managed surface matches release@${sha:0:12}."
-  exit 0
-fi
-
-cat >&2 <<EOF
-release-drift-check: DRIFT DETECTED.
-
-$report
-This belongs UPSTREAM in arthur-debert/release, not in this consumer.
-release-sync rebuilds .release/ from scratch, so a local edit to a managed
-file is both wrong (it won't propagate to other consumers) and futile (the
-next sync clobbers it). Fix the template in release/, cut a PATCH, advance
-@v1, and re-sync — don't patch around it here. See the migrate-consumer
-skill's "Bucket A" triage.
-EOF
-exit 1
+if __name__ == "__main__":
+    sys.exit(release_drift_check.main(sys.argv[1:]))
