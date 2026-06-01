@@ -1,134 +1,28 @@
-#!/usr/bin/env bash
-# Install a release PAT as the RELEASE_TOKEN secret across every repo onboarded
-# to the canonical main-branch-protection ruleset.
+#!/usr/bin/env python3
+# install-release-token — install a release PAT as RELEASE_TOKEN across onboarded repos.
 #
-# Why: on user-owned repos (and on org repos without org-level GitHub Actions
-# integration), GITHUB_TOKEN cannot bypass branch rulesets — `Integration`
-# actor bypass is rejected and `RepositoryRole` bypass only matches human
-# collaborators, not the github-actions[bot]. A Personal Access Token
-# authenticates as the owner (admin), which DOES match the admin RepositoryRole
-# bypass, so release workflows that push the version bump to default succeed.
-#
-# Usage:
-#   install-release-token            # reads token from stdin
-#   pbpaste | install-release-token  # macOS clipboard
-#   install-release-token --owners arthur-debert,lex-fmt
-#
-# Discovery: queries every repo under the given owners for a ruleset named
-# "main-branch-protection". Same logic apply-ruleset uses to find onboarded
-# repos.
+# Thin shim (shell→Python, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. install-release-token
+# is a release-only tool (a real file in bin/, NOT synced to consumers), so realpath
+# lands in bin/ and the package sits at ../templates/commons/lib/release_core
+# (the contract's variant (b)). Token validation + set-then-verify loop + stdout/exit
+# codes match the old bash byte-for-byte.
+import os
+import sys
 
-set -euo pipefail
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-owners="arthur-debert,lex-fmt"
+from release_core.verbs import install_release_token  # noqa: E402 — sys.path set above
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --owners) owners=$2; shift 2 ;;
-    -h|--help) sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; exit 0 ;;
-    *) echo "unknown arg: $1" >&2; exit 64 ;;
-  esac
-done
-
-if [ -t 0 ]; then
-  echo "error: pipe the PAT to stdin (e.g. pbpaste | $(basename "$0"))" >&2
-  exit 64
-fi
-
-token=$(cat | tr -d '\n\r ')
-if [ -z "$token" ]; then
-  echo "error: empty token on stdin" >&2
-  exit 64
-fi
-
-# Sanity-check the token: hit /user, verify it auths, and verify it carries
-# the OAuth scopes the consumer workflows need (notably read:org for the
-# Copilot-review reusable workflow). The X-OAuth-Scopes response header is
-# the canonical source — fine-grained PATs omit it entirely, which is also
-# disqualifying because they can't grant read:org.
-required_scopes=(repo read:org)
-resp=$(curl -fsSL -D - -H "Authorization: Bearer $token" https://api.github.com/user --write-out '\nHTTP_CODE:%{http_code}\n' 2>&1)
-code=$(printf '%s\n' "$resp" | sed -n 's/^HTTP_CODE:\(.*\)$/\1/p' | tail -1)
-body=$(printf '%s\n' "$resp" | sed '/^HTTP_CODE:/d' | awk 'BEGIN{h=1} /^\r?$/{h=0;next} h==0{print}')
-scopes_hdr=$(printf '%s\n' "$resp" | grep -i '^x-oauth-scopes:' | head -1 | sed -E 's/^[^:]+: *//; s/[\r ]+$//')
-login=$(printf '%s\n' "$body" | jq -r '.login // empty' 2>/dev/null)
-if [ "$code" != "200" ] || [ -z "$login" ]; then
-  echo "error: token authentication failed (http $code)" >&2
-  exit 1
-fi
-if [ -z "$scopes_hdr" ]; then
-  echo "error: token has no OAuth scopes (likely a fine-grained PAT)." >&2
-  echo "       This script needs a classic PAT with: ${required_scopes[*]}" >&2
-  echo "       Create one at https://github.com/settings/tokens/new" >&2
-  exit 1
-fi
-missing=()
-for s in "${required_scopes[@]}"; do
-  printf '%s' "$scopes_hdr" | tr ',' '\n' | tr -d ' ' | grep -qx "$s" || missing+=("$s")
-done
-if [ ${#missing[@]} -gt 0 ]; then
-  echo "error: token is missing required OAuth scope(s): ${missing[*]}" >&2
-  echo "       Token has: $scopes_hdr" >&2
-  echo "       Edit token scopes at https://github.com/settings/tokens" >&2
-  exit 1
-fi
-echo "token authenticates as: $login"
-echo "token scopes: $scopes_hdr"
-
-echo "discovering onboarded repos in: $owners"
-repos=()
-for owner in $(echo "$owners" | tr ',' ' '); do
-  while read -r repo; do
-    # Tolerate per-repo 403s (legacy/private repos w/o rulesets feature) so
-    # discovery doesn't abort partway through.
-    rs=$(gh api "repos/$repo/rulesets" 2>/dev/null || echo '[]')
-    id=$(jq -r '.[]? | select(.name == "main-branch-protection") | .id' <<<"$rs" 2>/dev/null | head -1)
-    [ -n "$id" ] && repos+=("$repo")
-  done < <(gh repo list "$owner" --limit 200 --json nameWithOwner --jq '.[].nameWithOwner')
-done
-
-if [ ${#repos[@]} -eq 0 ]; then
-  echo "no onboarded repos found under: $owners" >&2
-  exit 1
-fi
-
-echo "found ${#repos[@]} repo(s):"
-printf '  %s\n' "${repos[@]}"
-echo
-
-failed=0
-verified_ok=0
-verified_missing=0
-for repo in "${repos[@]}"; do
-  # Capture stderr so failures are visible — past versions silently
-  # swallowed errors and reported success even when the secret didn't
-  # land, which led to "install-release-token said ok but the secret
-  # isn't there" debugging cycles.
-  set_err=$(printf '%s' "$token" | gh secret set RELEASE_TOKEN -R "$repo" 2>&1 1>/dev/null)
-  set_rc=$?
-  if [ "$set_rc" -ne 0 ]; then
-    printf '  FAIL %s — gh secret set: %s\n' "$repo" "$set_err" >&2
-    failed=$((failed + 1))
-    continue
-  fi
-
-  # Verify by re-listing — gh secret set returns 0 but doesn't
-  # always actually persist (e.g. write race, CI-hash mismatch).
-  if gh secret list -R "$repo" 2>/dev/null | grep -qE '^RELEASE_TOKEN[[:space:]]'; then
-    printf '  ok   %s\n' "$repo"
-    verified_ok=$((verified_ok + 1))
-  else
-    printf '  FAIL %s — secret set returned 0 but RELEASE_TOKEN absent on re-list\n' "$repo" >&2
-    failed=$((failed + 1))
-    verified_missing=$((verified_missing + 1))
-  fi
-done
-
-echo
-echo "summary: ${#repos[@]} repos, $verified_ok verified set, $failed failure(s)"
-if [ "$verified_missing" -gt 0 ]; then
-  echo "  — $verified_missing repo(s) returned success but secret didn't persist; investigate auth/permissions" >&2
-fi
-if [ "$failed" -gt 0 ]; then
-  exit 1
-fi
+if __name__ == "__main__":
+    sys.exit(install_release_token.main(sys.argv[1:]))
