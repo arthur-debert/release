@@ -21,7 +21,7 @@ VERSION_FILE="${VERSION_FILE:-}"
 PREP_SCRIPT="${PREP_SCRIPT:-}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEMVER="$script_dir/../templates/commons/bin/share/semver-tool/semver"
+SEMVER="$script_dir/../bin/semver"
 
 emit() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then

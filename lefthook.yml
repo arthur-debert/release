@@ -35,9 +35,6 @@ pre-commit:
         fail=0
         for f in {staged_files}; do
           [ -f "$f" ] || continue
-          # Vendored (own provenance) — exempt, same as the ruff hook. We don't
-          # fix upstream's code (e.g. the semver-tool under share/).
-          case "$f" in */share/*) continue ;; esac
           case "$f" in
             *.sh|*.bash) ;;
             *)
@@ -94,9 +91,9 @@ pre-commit:
       # the CI `py-lint` job.
       #
       # The bin/ + app-bin/ globs deliberately match NON-python files too (the
-      # bash shims `release`, `check-shell`, `setup-dev-env.sh`, the vendored
-      # share/ tools). We can't hand a bash file to ruff — it errors as invalid
-      # Python — so file selection is done by CONTENT, not glob, exactly like
+      # bash shims `release`, `check-shell`, `setup-dev-env.sh`). We can't hand a
+      # bash file to ruff — it errors as invalid Python — so file selection is
+      # done by CONTENT, not glob, exactly like
       # bin/check-shell: keep only `*.py` plus shebang-detected python shims,
       # drop everything else. This mirrors the repo's unified content-based gate
       # (release#348 / docs/proposals/unified-gate.lex) and stays mode-invariant
@@ -121,7 +118,6 @@ pre-commit:
         for f in {staged_files}; do
           [ -f "$f" ] || continue
           case "$f" in
-            */share/*) continue ;; # vendored (own provenance) — exempt
             *.py)
               set -- "$@" "$f"
               continue

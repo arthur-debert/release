@@ -7,9 +7,8 @@ description: |
   re-render.
 
   Designed to be called from consumer PR-time CI (one step in any
-  existing check workflow). The scripts and the vendored semver-tool
-  must already be on disk via release-sync — this action only
-  invokes them.
+  existing check workflow). The scripts must already be on disk via
+  release-sync — this action only invokes them.
 
   ## Behavior
 
