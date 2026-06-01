@@ -165,6 +165,20 @@ def test_unknown_kind_renders_question_mark(env, monkeypatch, capsys):
     assert "o/a\t?\tok\tpass" in capsys.readouterr().out.splitlines()
 
 
+def test_paths_line_with_extra_tab_does_not_crash(env, monkeypatch, capsys):
+    # Mirror `read -r repo abspath found`: a line with more than three tab fields
+    # must NOT raise a ValueError unpack — the third field absorbs the remainder
+    # (split maxsplit=2), exactly as bash read does. The trailing tab makes the
+    # `found` field != "found", so the repo is reported missing — the faithful
+    # bash outcome. The point under test is "no crash", matching read's tolerance.
+    root = "/fleetroot"
+    paths = "o/a\t/fleetroot/o/a\tfound\textra\n"
+    monkeypatch.setattr(proc, "run", _Driver(paths))
+    rc = rvf.main(["--root", root])
+    assert rc == 1
+    assert "o/a\t-\tmissing\tskipped" in capsys.readouterr().out.splitlines()
+
+
 # ── propagated env / args ─────────────────────────────────────────────────────
 
 

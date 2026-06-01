@@ -170,7 +170,11 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     for line in paths.stdout.splitlines():
         if not line:
             continue
-        repo, abspath, found = line.split("\t")
+        # Mirror `IFS=$'\t' read -r repo abspath found`: split into exactly three
+        # fields, the last absorbing any further tabs (a tab in abspath is absurd
+        # but read tolerates it, so the faithful port must too — and maxsplit
+        # avoids a ValueError unpack on a >3-field line).
+        repo, abspath, found = line.split("\t", 2)
         seen += 1
 
         if found != "found":
