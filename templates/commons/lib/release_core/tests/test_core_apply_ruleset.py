@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import os
 
-from release_core import gh
+from release_core import gh, yamlio
 from release_core.verbs import apply_ruleset
 
 _TMPL = os.path.join(
@@ -102,6 +102,35 @@ def test_workflow_triggers_string_array_object_other():
 def test_is_pr_workflow():
     assert apply_ruleset.is_pr_workflow({"on": {"pull_request": None}}) is True
     assert apply_ruleset.is_pr_workflow({"on": "push"}) is False
+
+
+# --------------------------------------------------------------------------
+# Malformed-YAML handling: yamlio.load raises yamlio.YamlError (NOT
+# proc.ProcError, since _yq calls proc.run(check=False)). Both yaml-reading
+# sites must swallow YamlError and skip the file, matching the bash's clean
+# skip rather than crashing with a traceback. Regression for PR #392 review.
+# --------------------------------------------------------------------------
+
+
+def test_pr_workflow_paths_skips_malformed_yaml(tmp_path, monkeypatch):
+    wf = tmp_path / "workflows"
+    wf.mkdir()
+    (wf / "broken.yml").write_text("this: : is: not: valid\n")
+
+    def boom(_path):
+        raise yamlio.YamlError("yq parse failure")
+
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", boom)
+    # No exception, broken file simply contributes no path.
+    assert apply_ruleset._pr_workflow_paths(str(wf)) == []
+
+
+def test_checks_from_yq_skips_malformed_yaml(monkeypatch):
+    def boom(_path):
+        raise yamlio.YamlError("yq parse failure")
+
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", boom)
+    assert apply_ruleset._checks_from_yq("/top", [".github/workflows/ci.yml"]) == []
 
 
 # --------------------------------------------------------------------------

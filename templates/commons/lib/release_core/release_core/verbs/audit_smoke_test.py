@@ -269,7 +269,14 @@ def main(argv: list[str]) -> int:  # noqa: C901 — linear orchestration mirrors
         pr_url = (create.stdout.strip().splitlines() or [""])[-1]
         pr_num = _last_int(pr_url)
         if not pr_num:
-            print(f"[smoke] FAIL pr create: {pr_url}", file=sys.stderr)
+            # Surface BOTH streams: gh writes progress/URLs to stdout and the
+            # actual error to stderr, so either may carry the diagnostic.
+            print(
+                f"[smoke] FAIL pr create:\n"
+                f"STDOUT: {create.stdout.strip()}\n"
+                f"STDERR: {create.stderr.strip()}",
+                file=sys.stderr,
+            )
             return 1
         print(f"[smoke] opened PR #{pr_num}: {pr_url}")
 

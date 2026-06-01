@@ -27,7 +27,7 @@ import json
 import os
 import sys
 
-from .. import cli, gh, proc, yamlio
+from .. import cli, gh, yamlio
 
 USAGE = __doc__ or ""
 
@@ -138,7 +138,7 @@ def _pr_workflow_paths(workflows_dir: str) -> list[str]:
             continue
         try:
             doc = yamlio.load(path)
-        except proc.ProcError:
+        except yamlio.YamlError:
             continue
         if is_pr_workflow(doc):
             paths.append(f".github/workflows/{base}")
@@ -193,7 +193,7 @@ def _checks_from_yq(toplevel: str, paths: list[str]) -> list[str]:
     for path in paths:
         try:
             doc = yamlio.load(os.path.join(toplevel, path))
-        except proc.ProcError:
+        except yamlio.YamlError:
             continue
         if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
             found.update(doc["jobs"].keys())

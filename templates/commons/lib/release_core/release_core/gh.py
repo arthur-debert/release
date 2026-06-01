@@ -123,21 +123,16 @@ def secret_set(name: str, value: str, *, repo: str) -> None:
 
 
 def secret_list(repo: str) -> list[str]:
-    """`gh secret list -R <repo>` → list of secret names. Raises GhError.
+    """`gh secret list -R <repo> --json name -q '.[].name'` → list of names. Raises GhError.
 
     Porcelain over the Actions-secrets surface, the read-side companion to
     :func:`secret_set` (it is paired with it to verify a set actually persisted).
-    Output is the tab-separated `gh secret list` table; only the name column is
-    returned.
+    The structured `--json name -q '.[].name'` form yields one secret name per
+    line with no header — robust against `gh secret list`'s human-table columns
+    (and any future header row) that an ad-hoc whitespace split would misparse.
     """
-    output = _gh(["secret", "list", "-R", repo])
-    names = []
-    for line in output.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        names.append(line.split()[0])
-    return names
+    output = _gh(["secret", "list", "-R", repo, "--json", "name", "-q", ".[].name"])
+    return [line.strip() for line in output.splitlines() if line.strip()]
 
 
 def graphql(query: str, **variables: object) -> dict:

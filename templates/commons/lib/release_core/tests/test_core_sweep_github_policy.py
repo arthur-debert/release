@@ -105,3 +105,23 @@ def test_process_subtree_missing_prefix_is_noop(tmp_path):
     sweep.process_subtree(str(tmp_path / "nope"), force=False, tally=tally, emit=lines.append)
     assert lines == []
     assert tally == sweep.Tally()
+
+
+def test_main_undetected_kind_exits_1_cleanly(tmp_path, monkeypatch, capsys):
+    """When no --stack is given and manifest.detect_kind can't determine the
+    kind, main must print the bash's "could not detect kind of ..." line and
+    return 1 — not crash with an uncaught KindError. Regression for PR #392."""
+    from release_core import manifest
+
+    monkeypatch.setattr(sweep.proc, "out", lambda *a, **k: str(tmp_path))
+    monkeypatch.setattr(sweep.os, "chdir", lambda _p: None)
+
+    def boom(_root):
+        raise manifest.KindError(f"could not detect kind of {tmp_path}")
+
+    monkeypatch.setattr(sweep.manifest, "detect_kind", boom)
+
+    rc = sweep.main([])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "could not detect kind of" in err

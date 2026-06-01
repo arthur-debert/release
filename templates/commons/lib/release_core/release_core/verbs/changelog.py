@@ -303,6 +303,16 @@ def render_main(argv: list[str]) -> int:
     target = "CHANGELOG.md"
     fd, tmp = tempfile.mkstemp(prefix="CHANGELOG.md.tmp.", dir=".")
     try:
+        # mkstemp creates the temp file 0o600 and os.replace preserves that;
+        # the bash `mktemp + mv` produced a umask-default (typically 0o644)
+        # CHANGELOG.md. Re-derive the umask-respecting mode so the rendered
+        # file stays world-readable for downstream tools/CI.
+        try:
+            umask = os.umask(0)
+            os.umask(umask)
+            os.chmod(tmp, 0o666 & ~umask)
+        except OSError:
+            pass
         with os.fdopen(fd, "wb") as fh:
             fh.write(buf)
         os.replace(tmp, target)

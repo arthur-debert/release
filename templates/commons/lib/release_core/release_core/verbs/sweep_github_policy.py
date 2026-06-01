@@ -139,7 +139,15 @@ def main(argv: list[str]) -> int:
     os.chdir(repo_root)
 
     if not stack:
-        stack = manifest.detect_kind(repo_root)
+        # Bash did `stack=${stack:-$(detect-kind)}`; an undetected kind makes
+        # detect-kind print "could not detect kind of <pwd>" and exit 1, which
+        # (under `set -e`) aborts the sweep. Reproduce that clean exit rather
+        # than letting KindError surface as a traceback. cwd is repo_root here.
+        try:
+            stack = manifest.detect_kind(repo_root)
+        except manifest.KindError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
 
     release_root = _release_root()
     commons_dir = os.path.join(release_root, "templates", "commons")

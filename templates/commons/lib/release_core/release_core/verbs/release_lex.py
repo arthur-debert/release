@@ -416,9 +416,18 @@ def _release_one(key: str, cfg: dict) -> int:
         commit=commit_sha,
         limit=1,
         json_fields=["databaseId"],
-    ).stdout
-    run_id = _first_database_id(runs)
+    )
+    run_id = _first_database_id(runs.stdout)
     if not run_id:
+        if runs.returncode != 0:
+            # gh failed outright: surface BOTH streams (gh splits progress/JSON
+            # across stdout and the error onto stderr) before the generic line.
+            print(
+                f"  ✗ gh run list failed:\n"
+                f"STDOUT: {runs.stdout.strip()}\n"
+                f"STDERR: {runs.stderr.strip()}",
+                file=sys.stderr,
+            )
         print(
             f"  ✗ could not find release CI run for v{new} (commit {commit_sha})",
             file=sys.stderr,

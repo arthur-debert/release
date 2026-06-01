@@ -207,6 +207,24 @@ def test_render_empty_changelog(repo):
     )
 
 
+def test_render_output_mode_respects_umask(repo):
+    """render writes via mkstemp (0o600) + os.replace; the final CHANGELOG.md
+    must carry umask-default perms (e.g. 0o644), not the 0o600 mkstemp leaks —
+    parity with the bash `mktemp + mv`. Regression for PR #392 review."""
+    import os
+    import stat
+
+    (repo / "CHANGELOG").mkdir()
+    old = os.umask(0o022)
+    try:
+        rc = changelog.render_main([])
+    finally:
+        os.umask(old)
+    assert rc == 0
+    mode = stat.S_IMODE(os.stat(repo / "CHANGELOG.md").st_mode)
+    assert mode == 0o644, oct(mode)
+
+
 def test_render_descending_semver_order(repo):
     d = repo / "CHANGELOG"
     d.mkdir()

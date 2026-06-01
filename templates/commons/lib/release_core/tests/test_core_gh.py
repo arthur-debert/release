@@ -61,8 +61,8 @@ def test_secret_set_raises_on_failure(gh_on_path, monkeypatch):
 
 
 def test_secret_list_returns_names_only(gh_on_path, monkeypatch):
-    table = "RELEASE_TOKEN\tUpdated 2026-05-31\nCRATES_IO_KEY\tUpdated 2026-05-30\n"
-    monkeypatch.setattr(gh.proc, "run", _Recorder(stdout=table))
+    out = "RELEASE_TOKEN\nCRATES_IO_KEY\n"
+    monkeypatch.setattr(gh.proc, "run", _Recorder(stdout=out))
     assert gh.secret_list("o/r") == ["RELEASE_TOKEN", "CRATES_IO_KEY"]
 
 
@@ -72,10 +72,20 @@ def test_secret_list_empty(gh_on_path, monkeypatch):
 
 
 def test_secret_list_builds_argv(gh_on_path, monkeypatch):
-    rec = _Recorder(stdout="A\tx\n")
+    rec = _Recorder(stdout="A\n")
     monkeypatch.setattr(gh.proc, "run", rec)
     gh.secret_list("o/r")
-    assert rec.calls[0][0] == ["gh", "secret", "list", "-R", "o/r"]
+    assert rec.calls[0][0] == [
+        "gh",
+        "secret",
+        "list",
+        "-R",
+        "o/r",
+        "--json",
+        "name",
+        "-q",
+        ".[].name",
+    ]
 
 
 # ─── rest(body=...) ──────────────────────────────────────────────────────────
