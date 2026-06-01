@@ -19,6 +19,16 @@ setup() {
   TMPDIR_TEST="$HARNESS_WORKSPACE"
   cd "$HARNESS_WORKSPACE"
   git init -q
+  # CI runners carry no ambient git identity, and with auto-detection
+  # disabled (user.useConfigOnly) `git commit` aborts with exit 128. Pin a
+  # self-contained identity (+ disable signing, set the default branch) in
+  # the fixture repo so any test that commits is independent of host git
+  # config. Regression: PR #408 (run-precommit-gate-deletions failed 128 in CI).
+  git config user.email "tests@release.invalid"
+  git config user.name "Release Tests"
+  git config commit.gpgsign false
+  git config tag.gpgsign false
+  git config init.defaultBranch main
 }
 
 teardown() {
