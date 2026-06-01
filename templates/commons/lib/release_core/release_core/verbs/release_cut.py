@@ -67,7 +67,7 @@ import re
 import shutil
 import sys
 
-from .. import manifest, proc, version
+from .. import gh, manifest, proc, version
 
 USAGE = """\
 usage: release-cut <major|minor|patch|X.Y.Z[-PRERELEASE]>
@@ -323,10 +323,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     print(f"Triggering release.yml for v{new_version}...")
     # proc.run captures; forward gh's own stdout/stderr so the dispatch output
     # (and any gh error) reaches the user exactly as the bash `gh ...` did.
-    res = proc.run(
-        ["gh", "workflow", "run", "release.yml", "-f", f"version={new_version}"],
-        check=False,
-    )
+    res = gh.workflow_run("release.yml", fields={"version": new_version})
     if res.stdout:
         sys.stdout.write(res.stdout)
     if res.stderr:

@@ -28,6 +28,14 @@ def _gh(args: list[str], *, input_text: str | None = None) -> str:
     return result.stdout
 
 
+def _gh_raw(args: list[str], *, input_text: str | None = None):
+    """`gh <args>` returning the raw CompletedProcess (check=False), without
+    raising on nonzero. For call sites that inspect ``returncode`` and/or
+    forward gh's own stdout/stderr verbatim (the porcelain wrappers below that
+    mirror a bash `gh … ; rc=$?` rather than a `|| die`)."""
+    return proc.run(["gh", *args], input=input_text, check=False)
+
+
 def rest(
     path: str,
     *,
@@ -160,3 +168,251 @@ def repo_root(start: str | None = None) -> str:
 
     top = git(["rev-parse", "--show-toplevel"], cwd=start)
     return os.path.realpath(top)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Porcelain wrappers (Phase 1 chokepoint consolidation).
+#
+# Each mirrors the EXACT `gh` command line a verb call site used before this
+# sweep — same subcommand, flags, --json field lists, -q/--jq queries — so both
+# byte-for-byte behavior AND the offline BATS `gh` stubs stay valid. Return
+# shapes match what each call site needs (raw stdout str, CompletedProcess for
+# returncode/stream inspection, or bool for fire-and-forget), rather than
+# forcing a parse the call site doesn't want.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+def repo_view(
+    *,
+    repo: str | None = None,
+    json_fields: list[str] | None = None,
+    jq: str | None = None,
+    q: str | None = None,
+    check: bool = True,
+):
+    """`gh repo view [repo] [--json …] [-q/--jq …]`.
+
+    Used to resolve the current/target repo slug. ``jq=`` emits ``--jq`` and
+    ``q=`` emits ``-q`` — the two spellings are NOT normalized because different
+    call sites (and their BATS stubs) used one or the other verbatim.
+
+    With ``check=True`` (default) returns stripped stdout, raising GhError on
+    failure (mirrors ``proc.out``). With ``check=False`` returns the raw
+    CompletedProcess so callers can degrade to '' on a nonzero exit.
+    """
+    args = ["repo", "view"]
+    if repo is not None:
+        args.append(repo)
+    if json_fields is not None:
+        args += ["--json", ",".join(json_fields)]
+    if jq is not None:
+        args += ["--jq", jq]
+    if q is not None:
+        args += ["-q", q]
+    if check:
+        return _gh(args).strip()
+    return _gh_raw(args)
+
+
+def repo_list(
+    owner: str,
+    *,
+    limit: int = 200,
+    json_fields: list[str] | None = None,
+    jq: str | None = None,
+    check: bool = True,
+):
+    """`gh repo list <owner> --limit <n> [--json …] [--jq …]`.
+
+    Enumerates an owner's repos for the policy/onboarding sweeps. ``check=True``
+    returns stripped stdout (``proc.out`` semantics); ``check=False`` returns the
+    raw CompletedProcess so callers can swallow failure → []."""
+    args = ["repo", "list", owner, "--limit", str(limit)]
+    if json_fields is not None:
+        args += ["--json", ",".join(json_fields)]
+    if jq is not None:
+        args += ["--jq", jq]
+    if check:
+        return _gh(args).strip()
+    return _gh_raw(args)
+
+
+def repo_clone(repo: str, dest: str):
+    """`gh repo clone <repo> <dest>` → raw CompletedProcess (check=False).
+
+    `gh repo clone` (not plain `git clone`) works in gh-authenticated sandboxes
+    where git clone is restricted. Caller inspects ``returncode``."""
+    return _gh_raw(["repo", "clone", repo, dest])
+
+
+def pr_list(
+    *,
+    head: str | None = None,
+    json_fields: list[str] | None = None,
+    q: str | None = None,
+):
+    """`gh pr list [--head …] [--json …] [-q …]` → stripped stdout. Raises
+    GhError on failure (call sites that swallow failure wrap this themselves)."""
+    args = ["pr", "list"]
+    if head is not None:
+        args += ["--head", head]
+    if json_fields is not None:
+        args += ["--json", ",".join(json_fields)]
+    if q is not None:
+        args += ["-q", q]
+    return _gh(args).strip()
+
+
+def pr_create(
+    *,
+    repo: str | None = None,
+    base: str | None = None,
+    head: str | None = None,
+    title: str,
+    body: str,
+):
+    """`gh pr create [--repo …] [--base …] [--head …] --title … --body …`.
+
+    Returns the raw CompletedProcess (check=False): call sites parse the PR
+    URL/number from stdout and report their own success/FAILED line."""
+    args = ["pr", "create"]
+    if repo is not None:
+        args += ["--repo", repo]
+    if base is not None:
+        args += ["--base", base]
+    if head is not None:
+        args += ["--head", head]
+    args += ["--title", title, "--body", body]
+    return _gh_raw(args)
+
+
+def pr_merge(
+    pr: str, *, repo: str, squash: bool = False, delete_branch: bool = False, admin: bool = False
+) -> None:
+    """`gh pr merge <pr> --repo … [--squash] [--delete-branch] [--admin]`.
+
+    Streams gh's output (no capture) and raises GhError on nonzero — mirrors the
+    original `subprocess.run(..., check=True)` whose failure aborts the release
+    orchestration."""
+    args = ["pr", "merge", pr, "--repo", repo]
+    if squash:
+        args.append("--squash")
+    if delete_branch:
+        args.append("--delete-branch")
+    if admin:
+        args.append("--admin")
+    _gh_stream(args)
+
+
+def pr_comment(target: str, *, body: str):
+    """`gh pr comment <target> --body <body>` → raw CompletedProcess
+    (check=False). Caller maps returncode → success/FAILED."""
+    return _gh_raw(["pr", "comment", target, "--body", body])
+
+
+def pr_close(pr: str, *, repo: str, delete_branch: bool = False, comment: str | None = None):
+    """`gh pr close <pr> --repo … [--delete-branch] [--comment …]` → raw
+    CompletedProcess (check=False), best-effort cleanup."""
+    args = ["pr", "close", pr, "--repo", repo]
+    if delete_branch:
+        args.append("--delete-branch")
+    if comment is not None:
+        args += ["--comment", comment]
+    return _gh_raw(args)
+
+
+def run_list(
+    *,
+    repo: str | None = None,
+    workflow: str | None = None,
+    workflow_eq: str | None = None,
+    branch: str | None = None,
+    commit: str | None = None,
+    limit: int | None = None,
+    json_fields: list[str] | None = None,
+    q: str | None = None,
+):
+    """`gh run list [--repo …] [--workflow … | --workflow=… ] [--branch …]
+    [--commit …] [--limit …] [--json …] [-q …]` → raw CompletedProcess
+    (check=False).
+
+    Two workflow spellings are kept distinct: ``workflow=`` emits the split
+    ``--workflow <name>`` form (gh-release-issue) while ``workflow_eq=`` emits
+    the joined ``--workflow=<name>`` token (release-lex) — each call site's argv
+    must stay byte-identical for its BATS stub."""
+    args = ["run", "list"]
+    if repo is not None:
+        args += ["--repo", repo]
+    if workflow is not None:
+        args += ["--workflow", workflow]
+    if workflow_eq is not None:
+        args.append(f"--workflow={workflow_eq}")
+    if branch is not None:
+        args += ["--branch", branch]
+    if commit is not None:
+        args += ["--commit", commit]
+    if limit is not None:
+        args += ["--limit", str(limit)]
+    if json_fields is not None:
+        args += ["--json", ",".join(json_fields)]
+    if q is not None:
+        args += ["-q", q]
+    return _gh_raw(args)
+
+
+def run_watch(run_id: str, *, repo: str, exit_status: bool = False) -> None:
+    """`gh run watch <run_id> --repo … [--exit-status]`.
+
+    Streams the live watch output (no capture) and raises GhError on nonzero —
+    mirrors the original `subprocess.run(..., check=True)`."""
+    args = ["run", "watch", run_id, "--repo", repo]
+    if exit_status:
+        args.append("--exit-status")
+    _gh_stream(args)
+
+
+def workflow_run(workflow: str, *, fields: dict[str, str] | None = None):
+    """`gh workflow run <workflow> [-f key=value …]` → raw CompletedProcess
+    (check=False). Caller forwards gh's stdout/stderr and propagates the exit
+    code (workflow_dispatch trigger)."""
+    args = ["workflow", "run", workflow]
+    for key, value in (fields or {}).items():
+        args += ["-f", f"{key}={value}"]
+    return _gh_raw(args)
+
+
+def issue_view(issue: str, *, repo: str, json_fields: list[str]):
+    """`gh issue view <issue> --repo … --json …` → raw CompletedProcess
+    (check=False). Porcelain (not REST) so the offline BATS stub keeps working;
+    caller checks returncode then json.loads(stdout)."""
+    return _gh_raw(["issue", "view", issue, "--repo", repo, "--json", ",".join(json_fields)])
+
+
+def issue_create(*, repo: str, title: str, body: str, label: str | None = None) -> str:
+    """`gh issue create --repo … --title … --body … [--label …]` → stripped
+    stdout (the new issue URL). Raises GhError on failure (``proc.out``
+    semantics)."""
+    args = ["issue", "create", "--repo", repo, "--title", title, "--body", body]
+    if label is not None:
+        args += ["--label", label]
+    return _gh(args).strip()
+
+
+def issue_close(issue: str, *, repo: str, comment: str | None = None):
+    """`gh issue close <issue> --repo … [--comment …]` → raw CompletedProcess
+    (check=False). Caller maps returncode → success/FAILED."""
+    args = ["issue", "close", issue, "--repo", repo]
+    if comment is not None:
+        args += ["--comment", comment]
+    return _gh_raw(args)
+
+
+def _gh_stream(args: list[str]) -> None:
+    """`gh <args>` inheriting the parent's stdout/stderr (no capture) so live
+    output (`gh run watch`, `gh pr merge`) streams to the terminal. Raises
+    GhError on nonzero — the streaming analogue of `_gh`."""
+    if shutil.which("gh") is None:
+        raise GhError("`gh` CLI not found on PATH")
+    result = proc.run(["gh", *args], capture_output=False, check=False)
+    if result.returncode != 0:
+        raise GhError(f"gh {' '.join(args)} failed ({result.returncode})")

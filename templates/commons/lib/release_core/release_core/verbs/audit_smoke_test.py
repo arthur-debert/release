@@ -193,7 +193,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — linear orchestration mirrors
         return 64
 
     # Validate repo access.
-    if _run(["gh", "repo", "view", repo]).returncode != 0:
+    if gh.repo_view(repo=repo, check=False).returncode != 0:
         print(f"error: cannot access {repo} via gh", file=sys.stderr)
         return 1
 
@@ -259,22 +259,12 @@ def main(argv: list[str]) -> int:  # noqa: C901 — linear orchestration mirrors
             "closed automatically.\n\nVerifies the canonical PR loop starts: "
             "Copilot Review workflow fires + required checks trigger."
         )
-        create = _run(
-            [
-                "gh",
-                "pr",
-                "create",
-                "--repo",
-                repo,
-                "--base",
-                base,
-                "--head",
-                branch,
-                "--title",
-                "audit-smoke-test (auto-generated, will be closed)",
-                "--body",
-                body,
-            ]
+        create = gh.pr_create(
+            repo=repo,
+            base=base,
+            head=branch,
+            title="audit-smoke-test (auto-generated, will be closed)",
+            body=body,
         )
         pr_url = (create.stdout.strip().splitlines() or [""])[-1]
         pr_num = _last_int(pr_url)
@@ -287,18 +277,11 @@ def main(argv: list[str]) -> int:  # noqa: C901 — linear orchestration mirrors
     finally:
         if not keep and pr_num:
             print(f"[smoke] closing PR #{pr_num}")
-            _run(
-                [
-                    "gh",
-                    "pr",
-                    "close",
-                    pr_num,
-                    "--repo",
-                    repo,
-                    "--delete-branch",
-                    "--comment",
-                    "audit-smoke-test complete",
-                ]
+            gh.pr_close(
+                pr_num,
+                repo=repo,
+                delete_branch=True,
+                comment="audit-smoke-test complete",
             )
         if not keep:
             shutil.rmtree(workdir, ignore_errors=True)

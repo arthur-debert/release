@@ -49,7 +49,7 @@ import subprocess
 import sys
 import time
 
-from .. import proc
+from .. import gh, proc
 
 # Walk order (dependency-respecting). Each repo is included only if its path
 # was supplied via flag.
@@ -375,29 +375,17 @@ def _release_one(key: str, cfg: dict) -> int:
     # Open PR + admin-merge. The ruleset on main blocks direct push, so PR is
     # the only mechanism — `--admin` bypasses the review requirement for this
     # batch of automated releases.
-    pr_out = proc.run(
-        [
-            "gh",
-            "pr",
-            "create",
-            "--repo",
-            gh_repo,
-            "--title",
-            f"chore: release v{new}",
-            "--body",
-            "Cut by `release-lex` (Layer 1). Part of lex-fmt/lex#640.",
-        ],
-        check=False,
+    pr_out = gh.pr_create(
+        repo=gh_repo,
+        title=f"chore: release v{new}",
+        body="Cut by `release-lex` (Layer 1). Part of lex-fmt/lex#640.",
     ).stdout
     pr = _extract_pr_number(pr_out)
     if not pr:
         print("  ✗ gh pr create did not return a PR number", file=sys.stderr)
         return 1
     print(f"  ↳ PR #{pr} opened")
-    subprocess.run(  # noqa: S603 — constructed list
-        ["gh", "pr", "merge", pr, "--repo", gh_repo, "--squash", "--delete-branch", "--admin"],
-        check=True,
-    )
+    gh.pr_merge(pr, repo=gh_repo, squash=True, delete_branch=True, admin=True)
     print(f"  ↳ PR #{pr} admin-merged")
 
     # Fast-forward to the merge commit on main, then delegate to the repo's own
@@ -422,22 +410,12 @@ def _release_one(key: str, cfg: dict) -> int:
     # for both tag-push and workflow_dispatch — no clock skew) and restrict to
     # release.yml to ignore unrelated CI on the same push.
     time.sleep(8)
-    runs = proc.run(
-        [
-            "gh",
-            "run",
-            "list",
-            "--repo",
-            gh_repo,
-            "--workflow=release.yml",
-            "--commit",
-            commit_sha,
-            "--limit",
-            "1",
-            "--json",
-            "databaseId",
-        ],
-        check=False,
+    runs = gh.run_list(
+        repo=gh_repo,
+        workflow_eq="release.yml",
+        commit=commit_sha,
+        limit=1,
+        json_fields=["databaseId"],
     ).stdout
     run_id = _first_database_id(runs)
     if not run_id:
@@ -451,9 +429,7 @@ def _release_one(key: str, cfg: dict) -> int:
         )
         return 1
     print(f"  ↳ watching release CI run {run_id}...")
-    subprocess.run(  # noqa: S603
-        ["gh", "run", "watch", run_id, "--repo", gh_repo, "--exit-status"], check=True
-    )
+    gh.run_watch(run_id, repo=gh_repo, exit_status=True)
     print(f"  ✓ release CI complete for {key} v{new}")
     return 0
 
@@ -526,7 +502,7 @@ def main(argv: list[str]) -> int:
         if cfg["repos"].get(key) and _is_allowed(key, allowed, cfg["only"]):
             try:
                 rc = _release_one(key, cfg)
-            except (proc.ProcError, subprocess.CalledProcessError):
+            except (proc.ProcError, subprocess.CalledProcessError, gh.GhError):
                 # bash `set -e`: any failed command aborts the whole run with a
                 # nonzero status. Mirror that — stop the walk, exit 1.
                 return 1

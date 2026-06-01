@@ -179,20 +179,7 @@ def _has_ruleset(repo: str) -> bool:
 
 def _list_repos(owner: str) -> list[str]:
     """`gh repo list OWNER --limit 200 --json nameWithOwner` → nameWithOwner list."""
-    out = proc.out(
-        [
-            "gh",
-            "repo",
-            "list",
-            owner,
-            "--limit",
-            "200",
-            "--json",
-            "nameWithOwner",
-            "--jq",
-            ".[].nameWithOwner",
-        ]
-    )
+    out = gh.repo_list(owner, limit=200, json_fields=["nameWithOwner"], jq=".[].nameWithOwner")
     return [line for line in out.splitlines() if line.strip()]
 
 

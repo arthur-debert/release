@@ -43,7 +43,7 @@ import json
 import re
 import sys
 
-from .. import gh, proc
+from .. import gh
 
 USAGE = __doc__ or ""
 
@@ -120,18 +120,8 @@ def _view_issue(issue: str, repo: str) -> dict:
     Porcelain (not REST) so the offline BATS `gh` stub — which special-cases
     `gh issue view` — keeps working. Raises gh.GhError on failure (→ exit 2).
     """
-    result = proc.run(
-        [
-            "gh",
-            "issue",
-            "view",
-            issue,
-            "--repo",
-            repo,
-            "--json",
-            "number,title,url,body,comments",
-        ],
-        check=False,
+    result = gh.issue_view(
+        issue, repo=repo, json_fields=["number", "title", "url", "body", "comments"]
     )
     if result.returncode != 0:
         raise gh.GhError(result.stderr.strip())
@@ -141,18 +131,12 @@ def _view_issue(issue: str, repo: str) -> dict:
 def _comment_pr(url: str, body: str) -> bool:
     """`gh pr comment <url> --body <body>`. True on success, False on failure
     (the bash swallows gh's own output and only reports success/FAILED)."""
-    return proc.run(["gh", "pr", "comment", url, "--body", body], check=False).returncode == 0
+    return gh.pr_comment(url, body=body).returncode == 0
 
 
 def _close_issue(issue: str, repo: str, comment: str) -> bool:
     """`gh issue close <issue> --repo <repo> --comment <comment>`."""
-    return (
-        proc.run(
-            ["gh", "issue", "close", issue, "--repo", repo, "--comment", comment],
-            check=False,
-        ).returncode
-        == 0
-    )
+    return gh.issue_close(issue, repo=repo, comment=comment).returncode == 0
 
 
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash

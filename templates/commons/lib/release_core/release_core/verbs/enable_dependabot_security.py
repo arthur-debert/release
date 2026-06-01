@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import sys
 
-from .. import cli, gh, proc
+from .. import cli, gh
 
 USAGE = __doc__ or ""
 
@@ -65,10 +65,7 @@ def _list_owner_repos(owner: str) -> list[str]:
     """`gh repo list <owner> --limit 200 --json nameWithOwner` → list of full names."""
     import json
 
-    result = proc.run(
-        ["gh", "repo", "list", owner, "--limit", "200", "--json", "nameWithOwner"],
-        check=False,
-    )
+    result = gh.repo_list(owner, limit=200, json_fields=["nameWithOwner"], check=False)
     if result.returncode != 0 or not result.stdout.strip():
         return []
     try:
