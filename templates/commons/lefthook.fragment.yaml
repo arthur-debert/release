@@ -36,7 +36,7 @@ pre-commit:
       glob: "**/*.{yml,yaml}"
       run: >-
         if command -v yamllint >/dev/null 2>&1; then
-          yamllint {staged_files};
+          yamllint -- {staged_files};
         else
           echo "ERROR: yamllint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2;
           exit 1;
