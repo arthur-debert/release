@@ -9,6 +9,18 @@ their thin caller — required-input rename, default-behavior change, or
 removed input. A breaking change ships as a new MAJOR (`v2.0.0`),
 coordinated with all consumers before cutting.
 
+> **Note (post `scripts/release` retirement).** Some older entries below
+> reference per-repo `scripts/release/*` primitives
+> (`get-current-version`, `get-commits-since-release`, `should-release`,
+> `update-release`, `trigger-release`). Those primitives were **retired** —
+> there are no per-repo release scripts anymore. Release is driven by the
+> managed `bin/` tooling synced into every consumer: `bin/diff-since-release`
+> (what changed / should-release) and `bin/release` (= `release-cut`, which
+> reads the version from the Kind manifest and dispatches `release.yml`; CI
+> does the bump + CHANGELOG roll + commit + tag + build). The historical
+> entries are kept verbatim as a record of what each tag shipped at the time.
+> See `docs/lex-release-cascade.md` for the current model.
+
 ## v1.7.6 (2026-05-19) — feat: shared pre-commit gate before bot commits
 
 **Type:** PATCH (additive; no required-input changes; existing
