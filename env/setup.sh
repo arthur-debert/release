@@ -1,7 +1,7 @@
 #!/bin/bash
 # Claude Code on the web — environment setup script.
 #
-# version: 2026-05-23-playwright-system-deps
+# version: 2026-06-01-docker-hub-egress
 #
 # Paste this into your Claude Code on the web environment at:
 #   claude.ai/code -> environment selector -> settings icon -> Setup script
@@ -53,6 +53,24 @@
 # --------------------
 #   Leave at the default "Trusted" — the apt mirrors and github.com are
 #   in the default allowlist, so this script works without any tweaks.
+#
+#   ONE exception: Docker-delivery testing (`docker pull`, `apt install
+#   ./pkg.deb` / `brew install <tap>/<formula>` inside a container — the
+#   "test the delivery mechanism, not the binary" pattern in CLAUDE.md).
+#   `docker pull` against Docker Hub is NOT covered by the default
+#   Trusted allowlist and fails with a TLS/connect error at the registry
+#   handshake. Add these three hosts to the environment's allowed network
+#   hosts (environment selector -> settings -> network/allowed hosts) at
+#   environment creation — setting it there is the cleanest fix and
+#   unblocks the Docker suite directly:
+#
+#     registry-1.docker.io            # Docker Hub registry API (v2)
+#     auth.docker.io                  # token/auth handshake (anon + login)
+#     production.cloudfront.docker.com # blob CDN (image layer downloads)
+#
+#   Changing the allowed-hosts list invalidates the snapshot and re-runs
+#   this script on the next session (see "Snapshot lifecycle" above), so
+#   no extra step is needed beyond saving the network setting.
 
 set -euo pipefail
 
