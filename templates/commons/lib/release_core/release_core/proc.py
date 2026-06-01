@@ -31,11 +31,15 @@ def run(
     env: dict[str, str] | None = None,
     input: str | None = None,  # noqa: A002 — mirrors subprocess.run's parameter name
     check: bool = True,
+    capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     """Run ``cmd`` (no shell), capturing text stdout/stderr.
 
     ``env``, when given, is MERGED over ``os.environ`` (not a replacement). On a
-    nonzero exit with ``check=True`` raise :class:`ProcError`.
+    nonzero exit with ``check=True`` raise :class:`ProcError`. With
+    ``capture_output=False`` the child inherits the parent's stdout/stderr so
+    live output streams to the terminal (e.g. `gh run watch`); ``.stdout`` /
+    ``.stderr`` on the result are then ``None``.
     """
     merged_env = {**os.environ, **env} if env is not None else None
     proc = subprocess.run(  # noqa: S603 — cmd is a constructed list, never shell-interpolated
@@ -43,7 +47,7 @@ def run(
         cwd=cwd,
         env=merged_env,
         input=input,
-        capture_output=True,
+        capture_output=capture_output,
         text=True,
         check=False,
     )

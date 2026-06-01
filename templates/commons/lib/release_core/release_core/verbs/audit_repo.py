@@ -654,9 +654,7 @@ def main(argv: list[str]) -> int:
 
 def _current_repo() -> str:
     """`gh repo view --json nameWithOwner -q .nameWithOwner`, '' on failure."""
-    from .. import proc
+    from .. import gh
 
-    result = proc.run(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], check=False
-    )
+    result = gh.repo_view(json_fields=["nameWithOwner"], q=".nameWithOwner", check=False)
     return result.stdout.strip() if result.returncode == 0 else ""

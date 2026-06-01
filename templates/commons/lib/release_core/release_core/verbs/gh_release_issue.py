@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import sys
 
-from .. import proc
+from .. import gh, proc
 
 USAGE = __doc__ or ""
 
@@ -72,14 +72,24 @@ def _safe_out(cmd: list[str], default: str = "") -> str:
     return value if value else default
 
 
+def _safe_gh(fn, default: str = "") -> str:
+    """Run a gh.* wrapper, swallowing GhError → default (mirrors bash
+    `… || echo …`). Empty stdout also yields the default."""
+    try:
+        value = fn()
+    except gh.GhError:
+        return default
+    return value if value else default
+
+
 def collect_context() -> dict:
     """Auto-collected reproduction context: repo, branch, PR number/url, run url.
 
     Mirrors the bash gh/git probes exactly, including the `(unknown)` sentinels
     and the branch-scoped run lookup. Each probe degrades gracefully.
     """
-    repo = _safe_out(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+    repo = _safe_gh(
+        lambda: gh.repo_view(json_fields=["nameWithOwner"], q=".nameWithOwner"),
         "(unknown)",
     )
     branch = _safe_out(["git", "branch", "--show-current"], "(unknown)")
@@ -87,8 +97,8 @@ def collect_context() -> dict:
     pr_number = ""
     pr_url = ""
     if repo != "(unknown)" and branch != "(unknown)":
-        pr_number = _safe_out(
-            ["gh", "pr", "list", "--head", branch, "--json", "number", "-q", ".[0].number // empty"]
+        pr_number = _safe_gh(
+            lambda: gh.pr_list(head=branch, json_fields=["number"], q=".[0].number // empty")
         )
         if pr_number:
             pr_url = f"https://github.com/{repo}/pull/{pr_number}"
@@ -102,11 +112,24 @@ def lookup_run_url(component: str, branch: str) -> str:
     workflow = _WORKFLOW_BY_COMPONENT.get(component)
     if not workflow:
         return ""
-    cmd = ["gh", "run", "list", "--workflow", workflow]
-    if branch != "(unknown)":
-        cmd += ["--branch", branch]
-    cmd += ["--limit", "1", "--json", "url", "-q", ".[0].url // empty"]
-    return _safe_out(cmd)
+    run_branch = branch if branch != "(unknown)" else None
+    return _safe_gh(lambda: _run_list_url(workflow, run_branch))
+
+
+def _run_list_url(workflow: str, branch: str | None) -> str:
+    """`gh run list --workflow <wf> [--branch <b>] --limit 1 --json url -q …`
+    → the run URL (empty when none). Byte-identical argv to the former
+    `gh run list` call, branch flag omitted when unknown."""
+    result = gh.run_list(
+        workflow=workflow,
+        branch=branch,
+        limit=1,
+        json_fields=["url"],
+        q=".[0].url // empty",
+    )
+    if result.returncode != 0:
+        raise gh.GhError(result.stderr.strip())
+    return result.stdout.strip()
 
 
 def build_title(component: str, symptom: str) -> str:
@@ -146,21 +169,7 @@ def _create_issue(title: str, body: str) -> str:
     filters on. Porcelain (not REST) so it stays the single gh chokepoint and
     matches the offline test stub.
     """
-    return proc.out(
-        [
-            "gh",
-            "issue",
-            "create",
-            "--repo",
-            RELEASE_REPO,
-            "--title",
-            title,
-            "--body",
-            body,
-            "--label",
-            "consumer-filed",
-        ]
-    )
+    return gh.issue_create(repo=RELEASE_REPO, title=title, body=body, label="consumer-filed")
 
 
 def main(argv: list[str]) -> int:

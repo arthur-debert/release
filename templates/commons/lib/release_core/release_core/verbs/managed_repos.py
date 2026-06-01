@@ -35,7 +35,7 @@ import os
 import shutil
 import sys
 
-from .. import proc, yamlio
+from .. import gh, proc, yamlio
 
 USAGE = __doc__ or ""
 
@@ -171,7 +171,7 @@ def _clone(pairs: list[tuple[str, str]], root: str, refresh: bool) -> int:
             os.makedirs(os.path.dirname(abspath), exist_ok=True)
             # gh repo clone works in gh-authenticated sandboxes where plain
             # git clone is restricted (matches clone-lex-* convention).
-            if proc.run(["gh", "repo", "clone", repo, abspath], check=False).returncode != 0:
+            if gh.repo_clone(repo, abspath).returncode != 0:
                 print(f"→ {repo}: clone FAILED", file=sys.stderr)
                 rc = 1
     return rc

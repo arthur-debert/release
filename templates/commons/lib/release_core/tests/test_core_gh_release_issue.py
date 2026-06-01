@@ -50,15 +50,42 @@ def test_build_body_omits_pr_and_run_lines_when_empty():
     assert "**Branch:** feat/x\n\n**Symptom:** boom" in body
 
 
-def test_lookup_run_url_only_for_mapped_components(monkeypatch):
+def _record_gh(gh_mod, monkeypatch, stdout="https://x/run"):
+    """Capture the full `gh …` argv the chokepoint builds (mock at proc.run)."""
+    import subprocess
+
     calls: list = []
-    monkeypatch.setattr(
-        gri, "_safe_out", lambda cmd, default="": calls.append(cmd) or "https://x/run"
-    )
-    # mapped → probes
+
+    def fake_run(cmd, *, input=None, check=False):  # noqa: A002 — mirrors proc.run
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(gh_mod.shutil, "which", lambda _: "/usr/bin/gh")
+    monkeypatch.setattr(gh_mod.proc, "run", fake_run)
+    return calls
+
+
+def test_lookup_run_url_only_for_mapped_components(monkeypatch):
+    from release_core import gh
+
+    calls = _record_gh(gh, monkeypatch, stdout="https://x/run")
+    # mapped → probes; argv is byte-identical to the former direct gh call
     assert gri.lookup_run_url("copilot-review", "feat/x") == "https://x/run"
-    assert calls and calls[-1][:5] == ["gh", "run", "list", "--workflow", "copilot-review.yml"]
-    assert "--branch" in calls[-1]
+    assert calls and calls[-1] == [
+        "gh",
+        "run",
+        "list",
+        "--workflow",
+        "copilot-review.yml",
+        "--branch",
+        "feat/x",
+        "--limit",
+        "1",
+        "--json",
+        "url",
+        "-q",
+        ".[0].url // empty",
+    ]
     # unmapped → no probe, empty
     calls.clear()
     assert gri.lookup_run_url("ruleset", "feat/x") == ""
@@ -66,11 +93,24 @@ def test_lookup_run_url_only_for_mapped_components(monkeypatch):
 
 
 def test_lookup_run_url_unknown_branch_no_branch_filter(monkeypatch):
-    seen: list = []
-    monkeypatch.setattr(gri, "_safe_out", lambda cmd, default="": seen.append(cmd) or "")
+    from release_core import gh
+
+    calls = _record_gh(gh, monkeypatch, stdout="")
     gri.lookup_run_url("rust-cli-release", "(unknown)")
-    assert "--branch" not in seen[0]
-    assert seen[0][:5] == ["gh", "run", "list", "--workflow", "release.yml"]
+    assert "--branch" not in calls[0]
+    assert calls[0] == [
+        "gh",
+        "run",
+        "list",
+        "--workflow",
+        "release.yml",
+        "--limit",
+        "1",
+        "--json",
+        "url",
+        "-q",
+        ".[0].url // empty",
+    ]
 
 
 # --- main() dispatch / usage ---

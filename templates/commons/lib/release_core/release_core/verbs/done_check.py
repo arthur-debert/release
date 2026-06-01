@@ -535,12 +535,9 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
 def _detect_current_repo() -> str:
     """`gh repo view --json nameWithOwner --jq .nameWithOwner`, '' on failure."""
     try:
-        from .. import proc
+        from .. import gh
 
-        result = proc.run(
-            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-            check=False,
-        )
+        result = gh.repo_view(json_fields=["nameWithOwner"], jq=".nameWithOwner", check=False)
     except Exception:  # pragma: no cover — gh missing etc.
         return ""
     if result.returncode != 0:

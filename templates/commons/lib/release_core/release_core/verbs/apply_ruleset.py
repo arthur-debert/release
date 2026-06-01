@@ -202,7 +202,7 @@ def _checks_from_yq(toplevel: str, paths: list[str]) -> list[str]:
 
 def _current_repo() -> str:
     """`gh repo view --json nameWithOwner -q .nameWithOwner`."""
-    return proc.out(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    return gh.repo_view(json_fields=["nameWithOwner"], q=".nameWithOwner")
 
 
 def _load_template(release_root: str) -> dict:
