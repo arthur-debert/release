@@ -20,23 +20,35 @@ cascade died at the first repo lacking it. The generic decision replicates the
 old `diff-since-release` contract exactly (see `decide_release` below): commits
 since the last NON-prerelease tag reachable from HEAD; no final tags ⇒ the
 no-tags case (a first release is human-driven). Release is dispatched by the
-maintainer's `release-cut`, run in each repo's cwd:
+maintainer's `release-cut`, run in each repo's cwd, with an EXPLICIT version
+derived from that same latest final tag (TAG-AUTHORITATIVE — see below):
 
-  release-cut <bump>      — resolved from the maintainer's PATH (the release
-                            repo's bin/), invoked with the repo as cwd.
-                            release-cut is Kind-aware: it reads the current
-                            version from cwd's canonical manifest source
-                            (Cargo.toml, package.json, extension.toml, or the
-                            latest git tag for manifest-less Kinds), computes the
-                            new version from a bump shortcut or literal X.Y.Z, and
+  release-cut <X.Y.Z>     — resolved from the maintainer's PATH (the release
+                            repo's bin/), invoked with the repo as cwd. We
+                            DERIVE the explicit X.Y.Z here by applying the run's
+                            bump-kind to the latest final TAG decide_release
+                            computed (e.g. v0.10.8 + patch → 0.10.9), and dispatch
+                            THAT exact version — NOT the bump-kind. release-cut then
                             DISPATCHES cwd's `.github/workflows/release.yml` with
-                            that version. CI (the reusable per-Kind release
+                            our explicit version. CI (the reusable per-Kind release
                             workflow) does the actual bump + CHANGELOG roll +
                             commit + tag + build + GitHub Release. We call
                             release-cut directly rather than the repo's
                             `bin/release` shim (which only execs release-cut and
                             is missing on stale chain repos) so the maintainer-run
                             cascade is self-contained.
+
+TAG-AUTHORITATIVE version (why we dispatch an explicit X.Y.Z, not a bump-kind):
+release-lex already DECIDES off the latest final git tag (generic git, no per-repo
+tooling). If we instead dispatched `release-cut <bump-kind>`, release-cut would
+recompute the new version from the repo's MANIFEST — which is wrong wherever the
+manifest has drifted from the tag. The vscode case: package.json froze at
+0.4.1-rc.1 ~25 releases ago while the real version is the tag v0.10.8, so a
+manifest-driven `patch` bump yields 0.4.2 (wrong) instead of 0.10.9. So we apply
+the bump-kind to the TAG via release_core.version and dispatch the explicit result,
+making the cascade robust to manifest drift fleet-wide. Same self-contained pattern
+as dropping per-repo diff-since-release / bin/release. An explicit-X.Y.Z bump-kind
+passes through unchanged (no tag math).
 
 The old primitive→responsibility mapping, for the record:
   get-current-version       -> release-cut reads it from the Kind manifest.
@@ -89,7 +101,7 @@ import subprocess
 import sys
 import time
 
-from .. import gh, proc
+from .. import gh, proc, version
 
 # The maintainer-side dispatch tool. release-lex runs from the maintainer's
 # release clone, so `release-cut` is on the maintainer's PATH (the release repo's
@@ -261,6 +273,35 @@ def _looks_like_version(bump: str) -> bool:
     string has >=3 dot-separated pieces). Looser than a strict semver check —
     release-cut itself does the strict validation when it runs."""
     return bump.count(".") >= 2
+
+
+def next_version(bump_kind: str, tag: str) -> str:
+    """The explicit `X.Y.Z` version release-cut should dispatch, derived from the
+    latest FINAL git ``tag`` (the one ``decide_release`` already computed), NOT
+    from the repo's manifest.
+
+    This is the tag-authoritative fix (release#... option A): release-lex DECIDES
+    off the latest final tag, so it must also DERIVE the next version from that
+    same tag and dispatch it explicitly. Letting `release-cut <bump-kind>` recompute
+    from the manifest is wrong wherever the manifest has drifted from the tag — the
+    vscode case, where `package.json` froze at 0.4.1-rc.1 ~25 releases ago while the
+    real version is the tag v0.10.8, so a manifest-driven `patch` bump yields 0.4.2
+    instead of 0.10.9.
+
+      - ``bump_kind`` is one of patch|minor|major: apply it to ``tag`` via
+        release_core.version (parse strips the leading 'v' + any prerelease, bump
+        increments, fmt renders X.Y.Z). e.g. ('patch', 'v0.10.8') -> '0.10.9'.
+      - ``bump_kind`` already an explicit X.Y.Z: pass it through unchanged (the
+        operator named the exact version; no tag math).
+
+    Only ever called for the RELEASE decision, where ``tag`` is a real final tag.
+    The NOTAGS case never reaches here (a first release is human-driven — we never
+    guess a version)."""
+    if bump_kind not in ("patch", "minor", "major"):
+        # Explicit X.Y.Z (already validated loose-semver by _validate) — dispatch
+        # it verbatim; the tag is irrelevant when the operator named the version.
+        return bump_kind
+    return version.fmt(version.bump(version.parse(tag), bump_kind))
 
 
 def _first_database_id(runs_json: str) -> str:
@@ -491,26 +532,48 @@ def _release_one(key: str, cfg: dict) -> int:
         return 0
     print(f"  ↳ {decision.count} commit(s) since {decision.tag}")
 
-    # `release-cut <bump>` (maintainer's PATH tool, run in the repo cwd) is
-    # Kind-aware: it reads the current version from cwd's manifest, computes the
-    # new version, and dispatches cwd's release.yml. CI does the bump + CHANGELOG
-    # roll + commit + tag + build + GitHub Release. We call it directly rather
-    # than the repo's `bin/release` shim so the cascade doesn't depend on each
-    # target repo's tooling being current.
+    # TAG-AUTHORITATIVE version: derive the explicit X.Y.Z by applying the run's
+    # bump-kind to the latest final TAG decide_release already computed — NOT from
+    # the repo's manifest. We then dispatch `release-cut <X.Y.Z>` (the exact
+    # version) rather than `release-cut <bump-kind>`, so the cascade is robust to
+    # manifest drift fleet-wide (vscode's package.json froze at 0.4.1-rc.1 ~25
+    # releases ago while its real version is the tag v0.10.8 → patch must be
+    # 0.10.9, not the manifest-driven 0.4.2). An explicit-X.Y.Z bump-kind passes
+    # through unchanged.
+    try:
+        cut_version = next_version(bump_kind, decision.tag)
+    except ValueError as exc:
+        print(
+            f"  ✗ failed to parse tag {decision.tag!r} as semver: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    if bump_kind in ("patch", "minor", "major"):
+        # Tag math actually happened — show the derivation.
+        print(f"  ↳ next version {cut_version} (from {decision.tag} + {bump_kind})")
+    else:
+        # Explicit X.Y.Z passed straight through; no tag math, so don't claim any.
+        print(f"  ↳ next version {cut_version} (explicit; tag {decision.tag} unused)")
+
+    # `release-cut <X.Y.Z>` (maintainer's PATH tool, run in the repo cwd)
+    # dispatches cwd's release.yml with the EXACT version we computed. CI does the
+    # bump + CHANGELOG roll + commit + tag + build + GitHub Release. We call it
+    # directly rather than the repo's `bin/release` shim so the cascade doesn't
+    # depend on each target repo's tooling being current.
     if dry_run:
-        print(f"  $ {RELEASE_CUT} {bump_kind}")
+        print(f"  $ {RELEASE_CUT} {cut_version}")
         print("  ↳ dry-run: skipping release-cut dispatch + CI wait")
         return 0
 
-    print(f"  $ {RELEASE_CUT} {bump_kind}")
+    print(f"  $ {RELEASE_CUT} {cut_version}")
     # Use the absolute path resolved in _validate (before any os.chdir) and
     # route through the centralized subprocess chokepoint (proc.run).
     release_cut_cmd = cfg.get("release_cut_path", RELEASE_CUT)
-    cut = proc.run([release_cut_cmd, bump_kind], check=False, capture_output=False)
+    cut = proc.run([release_cut_cmd, cut_version], check=False, capture_output=False)
     if cut.returncode != 0:
-        print(f"  ✗ {RELEASE_CUT} {bump_kind} failed (exit {cut.returncode})", file=sys.stderr)
+        print(f"  ✗ {RELEASE_CUT} {cut_version} failed (exit {cut.returncode})", file=sys.stderr)
         return 1
-    print(f"  ↳ release.yml dispatched for {key} ({bump_kind})")
+    print(f"  ↳ release.yml dispatched for {key} ({cut_version})")
 
     # Find the release-CI run release-cut just dispatched and watch it. Filter
     # to release.yml and take the most recent run (dispatch is near-instant;

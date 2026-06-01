@@ -564,7 +564,8 @@ def test_release_one_success_empty_log_is_nothing_to_release(monkeypatch, capsys
 
 def test_release_one_success_with_commits_proceeds_to_dispatch(monkeypatch, capsys):
     # (d) final tag + commits -> decision passes; in dry-run we stop at the
-    # dispatch echo (returns 0) without cutting a real release.
+    # dispatch echo (returns 0) without cutting a real release. The dispatched
+    # version is TAG-derived (v1.2.3 + patch -> 1.2.4), not the bump-kind.
     cfg = {**_CFG, "dry_run": True}
     _patch_release_one_env(
         monkeypatch,
@@ -575,7 +576,9 @@ def test_release_one_success_with_commits_proceeds_to_dispatch(monkeypatch, caps
     assert rc == 0
     out = capsys.readouterr().out
     assert "2 commit(s) since v1.2.3" in out
-    assert "release-cut patch" in out
+    # The explicit derived version is dispatched — NOT the bump-kind.
+    assert "release-cut 1.2.4" in out
+    assert "release-cut patch" not in out
 
 
 def test_release_one_dispatch_uses_resolved_path_via_proc_run(monkeypatch, capsys):
@@ -607,11 +610,177 @@ def test_release_one_dispatch_uses_resolved_path_via_proc_run(monkeypatch, capsy
 
     rc = rlx._release_one("comms", cfg)
     assert rc == 1  # release-cut failed -> surfaced, not a silent 0
-    assert captured["cmd"] == ["/abs/bin/release-cut", "patch"]
+    # TAG-authoritative: dispatches the EXPLICIT version (v1.2.3 + patch = 1.2.4),
+    # NOT the bump-kind, so a drifted manifest can't drive the version.
+    assert captured["cmd"] == ["/abs/bin/release-cut", "1.2.4"]
     # Honors the proc.run contract used for a live, streaming dispatch.
     assert captured["kw"].get("check") is False
     assert captured["kw"].get("capture_output") is False
-    assert "release-cut patch failed" in capsys.readouterr().err
+    assert "release-cut 1.2.4 failed" in capsys.readouterr().err
+
+
+def test_release_one_malformed_tag_fails_cleanly_no_traceback(monkeypatch, capsys):
+    # A final tag that isn't strict 3-part semver (e.g. `v1.2`) makes
+    # next_version -> version.parse raise ValueError. _release_one must catch
+    # it, print a clean `✗ failed to parse tag ...` to stderr, and return 1 —
+    # NEVER let the traceback crash the orchestrator, and NEVER dispatch.
+    cfg = {
+        **_CFG,
+        "dry_run": False,
+        "release_cut_path": "/abs/bin/release-cut",
+    }
+    dispatched: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        if "tag" in cmd:
+            return _Res(0, stdout="v1.2\n")  # malformed: not X.Y.Z
+        if "log" in cmd:
+            return _Res(0, stdout="abc1234 feat: a\n")
+        dispatched.append(cmd)  # release-cut must NOT be reached
+        return _Res(0)
+
+    monkeypatch.setattr(rlx.proc, "run", fake_run)
+    monkeypatch.setattr(rlx, "_run", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os.path, "isfile", lambda *a, **k: False)
+
+    rc = rlx._release_one("comms", cfg)
+    assert rc == 1  # clean failure, not a traceback crash
+    assert dispatched == []  # no release-cut dispatch on an unparseable tag
+    err = capsys.readouterr().err
+    assert "failed to parse tag 'v1.2' as semver" in err
+
+
+# --------------------------------------------------------------------------
+# next_version — the tag-authoritative version derivation (the vscode fix)
+#
+# release-lex DECIDES off the latest final tag, so it must DERIVE the next version
+# from that same tag and dispatch it EXPLICITLY — never let release-cut recompute
+# from a (possibly drifted) manifest.
+# --------------------------------------------------------------------------
+
+
+def test_next_version_patch_from_tag():
+    assert rlx.next_version("patch", "v0.10.8") == "0.10.9"
+
+
+def test_next_version_minor_from_tag():
+    # minor zeroes patch (semver).
+    assert rlx.next_version("minor", "v0.10.8") == "0.11.0"
+
+
+def test_next_version_major_from_tag():
+    # major zeroes minor+patch (semver).
+    assert rlx.next_version("major", "v0.10.8") == "1.0.0"
+
+
+def test_next_version_strips_prerelease_on_tag():
+    # parse() tolerates a prerelease suffix on the tag; bump strips it.
+    assert rlx.next_version("patch", "v1.0.0-rc.1") == "1.0.1"
+
+
+def test_next_version_explicit_xyz_passes_through():
+    # An explicit X.Y.Z bump-kind is dispatched verbatim — no tag math.
+    assert rlx.next_version("1.2.3", "v0.10.8") == "1.2.3"
+
+
+# --------------------------------------------------------------------------
+# The vscode regression (the key test): a STALE manifest must NOT drive the
+# version. release-lex derives from the TAG and dispatches it explicitly.
+# --------------------------------------------------------------------------
+
+
+def test_vscode_stale_manifest_does_not_drive_version(monkeypatch):
+    # vscode's package.json froze at 0.4.1-rc.1 ~25 releases ago while its real
+    # version is the tag v0.10.8. We mock that stale manifest reader to PROVE it
+    # is never consulted: the dispatched version is TAG-derived (0.10.9), not the
+    # manifest-derived 0.4.2.
+    # Spy on version.parse to PROVE it is fed the TAG, never the stale
+    # manifest version '0.4.1-rc.1' (which would yield 0.4.2).
+    parse_inputs: list[str] = []
+    monkeypatch.setattr(rlx.version, "parse", _spy_parse(parse_inputs, rlx.version.parse))
+
+    cfg = {
+        "dry_run": False,
+        "bump_kind": "patch",
+        "release_cut_path": "/abs/bin/release-cut",
+        "repos": {"vscode": "/tmp/vscode"},
+    }
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(cmd, **kw):
+        if "tag" in cmd:
+            # vscode's latest FINAL tag (stray rc/pre tags deleted upstream).
+            return _Res(0, stdout="v0.10.8\n")
+        if "log" in cmd:
+            return _Res(0, stdout="abc1234 feat: a\n")
+        captured["cmd"] = cmd
+        return _Res(1)  # fail the dispatch to bail right after it
+
+    monkeypatch.setattr(rlx.proc, "run", fake_run)
+    monkeypatch.setattr(rlx, "_run", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os.path, "isfile", lambda *a, **k: False)
+
+    rlx._release_one("vscode", cfg)
+    # The dispatched version is derived from the TAG (0.10.9), NOT the stale
+    # manifest's 0.4.2 — this is the regression the fix prevents.
+    assert captured["cmd"] == ["/abs/bin/release-cut", "0.10.9"]
+    assert captured["cmd"][1] != "0.4.2"
+    # version.parse was fed the TAG, never the stale manifest's 0.4.1-rc.1.
+    assert parse_inputs == ["v0.10.8"]
+    assert "0.4.1-rc.1" not in parse_inputs
+
+
+def _spy_parse(log, real):
+    """Wrap version.parse so we can confirm it is fed the TAG (not a manifest
+    version). Records each input string into ``log``."""
+
+    def wrapper(s):
+        log.append(s)
+        return real(s)
+
+    return wrapper
+
+
+def test_vscode_parse_is_fed_the_tag_not_the_manifest(monkeypatch):
+    # Stronger: confirm version.parse is called with the TAG string 'v0.10.8',
+    # never the stale manifest version '0.4.1-rc.1'.
+    seen: list[str] = []
+    monkeypatch.setattr(rlx.version, "parse", _spy_parse(seen, rlx.version.parse))
+    out = rlx.next_version("patch", "v0.10.8")
+    assert out == "0.10.9"
+    assert seen == ["v0.10.8"]
+    assert "0.4.1-rc.1" not in seen
+
+
+def test_notags_decision_never_guesses_a_version(monkeypatch, capsys):
+    # NOTAGS short-circuits BEFORE next_version — release-lex never guesses a
+    # first version. A repo with no final tag is skipped cleanly (no dispatch).
+    cfg = {
+        "dry_run": False,
+        "bump_kind": "patch",
+        "release_cut_path": "/abs/bin/release-cut",
+        "repos": {"nvim": "/tmp/nvim"},
+    }
+    dispatched: list[str] = []
+
+    def fake_run(cmd, **kw):
+        if "tag" in cmd:
+            return _Res(0, stdout="")  # no tags at all
+        dispatched.append(cmd)
+        return _Res(0)
+
+    monkeypatch.setattr(rlx.proc, "run", fake_run)
+    monkeypatch.setattr(rlx, "_run", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os, "chdir", lambda *a, **k: None)
+    monkeypatch.setattr(rlx.os.path, "isfile", lambda *a, **k: False)
+
+    rc = rlx._release_one("nvim", cfg)
+    assert rc == 0
+    # No release-cut dispatch happened (only the tag listing ran).
+    assert not any("release-cut" in str(c) for c in dispatched)
+    assert "no final release tags yet" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
