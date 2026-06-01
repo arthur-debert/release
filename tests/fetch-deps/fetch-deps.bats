@@ -140,7 +140,10 @@ JSON
     [[ -f resources/embedded-grammars.json ]]
 }
 
-@test "extract mode: handles missing source gracefully" {
+@test "extract mode: missing source fails the dep loudly" {
+    # A source listed in `extract` that is absent from the archive is a
+    # real error (the build will be missing a file), not a soft skip.
+    # It must fail the dep with a clear message — never report a false ✓.
     setup_mock_curl
     make_multi_tarball "$HARNESS_WORKSPACE/ts.tar.gz" \
         "tree-sitter-lex.wasm:wasm-content"
@@ -161,9 +164,137 @@ JSON
 JSON
 
     run "$FETCH_DEPS" --target aarch64-apple-darwin
-    [[ "$status" -eq 0 ]]
-    [[ -f resources/tree-sitter-lex.wasm ]]
+    [[ "$status" -ne 0 ]]
     [[ "$output" == *"not found in archive"* ]]
+    [[ "$output" == *"dep(s) failed"* ]]
+    # No stamp should be written when the dep failed.
+    [[ ! -f .deps/ts.stamp ]]
+}
+
+# ─── CRLF regression (lex-fmt/lexed#142) ─────────────────
+
+# jq on Windows emits \r\n as the *line terminator* on every output
+# line (it opens stdout in text mode). The `extract` @tsv map builder
+# forgot the `| tr -d '\r'` that every other jq call uses, so each map
+# line arrived as "src\tdst\r\n". Command substitution strips the
+# trailing \n but NOT the \r, and `read` splits on \n only, so every
+# `dst` (the last line included) carried a trailing \r:
+# `cp "$found" "resources\r/"` then created a bogus `resources<CR>/`
+# dir and the real file went missing → downstream `vite build` couldn't
+# resolve ../resources/*.wasm. We reproduce Windows jq with a `jq` shim
+# on PATH that appends a CR to every output line, then assert the files
+# land in the CORRECT dirs with no CR-suffixed dir.
+#
+# Install a `jq` wrapper that mimics jq-on-Windows: real jq, but every
+# output line gets a trailing \r (\n → \r\n). Placed ahead of the real
+# jq on PATH for the duration of the test.
+crlf_jq_shim() {
+    local real_jq; real_jq="$(command -v jq)"
+    mkdir -p "$HARNESS_WORKSPACE/_bin"
+    cat > "$HARNESS_WORKSPACE/_bin/jq" <<SHIM
+#!/usr/bin/env bash
+# Windows jq emulation: append CR to every stdout line.
+"$real_jq" "\$@" | awk '{print \$0 "\r"}'
+SHIM
+    chmod +x "$HARNESS_WORKSPACE/_bin/jq"
+    export PATH="$HARNESS_WORKSPACE/_bin:$PATH"
+}
+
+@test "extract mode: CRLF jq output lands files in correct dirs (no CR-suffixed dir)" {
+    setup_mock_curl
+    crlf_jq_shim
+    make_multi_tarball "$HARNESS_WORKSPACE/ts.tar.gz" \
+        "tree-sitter-lex.wasm:wasm-content" \
+        "queries/highlights.scm:highlight-content"
+    mock_release ts v0.11.0 "tree-sitter.tar.gz" "$HARNESS_WORKSPACE/ts.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "ts": {
+        "repo": "test/ts",
+        "version": "v0.11.0",
+        "asset": "tree-sitter.tar.gz",
+        "extract": {
+            "tree-sitter-lex.wasm": "resources",
+            "queries": "resources/queries"
+        }
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+
+    # Files landed in the correct dirs...
+    [[ -f resources/tree-sitter-lex.wasm ]]
+    [[ "$(cat resources/tree-sitter-lex.wasm)" == "wasm-content" ]]
+    [[ -f resources/queries/highlights.scm ]]
+
+    # ...and NO CR-suffixed bogus dir was created.
+    [[ ! -d "$(printf 'resources\r')" ]]
+    run bash -c 'ls -1d resources* 2>/dev/null'
+    [[ "$output" != *$'\r'* ]]
+}
+
+# Unit-level: drive apply_extract_map directly with a CRLF-laden map
+# (the exact shape that reaches the function on Windows: every entry
+# but the last carries a trailing \r). Proves the per-field hardening
+# strips \r even if a future jq builder regresses and drops `tr -d`.
+@test "apply_extract_map: strips \\r per field (defense in depth)" {
+    mkdir -p root/sub
+    printf 'A' > root/a.wasm
+    printf 'B' > root/sub/b.scm
+
+    # Both entries carry a trailing \r — the real Windows-jq failure
+    # mode (\r survives on every line, last one included, because $()
+    # strips only the trailing \n and `read` splits on \n alone).
+    local map
+    map="$(printf 'a.wasm\tresources\r\nsub\tresources/queries\r')"
+
+    run bash -c '
+        source "'"$FETCH_DEPS"'"
+        apply_extract_map root "$1"
+    ' _ "$map"
+
+    [[ "$status" -eq 0 ]]
+    [[ -f resources/a.wasm ]]
+    [[ -d resources/queries ]]
+    [[ ! -d "$(printf 'resources\r')" ]]
+}
+
+# A failed cp (e.g. dest dir cannot be created) must fail the dep loudly
+# — never print a false ✓. Here `resources` is pre-created as a *file*,
+# so `mkdir -p resources` fails and the dep must fail non-zero.
+@test "extract mode: failed cp/mkdir fails the dep (no false success)" {
+    setup_mock_curl
+    make_multi_tarball "$HARNESS_WORKSPACE/ts.tar.gz" \
+        "tree-sitter-lex.wasm:wasm-content"
+    mock_release ts v0.11.0 "tree-sitter.tar.gz" "$HARNESS_WORKSPACE/ts.tar.gz"
+
+    # Pre-create `resources` as a regular file so `mkdir -p resources`
+    # (inside apply_extract_map) fails.
+    printf 'i am a file, not a dir' > resources
+
+    cat > deps.json <<'JSON'
+{
+    "ts": {
+        "repo": "test/ts",
+        "version": "v0.11.0",
+        "asset": "tree-sitter.tar.gz",
+        "extract": {
+            "tree-sitter-lex.wasm": "resources"
+        }
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"dep(s) failed"* ]]
+    # No false ✓ for the file that never got copied.
+    [[ "$output" != *"✓ tree-sitter-lex.wasm"* ]]
+    # And no stamp written.
+    [[ ! -f .deps/ts.stamp ]]
 }
 
 # ─── Simple extraction (no binary, no extract map) ────────

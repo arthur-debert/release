@@ -127,7 +127,7 @@ expand_item_template() {
     interim="$(jq -nr --arg tpl "$tpl" --argjson obj "$item" '
         $tpl | gsub("\\{\\{\\.(?<f>[a-zA-Z_][a-zA-Z0-9_]*)\\}\\}";
                     ($obj[.f] // "" | tostring))
-    ')"
+    ' | tr -d '\r')"
     expand_template "$interim" "$target"
 }
 
@@ -207,7 +207,7 @@ download_release_asset() {
         if ! asset_url="$(curl -fsSL \
             -H "Authorization: Bearer $token" \
             "$api_url" \
-            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url')"; then
+            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url' | tr -d '\r')"; then
             printf '%s: failed to look up release %s for %s\n' "$PROG" "$version" "$repo" >&2
             return 1
         fi
@@ -286,10 +286,21 @@ find_binary() {
 }
 
 # Apply a {src: dst} extract map against an unpacked archive root.
+# Returns non-zero if any entry could not be applied (missing source,
+# or a failed mkdir/cp) so the caller can fail the dep loudly instead
+# of reporting a false success.
 apply_extract_map() {
     local root="$1" extract_map="$2"
     local src dst found
+    local failed=0
     while IFS=$'\t' read -r src dst; do
+        # Defense-in-depth against CRLF: jq on Windows emits \r\n and
+        # command substitution only strips \r from the LAST entry, so
+        # all-but-last dst would otherwise carry a trailing \r and
+        # create a bogus "<dst>\r/" directory. Belt-and-braces with the
+        # `| tr -d '\r'` on the @tsv builders that feed this map.
+        src="${src%$'\r'}"
+        dst="${dst%$'\r'}"
         [[ -z "$src" || -z "$dst" ]] && continue
         if [[ -e "$root/$src" ]]; then
             found="$root/$src"
@@ -298,18 +309,32 @@ apply_extract_map() {
         fi
 
         if [[ -z "${found:-}" ]]; then
-            info "  ⚠ $src not found in archive (skipping)"
+            fail_dep "extract: '$src' not found in archive"
+            failed=1
             continue
         fi
 
-        mkdir -p "$dst"
+        if ! mkdir -p "$dst"; then
+            fail_dep "extract: cannot create dest dir '$dst'"
+            failed=1
+            continue
+        fi
         if [[ -d "$found" ]]; then
-            cp -r "$found"/. "$dst/"
+            if ! cp -r "$found"/. "$dst/"; then
+                fail_dep "extract: failed to copy '$src' → '$dst'"
+                failed=1
+                continue
+            fi
         else
-            cp "$found" "$dst/"
+            if ! cp "$found" "$dst/"; then
+                fail_dep "extract: failed to copy '$src' → '$dst'"
+                failed=1
+                continue
+            fi
         fi
         ok "$src → $dst"
     done <<< "$extract_map"
+    return "$failed"
 }
 
 # ─── Process a single dep ─────────────────────────────────
@@ -392,8 +417,8 @@ fetch_github() {
 
     elif [[ "$has_extract" == "true" ]]; then
         local extract_map
-        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
-        apply_extract_map "$root" "$extract_map"
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config" | tr -d '\r')"
+        apply_extract_map "$root" "$extract_map" || return 1
     else
         mkdir -p "$dest"
         cp -r "$root"/. "$dest/"
@@ -503,10 +528,10 @@ fetch_iter() {
 
     local extract_map="" raw_pairs=""
     if [[ "$has_extract" == "true" ]]; then
-        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config")"
+        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config" | tr -d '\r')"
     fi
     if [[ "$has_raw" == "true" ]]; then
-        raw_pairs="$(jq -r --arg d "$dep" '.[$d]["raw-files"] | to_entries[] | [.key, .value] | @tsv' "$config")"
+        raw_pairs="$(jq -r --arg d "$dep" '.[$d]["raw-files"] | to_entries[] | [.key, .value] | @tsv' "$config" | tr -d '\r')"
     fi
 
     local manifest
@@ -543,7 +568,7 @@ fetch_iter_item() {
     local has_extract="${11}" extract_map="${12}" has_raw="${13}" raw_pairs="${14}"
 
     local item_name
-    item_name="$(jq -r '.name // empty' <<< "$item")"
+    item_name="$(jq -r '.name // empty' <<< "$item" | tr -d '\r')"
     [[ -z "$item_name" ]] && { fail_dep "$dep: iteration item missing 'name' field"; return 1; }
 
     local repo version asset dest binary_as
@@ -586,7 +611,8 @@ fetch_iter_item() {
                 ev="$(expand_item_template "$v" "$item" "$target")"
                 printf '%s\t%s\n' "$ek" "$ev"
             done <<< "$extract_map")"
-            apply_extract_map "$root" "$expanded_extract_map"
+            apply_extract_map "$root" "$expanded_extract_map" \
+                || { fail_dep "$dep/$item_name: extract failed"; return 1; }
         else
             cp -r "$root"/. "$dest/"
             ok "extracted → $dest/"
