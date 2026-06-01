@@ -109,18 +109,46 @@ docstring (single source — no separate `show_help()`).
 
 ## `version.py` — semver
 
+**Implemented in Phase 0 (#379) — import and reuse; do not re-derive.** Public
+surface:
+
 ```python
 @dataclass(frozen=True, order=True)
 class SemVer:
-    major: int; minor: int; patch: int; prerelease: tuple = ()
+    major: int
+    minor: int
+    patch: int
+    _sort_key: tuple = field(compare=True, ...)   # ordering key (see below)
+    prerelease: tuple = field(compare=False, ...)  # public identifiers, e.g. ('rc', 1)
 
 def parse(s: str) -> SemVer: ...          # accepts optional leading 'v'
 def bump(v: SemVer, part: str) -> SemVer: # part in {major,minor,patch}; strips prerelease
-def fmt(v: SemVer, *, prefix: str = "") -> str: ...
+# str(v) renders canonically; pass a prefix at the call site if you need 'vX.Y.Z'.
 ```
 
+> **Amended from the original naive spec** (`order=True` over a raw `prerelease`
+> tuple): that sorts wrong (empty tuple sorts *below* a populated one — reverse
+> of semver.org §11) and `TypeError`s on mixed int/str identifiers. Ordering is
+> therefore driven by a derived `compare=True` `_sort_key` while the public
+> `prerelease` field is `compare=False`. Release outranks its prereleases;
+> numeric identifiers rank below alphanumeric. The module docstring documents it.
+
 Replaces `bin/share/semver-tool/`. That vendored tree is removed only once no
-script references it.
+script references it (NOT in Phase 0).
+
+## Phase 0 conventions (locked in by #379 — Phase 1 follows these)
+
+- **No `tests/fixtures/` for `release_core`.** Tests live in
+  `templates/commons/lib/release_core/tests/`, named **`test_core_*`** (avoids a
+  pytest rootdir import collision with `tests/python/test_cli.py`; package has no
+  `__init__.py`, matching `release_gh`). BATS fixtures are inline per the repo's
+  existing convention (see `tests/detect-kind/detect-kind.bats`).
+- **Verb registration** lives in `release_core/verbs/__init__.py` — keep it
+  additive (each verb self-registers) to avoid merge contention across parallel
+  Phase 1 PRs.
+- **`pyproject.toml` (workspace root)** already wires `release_core` as a uv
+  workspace member with `testpaths`/`pythonpath`; new verb tests are picked up
+  automatically.
 
 ## `manifest.py` — Kind detection + config
 
