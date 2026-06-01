@@ -176,8 +176,9 @@ JSON
 # jq on Windows emits \r\n as the *line terminator* on every output
 # line (it opens stdout in text mode). The `extract` @tsv map builder
 # forgot the `| tr -d '\r'` that every other jq call uses, so each map
-# line arrived as "src\tdst\r\n". Command substitution strips trailing
-# \n but NOT \r, so all-but-last `dst` carried a trailing \r:
+# line arrived as "src\tdst\r\n". Command substitution strips the
+# trailing \n but NOT the \r, and `read` splits on \n only, so every
+# `dst` (the last line included) carried a trailing \r:
 # `cp "$found" "resources\r/"` then created a bogus `resources<CR>/`
 # dir and the real file went missing → downstream `vite build` couldn't
 # resolve ../resources/*.wasm. We reproduce Windows jq with a `jq` shim
@@ -244,9 +245,11 @@ JSON
     printf 'A' > root/a.wasm
     printf 'B' > root/sub/b.scm
 
-    # First entry carries trailing \r (non-last), second is clean.
+    # Both entries carry a trailing \r — the real Windows-jq failure
+    # mode (\r survives on every line, last one included, because $()
+    # strips only the trailing \n and `read` splits on \n alone).
     local map
-    map="$(printf 'a.wasm\tresources\r\nsub\tresources/queries\n')"
+    map="$(printf 'a.wasm\tresources\r\nsub\tresources/queries\r')"
 
     run bash -c '
         source "'"$FETCH_DEPS"'"
