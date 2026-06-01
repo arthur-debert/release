@@ -238,7 +238,12 @@ A migration PR is mergeable into `feat/shell-to-python` only when ALL hold:
 - Phase 0 (this PR set) lands `release_core` + `detect-kind` canary + the
   `release-sync` materialization change. **Everything else depends on it.**
 - Bucket A PRs branch off the updated `feat/shell-to-python` and may run in
-  parallel; they touch disjoint files (own verb module + own shim) to minimize
-  merge conflicts. The shared `release_core/verbs/__init__` registry and any
-  `cli.py` extension are the only shared-file contention — keep verb modules
-  self-registering and additive.
+  parallel; they touch disjoint files (own verb module + own shim).
+- **Shared-file contention = `gh.py` and `cli.py` only.** `verbs/__init__.py` is
+  NOT shared (verbs self-register; shims import their module directly — proven in
+  #379/#380/#381). If a verb needs a new `gh.py` helper (e.g. #381 added
+  `issue_list` for `gh issue list` porcelain) or a new `cli.py` option type, that
+  is **additive and must be flagged in the PR body**; the orchestrator does not
+  run two `gh.py`-extending PRs in the same parallel batch (serialize / rebase to
+  avoid the one conflict point). Prefer the existing `gh.rest`/`graphql`/`git`/
+  `issue_list` before adding a helper.
