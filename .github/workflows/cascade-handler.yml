@@ -12,12 +12,14 @@ name: Cascade handler (reusable)
 #       secrets:
 #         RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 #
-# The contract: the consumer ships the managed release tooling under
-# `bin/` (re-synced from arthur-debert/release via `release-sync`):
-# `bin/diff-since-release` (is there anything to release? + what changed)
-# and `bin/release` (the Kind-aware `release-cut` shim that DISPATCHES
-# `.github/workflows/release.yml`, which does the bump + CHANGELOG roll +
-# commit + tag + build + GitHub Release in CI). The per-repo
+# The contract: the consumer ships the managed `bin/release` tool (the
+# Kind-aware `release-cut` shim, re-synced from arthur-debert/release via
+# `release-sync`) that DISPATCHES `.github/workflows/release.yml`, which
+# does the bump + CHANGELOG roll + commit + tag + build + GitHub Release in
+# CI. The should-release decision is computed GENERICALLY here via plain
+# git (commits since the last final release tag) — it no longer depends on a
+# per-repo `bin/diff-since-release`, which was absent for the manifest-less
+# Kinds (docs-site / tree-sitter / nvim-plugin). The per-repo
 # `scripts/release/*` primitives were retired — this handler now just
 # decides + dispatches; CI owns every mutation. See
 # arthur-debert/release `docs/lex-release-cascade.md`.
@@ -106,38 +108,64 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          # should-release decision: are there commits since the last
-          # final release tag? `bin/diff-since-release` prints a
-          # `Changes since <tag>:` / `---` header then the oneline log;
-          # a non-empty log section means "release".
+          # should-release decision, computed GENERICALLY via plain git
+          # (no per-repo bin/diff-since-release — it was absent for the
+          # manifest-less Kinds). Are there commits since the last FINAL
+          # (non-prerelease) release tag reachable from HEAD?
           #
-          # Exit-code contract (set -euo pipefail in diff-since-release):
-          #   0  -> success; inspect the log body
-          #   1  -> no release tags yet — "nothing to release" (a first
-          #         release is a human-driven `bin/release X.Y.Z`)
-          #   >1 -> genuine failure (git error / corrupt repo, e.g. 128).
-          #         Surface stderr and FAIL the step loudly — never treat
-          #         it as "no release", or the cascade silently stalls.
+          #   - `git tag --list 'v*' --sort=-version:refname --merged HEAD`
+          #     enumerates version tags, highest first. A nonzero exit is a
+          #     genuine git failure (corrupt repo / unborn HEAD) — surface it
+          #     and FAIL the step loudly; NEVER treat it as "no release", or
+          #     the cascade silently stalls.
+          #   - Drop prerelease tags (anything with `-`, e.g. v1.0.0-rc.1):
+          #     they share the `## [Unreleased]` scope with the final they
+          #     lead up to; the relevant diff is against the last *final*.
+          #   - No final tag -> "nothing to release" (a first release is a
+          #     human-driven `bin/release X.Y.Z`).
+          #   - `git log --oneline <tag>..HEAD` non-empty -> release. A nonzero
+          #     exit there is likewise a genuine git failure -> FAIL loudly.
           set +e
           err="$(mktemp)"
-          out="$(./bin/diff-since-release 2>"$err")"
+          all_tags="$(git tag --list 'v*' --sort=-version:refname --merged HEAD 2>"$err")"
           rc=$?
           set -e
-          if [ "$rc" != 0 ] && [ "$rc" != 1 ]; then
-            echo "::error::diff-since-release failed (exit ${rc}); cascade aborting"
+          if [ "$rc" != 0 ]; then
+            echo "::error::git tag listing failed (exit ${rc}); cascade aborting"
+            cat "$err" >&2
+            rm -f "$err"
+            exit "$rc"
+          fi
+          # Last FINAL (non-prerelease) tag: first line without a `-`.
+          latest_tag=""
+          if [ -n "$all_tags" ]; then
+            latest_tag="$(printf '%s\n' "$all_tags" | grep -v -- '-' | head -n1 || true)"
+          fi
+          if [ -z "$latest_tag" ]; then
+            rm -f "$err"
+            echo "release=no" >> "$GITHUB_OUTPUT"
+            echo "No release needed (no final release tags yet; first release is human-driven)."
+            exit 0
+          fi
+          set +e
+          log="$(git --no-pager log --oneline "${latest_tag}..HEAD" 2>"$err")"
+          rc=$?
+          set -e
+          if [ "$rc" != 0 ]; then
+            echo "::error::git log ${latest_tag}..HEAD failed (exit ${rc}); cascade aborting"
             cat "$err" >&2
             rm -f "$err"
             exit "$rc"
           fi
           rm -f "$err"
-          body="$(printf '%s\n' "$out" | sed -n '/^---$/,$p' | tail -n +2 | sed '/^[[:space:]]*$/d')"
-          if [ "$rc" = 0 ] && [ -n "$body" ]; then
+          body="$(printf '%s\n' "$log" | sed '/^[[:space:]]*$/d')"
+          if [ -n "$body" ]; then
             n="$(printf '%s\n' "$body" | grep -c .)"
             echo "release=yes" >> "$GITHUB_OUTPUT"
-            echo "Releasable: ${n} commit(s) since last release."
+            echo "Releasable: ${n} commit(s) since ${latest_tag}."
           else
             echo "release=no" >> "$GITHUB_OUTPUT"
-            echo "No release needed (rc=${rc}; no commits since last release tag)."
+            echo "No release needed (no commits since ${latest_tag})."
           fi
 
       - name: Skip if not needed

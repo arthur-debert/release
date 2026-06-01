@@ -231,6 +231,34 @@ def git_ls_tree(
     return res.stdout if res.returncode == 0 else ""
 
 
+def git_tag_list_merged(pattern: str = "v*", *, cwd: str, sort: str = "-version:refname"):
+    """`git -C <cwd> tag --list <pattern> --sort <sort> --merged HEAD` → raw
+    CompletedProcess (check=False).
+
+    Used by release-lex's generic should-release decision: enumerate the version
+    tags reachable from HEAD, highest-version first. Returns the CompletedProcess
+    so the caller can distinguish a benign empty result (rc 0, no tags) from a
+    genuine git failure (rc != 0, e.g. corrupt repo / unborn HEAD) and surface
+    the latter loudly rather than masking it as "no tags"."""
+    return proc.run(
+        ["git", "-C", cwd, "tag", "--list", pattern, "--sort", sort, "--merged", "HEAD"],
+        check=False,
+    )
+
+
+def git_log_oneline(rev_range: str, *, cwd: str):
+    """`git -C <cwd> --no-pager log --oneline <rev_range>` → raw CompletedProcess
+    (check=False).
+
+    The commit-count source for release-lex's should-release decision. Raw
+    CompletedProcess so the caller surfaces a nonzero rc (bad ref / git error)
+    loudly instead of reading an empty stdout as "nothing to release"."""
+    return proc.run(
+        ["git", "-C", cwd, "--no-pager", "log", "--oneline", rev_range],
+        check=False,
+    )
+
+
 def git_show_bytes(rev_path: str, *, cwd: str) -> bytes:
     """`git -C <cwd> show <rev>:<path>` → the blob's RAW bytes.
 
