@@ -18,13 +18,14 @@
 #   check-shell <file>...
 #
 # Exit codes:
-#   0  — every shell file passed (or shellcheck missing, or no shell files)
-#   1  — a shell file failed shellcheck
+#   0  — every shell file passed (or no shell files matched)
+#   1  — a shell file failed shellcheck, or shellcheck is not installed
+#        (a missing tool is a HARD gate failure — the gate does not skip)
 set -euo pipefail
 
 if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "shellcheck not installed (skipping; install: see https://github.com/koalaman/shellcheck#installing)" >&2
-  exit 0
+  echo "ERROR: shellcheck not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2
+  exit 1
 fi
 
 # Is $1 a shell file we own and should lint?

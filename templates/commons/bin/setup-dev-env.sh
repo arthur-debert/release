@@ -70,6 +70,19 @@ if ! command -v ruff >/dev/null 2>&1; then
 fi
 command -v ruff >/dev/null 2>&1 || _warn_unarmed ruff
 
+# yamllint — the consumer gate's YAML check (commons lefthook fragment). Like
+# ruff it's a pip tool: --break-system-packages first (PEP 668), plain pip
+# fallback, then brew. Install stderr stays visible for diagnostics.
+if ! command -v yamllint >/dev/null 2>&1; then
+  if command -v pip3 >/dev/null 2>&1; then
+    pip3 install --quiet --break-system-packages yamllint >/dev/null \
+      || pip3 install --quiet yamllint >/dev/null || true
+  elif command -v brew >/dev/null 2>&1; then
+    brew install yamllint >/dev/null || true
+  fi
+fi
+command -v yamllint >/dev/null 2>&1 || _warn_unarmed yamllint
+
 # System tools: shellcheck + actionlint (brew on macOS, apt on Linux). `sudo -n`
 # (non-interactive) so a password prompt fails fast instead of hanging a
 # session-start hook; install stderr stays visible for diagnostics.
@@ -82,6 +95,35 @@ for _gate_tool in shellcheck actionlint; do
   fi
   command -v "${_gate_tool}" >/dev/null 2>&1 || _warn_unarmed "${_gate_tool}"
 done
+
+# golangci-lint — the go-quality gate's linter. Only Go repos run that hook, so
+# gate the install on a root go.mod existing (we cd'd to REPO_ROOT above; the
+# §2 `go mod download` block uses the same root check). brew on macOS; on Linux
+# the canonical install script drops the binary into the Go bin dir, with `go
+# install` as the fallback when go is present but curl/sh isn't. Pinned to a
+# version (single source) for reproducibility. Install stderr stays visible —
+# matches the ruff/yamllint blocks; only stdout is muted.
+_GOLANGCI_LINT_VERSION="v1.64.8"
+if [ -f go.mod ] && ! command -v golangci-lint >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    brew install golangci-lint >/dev/null || true
+  elif command -v go >/dev/null 2>&1; then
+    # GOBIN wins if set; else the FIRST entry of a (possibly colon-separated)
+    # GOPATH — `$(go env GOPATH)/bin` would be a broken path on a multi-entry
+    # GOPATH. The install script and `go install` both land the binary here.
+    _go_bin="$(go env GOBIN)"
+    [ -n "${_go_bin}" ] || _go_bin="$(go env GOPATH | cut -d: -f1)/bin"
+    if command -v curl >/dev/null 2>&1; then
+      curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh \
+        | sh -s -- -b "${_go_bin}" "${_GOLANGCI_LINT_VERSION}" >/dev/null \
+        || go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${_GOLANGCI_LINT_VERSION}" >/dev/null \
+        || true
+    else
+      go install "github.com/golangci/golangci-lint/cmd/golangci-lint@${_GOLANGCI_LINT_VERSION}" >/dev/null || true
+    fi
+  fi
+  command -v golangci-lint >/dev/null 2>&1 || _warn_unarmed golangci-lint
+fi
 
 # --- 0.1. Pre-commit hook wiring (BOTH local and cloud) -----------------
 # Wiring `.git/hooks/pre-commit` is per-clone state — every fresh clone

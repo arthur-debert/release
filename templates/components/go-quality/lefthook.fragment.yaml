@@ -38,9 +38,9 @@ pre-commit:
       run: go vet ./...
       priority: 2
     golangci-lint:
-      # Opt-in: only runs if golangci-lint is installed. CI is expected
-      # to install it via the canonical setup-go action; locally,
-      # contributors `brew install golangci-lint` once.
+      # HARD gate: a missing tool exits non-zero (never skips). CI installs
+      # it via the canonical setup-go action; locally the bootstrap
+      # (setup-dev-env.sh) installs it for Go repos.
       glob:
         - "**/*.go"
         - "**/go.mod"
@@ -48,6 +48,7 @@ pre-commit:
         if command -v golangci-lint >/dev/null 2>&1; then
           golangci-lint run ./...
         else
-          echo "golangci-lint not installed (skipping; install via brew install golangci-lint)" >&2
+          echo "ERROR: golangci-lint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2
+          exit 1
         fi
       priority: 2
