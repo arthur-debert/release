@@ -33,6 +33,10 @@ else
 fi
 cd "$REPO_ROOT"
 
+# The gate runs first (one definition, via commons/bin/check-gate), then the
+# Kind-specific mkdocs build below.
+"$SCRIPT_DIR/check-gate"
+
 config=""
 if [ -f mkdocs.yml ]; then
   config="mkdocs.yml"
