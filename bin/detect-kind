@@ -1,106 +1,27 @@
-#!/usr/bin/env bash
-# Detect the Kind of a directory by inspecting its filesystem.
-# Prints one of: rust-cli, go-cli, electron-app, tauri-app, zed-extension,
-# vscode-ext, nvim-plugin, tree-sitter, docs-site, static-site, brew-tap,
-# github-action — or exits 1 if undetermined.
+#!/usr/bin/env python3
+# detect-kind — detect the Kind of a directory by inspecting its filesystem.
 #
-# Usage: detect-kind [<dir>]   (defaults to current dir)
+# Thin shim (shell→Python canary, docs/proposals/shell-to-python.md): put the
+# stdlib-only release_core package on sys.path and dispatch. detect-kind is a
+# release-only tool (a real file in bin/, NOT synced to consumers), so realpath
+# lands in bin/ and the package sits at ../templates/commons/lib/release_core
+# (the contract's variant (b)). Output matches the old bash byte-for-byte.
+import os
+import sys
 
-set -euo pipefail
+sys.path.insert(
+    0,
+    os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "..",
+        "templates",
+        "commons",
+        "lib",
+        "release_core",
+    ),
+)
 
-dir=${1:-.}
-cd "$dir"
+from release_core.verbs import detect_kind  # noqa: E402 — sys.path set above
 
-# brew tap
-if [ -d Formula ] || [ -d Casks ]; then
-  echo brew-tap; exit 0
-fi
-
-# tree-sitter grammar
-if [ -f grammar.js ]; then
-  echo tree-sitter; exit 0
-fi
-
-# tauri-app — must precede both the bare `rust-cli` branch (a tauri repo
-# could conceivably ship a root Cargo.toml in a workspace-root layout)
-# AND the `electron-app` branch (a tauri repo could carry electron in
-# devDependencies for a legacy reason; src-tauri/Cargo.toml is the
-# discriminator). The presence of BOTH signals — a Rust core under
-# src-tauri/ and a frontend at root — is what makes it tauri-app.
-if [ -f src-tauri/Cargo.toml ] && [ -f package.json ]; then
-  echo tauri-app; exit 0
-fi
-
-# zed-extension — must precede the bare `rust-cli` branch. A Zed extension
-# carries BOTH an extension.toml (the manifest Zed reads, with `id` and
-# `schema_version` at root) AND a Cargo.toml (the cdylib crate
-# compiled to wasm32-wasip2).
-if [ -f extension.toml ] && [ -f Cargo.toml ]; then
-  echo zed-extension; exit 0
-fi
-
-# rust-cli — today all rust consumers are CLIs. rust-lib will be a
-# separate Kind in a follow-up (distinguisher: [[bin]] in Cargo.toml
-# or src/main.rs).
-if [ -f Cargo.toml ]; then
-  echo rust-cli; exit 0
-fi
-
-# go-cli
-if [ -f go.mod ]; then
-  echo go-cli; exit 0
-fi
-
-# javascript-side
-if [ -f package.json ]; then
-  if grep -q '"electron-builder"' package.json 2>/dev/null || grep -q '"electron"' package.json 2>/dev/null; then
-    echo electron-app; exit 0
-  fi
-  if grep -q '"@vscode/vsce"' package.json 2>/dev/null || grep -q '"vsce"' package.json 2>/dev/null; then
-    echo vscode-ext; exit 0
-  fi
-fi
-
-# composite github action
-if [ -f action.yml ] || [ -f action.yaml ]; then
-  echo github-action; exit 0
-fi
-
-# nvim plugin: recognise both classic vimscript layout (plugin/ +
-# autoload/ + ftdetect/ + ...) AND modern lua-only layout (lua/<name>/
-# directory, optionally with queries/ for tree-sitter integration or
-# ftplugin/colors/ftdetect for vim integration). Modern plugins
-# frequently ship with no plugin/ dir at all — everything lives under
-# lua/ and gets required at runtime by lazy.nvim / packer / etc.
-if [ -d plugin ] \
-   || [ -d ftdetect ] \
-   || [ -d ftplugin ] \
-   || [ -d autoload ] \
-   || [ -d queries ]; then
-  # Confirm there's actually lua source (excludes a tree-sitter
-  # grammar-only repo, which already matched grammar.js above).
-  if [ -d lua ] || find . -maxdepth 3 -name '*.lua' -print -quit | grep -q .; then
-    echo nvim-plugin; exit 0
-  fi
-fi
-
-# docs-site (mkdocs) — must precede the `static-site` (mdbook/jekyll)
-# branch: a repo mid-migration can carry a legacy docs/_config.yml
-# alongside the new root mkdocs.yml, and the mkdocs.yml is the
-# discriminator for the canonical docs-site pipeline. The Kind is
-# pure-content (no compiled artifact); the build+deploy lives in the
-# mkdocs.yml reusable workflow, and the docs build check ships via the
-# `mkdocs` Capability + this Kind's bin/check. A root mkdocs.yml is the
-# unambiguous signal (config-at-docs-root consumers point the reusable
-# workflow's `config-file:` at it but still keep a root marker).
-if [ -f mkdocs.yml ]; then
-  echo docs-site; exit 0
-fi
-
-# static site (mdbook or jekyll)
-if [ -f book.toml ] || [ -f _config.yml ]; then
-  echo static-site; exit 0
-fi
-
-echo "could not detect kind of $(pwd)" >&2
-exit 1
+if __name__ == "__main__":
+    sys.exit(detect_kind.main(sys.argv[1:]))
