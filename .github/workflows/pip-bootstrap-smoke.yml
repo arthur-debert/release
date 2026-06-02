@@ -11,10 +11,11 @@ name: pip-bootstrap smoke
 # check; it is deliberately NOT in the branch-protection ruleset (a path-/event-
 # scoped check that doesn't always run would deadlock merges — see release#418).
 
+# PR-time only (+ manual): the smoke is a per-PR proof. Triggering on push too
+# would double-run it on in-repo PR branches for no added coverage.
 on:
-  push:
-    branches: ['**']
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -39,14 +40,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install yq (release-sync engine shells out to it)
+      - name: Install yq (mikefarah v4 — pinned)
         # release_core.yamlio shells out to `yq` to compose the lefthook.yml
-        # fragment merge; it is not bundled on ubuntu-latest.
+        # fragment merge; it is not bundled on ubuntu-latest. Pin an explicit v4
+        # release (NOT releases/latest) — same pin as release-sync-tests.yml — so
+        # a future v5 "latest" can't change serialization and turn this into
+        # spurious churn.
         run: |
           set -euo pipefail
-          sudo curl -sSfL \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
-            -o /usr/local/bin/yq
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
           yq --version
 
@@ -58,6 +61,10 @@ jobs:
           set -euo pipefail
           python -m pip install --upgrade build
           python -m build --wheel "${PKG_DIR}"
+          # nullglob: an unmatched glob must expand to NOTHING (empty array), not
+          # to the literal pattern — otherwise a zero-wheel build would yield a
+          # length-1 array and slip past the count check below.
+          shopt -s nullglob
           wheels=("${PKG_DIR}"/dist/release_core-*.whl)
           if [ "${#wheels[@]}" -ne 1 ]; then
             echo "ERROR: expected exactly 1 wheel, found ${#wheels[@]}: ${wheels[*]:-<none>}" >&2
@@ -87,7 +94,14 @@ jobs:
               "${RUNNER_TEMP}/venv/bin/"*) : ;;
               *) echo "ERROR: $cmd resolved to '$path', not the fresh venv" >&2; exit 1 ;;
             esac
-            out="$("$cmd" --help)"
+            # Capture stdout AND stderr: the verbs follow their bin/ shims, some
+            # of which print --help usage to stderr (e.g. release-cut). The §4
+            # bar is exit 0 + non-empty help, regardless of stream.
+            if ! out="$("$cmd" --help 2>&1)"; then
+              echo "ERROR: '$cmd --help' exited non-zero" >&2
+              printf '%s\n' "$out" >&2
+              exit 1
+            fi
             if [ -z "$out" ]; then
               echo "ERROR: '$cmd --help' produced no output" >&2
               exit 1
