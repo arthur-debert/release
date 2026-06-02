@@ -11,17 +11,8 @@
 set -euo pipefail
 
 if ! command -v release-cut >/dev/null 2>&1; then
-    # release-cut not installed. With an EXPLICIT version (the cascade /
-    # automated path) dispatch release.yml directly — that's all release-cut does
-    # with an explicit version anyway, so it isn't needed here. Kind-aware version
-    # COMPUTE (invoked with no version) still requires release-cut.
-    # (release#426 P1: cascade-handler runners don't provision release-cut.)
-    if [ "$#" -ge 1 ]; then
-        echo "bin/release: release-cut not on \$PATH — dispatching release.yml directly (version $1)" >&2
-        exec gh workflow run release.yml -f version="$1"
-    fi
-    echo "bin/release: release-cut not on \$PATH and no explicit version given." >&2
-    echo "  install it (pip-install release_core via install-release-core), or add release/bin to \$PATH." >&2
+    echo "bin/release: release-cut not on \$PATH" >&2
+    echo "  install: clone arthur-debert/release and add its bin/ to \$PATH" >&2
     exit 1
 fi
 
