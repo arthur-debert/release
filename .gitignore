@@ -27,3 +27,7 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+
+# Local Doppler CLI state (per-developer/machine; never repo config).
+# Created by `doppler` runs in a dev shell — committing it churns per-machine.
+dev_shell/
