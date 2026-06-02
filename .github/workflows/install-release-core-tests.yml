@@ -11,11 +11,13 @@ on:
   push:
     branches: ["**"]
     paths:
+      - "templates/commons/bin/install-release-core"
       - "bin/install-release-core"
       - "tests/install-release-core/**"
       - ".github/workflows/install-release-core-tests.yml"
   pull_request:
     paths:
+      - "templates/commons/bin/install-release-core"
       - "bin/install-release-core"
       - "tests/install-release-core/**"
       - ".github/workflows/install-release-core-tests.yml"
