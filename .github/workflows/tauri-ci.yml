@@ -370,8 +370,20 @@ jobs:
           GH_TOKEN: ${{ secrets.gh_token || github.token }}
         run: ${{ inputs.pre-test }}
 
-      - name: Install lefthook
-        run: npm install -g lefthook@2.1.6
+      - name: Arm the gate toolset (full lint set)
+        # The gate (lefthook.yml) is HARD — a missing tool FAILS bin/check, it
+        # does not skip (release#412). CI must therefore arm the FULL toolset,
+        # not just lefthook, or the hardened gate fails on the first missing
+        # linter (markdownlint). Mirrors release's own ci.yml. Kept inline
+        # (rather than calling the consumer's bin/setup-dev-env.sh) so it is
+        # robust to consumer bootstrap-version skew — the toolset-arming block
+        # only exists in the re-synced bootstrap, which lands in the same
+        # propagate PR as the hardened gate. This is the interim arming step
+        # that `release-core init` (epic #416) will replace fleet-wide with
+        # `pip install -U release_core && release-core init`.
+        run: |
+          npm install -g lefthook prettier markdownlint-cli
+          pip install "ruff==0.15.12"
 
       - name: Run canonical checks (bin/check)
         env:
