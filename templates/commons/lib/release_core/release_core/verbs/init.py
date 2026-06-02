@@ -35,11 +35,17 @@ Behavior:
   - exits NON-ZERO on any real failure (cannot write a file it intended to). No
     silent best-effort swallowing for init's own writes.
 
-Source resolution (PoC): the canonical config content is composed by the
-release-sync engine (sync.build_plan + sync.materialize) from $RELEASE_HOME — the
-same git clone + $RELEASE_REF env contract release-sync uses. This is a PoC
-simplification; folding fragment composition into the installed package so init
-needs no release checkout is a post-PoC follow-up.
+Source resolution: the canonical config content is composed from the
+wheel-bundled templates (release_core/_bundled_templates/, staged at build time
+by hatch_build.py) so init is self-contained — no release clone, no network.
+This is the DEFAULT and the only path a pip-installed consumer ever takes.
+
+A `$RELEASE_HOME` git checkout, when explicitly present (release-dev only),
+OVERRIDES the bundle: init then composes from live templates via the full
+release-sync engine (sync.build_plan + sync.materialize) at $RELEASE_REF, the
+same git-clone contract release-sync uses. In an editable/source checkout the
+bundle is absent (a gitignored build artifact), so $RELEASE_HOME is required
+there; a fresh wheel install needs neither.
 
 Exit codes:
   0  — done (created/refreshed, or a clean no-op)
@@ -84,31 +90,126 @@ def _usage_block() -> str:
     return (USAGE.strip("\n")).rstrip("\n")
 
 
-def _materialize_config_sources(repo_root: str, repo_name: str) -> dict[str, str]:
-    """Compose the canonical config content via the release-sync engine and
-    return {dest -> absolute path in a temp tree} for every CONFIG_FILES dest
-    that the engine produced.
+def _bundle_templates_root() -> str | None:
+    """Absolute path to the wheel-bundled templates tree, or None if not bundled.
 
-    Reuses sync.build_plan + sync.materialize (faithful composition, including
-    the fragment-merged lefthook.yml) rather than reimplementing it; init only
-    SELECTS the config subset and copies it create-if-absent. May raise
-    manifest.KindError (undetectable Kind), sync.SyncError (no $RELEASE_HOME
-    clone / no candidate ref), or yamlio.YamlError (missing yq, malformed
-    manifest/.release-sync.yaml, or a lefthook-fragment merge failure) — main()
-    catches all three and maps them to a clean exit 1.
-
-    The returned temp tree leaks intentionally for the process lifetime (a few
-    KB of config); the OS reaps it. Keeping init small beats threading cleanup.
+    The wheel ships the config templates under release_core/_bundled_templates/
+    (staged at build time, see hatch_build.py) so init is self-contained — no
+    release clone needed. In an editable/source checkout the dir is absent
+    (it's a build artifact, gitignored), so this returns None and init falls
+    back to the $RELEASE_HOME git path.
     """
-    release_home = os.environ.get("RELEASE_HOME") or os.path.join(
-        os.path.expanduser("~"), "release"
-    )
-    if not os.path.isdir(os.path.join(release_home, ".git")):
-        raise sync.SyncError(
-            f"release-core init: $RELEASE_HOME='{release_home}' is not a git clone"
-        )
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
+    root = os.path.join(here, "_bundled_templates", "templates")
+    return root if os.path.isdir(root) else None
+
+
+def _read_sync_yaml(repo_root: str) -> str | None:
+    sync_yaml = os.path.join(repo_root, ".release-sync.yaml")
+    if os.path.isfile(sync_yaml):
+        with open(sync_yaml, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    return None
+
+
+def _capabilities_from_bundle(tpl_root: str, kind: str) -> list[str]:
+    """Kind-default capabilities from the bundled templates/<kind>/manifest.yaml
+    (mirrors sync.resolve_capabilities' manifest branch, read from the bundle)."""
+    manifest_path = os.path.join(tpl_root, kind, "manifest.yaml")
+    if os.path.isfile(manifest_path):
+        with open(manifest_path, encoding="utf-8", errors="replace") as fh:
+            return sync._yq_list_capabilities(fh.read())
+    return []
+
+
+def _materialize_config_from_bundle(
+    tpl_root: str, repo_root: str, kind: str, capabilities: list[str]
+) -> dict[str, str]:
+    """Compose the config subset from the wheel-bundled templates (no git).
+
+    Mirrors the release-sync composition for the CONFIG subset only: copy the
+    static commons lint configs, then deep-merge the lefthook fragments (base <
+    commons < each capability < kind) via yq — the same merge sync._write_lefthook
+    does, sourced from the bundle instead of a git ref.
+    """
+    tmp = tempfile.mkdtemp(prefix=".release-core-init.")
+    sources: dict[str, str] = {}
+
+    for dest in CONFIG_FILES:
+        if dest == "lefthook.yml":
+            continue
+        src = os.path.join(tpl_root, "commons", dest)
+        if os.path.isfile(src):
+            out = os.path.join(tmp, dest)
+            shutil.copyfile(src, out)
+            sources[dest] = out
+
+    frag_rel = [
+        os.path.join("components", "_lefthook-base.yaml"),
+        os.path.join("commons", "lefthook.fragment.yaml"),
+    ]
+    frag_rel += [os.path.join("components", c, "lefthook.fragment.yaml") for c in capabilities if c]
+    frag_rel.append(os.path.join(kind, "lefthook.fragment.yaml"))
+    frags = [
+        os.path.join(tpl_root, f) for f in frag_rel if os.path.isfile(os.path.join(tpl_root, f))
+    ]
+
+    if frags:
+        frag_tmp = tempfile.mkdtemp()
+        try:
+            numbered: list[str] = []
+            for i, fp in enumerate(frags):
+                dirbase = os.path.basename(os.path.dirname(fp))
+                np = os.path.join(frag_tmp, f"{i:02d}-{dirbase}.yaml")
+                shutil.copyfile(fp, np)
+                numbered.append(np)
+            merged = yamlio.eval_all('. as $i ireduce({}; . *+ $i) | ... comments=""', numbered)
+            out = os.path.join(tmp, "lefthook.yml")
+            with open(out, "w", encoding="utf-8") as fh:
+                fh.write(
+                    "# Generated by release-core init from the bundled templates. Do not edit.\n"
+                    "# Regenerate by running release-core init.\n\n"
+                )
+                fh.write(merged)
+            sources["lefthook.yml"] = out
+        finally:
+            shutil.rmtree(frag_tmp, ignore_errors=True)
+
+    return sources
+
+
+def _materialize_config_sources(repo_root: str, repo_name: str) -> dict[str, str]:
+    """Compose the canonical config content and return {dest -> absolute path in
+    a temp tree} for every CONFIG_FILES dest produced.
+
+    DEFAULT: compose from the wheel-bundled templates (self-contained, no clone).
+    A `$RELEASE_HOME` git checkout, when explicitly present, OVERRIDES the bundle
+    (release-dev uses live templates via the full sync engine). May raise
+    manifest.KindError / sync.SyncError / yamlio.YamlError — main() maps each to
+    a clean exit 1.
+    """
+    release_home = os.environ.get("RELEASE_HOME")
+    have_clone = bool(release_home) and os.path.isdir(os.path.join(release_home, ".git"))
+    tpl_root = _bundle_templates_root()
 
     kind = manifest.detect_kind(repo_root)
+
+    # Self-contained path: bundled templates, no git. Used unless a real
+    # release clone is explicitly pointed at via $RELEASE_HOME.
+    if tpl_root and not have_clone:
+        sync_yaml_text = _read_sync_yaml(repo_root)
+        if sync_yaml_text is not None:
+            caps_names = sync._yq_list_capabilities(sync_yaml_text)
+        else:
+            caps_names = _capabilities_from_bundle(tpl_root, kind)
+        return _materialize_config_from_bundle(tpl_root, repo_root, kind, caps_names)
+
+    if not have_clone:
+        raise sync.SyncError(
+            "release-core init: no bundled templates and "
+            f"$RELEASE_HOME='{release_home or ''}' is not a git clone"
+        )
+
     release_ref = os.environ.get("RELEASE_REF") or None
     ref = sync.select_ref(release_home, repo_name, kind, release_ref)
     ref_sha = gh.git_rev_parse(ref, cwd=release_home)

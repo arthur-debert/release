@@ -26,13 +26,14 @@ jobs:
     env:
       PKG_DIR: templates/commons/lib/release_core
     steps:
-      - name: Checkout (full clone — init composes config from this checkout)
+      - name: Checkout (full clone — the OVERRIDE path composes from this checkout)
         uses: actions/checkout@v4
         with:
-          # `release-core init` composes the managed config via the release-sync
-          # engine from $RELEASE_HOME at $RELEASE_REF; that engine reads git
-          # objects (git ls-tree / cat-file / show), so it needs real history,
-          # not a shallow clone.
+          # The default `release-core init` path needs NO checkout (it composes
+          # from the wheel-bundled templates). But the OVERRIDE-path step below
+          # ($RELEASE_HOME=this checkout) drives the release-sync engine, which
+          # reads git objects (git ls-tree / cat-file / show) at $RELEASE_REF —
+          # so it needs real history, not a shallow clone.
           fetch-depth: 0
 
       - name: Set up Python
@@ -71,6 +72,36 @@ jobs:
             exit 1
           fi
           echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+
+      - name: Assert the wheel BUNDLES the config templates (self-contained)
+        # The self-contained wheel ships the config templates under
+        # release_core/_bundled_templates/ so `release-core init` composes the
+        # gate offline (no release clone). Prove the build hook (hatch_build.py)
+        # actually staged them INTO the wheel — without this, init silently falls
+        # back to the $RELEASE_HOME path and the "self-contained" claim is a lie.
+        # Assert the whole documented commons config subset + at least one kind
+        # manifest + the base/commons lefthook fragments are present.
+        run: |
+          set -euo pipefail
+          names="$(python - "$WHEEL" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              print("\n".join(z.namelist()))
+          PY
+          )"
+          require() {
+            if ! printf '%s\n' "$names" | grep -qxF "release_core/_bundled_templates/templates/$1"; then
+              echo "ERROR: wheel is missing bundled template: $1" >&2
+              exit 1
+            fi
+            echo "ok bundled: $1"
+          }
+          for f in .markdownlint.json .markdownlintignore .yamllint .shellcheckrc \
+                   .editorconfig .prettierignore lefthook.fragment.yaml; do
+            require "commons/$f"
+          done
+          require "components/_lefthook-base.yaml"
+          require "go-cli/manifest.yaml"
 
       - name: pip install the wheel into a FRESH venv
         # A clean venv proves the tools arrive purely from the install, not from
@@ -142,10 +173,70 @@ jobs:
           echo "documented CONFIG_FILES:"
           cat "${RUNNER_TEMP}/config_files.txt"
 
-      - name: release-core init — first run materializes the documented set
-        # $RELEASE_HOME = this checkout (a full git clone); $RELEASE_REF pins the
-        # composition to the exact PR commit, so init is self-contained and does
-        # not depend on any remote branch existing.
+      - name: release-core init OFFLINE — no $RELEASE_HOME, compose from the wheel
+        # The DEFAULT path a pip-installed consumer takes: NO release clone, NO
+        # network. `init` composes the gate from the templates BUNDLED in the
+        # wheel. RELEASE_HOME is explicitly unset so a leaked env can't mask a
+        # broken bundle by silently falling back to the git engine.
+        run: |
+          set -euo pipefail
+          unset RELEASE_HOME RELEASE_REF
+          off="${RUNNER_TEMP}/fixture-offline"
+          rm -rf "$off"; mkdir -p "$off"
+          git -C "$off" init -q
+          git -C "$off" config user.email smoke@example.com
+          git -C "$off" config user.name 'pip-bootstrap smoke'
+          printf 'module example.com/offline\n\ngo 1.22\n' > "$off/go.mod"
+          git -C "$off" add -A
+          git -C "$off" commit -qm 'fixture: go-cli marker'
+          cd "$off"
+          release-core init
+          # Every documented config file must be materialized OFFLINE.
+          missing=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if [ ! -f "$f" ]; then
+              echo "ERROR: offline init did not materialize '$f'" >&2
+              missing=1
+            else
+              echo "ok: $f"
+            fi
+          done < "${RUNNER_TEMP}/config_files.txt"
+          [ "$missing" -eq 0 ] || exit 1
+          # PROVE the BUNDLE path was taken (not a silent git-engine fallback):
+          # the offline composer stamps a distinct provenance header.
+          if ! head -1 lefthook.yml | grep -qF 'bundled templates'; then
+            echo "ERROR: lefthook.yml was not composed from the bundle — header was:" >&2
+            head -1 lefthook.yml >&2
+            exit 1
+          fi
+          echo "ok: gate composed offline from the bundled templates"
+          # No stray files beyond the documented set + the fixture's go.mod.
+          git add -A
+          extra="$(git -C "$off" diff --cached --name-only \
+            | grep -vxF -f "${RUNNER_TEMP}/config_files.txt" \
+            | grep -vxF 'go.mod' || true)"
+          if [ -n "$extra" ]; then
+            echo "ERROR: offline init wrote files outside the documented set:" >&2
+            echo "$extra" >&2
+            exit 1
+          fi
+          git commit -qm 'offline init'
+          # Idempotent: a second offline run is a clean no-op.
+          release-core init
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            echo "ERROR: second offline 'release-core init' was not a no-op:" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+          echo "ok: offline release-core init is idempotent"
+
+      - name: release-core init OVERRIDE — first run materializes the documented set
+        # release-dev's path: an explicit $RELEASE_HOME git clone OVERRIDES the
+        # bundle, composing from LIVE templates via the full release-sync engine.
+        # $RELEASE_REF pins composition to the exact PR commit, so it does not
+        # depend on any remote branch existing. (The wheel itself is always
+        # self-contained — this path is the deliberate dev-only escape hatch.)
         env:
           RELEASE_HOME: ${{ github.workspace }}
           RELEASE_REF: ${{ github.sha }}
@@ -178,7 +269,7 @@ jobs:
           fi
           git commit -qm 'init: first run'
 
-      - name: release-core init — second run is an idempotent no-op
+      - name: release-core init OVERRIDE — second run is an idempotent no-op
         env:
           RELEASE_HOME: ${{ github.workspace }}
           RELEASE_REF: ${{ github.sha }}
