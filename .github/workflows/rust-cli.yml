@@ -272,6 +272,30 @@ jobs:
 
       - uses: arthur-debert/release/.github/actions/setup-rust@v2
 
+      # prepare-release runs the consumer's lefthook pre-commit gate on the
+      # release commit (version bump + changelog roll). The hardened gate
+      # (#412) is HARD — a missing linter FAILS rather than skips — so the
+      # release runner must arm the FULL gate toolset, exactly as the CI
+      # workflows do (#417). Without this, the prepare commit dies on the
+      # first missing linter (markdownlint) the moment a consumer's synced
+      # gate reaches it. Mirrors rust-ci.yml's arming block.
+      - name: Set up Node (gate linters lefthook/prettier/markdownlint)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Set up Python (gate linters ruff/yamllint)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Arm the gate toolset (full lint set)
+        shell: bash
+        run: |
+          npm install -g lefthook prettier markdownlint-cli
+          pip install "ruff==0.15.12" yamllint
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
+          fi
+
       - uses: arthur-debert/release/.github/actions/prepare-release@v2
         id: prep
         with:
