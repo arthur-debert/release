@@ -154,6 +154,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash "${{ inputs.pre-check }}"
 
+      # Node for the gate's npm linters (lefthook/prettier/markdownlint) is set
+      # up UNCONDITIONALLY — the build-Node step above is gated on `inputs.node`,
+      # but the gate runs regardless of whether the extension build needs Node, so
+      # arm-gate must not depend on a node:false caller (or the runner's ambient
+      # Node). Mirrors the other stack workflows' dedicated gate-Node step.
+      - name: Set up Node (gate linters lefthook/prettier/markdownlint)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
       - name: Set up Python (gate linters ruff/yamllint)
         uses: actions/setup-python@v5
         with:
