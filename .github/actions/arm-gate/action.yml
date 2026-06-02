@@ -43,11 +43,30 @@ runs:
         # pip tools: ruff (pinned) + yamllint (consumer gate's YAML check).
         pip install "ruff==${RUFF_VERSION}" yamllint
         # shellcheck: ambient on ubuntu runners, absent on macOS / under image
-        # drift. The gate's shell-lint step is HARD, so ensure it.
+        # drift. The gate's shell-lint step is HARD, so ensure it — detecting the
+        # package manager (the composite runs fleet-wide, incl. macOS runners) and
+        # failing clearly if neither is present rather than emitting a noisy
+        # command-not-found and limping on to a gate that dies on missing tooling.
         if ! command -v shellcheck >/dev/null 2>&1; then
-          brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
+          if command -v brew >/dev/null 2>&1; then
+            brew install shellcheck
+          elif command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -qq && sudo apt-get install -y shellcheck
+          else
+            echo "arm-gate: shellcheck missing and no supported package manager (brew, apt-get) found" >&2
+            exit 1
+          fi
         fi
         # actionlint: release's own gate lints workflows; ensure it when absent.
+        # The download script drops the binary into /usr/local/bin, which is
+        # root-owned on standard Linux runners — install via sudo when available.
+        # Pipe curl|bash rather than `bash <(...)`: process substitution under
+        # sudo can fail on file-descriptor permissions.
         if ! command -v actionlint >/dev/null 2>&1; then
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest /usr/local/bin
+          _al_url='https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash'
+          if command -v sudo >/dev/null 2>&1; then
+            curl -sSfL "$_al_url" | sudo bash -s -- latest /usr/local/bin
+          else
+            curl -sSfL "$_al_url" | bash -s -- latest /usr/local/bin
+          fi
         fi
