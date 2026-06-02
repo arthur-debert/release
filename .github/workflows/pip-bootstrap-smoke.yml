@@ -1,0 +1,197 @@
+name: pip-bootstrap smoke
+
+# End-to-end smoke proof for the pip-install bootstrap PoC (ADR-0003,
+# docs/proposals/pip-bootstrap-contract.md §4). Proves the WHOLE chain inside
+# release's own repo, no consumer:
+#
+#   build wheel -> pip install into a fresh venv -> console-scripts on PATH ->
+#   `release-core init` in a throwaway fixture repo -> re-run is idempotent.
+#
+# A green run here IS the PoC's definition of done. This workflow is a normal PR
+# check; it is deliberately NOT in the branch-protection ruleset (a path-/event-
+# scoped check that doesn't always run would deadlock merges — see release#418).
+
+# PR-time only (+ manual): the smoke is a per-PR proof. Triggering on push too
+# would double-run it on in-repo PR branches for no added coverage.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      PKG_DIR: templates/commons/lib/release_core
+    steps:
+      - name: Checkout (full clone — init composes config from this checkout)
+        uses: actions/checkout@v4
+        with:
+          # `release-core init` composes the managed config via the release-sync
+          # engine from $RELEASE_HOME at $RELEASE_REF; that engine reads git
+          # objects (git ls-tree / cat-file / show), so it needs real history,
+          # not a shallow clone.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install yq (mikefarah v4 — pinned)
+        # release_core.yamlio shells out to `yq` to compose the lefthook.yml
+        # fragment merge; it is not bundled on ubuntu-latest. Pin an explicit v4
+        # release (NOT releases/latest) — same pin as release-sync-tests.yml — so
+        # a future v5 "latest" can't change serialization and turn this into
+        # spurious churn.
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.6/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Build the release_core wheel
+        # `build` is CI-only tooling — release_core's runtime deps stay empty
+        # (stdlib-only). This is the same build invocation PR-D's publish job
+        # uses (python -m build --wheel <pkg>).
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade build
+          python -m build --wheel "${PKG_DIR}"
+          # nullglob: an unmatched glob must expand to NOTHING (empty array), not
+          # to the literal pattern — otherwise a zero-wheel build would yield a
+          # length-1 array and slip past the count check below.
+          shopt -s nullglob
+          wheels=("${PKG_DIR}"/dist/release_core-*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "ERROR: expected exactly 1 wheel, found ${#wheels[@]}: ${wheels[*]:-<none>}" >&2
+            exit 1
+          fi
+          echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+
+      - name: pip install the wheel into a FRESH venv
+        # A clean venv proves the tools arrive purely from the install, not from
+        # the workspace sys.path. The venv's bin/ is prepended to PATH for the
+        # remaining steps so the console-scripts resolve by bare name.
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/pip" install --upgrade pip >/dev/null
+          "${RUNNER_TEMP}/venv/bin/pip" install "${WHEEL}"
+          echo "${RUNNER_TEMP}/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Assert console-scripts are on PATH and respond to --help
+        # The §1 invariant: the verbs ship as console-scripts. Assert exit 0 +
+        # non-empty output for the per-verb scripts and the top-level CLI.
+        run: |
+          set -euo pipefail
+          for cmd in changelog detect-kind release-cut release-core; do
+            path="$(command -v "$cmd")"
+            case "$path" in
+              "${RUNNER_TEMP}/venv/bin/"*) : ;;
+              *) echo "ERROR: $cmd resolved to '$path', not the fresh venv" >&2; exit 1 ;;
+            esac
+            # Capture stdout AND stderr: the verbs follow their bin/ shims, some
+            # of which print --help usage to stderr (e.g. release-cut). The §4
+            # bar is exit 0 + non-empty help, regardless of stream.
+            if ! out="$("$cmd" --help 2>&1)"; then
+              echo "ERROR: '$cmd --help' exited non-zero" >&2
+              printf '%s\n' "$out" >&2
+              exit 1
+            fi
+            if [ -z "$out" ]; then
+              echo "ERROR: '$cmd --help' produced no output" >&2
+              exit 1
+            fi
+            echo "ok: $cmd --help -> $(printf '%s' "$out" | head -n1)"
+          done
+
+      - name: Create a Kind-detectable throwaway fixture repo
+        # `release-core init` detects the target repo's Kind (manifest.detect_kind)
+        # and refuses an undetectable repo. A lone go.mod is the minimal signal
+        # for the go-cli Kind — no toolchain needed, just the marker file.
+        run: |
+          set -euo pipefail
+          fixture="${RUNNER_TEMP}/fixture"
+          rm -rf "$fixture"
+          mkdir -p "$fixture"
+          git -C "$fixture" init -q
+          git -C "$fixture" config user.email smoke@example.com
+          git -C "$fixture" config user.name 'pip-bootstrap smoke'
+          printf 'module example.com/smoke\n\ngo 1.22\n' > "$fixture/go.mod"
+          git -C "$fixture" add -A
+          git -C "$fixture" commit -qm 'fixture: go-cli marker'
+          echo "FIXTURE=$fixture" >> "$GITHUB_ENV"
+          echo "detected kind:"
+          ( cd "$fixture" && detect-kind )
+
+      - name: Read the documented CONFIG_FILES set from verbs/init.py
+        # Source of truth for what `init` must materialize is the CONFIG_FILES
+        # tuple in verbs/init.py — read it programmatically so this smoke can
+        # never assert a divergent hardcoded list. The wheel is already
+        # installed, so import it straight from the venv.
+        run: |
+          set -euo pipefail
+          python - <<'PY' > "${RUNNER_TEMP}/config_files.txt"
+          from release_core.verbs.init import CONFIG_FILES
+          print("\n".join(CONFIG_FILES))
+          PY
+          echo "documented CONFIG_FILES:"
+          cat "${RUNNER_TEMP}/config_files.txt"
+
+      - name: release-core init — first run materializes the documented set
+        # $RELEASE_HOME = this checkout (a full git clone); $RELEASE_REF pins the
+        # composition to the exact PR commit, so init is self-contained and does
+        # not depend on any remote branch existing.
+        env:
+          RELEASE_HOME: ${{ github.workspace }}
+          RELEASE_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd "${FIXTURE}"
+          release-core init
+          echo "--- materialized (untracked) ---"
+          missing=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            if [ ! -f "$f" ]; then
+              echo "ERROR: init did not materialize '$f'" >&2
+              missing=1
+            else
+              echo "ok: $f"
+            fi
+          done < "${RUNNER_TEMP}/config_files.txt"
+          [ "$missing" -eq 0 ] || exit 1
+          # Nothing OUTSIDE the documented set (beyond the fixture's own go.mod)
+          # should appear — init must not write stray files.
+          git add -A
+          extra="$(git -C "${FIXTURE}" diff --cached --name-only \
+            | grep -vxF -f "${RUNNER_TEMP}/config_files.txt" \
+            | grep -vxF 'go.mod' || true)"
+          if [ -n "$extra" ]; then
+            echo "ERROR: init wrote files outside the documented CONFIG_FILES set:" >&2
+            echo "$extra" >&2
+            exit 1
+          fi
+          git commit -qm 'init: first run'
+
+      - name: release-core init — second run is an idempotent no-op
+        env:
+          RELEASE_HOME: ${{ github.workspace }}
+          RELEASE_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd "${FIXTURE}"
+          release-core init
+          # Idempotent: the second run must leave the already-materialized files
+          # byte-identical — a clean working tree (no diff to the committed set).
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            echo "ERROR: second 'release-core init' was not a no-op:" >&2
+            git status --porcelain >&2
+            git --no-pager diff >&2
+            exit 1
+          fi
+          echo "ok: release-core init is idempotent (second run = clean no-op)"

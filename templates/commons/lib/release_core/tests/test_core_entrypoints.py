@@ -64,9 +64,11 @@ EXPECTED_COMMANDS = {
     "sweep-github-policy",
 }
 
-# The top-level `release-core` CLI is PR-C's; it must NOT appear in this PR's
-# table. Guard against an accidental early add.
-PRC_RESERVED = {"release-core"}
+# The top-level `release-core` CLI is its own command (the `init` subcommand
+# dispatcher, pip-bootstrap PoC §2). Unlike the per-verb scripts it does NOT map
+# into release_core.entrypoints — it points straight at the CLI's main.
+RELEASE_CORE_CLI = "release-core"
+RELEASE_CORE_CLI_TARGET = "release_core.cli_entry:main"
 
 
 def _pyproject_path() -> Path:
@@ -81,18 +83,24 @@ def _script_table() -> dict[str, str]:
 
 
 def test_script_table_matches_expected_command_set():
-    """The [project.scripts] keys == exactly the release_core-backed bin/ shims."""
-    assert set(_script_table()) == EXPECTED_COMMANDS
+    """The [project.scripts] keys == the release_core-backed bin/ shims plus the
+    top-level `release-core` CLI."""
+    assert set(_script_table()) == EXPECTED_COMMANDS | {RELEASE_CORE_CLI}
 
 
-def test_release_core_cli_not_yet_in_table():
-    """PR-C owns `release-core`; it must not leak into PR-B's table."""
-    assert PRC_RESERVED.isdisjoint(_script_table())
+def test_release_core_cli_registered_at_cli_entry_main():
+    """`release-core` is registered as the top-level CLI (cli_entry:main), so a
+    single wheel install puts `release-core init` on PATH."""
+    assert _script_table().get(RELEASE_CORE_CLI) == RELEASE_CORE_CLI_TARGET
 
 
 def test_every_target_is_release_core_entrypoints_wrapper():
-    """Every script target points at a real zero-arg callable in entrypoints."""
+    """Every per-verb script target points at a real zero-arg callable in
+    entrypoints. The top-level `release-core` CLI is the one exception — it maps
+    to cli_entry:main, checked separately above."""
     for cmd, target in _script_table().items():
+        if cmd == RELEASE_CORE_CLI:
+            continue
         module, _, func = target.partition(":")
         assert module == "release_core.entrypoints", (cmd, target)
         wrapper = getattr(entrypoints, func, None)
