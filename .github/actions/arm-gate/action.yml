@@ -1,0 +1,53 @@
+name: Arm the gate toolset
+description: |
+  Install the lint/format toolset the hardened gate (lefthook.yml) needs, in CI.
+
+  THE single definition of "arm the gate in CI" (release#416, the gate doctrine:
+  one definition, invoked everywhere — never re-listed per workflow). It replaces
+  the inline "Arm the gate toolset" block that #417/#419 had to copy into every
+  reusable stack-CI workflow + the rust-cli prepare job + release's own ci.yml.
+
+  The gate is HARD — a missing tool FAILS the gate, it does not skip (release#412)
+  — so CI must arm the FULL toolset before running `lefthook run pre-commit` /
+  `bin/check`. This arms the UNION across release's own gate and the consumer gate
+  (extra tools are harmless): lefthook + prettier + markdownlint (npm), ruff
+  (pinned) + yamllint (pip), shellcheck + actionlint (ensured if absent).
+
+  Assumes Node and Python are already set up by the caller (mirrors the inline
+  blocks it replaces) — it installs tools into the active toolchains, and does NOT
+  run setup-node/setup-python itself so it can't switch the interpreter out from
+  under the caller's build steps.
+
+  Pinning: ruff is pinned (single source) so CI and the local hook never disagree
+  on findings. Keep this in sync with templates/commons/bin/setup-dev-env.sh §0,
+  which arms the same toolset at session start (the WHERE differs; the WHAT — this
+  tool list — is the gate).
+
+inputs:
+  ruff-version:
+    description: 'Pinned ruff version (must match setup-dev-env.sh §0).'
+    required: false
+    default: '0.15.12'
+
+runs:
+  using: composite
+  steps:
+    - name: Arm the gate toolset (full lint set)
+      shell: bash
+      env:
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+      run: |
+        set -euo pipefail
+        # npm globals: lefthook + the markdown/format linters.
+        npm install -g lefthook prettier markdownlint-cli
+        # pip tools: ruff (pinned) + yamllint (consumer gate's YAML check).
+        pip install "ruff==${RUFF_VERSION}" yamllint
+        # shellcheck: ambient on ubuntu runners, absent on macOS / under image
+        # drift. The gate's shell-lint step is HARD, so ensure it.
+        if ! command -v shellcheck >/dev/null 2>&1; then
+          brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
+        fi
+        # actionlint: release's own gate lints workflows; ensure it when absent.
+        if ! command -v actionlint >/dev/null 2>&1; then
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest /usr/local/bin
+        fi
