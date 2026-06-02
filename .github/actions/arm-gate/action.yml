@@ -7,21 +7,16 @@ description: |
   the inline "Arm the gate toolset" block that #417/#419 had to copy into every
   reusable stack-CI workflow + the rust-cli prepare job + release's own ci.yml.
 
-  The gate is HARD — a missing tool FAILS the gate, it does not skip (release#412)
-  — so CI must arm the FULL toolset before running `lefthook run pre-commit` /
-  `bin/check`. This arms the UNION across release's own gate and the consumer gate
-  (extra tools are harmless): lefthook + prettier + markdownlint (npm), ruff
-  (pinned) + yamllint (pip), shellcheck + actionlint (ensured if absent).
+  This action is THIN by design: the provisioning logic lives in
+  bin-internal/provision-gate-toolset.sh (its own concern — testable outside
+  GitHub Actions, OS-branching, batched), and the same script is the unit
+  setup-dev-env.sh §0 / env/setup.sh (cloud) are meant to converge onto. The
+  action just invokes it.
 
   Assumes Node and Python are already set up by the caller (mirrors the inline
-  blocks it replaces) — it installs tools into the active toolchains, and does NOT
-  run setup-node/setup-python itself so it can't switch the interpreter out from
-  under the caller's build steps.
-
-  Pinning: ruff is pinned (single source) so CI and the local hook never disagree
-  on findings. Keep this in sync with templates/commons/bin/setup-dev-env.sh §0,
-  which arms the same toolset at session start (the WHERE differs; the WHAT — this
-  tool list — is the gate).
+  blocks it replaces) — the script installs tools into the active toolchains, and
+  this action does NOT run setup-node/setup-python itself so it can't switch the
+  interpreter out from under the caller's build steps.
 
 inputs:
   ruff-version:
@@ -39,46 +34,9 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Arm the gate toolset (full lint set)
+    - name: Provision the gate toolset
       shell: bash
       env:
         RUFF_VERSION: ${{ inputs.ruff-version }}
         ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
-      run: |
-        set -euo pipefail
-        # npm globals: lefthook + the markdown/format linters.
-        npm install -g lefthook prettier markdownlint-cli
-        # pip tools: ruff (pinned) + yamllint (consumer gate's YAML check).
-        pip install "ruff==${RUFF_VERSION}" yamllint
-        # shellcheck: ambient on ubuntu runners, absent on macOS / under image
-        # drift. The gate's shell-lint step is HARD, so ensure it — detecting the
-        # package manager (the composite runs fleet-wide, incl. macOS runners) and
-        # failing clearly if neither is present rather than emitting a noisy
-        # command-not-found and limping on to a gate that dies on missing tooling.
-        if ! command -v shellcheck >/dev/null 2>&1; then
-          if command -v brew >/dev/null 2>&1; then
-            brew install shellcheck
-          elif command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          else
-            echo "arm-gate: shellcheck missing and no supported package manager (brew, apt-get) found" >&2
-            exit 1
-          fi
-        fi
-        # actionlint: release's own gate lints workflows; ensure it when absent.
-        # Pinned VERSION (not "latest") for reproducibility — a new actionlint
-        # release can add rules that fail an unrelated PR (same reason ruff/yq are
-        # pinned). The download script drops the binary into /usr/local/bin, which
-        # is root-owned on standard Linux runners — install via sudo when
-        # available. Pipe curl|bash rather than `bash <(...)`: process
-        # substitution under sudo can fail on file-descriptor permissions. The
-        # installer is actionlint's own official script (same curl-from-upstream
-        # pattern as the golangci-lint install in setup-dev-env.sh).
-        if ! command -v actionlint >/dev/null 2>&1; then
-          _al_url='https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash'
-          if command -v sudo >/dev/null 2>&1; then
-            curl -sSfL "$_al_url" | sudo bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
-          else
-            curl -sSfL "$_al_url" | bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
-          fi
-        fi
+      run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
