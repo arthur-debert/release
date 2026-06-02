@@ -83,6 +83,16 @@ case "$os" in
     fi
     ;;
   Linux)
+    # Both Linux installs need root (apt; writing actionlint to /usr/local/bin).
+    # If anything is actually missing and we can neither be root nor escalate,
+    # fail FAST with an actionable message rather than letting apt / the
+    # /usr/local/bin write die later on a cryptic permission error.
+    if { [ "$need_shellcheck" -eq 1 ] || [ "$need_actionlint" -eq 1 ]; } \
+       && [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+      log "ERROR: need to install shellcheck/actionlint but running as non-root without sudo."
+      log "       Re-run as root (or with sudo available), or pre-install them."
+      exit 1
+    fi
     # apt has shellcheck but NOT actionlint; install shellcheck via apt (one
     # update + install), actionlint via its pinned official installer.
     if [ "$need_shellcheck" -eq 1 ]; then

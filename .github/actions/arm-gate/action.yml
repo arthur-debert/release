@@ -20,16 +20,18 @@ description: |
 
 inputs:
   ruff-version:
-    description: 'Pinned ruff version (must match setup-dev-env.sh §0).'
+    description: |
+      Override the pinned ruff version. Empty (default) → the script's own pin
+      (provision-gate-toolset.sh is the SINGLE source of truth for the pins, so
+      they can't drift between here and there).
     required: false
-    default: '0.15.12'
+    default: ''
   actionlint-version:
     description: |
-      Pinned actionlint version (NOT "latest"). Same rationale as the pinned ruff
-      and the pip-bootstrap-smoke yq pin: a new actionlint release can add rules
-      that turn an unrelated PR red, so CI pins the version for reproducibility.
+      Override the pinned actionlint version (NOT "latest" — a new release can add
+      rules that turn an unrelated PR red). Empty (default) → the script's own pin.
     required: false
-    default: '1.7.7'
+    default: ''
 
 runs:
   using: composite

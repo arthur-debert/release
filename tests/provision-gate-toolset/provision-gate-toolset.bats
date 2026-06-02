@@ -139,3 +139,29 @@ run_script() {
   [ "$status" -eq 0 ]
   grep -qE 'ruff==9\.9\.9 yamllint' "$LOG"
 }
+
+@test "empty RUFF_VERSION falls back to the script's own pin (single source)" {
+  # The composite passes empty when not overridden; the script must use its pin.
+  RUFF_VERSION='' run_script Linux
+  [ "$status" -eq 0 ]
+  grep -qE 'ruff==0\.15\.12 yamllint' "$LOG"
+}
+
+# --------------------------------------------------------------------------
+# non-root + no sudo: fail fast with a clear message (Linux system installs)
+# --------------------------------------------------------------------------
+
+@test "linux non-root + no sudo + a missing tool: errors up front" {
+  # Drop the sudo stub so `command -v sudo` fails; the test user is non-root.
+  rm -f stub/sudo
+  run_script Linux
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-root without sudo"* ]]
+}
+
+@test "linux non-root + no sudo but nothing missing: still succeeds" {
+  rm -f stub/sudo
+  for t in shellcheck actionlint; do _present "$t"; done
+  run_script Linux
+  [ "$status" -eq 0 ]   # no system install needed → guard not triggered
+}
