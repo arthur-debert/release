@@ -10,9 +10,17 @@ SCRIPT="$BATS_TEST_DIRNAME/../../bin-internal/provision-gate-toolset.sh"
 setup() {
   WORK="$(mktemp -d)"
   cd "$WORK"
-  mkdir -p stub
+  mkdir -p stub realbin
   export LOG="$WORK/calls.log"
   : > "$LOG"
+
+  # realbin/: symlinks to ONLY the genuine utilities the script itself invokes
+  # (id, bash). The script runs under PATH=stub:realbin via `env -i`, so a real
+  # gate tool preinstalled on the runner (ubuntu-latest ships shellcheck in
+  # /usr/bin!) is NOT visible to the script's `command -v` checks — without this,
+  # "clean machine" assertions pass locally but fail in CI. The test's OWN PATH
+  # stays normal (grep/rm/teardown unaffected).
+  for u in id bash; do ln -sf "$(command -v "$u")" "realbin/$u"; done
 
   # Logging stubs for the package managers + curl. Each records its argv.
   for tool in npm pip brew apt-get curl; do
@@ -41,23 +49,27 @@ printf '%s\n' "${UNAME_S:-Linux}"
 STUB
   chmod +x stub/uname
 
-  # Isolate PATH to the stubs + coreutils ONLY — otherwise the dev machine's real
-  # lefthook/shellcheck/actionlint (in /opt/homebrew/bin etc.) would be found by
-  # `command -v` and (correctly) treated as already-present, defeating the
-  # clean-machine assertions. /usr/bin + /bin give `id` and friends the script
-  # needs; the gate tools live nowhere on this PATH unless a stub provides them.
-  export PATH="$WORK/stub:/usr/bin:/bin"
 }
+
+# The isolated PATH the SCRIPT runs under (stubs + the curated real utils only).
+ISO_PATH() { printf '%s' "$WORK/stub:$WORK/realbin"; }
 
 teardown() {
   cd /
   rm -rf "$WORK"
 }
 
-# Mark a gate tool as already-present (an executable stub on PATH).
+# Mark a gate tool as already-present (an executable stub on the isolated PATH).
 _present() { printf '#!/usr/bin/env bash\nexit 0\n' > "stub/$1"; chmod +x "stub/$1"; }
 
-run_script() { run env UNAME_S="${1:-Linux}" bash "$SCRIPT"; }
+# Run the script under a clean, isolated env so only stubs + curated utils are
+# visible (env -i drops the inherited PATH that would otherwise leak runner tools).
+run_script() {
+  run env -i \
+    PATH="$(ISO_PATH)" LOG="$LOG" UNAME_S="${1:-Linux}" \
+    RUFF_VERSION="${RUFF_VERSION:-}" ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-}" \
+    bash "$SCRIPT"
+}
 
 # --------------------------------------------------------------------------
 # Linux: clean machine
@@ -123,7 +135,7 @@ run_script() { run env UNAME_S="${1:-Linux}" bash "$SCRIPT"; }
 # --------------------------------------------------------------------------
 
 @test "RUFF_VERSION override is honored" {
-  RUFF_VERSION=9.9.9 run env UNAME_S=Linux RUFF_VERSION=9.9.9 bash "$SCRIPT"
+  RUFF_VERSION=9.9.9 run_script Linux
   [ "$status" -eq 0 ]
   grep -qE 'ruff==9\.9\.9 yamllint' "$LOG"
 }
