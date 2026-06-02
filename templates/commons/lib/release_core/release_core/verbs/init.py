@@ -54,7 +54,7 @@ import shutil
 import sys
 import tempfile
 
-from .. import cli, gh, manifest, sync
+from .. import cli, gh, manifest, sync, yamlio
 
 USAGE = __doc__ or ""
 
@@ -91,8 +91,11 @@ def _materialize_config_sources(repo_root: str, repo_name: str) -> dict[str, str
 
     Reuses sync.build_plan + sync.materialize (faithful composition, including
     the fragment-merged lefthook.yml) rather than reimplementing it; init only
-    SELECTS the config subset and copies it create-if-absent. Raises
-    sync.SyncError / manifest.KindError on a resolution failure.
+    SELECTS the config subset and copies it create-if-absent. May raise
+    manifest.KindError (undetectable Kind), sync.SyncError (no $RELEASE_HOME
+    clone / no candidate ref), or yamlio.YamlError (missing yq, malformed
+    manifest/.release-sync.yaml, or a lefthook-fragment merge failure) — main()
+    catches all three and maps them to a clean exit 1.
 
     The returned temp tree leaks intentionally for the process lifetime (a few
     KB of config); the OS reaps it. Keeping init small beats threading cleanup.
@@ -185,6 +188,13 @@ def main(argv: list[str] | None = None) -> int:
     except sync.SyncError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+    except yamlio.YamlError as exc:
+        # Missing yq, a malformed manifest/.release-sync.yaml, or a
+        # lefthook-fragment merge failure — caught at the CLI boundary and
+        # mapped to a clean exit 1, exactly as release_sync does, never a
+        # traceback escaping.
+        print(f"release-core init: {exc}", file=sys.stderr)
+        return 1
 
     created: list[str] = []
     overwritten: list[str] = []
@@ -230,8 +240,14 @@ def main(argv: list[str] | None = None) -> int:
         f"summary: {len(created)} created, {len(overwritten)} overwritten, "
         f"{len(skipped)} unchanged" + (" (dry-run, no writes)" if dry_run else "")
     )
-    if not changed and not dry_run:
-        print("done. (no changes — already initialized)")
-    elif not dry_run:
-        print("done.")
+    if not dry_run:
+        if missing_source:
+            # The engine produced no source for some config files (an
+            # incomplete materialization for this Kind), so the repo is NOT
+            # fully initialized — don't claim it is.
+            print(f"done. ({len(missing_source)} config file(s) had no source — see stderr)")
+        elif not changed:
+            print("done. (no changes — already initialized)")
+        else:
+            print("done.")
     return 0

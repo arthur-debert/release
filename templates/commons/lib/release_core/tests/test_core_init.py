@@ -11,7 +11,7 @@ resolution + Kind/ref failure surfaces are covered by their own tests below.
 
 from __future__ import annotations
 
-from release_core import manifest, sync
+from release_core import manifest, sync, yamlio
 from release_core.verbs import init
 
 
@@ -242,7 +242,8 @@ def test_init_not_in_git_repo_exits_1(monkeypatch, capsys):
 
 def test_init_missing_source_for_kind_is_reported_not_fatal(tmp_path, monkeypatch, capsys):
     # If the engine produced no lefthook.yml (a Kind whose gate composes none),
-    # init reports it on stderr and still materializes the rest, exit 0.
+    # init reports it on stderr and still materializes the rest, exit 0 — but the
+    # final line must NOT claim the repo is fully initialized.
     repo = tmp_path / "repo"
     repo.mkdir()
     sources = _fixture_sources(tmp_path)
@@ -255,6 +256,27 @@ def test_init_missing_source_for_kind_is_reported_not_fatal(tmp_path, monkeypatc
     assert "absent  lefthook.yml" in captured.err
     assert not (repo / "lefthook.yml").exists()
     assert (repo / ".yamllint").is_file()
+    # Don't mislead: with a missing source, the repo is not "already initialized".
+    assert "already initialized" not in captured.out
+    assert "no source" in captured.out
+
+
+def test_init_yaml_error_exits_1_not_traceback(tmp_path, monkeypatch, capsys):
+    # A yamlio.YamlError out of the sync engine (missing yq, malformed manifest,
+    # or a lefthook-fragment merge failure) must be caught at the CLI boundary →
+    # clean exit 1, never a traceback, matching release_sync's contract.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+
+    def raise_yaml(root, name):
+        raise yamlio.YamlError("yq -o=json . failed (1): bad YAML")
+
+    monkeypatch.setattr(init, "_materialize_config_sources", raise_yaml)
+    rc = init.main([])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "bad YAML" in err
 
 
 # --------------------------------------------------------------------------
