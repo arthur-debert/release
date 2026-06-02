@@ -151,12 +151,14 @@ def _existing_ruleset_id(rulesets: object, name: str) -> int | None:
 
 
 def _pr_workflow_paths(workflows_dir: str) -> list[str]:
-    """Relative .github/workflows/<name> paths of PR-triggered, non-gate workflows.
+    """Relative .github/workflows/<name> paths of workflows that can contribute
+    globally-required checks.
 
     Globs *.yml then *.yaml (matching the bash loop order), parses each via yq,
-    and keeps the ones triggered on pull_request WITHOUT a `paths:` /
-    `paths-ignore:` filter. Path-filtered workflows are conditional and must
-    not contribute globally-required checks — see `pr_trigger_is_path_filtered`
+    and keeps a workflow only when it is an always-run PR gate: triggered on
+    pull_request, not a `_NON_GATE_WORKFLOWS` basename (copilot-review), and
+    WITHOUT a `paths:` / `paths-ignore:` filter. Path-filtered workflows are
+    conditional and must not be required — see `pr_trigger_is_path_filtered`
     (release#416).
     """
     import glob
