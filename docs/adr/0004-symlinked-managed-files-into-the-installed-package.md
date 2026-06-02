@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. Extends [ADR-0003](0003-pip-install-bootstrap-distribution.md) (pip is
-how the package arrives) and supersedes the _committed-`.release/`_ decision of
+how the package arrives) and supersedes the committed-`.release/` decision of
 [ADR-0001](0001-release-sync-build-dir-with-symlinks.md): the build dir + symlink
 mechanism stays, but the build dir becomes **gitignored** (not committed) and is
 composed at bootstrap from the installed package rather than synced as committed
@@ -69,6 +69,11 @@ symlink into a gitignored tree, drift is no longer invisible:
 This is gate-able in pre-commit and CI. Drift goes from _invisible and per-repo_
 to _impossible-or-loud and uniform_.
 
+Implementation note for that check: when scanning staged paths, exclude only
+**deleted** entries (`git diff --cached --name-only --diff-filter=d`), NOT
+`--diff-filter=ACMR` — a type-change (`T`, a symlink replaced by a real file) is
+exactly the violation to catch, and `ACMR` would silently drop it.
+
 **5. Carve-outs — files that stay committed real files (NOT symlinks):**
 
 - **Workflow files (`.github/workflows/*.yml`).** GitHub Actions reads workflow
@@ -86,12 +91,15 @@ Symlinked (the ideal case — no at-rest value, consumed only post-bootstrap):
 `lefthook.yml`, lint/format configs (`.markdownlint.json`, `.yamllint`,
 `.prettierignore`, …), skills, and the former `bin/` shims (now subcommands).
 
-**6. The irreducible seed.** One thing can never be a symlink-into-the-package:
-the bootstrapper itself — the boot resolver (`install-release-core`) and the
-SessionStart hook that calls it. You cannot symlink the thing that creates the
-symlinks. So the end state is exactly one tiny committed real file (the
-resolver/hook, the synced bootstrap from release#433), and everything else is a
-symlink or a subcommand.
+**6. The irreducible seed.** The bootstrapper can never be a
+symlink-into-the-package — you cannot symlink the thing that creates the symlinks.
+So a small, fixed **committed bootstrap surface** remains real: the SessionStart
+hook (`.claude/settings.json`), the bootstrap script it runs
+(`setup-dev-env.sh`), and the boot resolver they invoke (`install-release-core`,
+the synced bootstrap from release#433). Everything else is a symlink or a
+`release-core <verb>` subcommand. The point is not an exact file count but that
+the seed is small, fixed, and the _only_ managed real-file surface besides the
+§5 carve-outs.
 
 **7. Triggers.** Bootstrap runs at **SessionStart** (local + cloud Claude Code)
 and in **GitHub Actions** — the two contexts where a repo is acted on. Both
