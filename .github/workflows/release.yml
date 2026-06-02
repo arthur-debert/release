@@ -1,26 +1,29 @@
 name: Release
 
-# Thin caller of this repo's own gh-action.yml@v1.
+# Thin caller of this repo's own gh-action.yml@v2.
 #
 # Yes, this repo cuts ITS OWN release tags via the canonical
-# gh-action.yml stack workflow. Chicken-and-egg note: the first
-# tag that included gh-action.yml had to be cut manually (v1.4.0);
-# every subsequent patch / minor / major cut can go through this
-# caller now.
+# gh-action.yml stack workflow, dogfooding the SAME floating major
+# (`@v2`) the fleet pins — not a stale older line. Chicken-and-egg
+# note: the first tag that included gh-action.yml had to be cut
+# manually (v1.4.0); every subsequent patch / minor / major cut can
+# go through this caller now.
 #
-# What `gh-action.yml@v1` gives us here:
+# What `gh-action.yml@v2` gives us here:
 # - validate semver + ensure release-time invariants
 # - tag + push HEAD
 # - GH release with auto-extracted notes (we override with
 #   changelog-path: '' since docs/breaking-changes.md is NOT
 #   Keep-a-Changelog format)
-# - advance the `v1` floating branch → new tag (the canonical
-#   distribution mechanism for this repo)
+# - publish the `release_core` wheel as a release asset (pip-bootstrap
+#   transport, ADR-0003)
+# - advance the floating-major branch (derived from the released
+#   version, e.g. v2) → new tag (the canonical distribution mechanism)
 #
 # Manual fall-back: if this workflow ever can't run (org outage,
 # permissions change), the entire flow is still doable by hand:
 #   git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
-#   git branch -f v1 vX.Y.Z && git push origin v1 --force-with-lease
+#   git branch -f vX vX.Y.Z && git push origin vX --force-with-lease   # vX = the released major
 #   gh release create vX.Y.Z --notes "..."
 # See docs/breaking-changes.md for the format of release-note
 # bodies we usually attach.
@@ -38,7 +41,7 @@ permissions:
 
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/gh-action.yml@v1
+    uses: arthur-debert/release/.github/workflows/gh-action.yml@v2
     with:
       version: ${{ inputs.version }}
       # Multi-action repo: many composite actions under
