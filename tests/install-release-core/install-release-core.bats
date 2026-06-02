@@ -52,6 +52,18 @@ STUB
   export PIP_LOG="$WORK/pip.log"
   : > "$PIP_LOG"
 
+  # --- stub release-core: record `init` so the folded-in init is assertable.
+  # Found via `command -v` (step 2 of the resolver's _find_release_core). Honors
+  # $RELEASE_CORE_RC so a test can simulate an init failure.
+  cat > stub/release-core <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$INIT_LOG"
+exit "${RELEASE_CORE_RC:-0}"
+STUB
+  chmod +x stub/release-core
+  export INIT_LOG="$WORK/init.log"
+  : > "$INIT_LOG"
+
   export PATH="$WORK/stub:$PATH"
 
   _wheel() { echo "https://example.com/dl/$1/release_core-0.0.1-py3-none-any.whl"; }
@@ -185,6 +197,53 @@ EOF
   run "$BIN" --print-url
   [ "$status" -eq 0 ]
   [ ! -s "$PIP_LOG" ]
+}
+
+# --------------------------------------------------------------------------
+# folded-in init: install-release-core runs `release-core init` by default
+# --------------------------------------------------------------------------
+
+@test "init: runs release-core init by default after install" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$INIT_LOG")" = "init" ]
+}
+
+@test "init: --no-init installs but does NOT run init" {
+  run "$BIN" --no-init
+  [ "$status" -eq 0 ]
+  [ -s "$PIP_LOG" ]        # install still happened
+  [ ! -s "$INIT_LOG" ]     # but init did not
+  [[ "$output" == *"skipping release-core init"* ]]
+}
+
+@test "init: --print-url neither installs nor inits" {
+  run "$BIN" --print-url
+  [ "$status" -eq 0 ]
+  [ ! -s "$PIP_LOG" ]
+  [ ! -s "$INIT_LOG" ]
+}
+
+@test "init: bare \$PYTHON resolves to its real dir, not a stray ./release-core in cwd" {
+  # Regression: dirname of a bare `python3` is `.`, which would (mis)pick an
+  # unrelated ./release-core in the repo root. The resolver must resolve $PYTHON
+  # to its absolute path first and use the interpreter-adjacent script.
+  cat > release-core <<'STUB'
+#!/usr/bin/env bash
+printf 'WRONG-CWD-BINARY\n' >> "$INIT_LOG"
+STUB
+  chmod +x release-core
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$INIT_LOG")" = "init" ]        # the stub-dir release-core ran (logs "init")
+  [[ "$(cat "$INIT_LOG")" != *"WRONG-CWD-BINARY"* ]]
+}
+
+@test "init: failure is best-effort — does NOT fail the resolver" {
+  RELEASE_CORE_RC=1 run "$BIN"
+  [ "$status" -eq 0 ]                       # install succeeded; init failure tolerated
+  [ "$(cat "$INIT_LOG")" = "init" ]         # init was attempted
+  [[ "$output" == *"release-core init failed"* ]]
 }
 
 @test "install: --user is passed through to pip" {

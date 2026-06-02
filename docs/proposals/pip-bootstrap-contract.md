@@ -7,10 +7,11 @@
 
 ## The model (one sentence)
 
-Boot everywhere = **`install-release-core [--major vN]` then `release-core init`**
-— the resolver `pip install`s the release_core wheel from the GitHub release
-(`--force-reinstall --no-deps`; see §Transport), then init materializes the
-per-repo committed bits. Tools become console-scripts on PATH (current by install).
+Boot everywhere = **`install-release-core [--major vN]`** — the resolver
+`pip install`s the release_core wheel from the GitHub release (`--force-reinstall
+--no-deps`; see §Transport) **and then runs `release-core init`** in the current
+repo to materialize the per-repo committed bits. One command does the whole boot.
+Tools become console-scripts on PATH (current by install).
 
 ## Transport (DECIDED)
 
@@ -19,12 +20,17 @@ per-repo committed bits. Tools become console-scripts on PATH (current by instal
 resolves the asset URL and installs it.
 
 Boot resolver = **`bin/install-release-core`** (the ONE definition; both contexts
-call it). Boot everywhere is:
+call it). Boot everywhere is one command:
 
 ```bash
-install-release-core [--major vN]   # resolve + pip install the wheel
-release-core init                   # materialize the repo's committed config
+install-release-core [--major vN]   # resolve + pip install the wheel, then run
+                                    # `release-core init` (--no-init to skip)
 ```
+
+`init` is folded in (NOT a pip post-install hook — wheels have none, and init is
+repo-specific while pip is environment-level): the resolver runs it explicitly at
+the repo root on the just-installed console-script (located across venv/`--user`/
+system layouts), best-effort so its failure never fails the resolver.
 
 **Install model = "latest, force-reinstall" (LOCKED):**
 
@@ -41,10 +47,11 @@ release-core init                   # materialize the repo's committed config
 - **Exactly one** wheel asset must match per release; zero or many is a
   release-side packaging bug, surfaced loudly (exit 1), never silently installed.
 
-Resolution + the install model are covered by `tests/install-release-core/`
-(offline: stub `gh` applies the real `--jq` filter; stub `python3` records the
-pip args). Wiring `install-release-core` into `setup-dev-env.sh` (SessionStart)
-and the reusable CI workflows is the next step.
+Resolution, the install model, and the folded-in init are covered by
+`tests/install-release-core/` (offline: stub `gh` applies the real `--jq` filter;
+stub `python3` records the pip args; stub `release-core` records the init call).
+`install-release-core` is wired into `setup-dev-env.sh` (SessionStart); wiring it
+into the reusable CI workflows is the next step.
 
 ## What this PoC does NOT do
 
