@@ -31,3 +31,6 @@ build/
 # Local Doppler CLI state (per-developer/machine; never repo config).
 # Created by `doppler` runs in a dev shell — committing it churns per-machine.
 dev_shell/
+
+# Staged template bundle (build artifact for the self-contained release_core wheel)
+templates/commons/lib/release_core/release_core/_bundled_templates/
