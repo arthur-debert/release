@@ -16,9 +16,11 @@ dependencies = []
 # (fetch-deps, fetch-artifact, gh-*, clone-*, migrate-*) and the release_gh-
 # backed gh-task-status are intentionally absent. hatchling installs these as
 # console-scripts by default (no extra config needed).
-# NOTE: the top-level `release-core` CLI (release_core.cli_entry:main) is added
-# by PR-C (the `release-core init` PR); it is deliberately NOT listed here.
+# The top-level `release-core` CLI (release_core.cli_entry:main) — the `init`
+# subcommand dispatcher (PoC §2) — is registered here alongside the per-verb
+# scripts so `release-core init` lands on PATH from the same wheel install.
 [project.scripts]
+release-core = "release_core.cli_entry:main"
 apply-ruleset = "release_core.entrypoints:apply_ruleset_main"
 audit-portfolio = "release_core.entrypoints:audit_portfolio_main"
 audit-repo = "release_core.entrypoints:audit_repo_main"
