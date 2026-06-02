@@ -45,6 +45,7 @@ release-lex = "release_core.entrypoints:release_lex_main"
 release-notify-source = "release_core.entrypoints:release_notify_source_main"
 release-sync = "release_core.entrypoints:release_sync_main"
 release-verify-fleet = "release_core.entrypoints:release_verify_fleet_main"
+semver = "release_core.entrypoints:semver_main"
 sweep-github-policy = "release_core.entrypoints:sweep_github_policy_main"
 
 [dependency-groups]

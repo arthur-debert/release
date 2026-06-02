@@ -19,18 +19,19 @@ the verb's own --help output (the wrappers only forward argv, so this holds).
 
 from __future__ import annotations
 
+import inspect
 import io
 import sys
 import tomllib
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
 from release_core import entrypoints
 from release_core.verbs import changelog, detect_kind
 
-# Authoritative command-name → (verb-module, function) map, derived by reading
-# every bin/<name> shim that dispatches to release_core.verbs. Keep this list in
+# Authoritative set of on-PATH command names, derived by reading every
+# bin/<name> shim that dispatches to release_core.verbs. Keep this set in
 # lockstep with pyproject's [project.scripts] (the test below enforces ==).
 EXPECTED_COMMANDS = {
     "apply-ruleset",
@@ -59,6 +60,7 @@ EXPECTED_COMMANDS = {
     "release-notify-source",
     "release-sync",
     "release-verify-fleet",
+    "semver",
     "sweep-github-policy",
 }
 
@@ -95,8 +97,14 @@ def test_every_target_is_release_core_entrypoints_wrapper():
         assert module == "release_core.entrypoints", (cmd, target)
         wrapper = getattr(entrypoints, func, None)
         assert callable(wrapper), f"{cmd}: missing wrapper {func}"
-        # zero-arg: the console-script protocol calls it with no arguments.
-        assert wrapper.__code__.co_argcount == 0, f"{func} must take no args"
+        # The console-script protocol invokes the wrapper with no arguments, so
+        # it must be callable with an empty signature. signature().bind() is the
+        # faithful check: it rejects required positional/keyword-only params and
+        # is not fooled by *args/**kwargs the way co_argcount == 0 would be.
+        try:
+            inspect.signature(wrapper).bind()
+        except TypeError as exc:  # pragma: no cover - failure path
+            pytest.fail(f"{func} is not callable with zero arguments: {exc}")
 
 
 @pytest.mark.parametrize("cmd", sorted(EXPECTED_COMMANDS))
@@ -145,16 +153,22 @@ def test_wrapper_delegates_with_argv_and_propagates_exit_code(cmd, monkeypatch):
 
 def test_help_byte_identical_to_verb(monkeypatch):
     """Sanity: detect-kind --help via the wrapper == the verb's own --help."""
-    # Verb directly.
-    direct = io.StringIO()
-    with redirect_stdout(direct):
+    # Verb directly. Capture both streams: --help could in principle land on
+    # stderr, and we want byte-identity across the full output, not just stdout.
+    direct_out, direct_err = io.StringIO(), io.StringIO()
+    with redirect_stdout(direct_out), redirect_stderr(direct_err):
         rc_direct = detect_kind.main(["--help"])
 
     # Via the console-script wrapper (it forwards sys.argv[1:]).
     monkeypatch.setattr(sys, "argv", ["detect-kind", "--help"])
-    wrapped = io.StringIO()
-    with redirect_stdout(wrapped), pytest.raises(SystemExit) as exc:
+    wrapped_out, wrapped_err = io.StringIO(), io.StringIO()
+    with (
+        redirect_stdout(wrapped_out),
+        redirect_stderr(wrapped_err),
+        pytest.raises(SystemExit) as exc,
+    ):
         entrypoints.detect_kind_main()
 
-    assert wrapped.getvalue() == direct.getvalue()
+    assert wrapped_out.getvalue() == direct_out.getvalue()
+    assert wrapped_err.getvalue() == direct_err.getvalue()
     assert exc.value.code == rc_direct == 0

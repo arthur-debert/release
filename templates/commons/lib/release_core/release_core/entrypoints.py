@@ -11,6 +11,8 @@ Bash tools (``fetch-deps``/``fetch-artifact``/``gh-*``/``clone-*``) and
 ``release_gh``-backed tools (``gh-task-status``) are intentionally absent.
 """
 
+from __future__ import annotations
+
 import sys
 
 from release_core.verbs import (
@@ -37,6 +39,7 @@ from release_core.verbs import (
     release_notify_source,
     release_sync,
     release_verify_fleet,
+    semver,
     sweep_github_policy,
 )
 
@@ -143,6 +146,10 @@ def release_sync_main() -> None:
 
 def release_verify_fleet_main() -> None:
     raise SystemExit(release_verify_fleet.main(sys.argv[1:]))
+
+
+def semver_main() -> None:
+    raise SystemExit(semver.main(sys.argv[1:]))
 
 
 def sweep_github_policy_main() -> None:
