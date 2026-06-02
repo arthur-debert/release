@@ -191,11 +191,18 @@ fi
 _find_release_core() {
   # Resolve $PYTHON to an absolute path first: a bare command name (the default
   # `python3`) would make `dirname` yield `.` and check ./release-core in the
-  # repo root instead of beside the actual interpreter.
+  # repo root instead of beside the actual interpreter. Only use the
+  # interpreter-adjacent candidate when the resolution yielded a real PATH (it
+  # contains a `/`); if `command -v` fails (empty), skip straight to the PATH and
+  # --user-scripts probes rather than degrading to a bare-name `dirname .`.
   local python_path cand udir
-  python_path="$(command -v "$PYTHON" 2>/dev/null || printf '%s' "$PYTHON")"
-  cand="$(dirname "$python_path")/release-core"
-  [ -x "$cand" ] && { printf '%s\n' "$cand"; return 0; }
+  python_path="$(command -v "$PYTHON" 2>/dev/null || true)"
+  case "$python_path" in
+    */*)
+      cand="$(dirname "$python_path")/release-core"
+      [ -x "$cand" ] && { printf '%s\n' "$cand"; return 0; }
+      ;;
+  esac
   if command -v release-core >/dev/null 2>&1; then command -v release-core; return 0; fi
   udir="$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user"))' 2>/dev/null || true)"
   [ -n "$udir" ] && [ -x "$udir/release-core" ] && { printf '%s\n' "$udir/release-core"; return 0; }
