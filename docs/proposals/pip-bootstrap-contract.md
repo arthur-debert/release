@@ -15,19 +15,35 @@ Boot everywhere = **`pip install -U <release_core wheel from the gh release>` th
 
 **Wheel attached to each gh release.** The release pipeline builds
 `release_core-<ver>-py3-none-any.whl` and uploads it as a release asset. Boot
-resolves the asset URL for the target release and `pip install -U`s it.
+resolves the asset URL and installs it.
 
-Boot resolver (the canonical snippet — both contexts use it):
+Boot resolver = **`bin/install-release-core`** (the ONE definition; both contexts
+call it). Boot everywhere is:
 
 ```bash
-url=$(gh api repos/arthur-debert/release/releases/latest \
-        --jq '.assets[] | select(.name|test("^release_core-.*\\.whl$")) | .browser_download_url')
-pip install -U "$url"
-release-core init
+install-release-core [--major vN]   # resolve + pip install the wheel
+release-core init                   # materialize the repo's committed config
 ```
 
-(`releases/latest` for the PoC; major-line pinning — pick the latest release whose
-tag matches the consumer's pinned `vN` — is an ADR follow-up, not in this PoC.)
+**Install model = "latest, force-reinstall" (LOCKED):**
+
+- Source: the repo's `releases/latest` by default; `--major vN` instead pins to
+  the **latest release in that major line** carrying the wheel. The major-line
+  filter is load-bearing **before any `v3` is cut**: the wheel version is a static
+  `0.0.1` (not stamped from the tag), so `releases/latest` would hand a `v2`-pinned
+  consumer a future `v3` wheel. `--major v2` keeps `@vN` honest.
+- Install is **`pip install --force-reinstall --no-deps "$url"`**, NOT `-U`.
+  Because the wheel version is static, `pip install -U` sees `0.0.1` already
+  satisfied and SKIPS it, defeating the pull model. `--force-reinstall` always
+  reinstalls; `--no-deps` because release_core is dependency-light (stdlib-only)
+  and a boot must never mutate the environment's other packages.
+- **Exactly one** wheel asset must match per release; zero or many is a
+  release-side packaging bug, surfaced loudly (exit 1), never silently installed.
+
+Resolution + the install model are covered by `tests/install-release-core/`
+(offline: stub `gh` applies the real `--jq` filter; stub `python3` records the
+pip args). Wiring `install-release-core` into `setup-dev-env.sh` (SessionStart)
+and the reusable CI workflows is the next step.
 
 ## What this PoC does NOT do
 

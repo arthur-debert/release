@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+# install-release-core — the boot resolver for the pull-model distribution.
+#
+# Resolves the release_core wheel attached to a GitHub release and installs it.
+# This is THE single definition of "how a repo gets the current release_core"
+# (ADR-0003, docs/proposals/pip-bootstrap-contract.md §Transport). Both boot
+# contexts call it: the SessionStart hook (setup-dev-env.sh) and the reusable CI
+# workflows. It runs BEFORE release_core is installed, so it is pure shell — it
+# cannot itself be a release_core console-script.
+#
+# Install model = "latest, force-reinstall":
+#   - Default source is the repo's `releases/latest`.
+#   - `--major vN` instead picks the LATEST release in that major line that
+#     carries the wheel. This is the load-bearing v3-safety filter: the wheel
+#     version is not stamped from the tag (it is a static 0.0.1), so once a v3
+#     release exists, `releases/latest` would hand a v2-pinned consumer the v3
+#     wheel. Pinning to the consumer's major line keeps `@vN` honest.
+#   - Install is `pip install --force-reinstall --no-deps "$url"`, NOT `-U`:
+#     because the wheel version is static, `pip install -U` sees the same 0.0.1
+#     already satisfied and SKIPS it, defeating the pull model. --force-reinstall
+#     always reinstalls; --no-deps because release_core is dependency-light
+#     (stdlib-only) and we must never let a boot mutate the environment's other
+#     packages.
+#
+# Exactly ONE wheel asset must match per release (ADR: "select one URL and error
+# otherwise"). Zero or many is a release-side packaging bug, surfaced loudly here
+# rather than silently installing the wrong artifact.
+#
+# Running `release-core init` afterwards is the CALLER's job (it is a separate,
+# already-installed console-script and mutates repo state) — this script's single
+# responsibility is the transport: resolve + install.
+#
+# Source of truth: arthur-debert/release bin/install-release-core. Sister to
+# install-release-token / install-release-secrets.
+
+set -euo pipefail
+
+REPO="arthur-debert/release"
+MAJOR=""
+PRINT_URL=0
+PYTHON="${PYTHON:-python3}"
+
+usage() {
+  cat <<'EOF'
+Usage: install-release-core [--major vN] [--repo OWNER/REPO] [--print-url]
+
+Resolve the release_core wheel from a GitHub release and pip-install it
+(--force-reinstall --no-deps). The pull-model boot resolver.
+
+Options:
+  --major vN        Pin to the latest release in major line vN (e.g. --major v2).
+                    Default: the repo's releases/latest.
+  --repo OWNER/REPO Source repo for the release (default: arthur-debert/release).
+  --print-url       Print the resolved wheel URL and exit (resolve only, no
+                    install). Used by tests and CI dry-runs.
+  -h, --help        Show this help.
+
+Env:
+  PYTHON            Python interpreter to install into (default: python3).
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --major)
+      [ $# -ge 2 ] || { echo "install-release-core: --major needs a value (e.g. v2)" >&2; exit 64; }
+      MAJOR="$2"; shift 2 ;;
+    --major=*) MAJOR="${1#--major=}"; shift ;;
+    --repo)
+      [ $# -ge 2 ] || { echo "install-release-core: --repo needs a value" >&2; exit 64; }
+      REPO="$2"; shift 2 ;;
+    --repo=*) REPO="${1#--repo=}"; shift ;;
+    --print-url) PRINT_URL=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "install-release-core: unknown argument '$1'" >&2; usage >&2; exit 64 ;;
+  esac
+done
+
+# The wheel asset name pattern (must match the publish job's output name).
+# Two forms: a human-readable one for messages, and a jq-string form whose
+# backslash is doubled so it survives embedding in a jq string literal
+# (jq parses "\." as an invalid escape; "\\." is a literal-dot regex).
+WHEEL_DESC='release_core-*.whl'
+WHEEL_JQ_RE='^release_core-.*\\.whl$'
+
+# Emit the single wheel URL for the chosen release, or fail loudly.
+#
+# Strategy:
+#   - no --major: read releases/latest directly (GitHub computes "latest",
+#     excluding drafts/prereleases) and pull its wheel asset URLs.
+#   - --major vN: list releases (newest-first), drop drafts/prereleases, keep
+#     those whose tag is vN or vN.* AND that carry a wheel asset, take the first
+#     (newest), emit its wheel URL.
+# Either way the result is the array of matching asset URLs; we then require
+# exactly one.
+resolve_url() {
+  urls="$(_resolve_url_list)" || return 1
+
+  n=0
+  if [ -n "$urls" ]; then
+    n="$(printf '%s\n' "$urls" | grep -c .)"
+  fi
+  if [ "$n" -eq 0 ]; then
+    if [ -n "$MAJOR" ]; then
+      echo "install-release-core: no release in major line '$MAJOR' of $REPO carries a wheel asset matching $WHEEL_DESC" >&2
+    else
+      echo "install-release-core: releases/latest of $REPO has no wheel asset matching $WHEEL_DESC" >&2
+    fi
+    return 1
+  fi
+  if [ "$n" -gt 1 ]; then
+    echo "install-release-core: expected exactly 1 wheel asset, found $n — release packaging bug:" >&2
+    printf '%s\n' "$urls" | sed 's/^/  /' >&2
+    return 1
+  fi
+  printf '%s\n' "$urls"
+}
+
+_resolve_url_list() {
+  if [ -n "$MAJOR" ]; then
+    # Escape dots in the major for the jq regex; double the backslash so it
+    # survives the jq string literal. Anchor so `v2` matches v2 / v2.x but not
+    # v20.x — `^v2(\.|$)`. per_page=100 (not --paginate) keeps the page
+    # deterministic and well past any realistic single-major release count.
+    esc="$(printf '%s' "$MAJOR" | sed 's/\./\\\\./g')"
+    gh api "repos/${REPO}/releases?per_page=100" --jq "
+      [ .[]
+        | select(.draft == false and .prerelease == false)
+        | select(.tag_name | test(\"^${esc}(\\\\.|\$)\"))
+        | select(any(.assets[]; .name | test(\"${WHEEL_JQ_RE}\")))
+      ]
+      | first
+      | .assets[]?
+      | select(.name | test(\"${WHEEL_JQ_RE}\"))
+      | .browser_download_url
+    "
+  else
+    gh api "repos/${REPO}/releases/latest" --jq "
+      .assets[]?
+      | select(.name | test(\"${WHEEL_JQ_RE}\"))
+      | .browser_download_url
+    "
+  fi
+}
+
+url="$(resolve_url)"
+
+if [ "$PRINT_URL" -eq 1 ]; then
+  printf '%s\n' "$url"
+  exit 0
+fi
+
+echo "install-release-core: installing $url" >&2
+# --force-reinstall (static wheel version → -U would skip) + --no-deps
+# (dependency-light package; never touch the environment's other packages).
+"$PYTHON" -m pip install --force-reinstall --no-deps "$url"
+echo "install-release-core: done. Run 'release-core init' to materialize repo config." >&2
