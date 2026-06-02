@@ -237,9 +237,19 @@ if command -v install-release-core >/dev/null 2>&1; then
       || echo "warning: install-release-core (--user) failed — release_core not updated this session" >&2
   fi
   # Materialize this repo's committed config from the freshly-installed wheel.
-  # Guarded on the console-script existing so a failed install doesn't error here.
-  if command -v release-core >/dev/null 2>&1; then
-    release-core init \
+  # Resolve the console-script explicitly: a .venv install drops it at
+  # .venv/bin/release-core, which is NOT yet on PATH here — the symlink into
+  # ~/.local/bin is created by §2, which runs BELOW this block (and only in
+  # cloud). So prefer the venv binary directly, then fall back to a PATH lookup
+  # (the --user path lands it in ~/.local/bin, already on PATH).
+  _release_core=""
+  if [ -x "${REPO_ROOT}/.venv/bin/release-core" ]; then
+    _release_core="${REPO_ROOT}/.venv/bin/release-core"
+  elif command -v release-core >/dev/null 2>&1; then
+    _release_core="release-core"
+  fi
+  if [ -n "${_release_core}" ]; then
+    "${_release_core}" init \
       || echo "warning: release-core init failed — repo config not refreshed this session" >&2
   fi
 fi
