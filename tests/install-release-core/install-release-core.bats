@@ -224,6 +224,21 @@ EOF
   [ ! -s "$INIT_LOG" ]
 }
 
+@test "init: bare \$PYTHON resolves to its real dir, not a stray ./release-core in cwd" {
+  # Regression: dirname of a bare `python3` is `.`, which would (mis)pick an
+  # unrelated ./release-core in the repo root. The resolver must resolve $PYTHON
+  # to its absolute path first and use the interpreter-adjacent script.
+  cat > release-core <<'STUB'
+#!/usr/bin/env bash
+printf 'WRONG-CWD-BINARY\n' >> "$INIT_LOG"
+STUB
+  chmod +x release-core
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$INIT_LOG")" = "init" ]        # the stub-dir release-core ran (logs "init")
+  [[ "$(cat "$INIT_LOG")" != *"WRONG-CWD-BINARY"* ]]
+}
+
 @test "init: failure is best-effort — does NOT fail the resolver" {
   RELEASE_CORE_RC=1 run "$BIN"
   [ "$status" -eq 0 ]                       # install succeeded; init failure tolerated

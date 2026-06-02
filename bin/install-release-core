@@ -189,7 +189,12 @@ fi
 #   3. the python's --user scripts dir (e.g. macOS → ~/Library/Python/X.Y/bin),
 #      which is NOT ~/.local/bin and often not on PATH.
 _find_release_core() {
-  cand="$(dirname "$PYTHON")/release-core"
+  # Resolve $PYTHON to an absolute path first: a bare command name (the default
+  # `python3`) would make `dirname` yield `.` and check ./release-core in the
+  # repo root instead of beside the actual interpreter.
+  local python_path cand udir
+  python_path="$(command -v "$PYTHON" 2>/dev/null || printf '%s' "$PYTHON")"
+  cand="$(dirname "$python_path")/release-core"
   [ -x "$cand" ] && { printf '%s\n' "$cand"; return 0; }
   if command -v release-core >/dev/null 2>&1; then command -v release-core; return 0; fi
   udir="$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user"))' 2>/dev/null || true)"
