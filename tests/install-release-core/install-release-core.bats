@@ -187,6 +187,25 @@ EOF
   [ ! -s "$PIP_LOG" ]
 }
 
+@test "install: --user is passed through to pip" {
+  run "$BIN" --user
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --no-deps --user https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+}
+
+@test "install: --user --break-system-packages both passed through, in order" {
+  run "$BIN" --user --break-system-packages
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --no-deps --user --break-system-packages https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+}
+
+@test "install: no extra pip flags by default (clean invocation)" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$PIP_LOG")" != *"--user"* ]]
+  [[ "$(cat "$PIP_LOG")" != *"--break-system-packages"* ]]
+}
+
 @test "install: honors \$PYTHON override" {
   cat > stub/my-python <<'STUB'
 #!/usr/bin/env bash

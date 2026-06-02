@@ -39,6 +39,7 @@ REPO="arthur-debert/release"
 MAJOR=""
 PRINT_URL=0
 PYTHON="${PYTHON:-python3}"
+PIP_EXTRA=""   # extra pip flags (e.g. --user, --break-system-packages)
 
 usage() {
   cat <<'EOF'
@@ -53,6 +54,11 @@ Options:
   --repo OWNER/REPO Source repo for the release (default: arthur-debert/release).
   --print-url       Print the resolved wheel URL and exit (resolve only, no
                     install). Used by tests and CI dry-runs.
+  --user            Pass --user to pip (install into the user site so the
+                    console-scripts land in ~/.local/bin). Don't combine with a
+                    venv PYTHON — pip rejects --user inside a venv.
+  --break-system-packages
+                    Pass --break-system-packages to pip (PEP-668 system pythons).
   -h, --help        Show this help.
 
 Env:
@@ -71,6 +77,9 @@ while [ $# -gt 0 ]; do
       REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
     --print-url) PRINT_URL=1; shift ;;
+    --user) PIP_EXTRA="${PIP_EXTRA:+$PIP_EXTRA }--user"; shift ;;
+    --break-system-packages)
+      PIP_EXTRA="${PIP_EXTRA:+$PIP_EXTRA }--break-system-packages"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "install-release-core: unknown argument '$1'" >&2; usage >&2; exit 64 ;;
   esac
@@ -153,5 +162,8 @@ fi
 echo "install-release-core: installing $url" >&2
 # --force-reinstall (static wheel version → -U would skip) + --no-deps
 # (dependency-light package; never touch the environment's other packages).
-"$PYTHON" -m pip install --force-reinstall --no-deps "$url"
+# $PIP_EXTRA carries any --user / --break-system-packages the caller chose; it is
+# intentionally word-split (each token a separate pip arg), empty by default.
+# shellcheck disable=SC2086
+"$PYTHON" -m pip install --force-reinstall --no-deps $PIP_EXTRA "$url"
 echo "install-release-core: done. Run 'release-core init' to materialize repo config." >&2
