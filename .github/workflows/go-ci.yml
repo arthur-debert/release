@@ -112,6 +112,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Arm the gate toolset (full lint set)
+        shell: bash
         # The gate (lefthook.yml) is HARD — a missing tool FAILS bin/check, it
         # does not skip (release#412). CI must therefore arm the FULL toolset,
         # not just lefthook, or the hardened gate fails on the first missing
@@ -125,6 +126,13 @@ jobs:
         run: |
           npm install -g lefthook prettier markdownlint-cli
           pip install "ruff==0.15.12" yamllint
+          # The shellcheck binary is ambient on ubuntu runners but not on
+          # macOS, and not guaranteed if the runner image drifts. The gate's
+          # shell-lint step (bin/check-shell) is HARD, so install it when
+          # missing rather than let the gate die. brew on macOS; apt fallback.
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
+          fi
 
       - name: Run umbrella check
         shell: bash
