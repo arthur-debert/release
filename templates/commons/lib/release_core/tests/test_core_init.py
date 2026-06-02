@@ -351,3 +351,276 @@ def test_init_help_exits_0_and_prints_usage(capsys):
 def test_init_unknown_flag_is_usage_error(capsys):
     rc = init.main(["--nope"])
     assert rc == 64
+
+
+# --------------------------------------------------------------------------
+# self-contained bundle path — compose config from the wheel-bundled templates
+# (release_core/_bundled_templates/) with NO release clone. This is the DEFAULT
+# path a pip-installed consumer takes; the tests above monkeypatch
+# _materialize_config_sources wholesale, so the bundle composition below is the
+# coverage for the actual offline machinery (the feat/wheel-self-contained work).
+# --------------------------------------------------------------------------
+
+# yq (mikefarah v4) is required for the lefthook fragment merge — the same hard
+# dep release-sync has. Skip the merge-dependent tests cleanly if it's absent so
+# a yq-less dev box doesn't see spurious failures (CI pins yq, so coverage holds).
+import shutil as _shutil  # noqa: E402
+
+import pytest  # noqa: E402
+
+_HAVE_YQ = _shutil.which("yq") is not None
+_needs_yq = pytest.mark.skipif(not _HAVE_YQ, reason="yq (mikefarah v4) not installed")
+
+# The repo's real templates/ tree (tests/ -> release_core -> lib -> commons ->
+# templates). Used as a faithful bundle so the composition tests exercise the
+# ACTUAL fragments the wheel ships, not a hand-rolled stand-in.
+_REAL_TEMPLATES = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
+
+
+def _read(path: str) -> str:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _fake_bundle(tmp_path) -> str:
+    """A minimal but valid bundle tree (templates/...) for the go-cli kind:
+    commons lint configs + fragment, the base fragment, a go-quality capability
+    fragment, and a go-cli manifest. Returns the tpl_root (…/templates)."""
+    root = tmp_path / "_bundled_templates" / "templates"
+    (root / "commons").mkdir(parents=True)
+    (root / "components" / "go-quality").mkdir(parents=True)
+    (root / "go-cli").mkdir(parents=True)
+
+    # Static commons lint configs (copied verbatim by the bundle path).
+    for name in (
+        ".markdownlint.json",
+        ".markdownlintignore",
+        ".yamllint",
+        ".shellcheckrc",
+        ".editorconfig",
+        ".prettierignore",
+    ):
+        (root / "commons" / name).write_text(f"# fake {name}\n")
+
+    (root / "components" / "_lefthook-base.yaml").write_text(
+        "pre-commit:\n  parallel: true\n  commands: {}\n"
+    )
+    (root / "commons" / "lefthook.fragment.yaml").write_text(
+        "pre-commit:\n  commands:\n    markdownlint:\n      run: markdownlint .\n"
+    )
+    (root / "components" / "go-quality" / "lefthook.fragment.yaml").write_text(
+        "pre-commit:\n  commands:\n    go-vet:\n      run: go vet ./...\n"
+    )
+    (root / "go-cli" / "manifest.yaml").write_text("kind: go-cli\ncapabilities:\n  - go-quality\n")
+    return str(root)
+
+
+# ---- _bundle_templates_root --------------------------------------------------
+
+
+def test_bundle_templates_root_none_when_unstaged(monkeypatch, tmp_path):
+    # No staged _bundled_templates/ next to the module → None, so init falls back
+    # to the $RELEASE_HOME git path. (Not asserted against the live source tree:
+    # a local `python -m build` stages the gitignored bundle on disk, which would
+    # make a bare assertion flaky — so we drive the resolver at a clean fake dir.)
+    fake_pkg = tmp_path / "release_core" / "verbs"
+    fake_pkg.mkdir(parents=True)
+    fake_file = fake_pkg / "init.py"
+    fake_file.write_text("")
+    monkeypatch.setattr(init.os.path, "realpath", lambda _p: str(fake_file))
+    assert init._bundle_templates_root() is None
+
+
+def test_bundle_templates_root_found_when_staged(monkeypatch, tmp_path):
+    # Point the resolver at a fake module dir whose _bundled_templates/templates
+    # exists; it must return that path.
+    fake_pkg = tmp_path / "release_core" / "verbs"
+    fake_pkg.mkdir(parents=True)
+    bundle = tmp_path / "release_core" / "_bundled_templates" / "templates"
+    bundle.mkdir(parents=True)
+    fake_file = fake_pkg / "init.py"
+    fake_file.write_text("")
+    monkeypatch.setattr(init.os.path, "realpath", lambda _p: str(fake_file))
+    assert init._bundle_templates_root() == str(bundle)
+
+
+# ---- _capabilities_from_bundle ----------------------------------------------
+
+
+def test_capabilities_from_bundle_reads_manifest(tmp_path):
+    tpl_root = _fake_bundle(tmp_path)
+    assert init._capabilities_from_bundle(tpl_root, "go-cli") == ["go-quality"]
+
+
+def test_capabilities_from_bundle_missing_manifest_is_empty(tmp_path):
+    tpl_root = _fake_bundle(tmp_path)
+    assert init._capabilities_from_bundle(tpl_root, "no-such-kind") == []
+
+
+# ---- _materialize_config_from_bundle (fake bundle) --------------------------
+
+
+@_needs_yq
+def test_materialize_from_bundle_composes_config_and_lefthook(tmp_path):
+    tpl_root = _fake_bundle(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sources = init._materialize_config_from_bundle(tpl_root, str(repo), "go-cli", ["go-quality"])
+
+    # Every static commons config is copied verbatim.
+    for name in (
+        ".markdownlint.json",
+        ".yamllint",
+        ".shellcheckrc",
+        ".editorconfig",
+        ".prettierignore",
+        ".markdownlintignore",
+    ):
+        assert name in sources, f"{name} should be composed from the bundle"
+        assert os.path.isfile(sources[name])
+
+    # lefthook.yml is fragment-merged (base < commons < go-quality), carries the
+    # "do not edit" provenance header, and contains commands from BOTH fragments.
+    assert "lefthook.yml" in sources
+    text = _read(sources["lefthook.yml"])
+    assert "Generated by release-core init from the bundled templates" in text
+    assert "markdownlint" in text  # from commons fragment
+    assert "go-vet" in text  # from the go-quality capability fragment
+
+
+@_needs_yq
+def test_materialize_from_bundle_uses_real_templates(tmp_path):
+    # The strongest proof: compose from the repo's ACTUAL templates tree exactly
+    # as the staged bundle would, for the go-cli kind. Exercises the real
+    # fragments the wheel ships, so a fragment-merge regression is caught here.
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    caps = init._capabilities_from_bundle(_REAL_TEMPLATES, "go-cli")
+    assert "go-quality" in caps
+    sources = init._materialize_config_from_bundle(_REAL_TEMPLATES, str(repo), "go-cli", caps)
+    assert "lefthook.yml" in sources
+    text = _read(sources["lefthook.yml"])
+    # commons gate (markdownlint) + the go-quality capability (gofmt/go-vet).
+    assert "markdownlint" in text
+    assert "go-vet" in text
+    # The full documented config subset is present (commons ships all of them).
+    for name in init.CONFIG_FILES:
+        assert name in sources, f"{name} missing from real-templates composition"
+
+
+# ---- _materialize_config_sources routing ------------------------------------
+
+
+def test_materialize_sources_defaults_to_bundle_when_no_release_home(tmp_path, monkeypatch):
+    # No $RELEASE_HOME → the bundle path is taken (NOT the git engine).
+    tpl_root = _fake_bundle(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.setattr(init, "_bundle_templates_root", lambda: tpl_root)
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "go-cli")
+
+    # Spy: the git engine must NOT be touched on the bundle path.
+    def _boom(*a, **k):  # pragma: no cover - asserts non-invocation
+        raise AssertionError("git sync engine must not run on the bundle path")
+
+    monkeypatch.setattr(init.sync, "select_ref", _boom)
+
+    called = {}
+    real = init._materialize_config_from_bundle
+
+    def _spy(tpl, root, kind, caps):
+        called["caps"] = caps
+        called["kind"] = kind
+        return real(tpl, root, kind, caps)
+
+    monkeypatch.setattr(init, "_materialize_config_from_bundle", _spy)
+
+    sources = init._materialize_config_sources(str(repo), "repo")
+    assert called["kind"] == "go-cli"
+    assert called["caps"] == ["go-quality"]  # from the bundled manifest
+    assert ".yamllint" in sources
+
+
+def test_materialize_sources_bundle_honors_consumer_sync_yaml(tmp_path, monkeypatch):
+    # A consumer .release-sync.yaml capability override wins over the bundled
+    # manifest default, on the offline path too.
+    tpl_root = _fake_bundle(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".release-sync.yaml").write_text("capabilities:\n  - go-quality\n  - extra\n")
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.setattr(init, "_bundle_templates_root", lambda: tpl_root)
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "go-cli")
+
+    captured = {}
+
+    def _spy(tpl, root, kind, caps):
+        captured["caps"] = caps
+        return {}
+
+    monkeypatch.setattr(init, "_materialize_config_from_bundle", _spy)
+    init._materialize_config_sources(str(repo), "repo")
+    assert captured["caps"] == ["go-quality", "extra"]
+
+
+def test_materialize_sources_release_home_overrides_bundle(tmp_path, monkeypatch):
+    # An explicit $RELEASE_HOME git clone OVERRIDES the bundle: the full sync
+    # engine runs (release-dev's live-templates path), bundle untouched.
+    tpl_root = _fake_bundle(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    clone = tmp_path / "clone"
+    (clone / ".git").mkdir(parents=True)
+    monkeypatch.setenv("RELEASE_HOME", str(clone))
+    monkeypatch.setattr(init, "_bundle_templates_root", lambda: tpl_root)
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "go-cli")
+
+    # The bundle composer must NOT run when a clone is present.
+    def _boom(*a, **k):  # pragma: no cover - asserts non-invocation
+        raise AssertionError("bundle path must not run when $RELEASE_HOME is a clone")
+
+    monkeypatch.setattr(init, "_materialize_config_from_bundle", _boom)
+
+    # Stub the git engine so the override path is exercised without real git.
+    monkeypatch.setattr(init.sync, "select_ref", lambda *a, **k: "abcdef")
+    monkeypatch.setattr(init.gh, "git_rev_parse", lambda *a, **k: "abcdef0")
+    monkeypatch.setattr(
+        init.sync,
+        "resolve_capabilities",
+        lambda *a, **k: sync.Capabilities(names=["go-quality"], manifest_source="x"),
+    )
+    monkeypatch.setattr(init.sync, "build_plan", lambda *a, **k: object())
+
+    def _fake_materialize(home, ref, sha, plan, dest):
+        for name in init.CONFIG_FILES:
+            with open(os.path.join(dest, name), "w", encoding="utf-8") as fh:
+                fh.write(f"# git-engine {name}\n")
+
+    monkeypatch.setattr(init.sync, "materialize", _fake_materialize)
+
+    sources = init._materialize_config_sources(str(repo), "repo")
+    assert set(sources) == set(init.CONFIG_FILES)
+    assert _read(sources["lefthook.yml"]) == "# git-engine lefthook.yml\n"
+
+
+@_needs_yq
+def test_main_end_to_end_through_bundle_path(tmp_path, monkeypatch, capsys):
+    # Full main([]) over the offline bundle path: detect kind, compose from the
+    # bundle, create-if-absent the documented set — no $RELEASE_HOME, no git.
+    tpl_root = _fake_bundle(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_bundle_templates_root", lambda: tpl_root)
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "go-cli")
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    for name in init.CONFIG_FILES:
+        assert (repo / name).is_file(), f"{name} should be materialized offline"
+    assert "7 created" in out
+    # The composed gate carries the bundle provenance header.
+    assert "from the bundled templates" in (repo / "lefthook.yml").read_text()

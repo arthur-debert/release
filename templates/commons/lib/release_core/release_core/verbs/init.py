@@ -35,11 +35,17 @@ Behavior:
   - exits NON-ZERO on any real failure (cannot write a file it intended to). No
     silent best-effort swallowing for init's own writes.
 
-Source resolution (PoC): the canonical config content is composed by the
-release-sync engine (sync.build_plan + sync.materialize) from $RELEASE_HOME — the
-same git clone + $RELEASE_REF env contract release-sync uses. This is a PoC
-simplification; folding fragment composition into the installed package so init
-needs no release checkout is a post-PoC follow-up.
+Source resolution: the canonical config content is composed from the
+wheel-bundled templates (release_core/_bundled_templates/, staged at build time
+by hatch_build.py) so init is self-contained — no release clone, no network.
+This is the DEFAULT and the only path a pip-installed consumer ever takes.
+
+A `$RELEASE_HOME` git checkout, when explicitly present (release-dev only),
+OVERRIDES the bundle: init then composes from live templates via the full
+release-sync engine (sync.build_plan + sync.materialize) at $RELEASE_REF, the
+same git-clone contract release-sync uses. In an editable/source checkout the
+bundle is absent (a gitignored build artifact), so $RELEASE_HOME is required
+there; a fresh wheel install needs neither.
 
 Exit codes:
   0  — done (created/refreshed, or a clean no-op)

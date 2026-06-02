@@ -80,3 +80,12 @@ class CustomBuildHook(BuildHookInterface):
 
         # Ensure hatch includes the staged tree in the wheel.
         build_data.setdefault("artifacts", []).append(f"release_core/{_BUNDLE_DIRNAME}/**")
+
+    def finalize(self, version, build_data, artifact_path):
+        # The staged tree only needs to exist WHILE hatch packages the wheel.
+        # Remove it afterwards so a build leaves no trace in the source tree —
+        # otherwise a stale bundle next to an editable install would make
+        # `release-core init` silently take the offline path. It is gitignored,
+        # so this is hygiene, not correctness for git; ignore_errors keeps a
+        # cleanup hiccup from failing an otherwise-good build.
+        shutil.rmtree(os.path.join(self.root, "release_core", _BUNDLE_DIRNAME), ignore_errors=True)
