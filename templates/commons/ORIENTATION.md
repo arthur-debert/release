@@ -50,6 +50,17 @@ That is the whole loop: open → poll the engine → clear what it names → `re
 hand off. Drive it through `gh-task-status`; don't reinvent it with ad-hoc
 `gh api` calls.
 
+**Landing a feature or fix?** Add a changelog fragment in the same PR:
+
+```sh
+changelog add <slug> "<one-line summary>"
+```
+
+It writes `CHANGELOG/unreleased-<slug>.md`. The release refuses to cut without
+one — the prepare gate fails with _"No CHANGELOG/unreleased-\*.md fragments
+found"_ — so a feature that merges without a fragment silently blocks the next
+release until someone backfills it.
+
 ## Escalation — when managed infrastructure breaks
 
 If a gate, workflow, or managed tool misbehaves, do **not** patch it in this
