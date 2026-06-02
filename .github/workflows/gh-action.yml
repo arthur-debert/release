@@ -389,11 +389,18 @@ jobs:
           python -m pip install --upgrade build
           rm -rf "${PKG_DIR}/dist"
           python -m build --wheel "${PKG_DIR}"
-          # Exactly one wheel is expected; resolve it explicitly so a glob
-          # miss fails loudly rather than uploading nothing.
-          wheel=$(ls "${PKG_DIR}"/dist/release_core-*.whl)
-          echo "Uploading wheel: ${wheel}"
-          gh release upload "${TAG}" "${wheel}" --clobber
+          # Exactly one wheel is expected. Collect matches into an array and
+          # assert the count so a zero-match (build produced nothing) or a
+          # multi-match (stale dist not cleaned) fails loudly with a clear
+          # message instead of feeding gh a newline-joined / empty path.
+          shopt -s nullglob
+          wheels=("${PKG_DIR}"/dist/release_core-*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "ERROR: expected exactly 1 release_core wheel, found ${#wheels[@]}: ${wheels[*]:-<none>}" >&2
+            exit 1
+          fi
+          echo "Uploading wheel: ${wheels[0]}"
+          gh release upload "${TAG}" "${wheels[0]}" --clobber
 
   # -------------------------------------------------------------------
   # 3. Advance the floating-major branch (v1, v2, …) to point at the
