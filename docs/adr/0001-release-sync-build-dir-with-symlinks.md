@@ -6,7 +6,11 @@ Accepted. The package-distribution half is superseded by
 [ADR-0003](0003-pip-install-bootstrap-distribution.md): `release_core` now
 arrives via `pip install` of a wheel from the GitHub release, not as committed code
 materialized into `.release/`. The build-dir + symlink mechanism described here
-still governs any _config_ materialized into the consumer tree.
+still governs any _config_ materialized into the consumer tree — but the
+_committed_-`.release/` decision is itself superseded by
+[ADR-0004](0004-symlinked-managed-files-into-the-installed-package.md): the build
+dir becomes **gitignored** and is composed at bootstrap from the installed
+package, with the repo holding committed symlinks into it.
 
 ## Context
 
