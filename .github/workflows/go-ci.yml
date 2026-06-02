@@ -111,28 +111,13 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Arm the gate toolset (full lint set)
-        shell: bash
-        # The gate (lefthook.yml) is HARD — a missing tool FAILS bin/check, it
-        # does not skip (release#412). CI must therefore arm the FULL toolset,
-        # not just lefthook, or the hardened gate fails on the first missing
-        # linter (markdownlint). Mirrors release's own ci.yml. Kept inline
-        # (rather than calling the consumer's bin/setup-dev-env.sh) so it is
-        # robust to consumer bootstrap-version skew — the toolset-arming block
-        # only exists in the re-synced bootstrap, which lands in the same
-        # propagate PR as the hardened gate. This is the interim arming step
-        # that `release-core init` (epic #416) will replace fleet-wide with
-        # `pip install -U release_core && release-core init`.
-        run: |
-          npm install -g lefthook prettier markdownlint-cli
-          pip install "ruff==0.15.12" yamllint
-          # The shellcheck binary is ambient on ubuntu runners but not on
-          # macOS, and not guaranteed if the runner image drifts. The gate's
-          # shell-lint step (bin/check-shell) is HARD, so install it when
-          # missing rather than let the gate die. brew on macOS; apt fallback.
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
-          fi
+      - name: Arm the gate toolset
+        # ONE definition of CI gate-arming: the arm-gate composite (→ the
+        # bin-internal/provision-gate-toolset.sh script). Replaces the inline
+        # block #417/#419 had to copy into every reusable workflow (release#416).
+        # Node + Python are set up by the steps above; the composite installs the
+        # lint/format toolset the hardened gate needs.
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
 
       - name: Run umbrella check
         shell: bash

@@ -287,14 +287,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Arm the gate toolset (full lint set)
-        shell: bash
-        run: |
-          npm install -g lefthook prettier markdownlint-cli
-          pip install "ruff==0.15.12" yamllint
-          if ! command -v shellcheck >/dev/null 2>&1; then
-            brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
-          fi
+      - name: Arm the gate toolset
+        # ONE definition of CI gate-arming: the arm-gate composite (→ the
+        # bin-internal/provision-gate-toolset.sh script). Node + Python are set up
+        # by the steps above; the composite installs the lint/format toolset the
+        # hardened gate (run by prepare-release below) needs. (release#416)
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
 
       - uses: arthur-debert/release/.github/actions/prepare-release@v2
         id: prep
