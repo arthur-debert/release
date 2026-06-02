@@ -141,22 +141,23 @@ runs:
           extract "$CHANGELOG" release-notes.md
 
     - name: Set up Node (gate linters lefthook/prettier/markdownlint)
-      if: steps.detect.outputs.skip != 'true'
+      if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
       uses: actions/setup-node@v4
       with:
         node-version: '20'
     - name: Set up Python (gate linters ruff/yamllint)
-      if: steps.detect.outputs.skip != 'true'
+      if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
       uses: actions/setup-python@v5
       with:
         python-version: '3.13'
     - name: Arm the gate toolset (release#426 P2)
-      if: steps.detect.outputs.skip != 'true'
+      if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
       shell: bash
       # The Commit step below runs the consumer's HARD gate (#412) on the bump
       # commit; a missing linter FAILS the release. Arm the toolset first — Node +
       # Python here (not every release Kind provides them), then the single
-      # provisioning definition installs the rest (the arm-gate script).
+      # provisioning definition installs the rest (the arm-gate script). Skipped
+      # when the gate is bypassed (SKIP_PRECOMMIT_GATE) — nothing to arm then.
       run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
     - name: Commit, tag, push
       id: push
