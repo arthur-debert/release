@@ -230,5 +230,15 @@ jobs:
           NEXT_VERSION: ${{ steps.decide.outputs.next-version }}
         run: |
           set -e
-          ./bin/release "$NEXT_VERSION"
+          # bin/release → release-cut (Kind-aware). release-cut is NOT provisioned
+          # on this runner, so if the shim can't run (not on PATH → exit 127 /
+          # exit 1), fall back to dispatching release.yml directly. Identical
+          # effect here: we pass an EXPLICIT version, so no Kind-aware compute is
+          # needed — release-cut would just `gh workflow run release.yml` anyway.
+          # (release#426 P1: the cascade was dying at exit 127 on this line,
+          # leaving the editor cascade two releases behind.)
+          if ! ./bin/release "$NEXT_VERSION"; then
+            echo "::warning::bin/release failed (release-cut not installed) — dispatching release.yml directly"
+            gh workflow run release.yml -f version="$NEXT_VERSION"
+          fi
           echo "Dispatched release.yml (version ${NEXT_VERSION}); CI will bump + tag + build + release."
