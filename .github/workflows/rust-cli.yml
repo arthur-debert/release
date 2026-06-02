@@ -847,3 +847,25 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
+
+  # -------------------------------------------------------------------
+  # Notify downstreams. A binary CLI CAN have dependents (e.g. lex-lsp →
+  # the lex editors; simple-gal → simple-gal-ui), so rust-cli is NOT a
+  # fan-out dead-end — it carries the same notify-downstreams placeholder
+  # as the other Kinds (electron-app/tree-sitter/…), for consistency.
+  # (release#426 P3.)
+  # -------------------------------------------------------------------
+  notify-downstreams:
+    needs: [prepare, create-release]
+    if: needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-op placeholder
+        # Per-consumer downstream lists are repo-specific: each consumer's
+        # own release.yml fires its `notify-downstreams` step (which knows
+        # its direct dependents) AFTER it calls this reusable workflow. The
+        # reusable workflow does NOT emit dispatches itself. Kept as a
+        # placeholder for a future centralized notify mechanism, and so a
+        # rust-cli consumer with dependents has the same shape to hang its
+        # notify step on as every other Kind.
+        run: echo "Release ${{ needs.prepare.outputs.version }} complete. Caller's own release.yml fires its notify-downstreams step (if any) after this workflow returns."
