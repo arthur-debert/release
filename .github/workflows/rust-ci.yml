@@ -181,6 +181,14 @@ jobs:
         if: inputs.pre-test != ''
         run: bash "${{ inputs.pre-test }}"
 
+      - name: Set up Node (gate linters lefthook/prettier/markdownlint)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Set up Python (gate linters ruff/yamllint)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Arm the gate toolset (full lint set)
         # The gate (lefthook.yml) is HARD — a missing tool FAILS bin/check, it
         # does not skip (release#412). CI must therefore arm the FULL toolset,
