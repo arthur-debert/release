@@ -26,9 +26,13 @@
 # otherwise"). Zero or many is a release-side packaging bug, surfaced loudly here
 # rather than silently installing the wrong artifact.
 #
-# Running `release-core init` afterwards is the CALLER's job (it is a separate,
-# already-installed console-script and mutates repo state) — this script's single
-# responsibility is the transport: resolve + install.
+# After installing, this runs `release-core init` in the current repo by default
+# (--no-init to skip) — the "one command does the boot" ergonomic. It is NOT a
+# pip post-install hook (wheels have none, and init is repo-specific while pip is
+# environment-level): the resolver runs init explicitly, at the repo root, on the
+# JUST-installed console-script (resolved across venv / --user / system layouts).
+# init is best-effort — its failure does NOT fail the resolver (committed config
+# degrades gracefully; the install, the resolver's core job, still succeeded).
 #
 # Source of truth: arthur-debert/release bin/install-release-core. Sister to
 # install-release-token / install-release-secrets.
@@ -38,22 +42,27 @@ set -euo pipefail
 REPO="arthur-debert/release"
 MAJOR=""
 PRINT_URL=0
+NO_INIT=0
 PYTHON="${PYTHON:-python3}"
 PIP_EXTRA=""   # extra pip flags (e.g. --user, --break-system-packages)
 
 usage() {
   cat <<'EOF'
 Usage: install-release-core [--major vN] [--repo OWNER/REPO] [--print-url]
+                            [--no-init] [--user] [--break-system-packages]
 
-Resolve the release_core wheel from a GitHub release and pip-install it
-(--force-reinstall --no-deps). The pull-model boot resolver.
+Resolve the release_core wheel from a GitHub release, pip-install it
+(--force-reinstall --no-deps), then run `release-core init` in the current repo.
+The pull-model boot resolver — one command does the whole boot.
 
 Options:
   --major vN        Pin to the latest release in major line vN (e.g. --major v2).
                     Default: the repo's releases/latest.
   --repo OWNER/REPO Source repo for the release (default: arthur-debert/release).
   --print-url       Print the resolved wheel URL and exit (resolve only, no
-                    install). Used by tests and CI dry-runs.
+                    install, no init). Used by tests and CI dry-runs.
+  --no-init         Install only; do NOT run `release-core init` afterwards
+                    (pure-transport mode, e.g. just updating the package).
   --user            Pass --user to pip (install into the user site so the
                     console-scripts land in ~/.local/bin). Don't combine with a
                     venv PYTHON — pip rejects --user inside a venv.
@@ -77,6 +86,7 @@ while [ $# -gt 0 ]; do
       REPO="$2"; shift 2 ;;
     --repo=*) REPO="${1#--repo=}"; shift ;;
     --print-url) PRINT_URL=1; shift ;;
+    --no-init) NO_INIT=1; shift ;;
     --user) PIP_EXTRA="${PIP_EXTRA:+$PIP_EXTRA }--user"; shift ;;
     --break-system-packages)
       PIP_EXTRA="${PIP_EXTRA:+$PIP_EXTRA }--break-system-packages"; shift ;;
@@ -166,4 +176,35 @@ echo "install-release-core: installing $url" >&2
 # intentionally word-split (each token a separate pip arg), empty by default.
 # shellcheck disable=SC2086
 "$PYTHON" -m pip install --force-reinstall --no-deps $PIP_EXTRA "$url"
-echo "install-release-core: done. Run 'release-core init' to materialize repo config." >&2
+
+if [ "$NO_INIT" -eq 1 ]; then
+  echo "install-release-core: installed (--no-init; skipping release-core init)." >&2
+  exit 0
+fi
+
+# Locate the JUST-installed release-core console-script across install layouts:
+#   1. the installing python's own bin dir (venv, or a system python whose
+#      scripts sit beside it);
+#   2. anything already on PATH (e.g. --user on Linux → ~/.local/bin);
+#   3. the python's --user scripts dir (e.g. macOS → ~/Library/Python/X.Y/bin),
+#      which is NOT ~/.local/bin and often not on PATH.
+_find_release_core() {
+  cand="$(dirname "$PYTHON")/release-core"
+  [ -x "$cand" ] && { printf '%s\n' "$cand"; return 0; }
+  if command -v release-core >/dev/null 2>&1; then command -v release-core; return 0; fi
+  udir="$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_path("scripts", "posix_user"))' 2>/dev/null || true)"
+  [ -n "$udir" ] && [ -x "$udir/release-core" ] && { printf '%s\n' "$udir/release-core"; return 0; }
+  return 1
+}
+
+# init is best-effort: a failure (e.g. an older published wheel, or a Kind that
+# composes no config) must NOT fail the resolver — the install succeeded, and the
+# committed config degrades gracefully. Runs in the CURRENT repo (the boot caller
+# cd's to the repo root first).
+rc="$(_find_release_core || true)"
+if [ -n "$rc" ]; then
+  echo "install-release-core: installed; running release-core init" >&2
+  "$rc" init || echo "warning: release-core init failed — repo config not refreshed" >&2
+else
+  echo "warning: release-core not found after install — skipping init" >&2
+fi

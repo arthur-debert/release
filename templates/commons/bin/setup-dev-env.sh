@@ -208,22 +208,23 @@ fi
 # --- 0.2. Pull-model: self-update release_core from the published wheel --
 # The north star (ADR-0003): repos AUTO-UPDATE on session start, retiring the
 # hand-run `orc propagate` treadmill. The boot resolver `install-release-core`
-# resolves the latest release wheel and pip-installs it (--force-reinstall
-# --no-deps — the wheel version is static, so `-U` would skip it); then
-# `release-core init` materializes this repo's committed config (create-if-absent,
-# so a steady-state session is a no-op). Runs in BOTH local and cloud (above the
-# cloud-only gate) — auto-update is the whole point.
+# resolves the latest release wheel, pip-installs it (--force-reinstall --no-deps
+# — the wheel version is static, so `-U` would skip it), THEN runs `release-core
+# init` itself (it locates the just-installed console-script across venv/--user/
+# system layouts). One command does the whole boot. Runs in BOTH local and cloud
+# (above the cloud-only gate) — auto-update is the whole point.
 #
-# BEST-EFFORT, never aborts the session: every step is `|| warn`. The committed
-# config already in the repo degrades gracefully if the pull fails (a stale repo
-# is older-but-working, never broken). If the resolver isn't on PATH yet
-# (consumers pre-rollout — it ships from release's bin/, not the synced set), the
-# whole block silently no-ops, so this lands safely fleet-wide before the
-# resolver is delivered to consumers.
+# BEST-EFFORT, never aborts the session: every call is `|| warn`, and init
+# failure inside the resolver is itself best-effort. The committed config already
+# in the repo degrades gracefully if the pull fails (a stale repo is
+# older-but-working, never broken). If the resolver isn't on PATH yet (consumers
+# pre-rollout — it ships from release's bin/, not the synced set), the whole block
+# silently no-ops, so this lands safely fleet-wide before the resolver is
+# delivered to consumers.
 #
 # Install target (so the console-scripts land on PATH): a repo `.venv` if one is
 # already present (its bin/ is symlinked onto PATH by §2 / dodot), else `--user`
-# → ~/.local/bin (ensured on PATH below). `--break-system-packages` is tried
+# → the user site (ensured on PATH below). `--break-system-packages` is tried
 # first for PEP-668 system pythons, with a plain `--user` fallback (older pip
 # rejects the flag), mirroring the ruff/yamllint blocks above.
 if command -v install-release-core >/dev/null 2>&1; then
@@ -235,22 +236,6 @@ if command -v install-release-core >/dev/null 2>&1; then
     install-release-core --user --break-system-packages \
       || install-release-core --user \
       || echo "warning: install-release-core (--user) failed — release_core not updated this session" >&2
-  fi
-  # Materialize this repo's committed config from the freshly-installed wheel.
-  # Resolve the console-script explicitly: a .venv install drops it at
-  # .venv/bin/release-core, which is NOT yet on PATH here — the symlink into
-  # ~/.local/bin is created by §2, which runs BELOW this block (and only in
-  # cloud). So prefer the venv binary directly, then fall back to a PATH lookup
-  # (the --user path lands it in ~/.local/bin, already on PATH).
-  _release_core=""
-  if [ -x "${REPO_ROOT}/.venv/bin/release-core" ]; then
-    _release_core="${REPO_ROOT}/.venv/bin/release-core"
-  elif command -v release-core >/dev/null 2>&1; then
-    _release_core="release-core"
-  fi
-  if [ -n "${_release_core}" ]; then
-    "${_release_core}" init \
-      || echo "warning: release-core init failed — repo config not refreshed this session" >&2
   fi
 fi
 
