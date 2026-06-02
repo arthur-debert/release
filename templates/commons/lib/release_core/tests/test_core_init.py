@@ -447,6 +447,7 @@ def test_bundle_templates_root_found_when_staged(monkeypatch, tmp_path):
 # ---- _capabilities_from_bundle ----------------------------------------------
 
 
+@_needs_yq  # _capabilities_from_bundle parses the manifest via yamlio (yq)
 def test_capabilities_from_bundle_reads_manifest(tmp_path):
     tpl_root = _fake_bundle(tmp_path)
     assert init._capabilities_from_bundle(tpl_root, "go-cli") == ["go-quality"]
@@ -511,6 +512,7 @@ def test_materialize_from_bundle_uses_real_templates(tmp_path):
 # ---- _materialize_config_sources routing ------------------------------------
 
 
+@_needs_yq  # the spy calls the REAL composer, which fragment-merges via yq
 def test_materialize_sources_defaults_to_bundle_when_no_release_home(tmp_path, monkeypatch):
     # No $RELEASE_HOME → the bundle path is taken (NOT the git engine).
     tpl_root = _fake_bundle(tmp_path)
@@ -542,6 +544,7 @@ def test_materialize_sources_defaults_to_bundle_when_no_release_home(tmp_path, m
     assert ".yamllint" in sources
 
 
+@_needs_yq  # capability resolution parses .release-sync.yaml via yamlio (yq)
 def test_materialize_sources_bundle_honors_consumer_sync_yaml(tmp_path, monkeypatch):
     # A consumer .release-sync.yaml capability override wins over the bundled
     # manifest default, on the offline path too.
