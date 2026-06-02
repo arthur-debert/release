@@ -77,3 +77,24 @@ jobs:
             exit 1
           fi
           test -s bin/fetch-deps
+
+      - name: Build/package artifacts must never be committed
+        # ADR-0004's "the package/build dir is never in git = violation" invariant,
+        # enforced here in the source repo (the dogfood). These dirs are gitignored
+        # build output (the wheel's staged template bundle, python dist/build); a
+        # build hook stages _bundled_templates/ transiently — a stray `git add` of
+        # it would ship build artifacts as if they were source. Fail loudly if any
+        # tracked path falls under them. (release#416 step 11, safe prep slice.)
+        run: |
+          set -euo pipefail
+          # Patterns are anchored to path segments so we match the dirs, not
+          # incidental substrings. git ls-files lists only TRACKED files.
+          violations="$(git ls-files \
+            | grep -E '(^|/)_bundled_templates/|(^|/)dist/|(^|/)build/' \
+            | grep -v '^tests/' || true)"
+          if [ -n "$violations" ]; then
+            echo "::error::Build/package artifacts are committed (must be gitignored — ADR-0004):" >&2
+            printf '%s\n' "$violations" >&2
+            exit 1
+          fi
+          echo "ok: no build/package artifacts tracked in git"
