@@ -1,0 +1,44 @@
+name: Arm the gate toolset
+description: |
+  Install the lint/format toolset the hardened gate (lefthook.yml) needs, in CI.
+
+  THE single definition of "arm the gate in CI" (release#416, the gate doctrine:
+  one definition, invoked everywhere — never re-listed per workflow). It replaces
+  the inline "Arm the gate toolset" block that #417/#419 had to copy into every
+  reusable stack-CI workflow + the rust-cli prepare job + release's own ci.yml.
+
+  This action is THIN by design: the provisioning logic lives in
+  bin-internal/provision-gate-toolset.sh (its own concern — testable outside
+  GitHub Actions, OS-branching, batched), and the same script is the unit
+  setup-dev-env.sh §0 / env/setup.sh (cloud) are meant to converge onto. The
+  action just invokes it.
+
+  Assumes Node and Python are already set up by the caller (mirrors the inline
+  blocks it replaces) — the script installs tools into the active toolchains, and
+  this action does NOT run setup-node/setup-python itself so it can't switch the
+  interpreter out from under the caller's build steps.
+
+inputs:
+  ruff-version:
+    description: |
+      Override the pinned ruff version. Empty (default) → the script's own pin
+      (provision-gate-toolset.sh is the SINGLE source of truth for the pins, so
+      they can't drift between here and there).
+    required: false
+    default: ''
+  actionlint-version:
+    description: |
+      Override the pinned actionlint version (NOT "latest" — a new release can add
+      rules that turn an unrelated PR red). Empty (default) → the script's own pin.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Provision the gate toolset
+      shell: bash
+      env:
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+        ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
+      run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"

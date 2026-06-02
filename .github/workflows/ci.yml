@@ -38,15 +38,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install gate tools (lefthook + linters)
-        # The same toolset the bootstrap (setup-dev-env.sh / release-core init)
-        # installs at session start, so local and CI run the gate with identical
-        # tools. ruff is pinned so CI and the local hook never disagree on
-        # findings; shellcheck is preinstalled on ubuntu-latest.
-        run: |
-          npm install -g lefthook prettier markdownlint-cli
-          pip install ruff==0.15.12
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) latest /usr/local/bin
+      - name: Arm the gate toolset
+        # ONE definition of CI gate-arming (the arm-gate composite), invoked here
+        # rather than re-listing the tool set inline — the same consolidation that
+        # replaces the #417/#419 inline blocks fleet-wide. Local path ref since
+        # this is release's own repo. (release#416)
+        uses: ./.github/actions/arm-gate
       - name: Run the gate (lefthook run pre-commit --all-files)
         run: lefthook run pre-commit --all-files
 
