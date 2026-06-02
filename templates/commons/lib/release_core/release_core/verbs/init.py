@@ -147,6 +147,11 @@ def _write_file(dest: str, src: str, *, exists: bool) -> None:
         os.close(fd)
         try:
             shutil.copyfile(src, tmp)
+            # mkstemp creates the temp file 0600; an atomic replace must not
+            # silently tighten the managed file's permissions. Carry over the
+            # mode the destination already had (which was itself created
+            # umask-respecting on first materialize).
+            shutil.copymode(dest, tmp)
             os.replace(tmp, dest)
         except BaseException:
             if os.path.exists(tmp):
@@ -177,6 +182,12 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         print("release-core init: not inside a git repo", file=sys.stderr)
         return 1
+    # Resolve a relative RELEASE_HOME against the ORIGINAL cwd before we chdir
+    # into the repo — otherwise a relative override (e.g. RELEASE_HOME=.) would
+    # later resolve against repo_root and miss the release clone.
+    release_home = os.environ.get("RELEASE_HOME")
+    if release_home:
+        os.environ["RELEASE_HOME"] = os.path.abspath(release_home)
     os.chdir(repo_root)
     repo_name = os.path.basename(repo_root)
 
@@ -198,6 +209,7 @@ def main(argv: list[str] | None = None) -> int:
 
     created: list[str] = []
     overwritten: list[str] = []
+    repaired: list[str] = []
     skipped: list[str] = []
     missing_source: list[str] = []
 
@@ -208,16 +220,25 @@ def main(argv: list[str] | None = None) -> int:
             # gate composes no lefthook). Report it; not a failure.
             missing_source.append(dest)
             continue
-        exists = os.path.lexists(dest)
-        if exists and not force:
+        # A dangling symlink (a leftover .release/-style link whose target is
+        # gone) is broken config, not a consumer edit — lexists() reports it as
+        # present, which would silently skip it and leave the repo effectively
+        # uninitialized. Treat it as needing repair: materialize the real file
+        # over it regardless of --force.
+        is_broken_link = os.path.islink(dest) and not os.path.exists(dest)
+        present = os.path.lexists(dest) and not is_broken_link
+        if present and not force:
             skipped.append(dest)
             continue
-        action_list = overwritten if exists else created
+        action_list = repaired if is_broken_link else (overwritten if present else created)
         if dry_run:
             action_list.append(dest)
             continue
         try:
-            _write_file(dest, src, exists=exists)
+            if is_broken_link:
+                # Clear the dangling link so the create path writes a real file.
+                os.unlink(dest)
+            _write_file(dest, src, exists=present)
         except OSError as exc:
             # init's OWN writes must hard-fail (no best-effort swallowing).
             print(f"release-core init: failed to write {dest}: {exc}", file=sys.stderr)
@@ -229,16 +250,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {verb}create  {f}")
     for f in overwritten:
         print(f"  {verb}force   {f} (overwritten)")
+    for f in repaired:
+        print(f"  {verb}repair  {f} (was a broken symlink)")
     for f in skipped:
         print(f"  skip    {f} (exists; --force to overwrite)")
     for f in missing_source:
         print(f"  absent  {f} (not produced for this kind)", file=sys.stderr)
 
-    changed = len(created) + len(overwritten)
+    changed = len(created) + len(overwritten) + len(repaired)
+    # The repaired clause is omitted when nothing was repaired so the common
+    # summary line stays stable (created/overwritten/unchanged).
+    repaired_clause = f", {len(repaired)} repaired" if repaired else ""
     print()
     print(
-        f"summary: {len(created)} created, {len(overwritten)} overwritten, "
-        f"{len(skipped)} unchanged" + (" (dry-run, no writes)" if dry_run else "")
+        f"summary: {len(created)} created, {len(overwritten)} overwritten"
+        f"{repaired_clause}, {len(skipped)} unchanged"
+        + (" (dry-run, no writes)" if dry_run else "")
     )
     if not dry_run:
         if missing_source:

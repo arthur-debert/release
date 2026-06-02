@@ -11,6 +11,9 @@ resolution + Kind/ref failure surfaces are covered by their own tests below.
 
 from __future__ import annotations
 
+import os
+import stat
+
 from release_core import manifest, sync, yamlio
 from release_core.verbs import init
 
@@ -123,6 +126,59 @@ def test_init_force_overwrites_existing(tmp_path, monkeypatch, capsys):
     assert "force   lefthook.yml (overwritten)" in out
     # 6 absent → created, 1 present → overwritten.
     assert "6 created, 1 overwritten, 0 unchanged" in out
+
+
+def test_init_force_preserves_existing_file_mode(tmp_path, monkeypatch, capsys):
+    # The atomic overwrite goes through mkstemp (0600) + os.replace; it must NOT
+    # silently tighten the managed file's permissions. (Gemini review on #424.)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    target = repo / "lefthook.yml"
+    target.write_text("# stale\n")
+    os.chmod(target, 0o644)
+    sources = _fixture_sources(tmp_path)
+    _patch(monkeypatch, repo, sources)
+
+    assert init.main(["--force"]) == 0
+    capsys.readouterr()
+    mode = stat.S_IMODE(os.stat(target).st_mode)
+    assert mode == 0o644, f"force overwrite changed mode to {oct(mode)} (expected 0o644)"
+
+
+def test_init_repairs_a_broken_symlink(tmp_path, monkeypatch, capsys):
+    # A dangling .release/-style symlink at a config path reports as present via
+    # lexists(); init must repair it (materialize the real file over it) even
+    # WITHOUT --force, not silently skip and leave the repo uninitialized.
+    # (Gemini review on #424.)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    link = repo / "lefthook.yml"
+    os.symlink(repo / ".release" / "build" / "lefthook.yml", link)  # target missing
+    assert os.path.islink(link) and not os.path.exists(link)
+    sources = _fixture_sources(tmp_path)
+    _patch(monkeypatch, repo, sources)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert not os.path.islink(link), "broken symlink should be replaced by a real file"
+    assert link.read_text() == "# managed source for lefthook.yml\n"
+    assert "repair  lefthook.yml (was a broken symlink)" in out
+    assert "1 repaired" in out
+
+
+def test_init_resolves_relative_release_home_before_chdir(tmp_path, monkeypatch):
+    # A relative RELEASE_HOME must be resolved against the ORIGINAL cwd, not the
+    # repo root init chdir's into. (Gemini review on #424.)
+    monkeypatch.chdir(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    sources = _fixture_sources(tmp_path)
+    _patch(monkeypatch, repo, sources)
+    monkeypatch.setenv("RELEASE_HOME", "rel/clone")
+
+    assert init.main([]) == 0
+    assert os.environ["RELEASE_HOME"] == str(tmp_path / "rel" / "clone")
 
 
 # --------------------------------------------------------------------------
