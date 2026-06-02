@@ -1,4 +1,4 @@
-# ADR-0003: tooling is distributed by pip-installing a wheel from the gh release
+# ADR-0003: tooling is distributed by pip-installing a wheel from the GitHub release
 
 ## Status
 
@@ -48,7 +48,7 @@ rest of the pipeline already produces, with no extra namespace to own.
 
 ## Decision
 
-**Boot everywhere = `pip install -U <release_core wheel from the gh release>`
+**Boot everywhere = `pip install -U <release_core wheel from the GitHub release>`
 followed by `release-core init`.**
 
 - **Tools become console-scripts.** `pyproject.toml` `[project.scripts]` maps
@@ -56,7 +56,7 @@ followed by `release-core init`.**
   a zero-arg wrapper in `release_core/entrypoints.py` that delegates to the
   verb's existing `main(argv) -> int`. Installing the wheel puts the tools on
   PATH; they are current by virtue of the install.
-- **Transport is a wheel attached to each gh release.** The release pipeline
+- **Transport is a wheel attached to each GitHub release.** The release pipeline
   builds `release_core-<ver>-py3-none-any.whl` and uploads it as a release asset.
   Boot resolves the asset URL for the target release and `pip install -U`s it.
   This is decided; PyPI and `git+https` were considered and rejected for the
@@ -66,7 +66,8 @@ followed by `release-core init`.**
   `lefthook.yml`, lint configs) are written by an idempotent `release-core init`
   subcommand. Init is the seam that replaces sync's _config_ materialization.
 
-The canonical boot resolver — used by both the CI and local-dev contexts:
+The canonical boot resolver — used by both the CI and local-dev contexts
+(`gh` is the GitHub CLI):
 
 ```bash
 url=$(gh api repos/arthur-debert/release/releases/latest \

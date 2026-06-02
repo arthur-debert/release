@@ -4,7 +4,7 @@
 
 Accepted. The package-distribution half is superseded by
 [ADR-0003](0003-pip-install-bootstrap-distribution.md): `release_core` now
-arrives via `pip install` of a wheel from the gh release, not as committed code
+arrives via `pip install` of a wheel from the GitHub release, not as committed code
 materialized into `.release/`. The build-dir + symlink mechanism described here
 still governs any _config_ materialized into the consumer tree.
 
