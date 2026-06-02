@@ -7,9 +7,10 @@
 
 ## The model (one sentence)
 
-Boot everywhere = **`pip install -U <release_core wheel from the gh release>` then
-`release-core init`**. Tools become console-scripts on PATH (current by install);
-`release-core init` materializes the per-repo committed bits.
+Boot everywhere = **`install-release-core [--major vN]` then `release-core init`**
+— the resolver `pip install`s the release_core wheel from the GitHub release
+(`--force-reinstall --no-deps`; see §Transport), then init materializes the
+per-repo committed bits. Tools become console-scripts on PATH (current by install).
 
 ## Transport (DECIDED)
 
