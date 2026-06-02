@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# orc — the fleet orchestrator CLI (propagate, watch, …), resolved through the
+# uv workspace.
+#
+# Why a wrapper: orchestrator depends on `release_gh` as a uv *workspace* member
+# (resolved from the repo root, not installed into the orchestrator subdir venv).
+# So a bare `orchestrator/.venv/bin/orc` fails at import with
+# `ModuleNotFoundError: No module named 'release_gh'`. Going through
+# `uv run --project <release>/orchestrator` resolves the workspace every time, so
+# `orc` Just Works regardless of which .venv happens to be synced.
+#
+# release-DEV tool: it operates the fleet FROM release (opens consumer PRs, etc.).
+# It is NOT synced to consumers — lives only in repo-root bin/ (on PATH via dodot).
+set -euo pipefail
+
+# Repo root = parent of this script's bin/ dir. Resolve $0 to a real path first:
+# if invoked by a bare name, `dirname "$0"` would be `.` and resolve against the
+# cwd instead of the script's location. `command -v` maps a bare name (or path)
+# to its full path; the `*/*` guard means we only trust a resolved PATH, falling
+# back to $0 otherwise.
+_self="$(command -v "$0" 2>/dev/null || true)"
+case "$_self" in */*) : ;; *) _self="$0" ;; esac
+_root="$(cd "$(dirname "$_self")/.." && pwd)"
+
+if ! command -v uv >/dev/null 2>&1; then
+  echo "orc: 'uv' is required (orchestrator resolves release_gh via the uv workspace). Install uv, then re-run." >&2
+  exit 1
+fi
+
+exec uv run --project "${_root}/orchestrator" orc "$@"
