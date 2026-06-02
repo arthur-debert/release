@@ -132,7 +132,7 @@ jobs:
         # `pip install -U release_core && release-core init`.
         run: |
           npm install -g lefthook prettier markdownlint-cli
-          pip install "ruff==0.15.12"
+          pip install "ruff==0.15.12" yamllint
 
       - name: Run umbrella check
         shell: bash
