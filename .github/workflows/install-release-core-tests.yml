@@ -1,0 +1,34 @@
+name: install-release-core tests
+
+# BATS contract suite for bin/install-release-core — the pull-model boot
+# resolver (ADR-0003). Locks the resolution + install model fully offline: a
+# stub `gh` applies the script's real --jq filter to fixture release JSON (so
+# the major-line filter, prerelease/draft exclusion, and exactly-one-wheel
+# guard are tested for real), and a stub `python3` records the pip args so the
+# --force-reinstall --no-deps install model is assertable. No network/auth.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin/install-release-core"
+      - "tests/install-release-core/**"
+      - ".github/workflows/install-release-core-tests.yml"
+  pull_request:
+    paths:
+      - "bin/install-release-core"
+      - "tests/install-release-core/**"
+      - ".github/workflows/install-release-core-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats + jq
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+      - name: Run BATS suite
+        run: bats tests/install-release-core/
