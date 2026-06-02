@@ -13,10 +13,14 @@
 # It is NOT synced to consumers — lives only in repo-root bin/ (on PATH via dodot).
 set -euo pipefail
 
-# Repo root = parent of this script's bin/ dir. bin/orc is a real file on PATH
-# (release/bin is exported directly, not symlink-mirrored), so $0 is its real
-# path and dirname/.. is the release checkout.
-_root="$(cd "$(dirname "$0")/.." && pwd)"
+# Repo root = parent of this script's bin/ dir. Resolve $0 to a real path first:
+# if invoked by a bare name, `dirname "$0"` would be `.` and resolve against the
+# cwd instead of the script's location. `command -v` maps a bare name (or path)
+# to its full path; the `*/*` guard means we only trust a resolved PATH, falling
+# back to $0 otherwise.
+_self="$(command -v "$0" 2>/dev/null || true)"
+case "$_self" in */*) : ;; *) _self="$0" ;; esac
+_root="$(cd "$(dirname "$_self")/.." && pwd)"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "orc: 'uv' is required (orchestrator resolves release_gh via the uv workspace). Install uv, then re-run." >&2
