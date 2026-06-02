@@ -28,6 +28,13 @@ inputs:
     description: 'Pinned ruff version (must match setup-dev-env.sh §0).'
     required: false
     default: '0.15.12'
+  actionlint-version:
+    description: |
+      Pinned actionlint version (NOT "latest"). Same rationale as the pinned ruff
+      and the pip-bootstrap-smoke yq pin: a new actionlint release can add rules
+      that turn an unrelated PR red, so CI pins the version for reproducibility.
+    required: false
+    default: '1.7.7'
 
 runs:
   using: composite
@@ -36,6 +43,7 @@ runs:
       shell: bash
       env:
         RUFF_VERSION: ${{ inputs.ruff-version }}
+        ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
       run: |
         set -euo pipefail
         # npm globals: lefthook + the markdown/format linters.
@@ -58,15 +66,19 @@ runs:
           fi
         fi
         # actionlint: release's own gate lints workflows; ensure it when absent.
-        # The download script drops the binary into /usr/local/bin, which is
-        # root-owned on standard Linux runners — install via sudo when available.
-        # Pipe curl|bash rather than `bash <(...)`: process substitution under
-        # sudo can fail on file-descriptor permissions.
+        # Pinned VERSION (not "latest") for reproducibility — a new actionlint
+        # release can add rules that fail an unrelated PR (same reason ruff/yq are
+        # pinned). The download script drops the binary into /usr/local/bin, which
+        # is root-owned on standard Linux runners — install via sudo when
+        # available. Pipe curl|bash rather than `bash <(...)`: process
+        # substitution under sudo can fail on file-descriptor permissions. The
+        # installer is actionlint's own official script (same curl-from-upstream
+        # pattern as the golangci-lint install in setup-dev-env.sh).
         if ! command -v actionlint >/dev/null 2>&1; then
           _al_url='https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash'
           if command -v sudo >/dev/null 2>&1; then
-            curl -sSfL "$_al_url" | sudo bash -s -- latest /usr/local/bin
+            curl -sSfL "$_al_url" | sudo bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
           else
-            curl -sSfL "$_al_url" | bash -s -- latest /usr/local/bin
+            curl -sSfL "$_al_url" | bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
           fi
         fi
