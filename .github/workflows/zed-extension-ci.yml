@@ -172,6 +172,13 @@ jobs:
         run: |
           npm install -g lefthook prettier markdownlint-cli
           pip install "ruff==0.15.12" yamllint
+          # The shellcheck binary is ambient on ubuntu runners but ABSENT
+          # on macOS (inputs.runner can be macos-*). The gate's shell-lint step
+          # (bin/check-shell) is HARD, so install it when missing rather than
+          # let the gate die on a non-ubuntu runner. brew on macOS; apt fallback.
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            brew install shellcheck || { sudo apt-get update -qq && sudo apt-get install -y shellcheck; }
+          fi
 
       - name: Run umbrella check
         shell: bash
