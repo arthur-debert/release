@@ -317,8 +317,11 @@ jobs:
       # pnpm/action-setup is unverified → it startup-fails the workflow.
       # corepack (bundled with Node) provisions pnpm from the consumer's
       # `packageManager` pin and is policy-clean.
-      - name: Enable corepack (when pnpm lockfile present)
-        if: hashFiles('pnpm-lock.yaml') != ''
+      - name: Enable corepack (when pnpm/yarn lockfile present)
+        # Cover yarn too: setup-node below selects `cache: yarn` when yarn.lock
+        # is present, and that cache step calls the package manager at setup —
+        # so yarn must be on PATH (via corepack) first, same as pnpm.
+        if: hashFiles('pnpm-lock.yaml') != '' || hashFiles('yarn.lock') != ''
         run: corepack enable
 
       - uses: actions/setup-node@v6
