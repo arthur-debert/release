@@ -316,11 +316,14 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
     NEVER stages anything beyond ``written`` (no `git add -A`); a user's other
     staged/unstaged work is left exactly as it was.
     """
-    # Not a git repo / git unavailable → quiet no-op (init still succeeded).
+    # Not a git repo, git unavailable, or an unborn branch (no commits yet) →
+    # quiet no-op (init still succeeded). git_rev_parse_verify("HEAD") is the one
+    # consistent probe across every layout (standard repo, submodule, worktree):
+    # it is True iff a real HEAD commit exists. A pathspec-scoped commit cannot
+    # run on an unborn branch (`fatal: cannot do partial commit during
+    # bootstrap`), so gating on HEAD here also avoids that noisy failure.
     try:
-        if not os.path.isdir(os.path.join(repo_root, ".git")) and not gh.git_rev_parse_verify(
-            "HEAD", cwd=repo_root
-        ):
+        if not gh.git_rev_parse_verify("HEAD", cwd=repo_root):
             return
     except Exception:
         return

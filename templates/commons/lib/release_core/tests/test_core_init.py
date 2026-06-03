@@ -798,6 +798,33 @@ def test_commit_in_non_git_dir_is_safe_no_op(tmp_path, monkeypatch, capsys):
 
 
 @_needs_git
+def test_commit_on_unborn_branch_is_safe_no_op(tmp_path, monkeypatch, capsys):
+    # A freshly `git init`'d repo with NO commits yet (unborn HEAD). A
+    # pathspec-scoped commit cannot run there ("partial commit during
+    # bootstrap"); init must skip silently and still succeed — consistently
+    # across layouts (Gemini review on #443).
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "Test")
+    # No initial commit → HEAD is unborn.
+    sources = _fixture_sources(tmp_path)
+    _patch(monkeypatch, repo, sources)
+
+    rc = init.main(["--commit"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    # Files were still materialized.
+    for dest in init.CONFIG_FILES:
+        assert (repo / dest).is_file()
+    # No commit, and no noisy "cannot do partial commit" failure surfaced.
+    assert "committed" not in captured.out
+    assert "bootstrap" not in captured.err
+    assert "--commit skipped" not in captured.err
+
+
+@_needs_git
 def test_push_only_on_default_branch(tmp_path, monkeypatch, capsys):
     # On a feature branch, --push must keep the commit local (no push attempt).
     repo = _init_git_repo(tmp_path / "repo", default_branch="main")
