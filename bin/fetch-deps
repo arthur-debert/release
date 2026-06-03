@@ -12,10 +12,10 @@
 # decouples the port from the pull-model distribution. Network I/O still
 # shells out to `curl` (preserving the auth-header semantics and the BATS
 # curl-mock contract); extraction shells out to `tar`/`unzip`. `deps.json`
-# is parsed with the stdlib `json` module, so `jq` is no longer required
-# for the common cases — it is only needed (and only checked for) when a
-# dep uses manifest iteration (`from-manifest`/`for-each`), whose value is
-# an arbitrary jq expression. sha256 verification uses stdlib `hashlib`.
+# is parsed with the stdlib `json` module, so `jq` is no longer required at
+# all: the manifest-iteration `for-each` is a dotted path ending in `[]`
+# (the only shape the fleet uses), evaluated in-process. sha256 verification
+# uses stdlib `hashlib`.
 """fetch-deps — download dependencies declared in deps.json."""
 
 from __future__ import annotations
@@ -531,6 +531,46 @@ def fetch_url(dep: str, cfg: dict, if_missing: bool, target: str, work_dir: str)
     return True
 
 
+# ─── for-each evaluation (jq-free) ─────────────────────────
+
+# `for-each` selects the array to iterate. In practice — and across the entire
+# fleet — it is always a dotted path ending in `[]` (`.grammars[]`,
+# `.items[]`, `.a.b[]`). We evaluate that subset directly so no jq engine is
+# needed; expressions outside it raise ForEachError with a clear message.
+_FOR_EACH_RE = re.compile(r"^\.((?:[A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z_][A-Za-z0-9_]*)*)?\[\]$")
+
+
+class ForEachError(ValueError):
+    """A for-each expression outside the supported subset, or not selecting
+    an array."""
+
+
+def eval_for_each(expr: str, data: object) -> list:
+    """Return the list selected by a `.a.b[]`-style for-each expression.
+
+    A path that doesn't resolve (missing key) yields an empty list, matching
+    "nothing to iterate". A resolved-but-non-array target, or syntax beyond
+    the supported subset, raises ForEachError.
+    """
+    m = _FOR_EACH_RE.match(expr.strip())
+    if not m:
+        raise ForEachError(
+            f"unsupported for-each expression '{expr}' "
+            "(supported: a dotted path ending in [], e.g. .grammars[])"
+        )
+    path = m.group(1)
+    cur = data
+    if path:
+        for key in path.split("."):
+            if isinstance(cur, dict) and key in cur:
+                cur = cur[key]
+            else:
+                return []
+    if not isinstance(cur, list):
+        raise ForEachError(f"for-each '{expr}' did not select an array")
+    return cur
+
+
 def fetch_iter(dep: str, cfg: dict, if_missing: bool, target: str, work_dir: str) -> bool:
     manifest_tpl = str(cfg.get("from-manifest") or "")
     for_each = str(cfg.get("for-each") or "")
@@ -563,28 +603,23 @@ def fetch_iter(dep: str, cfg: dict, if_missing: bool, target: str, work_dir: str
         return fail_dep(f"{dep}: manifest not found: {manifest}")
     try:
         with open(manifest, encoding="utf-8") as fh:
-            json.load(fh)
+            manifest_data = json.load(fh)
     except (OSError, ValueError):
         return fail_dep(f"{dep}: invalid JSON in manifest: {manifest}")
 
-    # `for-each` is an arbitrary jq expression — the one place that genuinely
-    # needs jq. Check for it lazily (only iteration-mode deps pay the cost).
-    if shutil.which("jq") is None:
-        raise die("jq is required for manifest iteration (from-manifest) but not found")
-
-    cp = subprocess.run(["jq", "-c", for_each, manifest], capture_output=True, text=True)
-    if cp.returncode != 0:
-        return fail_dep(f"{dep}: invalid for-each expression '{for_each}': {cp.stderr.strip()}")
+    # Evaluate `for-each` in-process (no jq). It is always a dotted path
+    # ending in `[]` across the whole fleet (e.g. `.grammars[]`); anything
+    # outside that subset raises a clear error rather than silently misbehaving.
+    try:
+        items = eval_for_each(for_each, manifest_data)
+    except ForEachError as e:
+        return fail_dep(f"{dep}: {e}")
 
     info(f"{dep}: iterating {for_each} over {manifest}")
 
     item_failed = 0
-    for line in cp.stdout.splitlines():
-        if not line:
-            continue
-        try:
-            item = json.loads(line)
-        except ValueError:
+    for item in items:
+        if not isinstance(item, dict):
             item = {}
         if not fetch_iter_item(
             dep,
@@ -748,7 +783,7 @@ deps.json — manifest iteration shape:
   {
     "dep-name": {
       "from-manifest": "resources/manifest.json",  (path on disk, templated)
-      "for-each":      ".items[]",                  (jq expression)
+      "for-each":      ".items[]",                  (array path, ends in [])
       "repo":          "{{.repo}}",                 (per-item templates)
       "version":       "{{.version}}",
       "asset":         "{{.asset_name}}",
