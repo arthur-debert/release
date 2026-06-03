@@ -25,6 +25,11 @@ on:
 
 jobs:
   request:
+    # Skip on Dependabot PRs: their workflow runs use the separate Dependabot
+    # secret store, so `secrets.gh_token` is empty and `gh pr edit` exits 4 —
+    # painting every Dependabot PR's checks red on a non-blocking job. Dependabot
+    # PRs don't need a Copilot review anyway. Skipped (not failed) keeps them green.
+    if: github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -32,6 +37,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.gh_token }}
         run: |
+          # Defensive: if the token is somehow absent (e.g. an unexpected
+          # tokenless context), no-op rather than exit 4 with a red check.
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "no gh_token available — skipping Copilot review request" >&2
+            exit 0
+          fi
           gh pr edit ${{ inputs.pr_number }} \
             --repo ${{ github.repository }} \
             --add-reviewer @copilot
