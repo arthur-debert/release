@@ -317,10 +317,17 @@ def sha256_of(path: str) -> str | None:
 
 def extract_archive(archive: str, dest: str) -> bool:
     os.makedirs(dest, exist_ok=True)
-    if archive.endswith((".tar.gz", ".tgz")):
-        return subprocess.run(["tar", "-xzf", archive, "-C", dest]).returncode == 0
-    if archive.endswith(".zip"):
-        return subprocess.run(["unzip", "-qo", archive, "-d", dest]).returncode == 0
+    try:
+        if archive.endswith((".tar.gz", ".tgz")):
+            return subprocess.run(["tar", "-xzf", archive, "-C", dest]).returncode == 0
+        if archive.endswith(".zip"):
+            return subprocess.run(["unzip", "-qo", archive, "-d", dest]).returncode == 0
+    except FileNotFoundError:
+        # Missing tar/unzip — fail the dep cleanly instead of a traceback
+        # (the bash `tar`/`unzip` would exit 127 and fail the dep too).
+        cmd = "tar" if archive.endswith((".tar.gz", ".tgz")) else "unzip"
+        print(f"{PROG}: required command not found: {cmd}", file=sys.stderr)
+        return False
     print(f"{PROG}: unsupported archive format: {archive}", file=sys.stderr)
     return False
 
@@ -339,6 +346,7 @@ def extract_root(directory: str) -> str:
 
 def find_binary(root: str, name: str) -> str | None:
     for dirpath, _dirs, files in os.walk(root):
+        _dirs.sort()  # deterministic descent order across platforms
         for f in sorted(files):
             if f == name:
                 p = os.path.join(dirpath, f)
@@ -349,23 +357,14 @@ def find_binary(root: str, name: str) -> str | None:
 
 def _find_by_basename(root: str, base: str) -> str | None:
     for dirpath, _dirs, files in os.walk(root):
+        _dirs.sort()  # deterministic descent order across platforms
         for f in sorted(files):
             if f == base:
                 return os.path.join(dirpath, f)
-        for d in sorted(_dirs):
+        for d in _dirs:
             if d == base:
                 return os.path.join(dirpath, d)
     return None
-
-
-def _copy_into(src: str, dst_dir: str) -> None:
-    """cp -r semantics: a dir's *contents* go under dst_dir/<basename>; a file
-    is copied into dst_dir."""
-    if os.path.isdir(src):
-        target = os.path.join(dst_dir, os.path.basename(src.rstrip("/")))
-        shutil.copytree(src, target, dirs_exist_ok=True)
-    else:
-        shutil.copy(src, dst_dir)
 
 
 def apply_extract_map(root: str, extract_map: dict) -> bool:

@@ -122,7 +122,8 @@ def resolve_arch(arch_override: str) -> str:
 def find_executable_named(root: str, name: str) -> str | None:
     """First executable (u+x) regular file named <name> under root."""
     for dirpath, _dirs, files in os.walk(root):
-        for f in files:
+        _dirs.sort()  # deterministic descent order across platforms
+        for f in sorted(files):
             if f != name:
                 continue
             p = os.path.join(dirpath, f)
@@ -133,6 +134,7 @@ def find_executable_named(root: str, name: str) -> str | None:
 
 def find_first_executable(root: str) -> str | None:
     for dirpath, _dirs, files in os.walk(root):
+        _dirs.sort()  # deterministic descent order across platforms
         for f in sorted(files):
             p = os.path.join(dirpath, f)
             if os.path.isfile(p) and (os.stat(p).st_mode & 0o100):
@@ -143,16 +145,20 @@ def find_first_executable(root: str) -> str | None:
 def extract_archive(archive: str, dest: str) -> None:
     os.makedirs(dest, exist_ok=True)
     low = archive.lower()
-    if low.endswith((".tar.gz", ".tgz")):
-        if subprocess.run(["tar", "-xzf", archive, "-C", dest]).returncode != 0:
-            raise Fail(4, "tar extract failed")
-    elif low.endswith(".zip"):
-        if not have("unzip"):
-            raise Fail(1, "unzip needed for .zip archives")
-        if subprocess.run(["unzip", "-q", archive, "-d", dest]).returncode != 0:
-            raise Fail(4, "unzip failed")
-    else:
-        raise Fail(4, f"unsupported archive type: {archive}")
+    try:
+        if low.endswith((".tar.gz", ".tgz")):
+            if subprocess.run(["tar", "-xzf", archive, "-C", dest]).returncode != 0:
+                raise Fail(4, "tar extract failed")
+        elif low.endswith(".zip"):
+            if not have("unzip"):
+                raise Fail(1, "unzip needed for .zip archives")
+            if subprocess.run(["unzip", "-q", archive, "-d", dest]).returncode != 0:
+                raise Fail(4, "unzip failed")
+        else:
+            raise Fail(4, f"unsupported archive type: {archive}")
+    except FileNotFoundError:
+        cmd = "tar" if low.endswith((".tar.gz", ".tgz")) else "unzip"
+        raise Fail(1, f"required command not found: {cmd}") from None
 
 
 def run(argv: list[str]) -> int:
