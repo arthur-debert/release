@@ -890,8 +890,11 @@ def test_push_happens_on_clean_default_branch(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "pushed to main." in out
-    # The bare origin now has the managed commit.
-    assert "chore(release)" in _git(bare, "log", "-1", "--pretty=format:%s")
+    # The bare origin now has the managed commit. Read the explicit `main` ref,
+    # not the bare's default HEAD: `git init --bare` points HEAD at
+    # init.defaultBranch (often `master` on CI), so `git log` with no ref hits an
+    # empty branch and exits 128 even though the push to `main` succeeded.
+    assert "chore(release)" in _git(bare, "log", "-1", "--pretty=format:%s", "main")
 
 
 @_needs_git
