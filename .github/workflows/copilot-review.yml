@@ -29,7 +29,7 @@ jobs:
     # secret store, so `secrets.gh_token` is empty and `gh pr edit` exits 4 —
     # painting every Dependabot PR's checks red on a non-blocking job. Dependabot
     # PRs don't need a Copilot review anyway. Skipped (not failed) keeps them green.
-    if: github.actor != 'dependabot[bot]' && github.actor != 'dependabot-preview[bot]'
+    if: (github.event.pull_request.user.login || '') != 'dependabot[bot]' && (github.event.pull_request.user.login || '') != 'dependabot-preview[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
