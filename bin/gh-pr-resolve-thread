@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 
@@ -103,13 +104,21 @@ def main(argv: list[str]) -> int:
         print(f"error: comment id must be numeric (got: {comment_id})", file=sys.stderr)
         return 64
 
+    if shutil.which("gh") is None:
+        print("error: gh is required but not found", file=sys.stderr)
+        return 1
+
     cp = _gh(["repo", "view", "--json", "owner,name"])
     if cp.returncode != 0:
         sys.stderr.write(cp.stderr)
         return 1
-    repo = json.loads(cp.stdout)
-    owner = repo["owner"]["login"]
-    name = repo["name"]
+    try:
+        repo = json.loads(cp.stdout)
+        owner = repo["owner"]["login"]
+        name = repo["name"]
+    except (ValueError, KeyError, TypeError):
+        print("error: could not parse repo info from gh", file=sys.stderr)
+        return 1
 
     # Find the thread containing this comment.
     cp = _gh(
@@ -130,11 +139,22 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(cp.stderr)
         return 1
 
-    data = json.loads(cp.stdout)
-    nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    try:
+        data = json.loads(cp.stdout)
+        repository = data.get("data", {}).get("repository") or {}
+        pull_request = repository.get("pullRequest") or {}
+        nodes = pull_request.get("reviewThreads", {}).get("nodes") or []
+    except (ValueError, AttributeError, TypeError):
+        print("error: could not parse review threads from gh", file=sys.stderr)
+        return 1
+
     cid = int(comment_id)
     thread = next(
-        (t for t in nodes if any(c.get("databaseId") == cid for c in t["comments"]["nodes"])),
+        (
+            t
+            for t in nodes
+            if any(c.get("databaseId") == cid for c in t.get("comments", {}).get("nodes", []))
+        ),
         None,
     )
 
@@ -145,7 +165,7 @@ def main(argv: list[str]) -> int:
         )
         return 1
 
-    thread_id = thread["id"]
+    thread_id = thread.get("id")
     if thread.get("isResolved") is True:
         print(f"already resolved: thread {thread_id} ({owner}/{name}#{pr})")
         return 0
