@@ -1,660 +1,739 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # IMPORTANT: this file MUST stay a real file, never a symlink. Consumers
 # and electron-app.yml fetch it via raw.githubusercontent.com, which
 # serves a symlink blob as its target *string* (not the script) — that
 # broke five consumers' CI when this was briefly symlinked (release#317).
 # A CI guard in .github/workflows/ci.yml enforces this.
-set -euo pipefail
+#
+# Self-contained, stdlib-only Python (shell→Python port, see
+# docs/proposals/shell-to-python.md). Fetched standalone via
+# raw.githubusercontent.com and run with NO release_core present, so it
+# imports nothing beyond the stdlib and is NOT a release_core shim — this
+# decouples the port from the pull-model distribution. Network I/O still
+# shells out to `curl` (preserving the auth-header semantics and the BATS
+# curl-mock contract); extraction shells out to `tar`/`unzip`. `deps.json`
+# is parsed with the stdlib `json` module, so `jq` is no longer required at
+# all: the manifest-iteration `for-each` is a dotted path ending in `[]`
+# (the only shape the fleet uses), evaluated in-process. sha256 verification
+# uses stdlib `hashlib`.
+"""fetch-deps — download dependencies declared in deps.json."""
 
-VERSION="0.2.0"
-PROG="fetch-deps"
+from __future__ import annotations
 
-die()  { printf '%s: %s\n' "$PROG" "$*" >&2; exit 1; }
-info() { printf '  %s\n' "$*"; }
-ok()   { printf '  ✓ %s\n' "$*"; }
-skip() { printf '  ⊘ %s\n' "$*"; }
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+VERSION = "0.2.0"
+PROG = "fetch-deps"
+
+
+class Die(SystemExit):
+    """Hard exit (config error / integrity failure) — never soft-swallowed."""
+
+
+def die(msg: str) -> Die:
+    print(f"{PROG}: {msg}", file=sys.stderr)
+    return Die(1)
+
+
+def info(msg: str) -> None:
+    print(f"  {msg}")
+
+
+def ok(msg: str) -> None:
+    print(f"  ✓ {msg}")
+
+
+def skip(msg: str) -> None:
+    print(f"  ⊘ {msg}")
+
+
+def fail_dep(msg: str) -> bool:
+    """Soft failure — print and report False so the caller can decide."""
+    print(f"{PROG}: {msg}", file=sys.stderr)
+    return False
+
 
 # ─── Platform detection ───────────────────────────────────
 
-detect_target() {
-    local os arch
-    case "$(uname -s)" in
-        Linux)                          os="unknown-linux-gnu" ;;
-        Darwin)                         os="apple-darwin" ;;
-        MINGW*|MSYS*|CYGWIN*|Windows*) os="pc-windows-msvc" ;;
-        *)                              die "unsupported OS: $(uname -s)" ;;
-    esac
-    case "$(uname -m)" in
-        x86_64)         arch="x86_64" ;;
-        aarch64|arm64)  arch="aarch64" ;;
-        *)              die "unsupported arch: $(uname -m)" ;;
-    esac
-    printf '%s-%s' "$arch" "$os"
-}
 
-target_os() {
-    case "$1" in
-        *linux*)   echo "linux" ;;
-        *darwin*)  echo "macos" ;;
-        *windows*) echo "windows" ;;
-        *)         echo "unknown" ;;
-    esac
-}
+def detect_target() -> str:
+    sysname = platform.system()
+    if sysname == "Linux":
+        os_part = "unknown-linux-gnu"
+    elif sysname == "Darwin":
+        os_part = "apple-darwin"
+    elif sysname == "Windows" or sysname.startswith(("MINGW", "MSYS", "CYGWIN")):
+        os_part = "pc-windows-msvc"
+    else:
+        raise die(f"unsupported OS: {sysname}")
 
-target_arch() {
-    case "$1" in
-        x86_64*)         echo "x86_64" ;;
-        aarch64*|arm64*) echo "aarch64" ;;
-        *)               echo "unknown" ;;
-    esac
-}
+    mach = platform.machine()
+    if mach in ("x86_64", "AMD64"):
+        arch = "x86_64"
+    elif mach in ("aarch64", "arm64", "ARM64"):
+        arch = "aarch64"
+    else:
+        raise die(f"unsupported arch: {mach}")
+    return f"{arch}-{os_part}"
 
-# Node/Electron platform naming (distinct from `target_os` which uses
-# Rust-style names). Used by {{node_platform}} for paths like
-# electron-builder's `extraResource: resources/bin/<node_platform>-<node_arch>`.
-target_node_platform() {
-    case "$1" in
-        *linux*)   echo "linux" ;;
-        *darwin*)  echo "darwin" ;;
-        *windows*) echo "win32" ;;
-        *)         echo "unknown" ;;
-    esac
-}
 
-# Node/Electron architecture naming (distinct from `target_arch` which
-# uses Rust-style names). Used by {{node_arch}}.
-target_node_arch() {
-    case "$1" in
-        x86_64*)         echo "x64" ;;
-        aarch64*|arm64*) echo "arm64" ;;
-        *)               echo "unknown" ;;
-    esac
-}
+def target_os(t: str) -> str:
+    if "linux" in t:
+        return "linux"
+    if "darwin" in t:
+        return "macos"
+    if "windows" in t:
+        return "windows"
+    return "unknown"
 
-archive_ext() {
-    case "$1" in
-        *windows*) echo ".zip" ;;
-        *)         echo ".tar.gz" ;;
-    esac
-}
 
-is_archive() {
-    case "$1" in
-        *.tar.gz|*.tgz|*.zip) return 0 ;;
-        *)                    return 1 ;;
-    esac
-}
+def target_arch(t: str) -> str:
+    if t.startswith("x86_64"):
+        return "x86_64"
+    if t.startswith("aarch64") or t.startswith("arm64"):
+        return "aarch64"
+    return "unknown"
+
+
+def target_node_platform(t: str) -> str:
+    if "linux" in t:
+        return "linux"
+    if "darwin" in t:
+        return "darwin"
+    if "windows" in t:
+        return "win32"
+    return "unknown"
+
+
+def target_node_arch(t: str) -> str:
+    if t.startswith("x86_64"):
+        return "x64"
+    if t.startswith("aarch64") or t.startswith("arm64"):
+        return "arm64"
+    return "unknown"
+
+
+def archive_ext(t: str) -> str:
+    return ".zip" if "windows" in t else ".tar.gz"
+
+
+def is_archive(name: str) -> bool:
+    return name.endswith((".tar.gz", ".tgz", ".zip"))
+
 
 # ─── Template expansion ───────────────────────────────────
 
-# Cache target-derived values. The target is fixed for the whole
-# script run; expanding 6 substitutions per dep via subshells adds up
-# (Bash subshells are noticeably slow on macOS / Git-Bash). main()
-# calls `cache_target_vars "$target"` once before the fetch loop.
-_OS=""
-_ARCH=""
-_NODE_PLATFORM=""
-_NODE_ARCH=""
-_EXT=""
+# Cache target-derived values for the whole run (target is fixed).
+_CACHE: dict[str, str] = {}
 
-cache_target_vars() {
-    local target="$1"
-    _OS="$(target_os "$target")"
-    _ARCH="$(target_arch "$target")"
-    _NODE_PLATFORM="$(target_node_platform "$target")"
-    _NODE_ARCH="$(target_node_arch "$target")"
-    _EXT="$(archive_ext "$target")"
-}
 
-expand_template() {
-    local tpl="$1" target="$2"
-    local result="$tpl"
-    result="${result//\{\{target\}\}/$target}"
-    result="${result//\{\{os\}\}/$_OS}"
-    result="${result//\{\{arch\}\}/$_ARCH}"
-    result="${result//\{\{node_platform\}\}/$_NODE_PLATFORM}"
-    result="${result//\{\{node_arch\}\}/$_NODE_ARCH}"
-    result="${result//\{\{ext\}\}/$_EXT}"
-    printf '%s' "$result"
-}
+def cache_target_vars(target: str) -> None:
+    _CACHE["os"] = target_os(target)
+    _CACHE["arch"] = target_arch(target)
+    _CACHE["node_platform"] = target_node_platform(target)
+    _CACHE["node_arch"] = target_node_arch(target)
+    _CACHE["ext"] = archive_ext(target)
 
-# Expand {{.field}} placeholders against a JSON object, then expand
-# global {{target}} / {{os}} / ... placeholders. Used by the
-# manifest-iteration mode (#309).
-expand_item_template() {
-    local tpl="$1" item="$2" target="$3"
-    local interim
-    interim="$(jq -nr --arg tpl "$tpl" --argjson obj "$item" '
-        $tpl | gsub("\\{\\{\\.(?<f>[a-zA-Z_][a-zA-Z0-9_]*)\\}\\}";
-                    ($obj[.f] // "" | tostring))
-    ' | tr -d '\r')"
-    expand_template "$interim" "$target"
-}
+
+def expand_template(tpl: str, target: str) -> str:
+    result = tpl
+    result = result.replace("{{target}}", target)
+    result = result.replace("{{os}}", _CACHE["os"])
+    result = result.replace("{{arch}}", _CACHE["arch"])
+    result = result.replace("{{node_platform}}", _CACHE["node_platform"])
+    result = result.replace("{{node_arch}}", _CACHE["node_arch"])
+    result = result.replace("{{ext}}", _CACHE["ext"])
+    return result
+
+
+def _jq_tostring(v: object) -> str:
+    """Mimic jq's `// "" | tostring` for a manifest-item field."""
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, str):
+        return v
+    if isinstance(v, (int, float)):
+        return str(v)
+    return json.dumps(v, separators=(",", ":"))
+
+
+_ITEM_RE = re.compile(r"\{\{\.([a-zA-Z_][a-zA-Z0-9_]*)\}\}")
+
+
+def expand_item_template(tpl: str, item: dict, target: str) -> str:
+    interim = _ITEM_RE.sub(lambda m: _jq_tostring(item.get(m.group(1))), tpl)
+    return expand_template(interim, target)
+
 
 # ─── Stamp management ─────────────────────────────────────
 
-STAMP_DIR=".deps"
+STAMP_DIR = ".deps"
 
-stamp_path() { printf '%s/%s.stamp' "$STAMP_DIR" "$1"; }
 
-stamp_matches() {
-    local key="$1" expected="$2"
-    local stamp_file recorded
-    stamp_file="$(stamp_path "$key")"
-    [[ -f "$stamp_file" ]] || return 1
-    read -r recorded < "$stamp_file" || true
-    [[ "$recorded" == "$expected" ]]
-}
+def stamp_path(key: str) -> str:
+    return os.path.join(STAMP_DIR, f"{key}.stamp")
 
-stamp_write() {
-    local key="$1" content="$2"
-    local stamp_file
-    stamp_file="$(stamp_path "$key")"
-    mkdir -p "${stamp_file%/*}"
-    printf '%s' "$content" > "$stamp_file"
-}
+
+def stamp_matches(key: str, expected: str) -> bool:
+    p = stamp_path(key)
+    if not os.path.isfile(p):
+        return False
+    try:
+        with open(p, encoding="utf-8") as fh:
+            recorded = fh.readline().rstrip("\n")
+    except OSError:
+        return False
+    return recorded == expected
+
+
+def stamp_write(key: str, content: str) -> None:
+    p = stamp_path(key)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as fh:
+        fh.write(content)
+
 
 # ─── Download ──────────────────────────────────────────────
 
-_auth_token() {
-    printf '%s' "${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-}
 
-# Plain HTTPS download. Sends auth header only for github.com hosts so
-# arbitrary URLs (HuggingFace, CDNs) don't leak tokens.
-download_url() {
-    local url="$1" dest="$2"
-    local token="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
-    # Pull "host" out of "scheme://host/...". Strips userinfo and port.
-    local rest="${url#*://}"
-    local host="${rest%%/*}"
-    host="${host#*@}"
-    host="${host%%:*}"
+def _auth_token() -> str:
+    return os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
 
-    if [[ -n "$token" ]] && \
-       { [[ "$host" == "github.com" ]] || \
-         [[ "$host" == "raw.githubusercontent.com" ]] || \
-         [[ "$host" == "api.github.com" ]]; }; then
-        if ! curl -fsSL -H "Authorization: Bearer $token" -o "$dest" "$url"; then
-            printf '%s: download failed: %s\n' "$PROG" "$url" >&2
-            return 1
-        fi
-    else
-        if ! curl -fsSL -o "$dest" "$url"; then
-            printf '%s: download failed: %s\n' "$PROG" "$url" >&2
-            return 1
-        fi
-    fi
-}
 
-# Download a GitHub release asset. For private repos the browser-style URL
-# (github.com/.../releases/download/...) returns 404 even with an auth
-# header because the 302 redirect strips Authorization. Use the API
-# endpoint instead: look up the asset ID via the releases/tags endpoint,
-# then download with Accept: application/octet-stream.
-#
-# Returns non-zero on failure so callers can decide whether to soft-fail
-# or hard-fail. Prints errors to stderr.
-download_release_asset() {
-    local repo="$1" version="$2" asset="$3" dest="$4"
-    local token
-    token="$(_auth_token)"
+def _curl(args: list[str], capture: bool = False) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["curl", *args],
+        capture_output=capture,
+        text=True,
+    )
 
-    if [[ -n "$token" ]]; then
-        # Authenticated path -- works for both public and private repos.
-        local api_url="https://api.github.com/repos/$repo/releases/tags/$version"
-        local asset_url
-        if ! asset_url="$(curl -fsSL \
-            -H "Authorization: Bearer $token" \
-            "$api_url" \
-            | jq -r --arg name "$asset" '.assets[] | select(.name == $name) | .url' | tr -d '\r')"; then
-            printf '%s: failed to look up release %s for %s\n' "$PROG" "$version" "$repo" >&2
-            return 1
-        fi
 
-        if [[ -z "$asset_url" || "$asset_url" == "null" ]]; then
-            printf '%s: %s@%s: asset %q not found in release\n' "$PROG" "$repo" "$version" "$asset" >&2
-            return 1
-        fi
+def download_url(url: str, dest: str) -> bool:
+    """Plain HTTPS download. Auth header only for github.com hosts so
+    arbitrary URLs (HuggingFace, CDNs) don't leak tokens."""
+    token = _auth_token()
+    rest = url.split("://", 1)[-1]
+    host = rest.split("/", 1)[0]
+    host = host.split("@")[-1].split(":")[0]
 
-        if ! curl -fsSL \
-            -H "Authorization: Bearer $token" \
-            -H "Accept: application/octet-stream" \
-            -o "$dest" \
-            "$asset_url"; then
-            printf '%s: download failed: %s from %s@%s\n' "$PROG" "$asset" "$repo" "$version" >&2
-            return 1
-        fi
-    else
-        # Unauthenticated -- public repos only.
-        local url="https://github.com/$repo/releases/download/$version/$asset"
-        if ! curl -fsSL -o "$dest" "$url"; then
-            printf '%s: download failed: %s (private repo? set GH_TOKEN)\n' "$PROG" "$url" >&2
-            return 1
-        fi
-    fi
-}
+    github_hosts = {"github.com", "raw.githubusercontent.com", "api.github.com"}
+    if token and host in github_hosts:
+        cp = _curl(["-fsSL", "-H", f"Authorization: Bearer {token}", "-o", dest, url])
+    else:
+        cp = _curl(["-fsSL", "-o", dest, url])
+    if cp.returncode != 0:
+        print(f"{PROG}: download failed: {url}", file=sys.stderr)
+        return False
+    return True
 
-# Download a raw file from raw.githubusercontent.com — used by
-# `raw-files` in iteration mode (#309).
-download_raw_github() {
-    local repo="$1" version="$2" path="$3" dest="$4"
-    download_url "https://raw.githubusercontent.com/$repo/$version/$path" "$dest"
-}
 
-sha256_of() {
-    local file="$1" sum
-    if command -v sha256sum >/dev/null 2>&1; then
-        sum="$(sha256sum "$file")"
-    elif command -v shasum >/dev/null 2>&1; then
-        sum="$(shasum -a 256 "$file")"
-    else
-        return 1
-    fi
-    printf '%s' "${sum%% *}"
-}
+def download_release_asset(repo: str, version: str, asset: str, dest: str) -> bool:
+    """Download a GitHub release asset. For private repos the browser-style
+    URL strips Authorization on the 302, so when a token is present we resolve
+    the asset URL via the API and download with Accept: octet-stream."""
+    token = _auth_token()
+    if token:
+        api_url = f"https://api.github.com/repos/{repo}/releases/tags/{version}"
+        cp = _curl(["-fsSL", "-H", f"Authorization: Bearer {token}", api_url], capture=True)
+        if cp.returncode != 0:
+            print(
+                f"{PROG}: failed to look up release {version} for {repo}",
+                file=sys.stderr,
+            )
+            return False
+        asset_url = ""
+        try:
+            payload = json.loads(cp.stdout)
+            for a in payload.get("assets", []):
+                if a.get("name") == asset:
+                    asset_url = a.get("url") or ""
+                    break
+        except ValueError:
+            asset_url = ""
+        if not asset_url or asset_url == "null":
+            print(
+                f"{PROG}: {repo}@{version}: asset {asset} not found in release",
+                file=sys.stderr,
+            )
+            return False
+        cp = _curl(
+            [
+                "-fsSL",
+                "-H",
+                f"Authorization: Bearer {token}",
+                "-H",
+                "Accept: application/octet-stream",
+                "-o",
+                dest,
+                asset_url,
+            ]
+        )
+        if cp.returncode != 0:
+            print(
+                f"{PROG}: download failed: {asset} from {repo}@{version}",
+                file=sys.stderr,
+            )
+            return False
+        return True
+    else:
+        url = f"https://github.com/{repo}/releases/download/{version}/{asset}"
+        cp = _curl(["-fsSL", "-o", dest, url])
+        if cp.returncode != 0:
+            print(
+                f"{PROG}: download failed: {url} (private repo? set GH_TOKEN)",
+                file=sys.stderr,
+            )
+            return False
+        return True
+
+
+def download_raw_github(repo: str, version: str, path: str, dest: str) -> bool:
+    return download_url(f"https://raw.githubusercontent.com/{repo}/{version}/{path}", dest)
+
+
+def sha256_of(path: str) -> str | None:
+    try:
+        h = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+    except OSError:
+        return None
+
 
 # ─── Extraction ────────────────────────────────────────────
 
-extract_archive() {
-    local archive="$1" dest="$2"
-    mkdir -p "$dest"
-    case "$archive" in
-        *.tar.gz|*.tgz) tar -xzf "$archive" -C "$dest" || return 1 ;;
-        *.zip)          unzip -qo "$archive" -d "$dest" || return 1 ;;
-        *)              printf '%s: unsupported archive format: %s\n' "$PROG" "$archive" >&2; return 1 ;;
-    esac
-}
 
-extract_root() {
-    local dir="$1"
-    local count=0 single=""
-    for entry in "$dir"/*; do
-        count=$((count + 1))
-        single="$entry"
-    done
-    if [[ $count -eq 1 && -d "$single" ]]; then
-        printf '%s' "$single"
-    else
-        printf '%s' "$dir"
-    fi
-}
+def extract_archive(archive: str, dest: str) -> bool:
+    os.makedirs(dest, exist_ok=True)
+    try:
+        if archive.endswith((".tar.gz", ".tgz")):
+            return subprocess.run(["tar", "-xzf", archive, "-C", dest]).returncode == 0
+        if archive.endswith(".zip"):
+            return subprocess.run(["unzip", "-qo", archive, "-d", dest]).returncode == 0
+    except FileNotFoundError:
+        # Missing tar/unzip — fail the dep cleanly instead of a traceback
+        # (the bash `tar`/`unzip` would exit 127 and fail the dep too).
+        cmd = "tar" if archive.endswith((".tar.gz", ".tgz")) else "unzip"
+        print(f"{PROG}: required command not found: {cmd}", file=sys.stderr)
+        return False
+    print(f"{PROG}: unsupported archive format: {archive}", file=sys.stderr)
+    return False
 
-find_binary() {
-    local root="$1" name="$2"
-    find "$root" -name "$name" -type f 2>/dev/null | head -1 || true
-}
 
-# Apply a {src: dst} extract map against an unpacked archive root.
-# Returns non-zero if any entry could not be applied (missing source,
-# or a failed mkdir/cp) so the caller can fail the dep loudly instead
-# of reporting a false success.
-apply_extract_map() {
-    local root="$1" extract_map="$2"
-    local src dst found
-    local failed=0
-    while IFS=$'\t' read -r src dst; do
-        # Defense-in-depth against CRLF: jq on Windows emits \r\n and
-        # command substitution only strips \r from the LAST entry, so
-        # all-but-last dst would otherwise carry a trailing \r and
-        # create a bogus "<dst>\r/" directory. Belt-and-braces with the
-        # `| tr -d '\r'` on the @tsv builders that feed this map.
-        src="${src%$'\r'}"
-        dst="${dst%$'\r'}"
-        [[ -z "$src" || -z "$dst" ]] && continue
-        if [[ -e "$root/$src" ]]; then
-            found="$root/$src"
-        else
-            found="$(find "$root" -name "${src##*/}" 2>/dev/null | head -1 || true)"
-        fi
+def extract_root(directory: str) -> str:
+    """If the archive unpacked to a single top-level dir, return it (the GH
+    convention); otherwise the directory itself. Glob semantics ignore
+    dotfiles, like bash `for entry in "$dir"/*`."""
+    entries = [e for e in sorted(os.listdir(directory)) if not e.startswith(".")]
+    if len(entries) == 1:
+        single = os.path.join(directory, entries[0])
+        if os.path.isdir(single):
+            return single
+    return directory
 
-        if [[ -z "${found:-}" ]]; then
-            fail_dep "extract: '$src' not found in archive"
-            failed=1
+
+def find_binary(root: str, name: str) -> str | None:
+    for dirpath, _dirs, files in os.walk(root):
+        _dirs.sort()  # deterministic descent order across platforms
+        for f in sorted(files):
+            if f == name:
+                p = os.path.join(dirpath, f)
+                if os.path.isfile(p):
+                    return p
+    return None
+
+
+def _find_by_basename(root: str, base: str) -> str | None:
+    for dirpath, _dirs, files in os.walk(root):
+        _dirs.sort()  # deterministic descent order across platforms
+        for f in sorted(files):
+            if f == base:
+                return os.path.join(dirpath, f)
+        for d in _dirs:
+            if d == base:
+                return os.path.join(dirpath, d)
+    return None
+
+
+def apply_extract_map(root: str, extract_map: dict) -> bool:
+    """Apply a {src: dst} extract map against an unpacked archive root.
+    Returns False if any entry could not be applied (missing source or a
+    failed mkdir/copy) so the caller fails the dep loudly."""
+    failed = False
+    for src, dst in extract_map.items():
+        if not src or not dst:
             continue
-        fi
+        candidate = os.path.join(root, src)
+        if os.path.exists(candidate):
+            found = candidate
+        else:
+            found = _find_by_basename(root, os.path.basename(src))
 
-        if ! mkdir -p "$dst"; then
-            fail_dep "extract: cannot create dest dir '$dst'"
-            failed=1
+        if not found:
+            fail_dep(f"extract: '{src}' not found in archive")
+            failed = True
             continue
-        fi
-        if [[ -d "$found" ]]; then
-            if ! cp -r "$found"/. "$dst/"; then
-                fail_dep "extract: failed to copy '$src' → '$dst'"
-                failed=1
-                continue
-            fi
-        else
-            if ! cp "$found" "$dst/"; then
-                fail_dep "extract: failed to copy '$src' → '$dst'"
-                failed=1
-                continue
-            fi
-        fi
-        ok "$src → $dst"
-    done <<< "$extract_map"
-    return "$failed"
-}
+
+        try:
+            os.makedirs(dst, exist_ok=True)
+        except OSError:
+            fail_dep(f"extract: cannot create dest dir '{dst}'")
+            failed = True
+            continue
+
+        try:
+            if os.path.isdir(found):
+                # cp -r "$found"/. "$dst/" — copy contents into dst.
+                shutil.copytree(found, dst, dirs_exist_ok=True)
+            else:
+                shutil.copy(found, dst)
+        except (OSError, shutil.Error):
+            fail_dep(f"extract: failed to copy '{src}' → '{dst}'")
+            failed = True
+            continue
+        ok(f"{src} → {dst}")
+    return not failed
+
 
 # ─── Process a single dep ─────────────────────────────────
 
-fail_dep() {
-    printf '%s: %s\n' "$PROG" "$*" >&2
-    return 1
-}
+_DEP_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
-# Dispatcher: routes a dep to the correct handler based on its shape.
-process_dep() {
-    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
 
-    # Invalid dep names and missing required fields are static config
-    # bugs in deps.json, not transient runtime errors — die hard so
-    # --soft / "optional": true don't silently swallow them.
-    if [[ ! "$dep" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
-        die "invalid dependency name: $dep"
-    fi
+def process_dep(dep: str, item_cfg: dict, if_missing: bool, target: str, work_dir: str) -> bool:
+    # Invalid names / missing required fields are static config bugs, not
+    # transient runtime errors — die hard so --soft / "optional" don't
+    # silently swallow them.
+    if not _DEP_NAME_RE.match(dep):
+        raise die(f"invalid dependency name: {dep}")
 
-    local has_manifest has_url shapes
-    shapes="$(jq -r --arg d "$dep" '.[$d] | [has("from-manifest"), has("url")] | @tsv' "$config" | tr -d '\r')"
-    IFS=$'\t' read -r has_manifest has_url <<< "$shapes"
+    if "from-manifest" in item_cfg:
+        return fetch_iter(dep, item_cfg, if_missing, target, work_dir)
+    if "url" in item_cfg:
+        return fetch_url(dep, item_cfg, if_missing, target, work_dir)
+    return fetch_github(dep, item_cfg, if_missing, target, work_dir)
 
-    if [[ "$has_manifest" == "true" ]]; then
-        fetch_iter "$dep" "$if_missing" "$target" "$config" "$work_dir"
-    elif [[ "$has_url" == "true" ]]; then
-        fetch_url "$dep" "$if_missing" "$target" "$config" "$work_dir"
-    else
-        fetch_github "$dep" "$if_missing" "$target" "$config" "$work_dir"
-    fi
-}
 
-fetch_github() {
-    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+def fetch_github(dep: str, cfg: dict, if_missing: bool, target: str, work_dir: str) -> bool:
+    repo = str(cfg.get("repo") or "")
+    version = str(cfg.get("version") or "")
+    asset_tpl = str(cfg.get("asset") or "")
+    binary = str(cfg.get("binary") or "")
+    dest_tpl = str(cfg.get("dest") if cfg.get("dest") not in (None, "") else ".")
+    has_extract = "extract" in cfg
 
-    local repo version asset_tpl binary dest_tpl has_extract
-    repo="$(jq -r --arg d "$dep" '.[$d].repo // empty' "$config" | tr -d '\r')"
-    version="$(jq -r --arg d "$dep" '.[$d].version // empty' "$config" | tr -d '\r')"
-    asset_tpl="$(jq -r --arg d "$dep" '.[$d].asset // empty' "$config" | tr -d '\r')"
-    binary="$(jq -r --arg d "$dep" '.[$d].binary // empty' "$config" | tr -d '\r')"
-    dest_tpl="$(jq -r --arg d "$dep" '.[$d].dest // "."' "$config" | tr -d '\r')"
-    has_extract="$(jq -r --arg d "$dep" '.[$d] | has("extract")' "$config" | tr -d '\r')"
+    if not repo:
+        raise die(f"{dep}: missing 'repo'")
+    if not version:
+        raise die(f"{dep}: missing 'version'")
+    if not asset_tpl:
+        raise die(f"{dep}: missing 'asset'")
 
-    [[ -z "$repo" ]]      && die "$dep: missing 'repo'"
-    [[ -z "$version" ]]   && die "$dep: missing 'version'"
-    [[ -z "$asset_tpl" ]] && die "$dep: missing 'asset'"
+    asset = expand_template(asset_tpl, target)
+    dest = expand_template(dest_tpl, target)
 
-    local asset dest
-    asset="$(expand_template "$asset_tpl" "$target")"
-    dest="$(expand_template "$dest_tpl" "$target")"
+    if if_missing and stamp_matches(dep, f"{version} {target}"):
+        skip(f"{dep} {version} — up to date")
+        return True
 
-    if [[ "$if_missing" == true ]] && stamp_matches "$dep" "$version $target"; then
-        skip "$dep $version — up to date"
-        return 0
-    fi
+    info(f"{dep} {version} → {dest}")
 
-    info "$dep $version → $dest"
+    dep_dir = os.path.join(work_dir, dep)
+    os.makedirs(dep_dir, exist_ok=True)
 
-    local dep_dir="$work_dir/$dep"
-    mkdir -p "$dep_dir"
+    if not download_release_asset(repo, version, asset, os.path.join(dep_dir, asset)):
+        return False
 
-    download_release_asset "$repo" "$version" "$asset" "$dep_dir/$asset" || return 1
+    if not extract_archive(os.path.join(dep_dir, asset), os.path.join(dep_dir, "out")):
+        return False
+    root = extract_root(os.path.join(dep_dir, "out"))
 
-    extract_archive "$dep_dir/$asset" "$dep_dir/out" || return 1
-    local root
-    root="$(extract_root "$dep_dir/out")"
+    if binary:
+        bin_name = binary
+        if "windows" in target:
+            bin_name = f"{binary}.exe"
+        found = find_binary(root, bin_name)
+        if not found:
+            return fail_dep(f"{dep}: binary '{bin_name}' not found in archive")
+        os.makedirs(dest, exist_ok=True)
+        shutil.copyfile(found, os.path.join(dest, bin_name))
+        os.chmod(os.path.join(dest, bin_name), 0o755)
+        ok(f"{bin_name} → {dest}/")
+    elif has_extract:
+        extract_map = dict(cfg.get("extract") or {})
+        if not apply_extract_map(root, extract_map):
+            return False
+    else:
+        os.makedirs(dest, exist_ok=True)
+        shutil.copytree(root, dest, dirs_exist_ok=True)
+        ok(f"extracted → {dest}/")
 
-    if [[ -n "$binary" ]]; then
-        local bin_name="$binary"
-        [[ "$target" == *windows* ]] && bin_name="${binary}.exe"
+    stamp_write(dep, f"{version} {target}")
+    return True
 
-        local found
-        found="$(find_binary "$root" "$bin_name")"
-        [[ -z "$found" ]] && { fail_dep "$dep: binary '$bin_name' not found in archive"; return 1; }
 
-        mkdir -p "$dest"
-        install -m 0755 "$found" "$dest/$bin_name"
-        ok "$bin_name → $dest/"
+def fetch_url(dep: str, cfg: dict, if_missing: bool, target: str, work_dir: str) -> bool:
+    url_tpl = str(cfg.get("url") or "")
+    filename_tpl = str(cfg.get("filename") or "")
+    dest_tpl = str(cfg.get("dest") if cfg.get("dest") not in (None, "") else ".")
+    sha256 = str(cfg.get("sha256") or "")
 
-    elif [[ "$has_extract" == "true" ]]; then
-        local extract_map
-        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config" | tr -d '\r')"
-        apply_extract_map "$root" "$extract_map" || return 1
-    else
-        mkdir -p "$dest"
-        cp -r "$root"/. "$dest/"
-        ok "extracted → $dest/"
-    fi
+    if not url_tpl:
+        raise die(f"{dep}: missing 'url'")
 
-    stamp_write "$dep" "$version $target"
-}
+    url = expand_template(url_tpl, target)
+    dest = expand_template(dest_tpl, target)
+    if filename_tpl:
+        filename = expand_template(filename_tpl, target)
+    else:
+        path = url.split("?", 1)[0]
+        filename = os.path.basename(path)
 
-# Plain HTTPS download — non-GitHub sources (#310).
-fetch_url() {
-    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
+    stamp_id = f"sha256:{sha256}" if sha256 else f"url:{url}"
 
-    # ASCII Unit Separator (\x1f) for joining — `read` with IFS=$'\t'
-    # collapses consecutive separators because tab is a whitespace char.
-    local url_tpl filename_tpl dest_tpl sha256 config_vals
-    config_vals="$(jq -r --arg d "$dep" --arg sep $'\x1f' \
-        '.[$d] | [.url // "", .filename // "", .dest // ".", .sha256 // ""] | join($sep)' \
-        "$config" | tr -d '\r')"
-    IFS=$'\x1f' read -r url_tpl filename_tpl dest_tpl sha256 <<< "$config_vals"
+    if if_missing and stamp_matches(dep, stamp_id):
+        skip(f"{dep} — up to date")
+        return True
 
-    [[ -z "$url_tpl" ]] && die "$dep: missing 'url'"
+    info(f"{dep} → {dest}/{filename}")
 
-    local url dest filename
-    url="$(expand_template "$url_tpl" "$target")"
-    dest="$(expand_template "$dest_tpl" "$target")"
-    if [[ -n "$filename_tpl" ]]; then
-        filename="$(expand_template "$filename_tpl" "$target")"
-    else
-        # Strip query string then take basename.
-        local path="${url%%\?*}"
-        filename="$(basename "$path")"
-    fi
+    dep_dir = os.path.join(work_dir, dep)
+    os.makedirs(dep_dir, exist_ok=True)
 
-    # Stamp identity: sha256 if present (content-addressed), else url.
-    local stamp_id
-    if [[ -n "$sha256" ]]; then
-        stamp_id="sha256:$sha256"
-    else
-        stamp_id="url:$url"
-    fi
+    if not download_url(url, os.path.join(dep_dir, filename)):
+        return False
 
-    if [[ "$if_missing" == true ]] && stamp_matches "$dep" "$stamp_id"; then
-        skip "$dep — up to date"
-        return 0
-    fi
-
-    info "$dep → $dest/$filename"
-
-    local dep_dir="$work_dir/$dep"
-    mkdir -p "$dep_dir"
-
-    download_url "$url" "$dep_dir/$filename" || return 1
-
-    if [[ -n "$sha256" ]]; then
-        local actual
-        actual="$(sha256_of "$dep_dir/$filename")" \
-            || die "$dep: cannot compute sha256 (sha256sum/shasum not found)"
-        if [[ "$actual" != "$sha256" ]]; then
+    if sha256:
+        actual = sha256_of(os.path.join(dep_dir, filename))
+        if actual is None:
+            raise die(f"{dep}: cannot compute sha256")
+        if actual != sha256:
             # Integrity failure: hard fail even under --soft.
-            die "$dep: sha256 mismatch (expected $sha256, got $actual)"
-        fi
-    fi
+            raise die(f"{dep}: sha256 mismatch (expected {sha256}, got {actual})")
 
-    mkdir -p "$dest"
-    cp "$dep_dir/$filename" "$dest/$filename"
-    ok "$filename → $dest/"
+    os.makedirs(dest, exist_ok=True)
+    shutil.copy(os.path.join(dep_dir, filename), os.path.join(dest, filename))
+    ok(f"{filename} → {dest}/")
 
-    stamp_write "$dep" "$stamp_id"
-}
+    stamp_write(dep, stamp_id)
+    return True
 
-# Manifest-driven iteration (#309). Iterates a jq path over a JSON
-# file already on disk and processes each item. Pre-computes all
-# per-dep config in a single jq call so the per-item loop only does
-# template expansion + downloads.
-fetch_iter() {
-    local dep="$1" if_missing="$2" target="$3" config="$4" work_dir="$5"
 
-    # ASCII Unit Separator (\x1f) preserves empty fields through `read`
-    # (a tab would be collapsed because IFS=$'\t' treats consecutive
-    # whitespace as one separator).
-    local manifest_tpl for_each repo_tpl version_tpl asset_tpl \
-          dest_tpl binary_as_tpl has_extract has_raw config_vals
-    config_vals="$(jq -r --arg d "$dep" --arg sep $'\x1f' '
-        .[$d] | [
-            ."from-manifest" // "",
-            ."for-each"      // "",
-            .repo            // "",
-            .version         // "",
-            .asset           // "",
-            .dest            // ".",
-            ."binary-as"     // "",
-            (has("extract")  | tostring),
-            (has("raw-files")| tostring)
-        ] | join($sep)' "$config" | tr -d '\r')"
-    IFS=$'\x1f' read -r manifest_tpl for_each repo_tpl version_tpl asset_tpl \
-                        dest_tpl binary_as_tpl has_extract has_raw <<< "$config_vals"
+# ─── for-each evaluation (jq-free) ─────────────────────────
 
-    # Validate in author-friendly order: from-manifest → for-each →
-    # the GH-release fields. So a config missing for-each surfaces that
-    # error first, even if repo/version/asset are also missing.
-    [[ -z "$manifest_tpl" ]] && die "$dep: missing 'from-manifest'"
-    [[ -z "$for_each" ]]     && die "$dep: missing 'for-each'"
-    [[ -z "$repo_tpl" ]]     && die "$dep: missing 'repo'"
-    [[ -z "$version_tpl" ]]  && die "$dep: missing 'version'"
-    [[ -z "$asset_tpl" ]]    && die "$dep: missing 'asset'"
+# `for-each` selects the array to iterate. In practice — and across the entire
+# fleet — it is always a dotted path ending in `[]` (`.grammars[]`,
+# `.items[]`, `.a.b[]`). We evaluate that subset directly so no jq engine is
+# needed; expressions outside it raise ForEachError with a clear message.
+_FOR_EACH_RE = re.compile(r"^\.((?:[A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z_][A-Za-z0-9_]*)*)?\[\]$")
 
-    local extract_map="" raw_pairs=""
-    if [[ "$has_extract" == "true" ]]; then
-        extract_map="$(jq -r --arg d "$dep" '.[$d].extract | to_entries[] | [.key, .value] | @tsv' "$config" | tr -d '\r')"
-    fi
-    if [[ "$has_raw" == "true" ]]; then
-        raw_pairs="$(jq -r --arg d "$dep" '.[$d]["raw-files"] | to_entries[] | [.key, .value] | @tsv' "$config" | tr -d '\r')"
-    fi
 
-    local manifest
-    manifest="$(expand_template "$manifest_tpl" "$target")"
-    [[ -f "$manifest" ]] || { fail_dep "$dep: manifest not found: $manifest"; return 1; }
-    jq empty "$manifest" 2>/dev/null \
-        || { fail_dep "$dep: invalid JSON in manifest: $manifest"; return 1; }
+class ForEachError(ValueError):
+    """A for-each expression outside the supported subset, or not selecting
+    an array."""
 
-    local items
-    if ! items="$(jq -c "$for_each" "$manifest" 2>&1)"; then
-        fail_dep "$dep: invalid for-each expression '$for_each': $items"
-        return 1
-    fi
 
-    info "$dep: iterating $for_each over $manifest"
+def eval_for_each(expr: str, data: object) -> list:
+    """Return the list selected by a `.a.b[]`-style for-each expression.
 
-    local item_failed=0
-    while IFS= read -r item; do
-        [[ -z "$item" ]] && continue
-        if ! fetch_iter_item "$dep" "$item" "$if_missing" "$target" "$work_dir" \
-                "$repo_tpl" "$version_tpl" "$asset_tpl" "$dest_tpl" "$binary_as_tpl" \
-                "$has_extract" "$extract_map" "$has_raw" "$raw_pairs"; then
-            item_failed=$((item_failed + 1))
-        fi
-    done <<< "$items"
+    A path that doesn't resolve (missing key) yields an empty list, matching
+    "nothing to iterate". A resolved-but-non-array target, or syntax beyond
+    the supported subset, raises ForEachError.
+    """
+    m = _FOR_EACH_RE.match(expr.strip())
+    if not m:
+        raise ForEachError(
+            f"unsupported for-each expression '{expr}' "
+            "(supported: a dotted path ending in [], e.g. .grammars[])"
+        )
+    path = m.group(1)
+    cur = data
+    if path:
+        for key in path.split("."):
+            if isinstance(cur, dict) and key in cur:
+                cur = cur[key]
+            else:
+                return []
+    if not isinstance(cur, list):
+        raise ForEachError(f"for-each '{expr}' did not select an array")
+    return cur
 
-    [[ $item_failed -gt 0 ]] && return 1
-    return 0
-}
 
-fetch_iter_item() {
-    local dep="$1" item="$2" if_missing="$3" target="$4" work_dir="$5"
-    local repo_tpl="$6" version_tpl="$7" asset_tpl="$8" dest_tpl="$9" binary_as_tpl="${10}"
-    local has_extract="${11}" extract_map="${12}" has_raw="${13}" raw_pairs="${14}"
+def fetch_iter(dep: str, cfg: dict, if_missing: bool, target: str, work_dir: str) -> bool:
+    manifest_tpl = str(cfg.get("from-manifest") or "")
+    for_each = str(cfg.get("for-each") or "")
+    repo_tpl = str(cfg.get("repo") or "")
+    version_tpl = str(cfg.get("version") or "")
+    asset_tpl = str(cfg.get("asset") or "")
+    dest_tpl = str(cfg.get("dest") if cfg.get("dest") not in (None, "") else ".")
+    binary_as_tpl = str(cfg.get("binary-as") or "")
+    has_extract = "extract" in cfg
+    has_raw = "raw-files" in cfg
 
-    local item_name
-    item_name="$(jq -r '.name // empty' <<< "$item" | tr -d '\r')"
-    [[ -z "$item_name" ]] && { fail_dep "$dep: iteration item missing 'name' field"; return 1; }
+    # Validate in author-friendly order: from-manifest → for-each → the
+    # GH-release fields.
+    if not manifest_tpl:
+        raise die(f"{dep}: missing 'from-manifest'")
+    if not for_each:
+        raise die(f"{dep}: missing 'for-each'")
+    if not repo_tpl:
+        raise die(f"{dep}: missing 'repo'")
+    if not version_tpl:
+        raise die(f"{dep}: missing 'version'")
+    if not asset_tpl:
+        raise die(f"{dep}: missing 'asset'")
 
-    local repo version asset dest binary_as
-    repo="$(expand_item_template "$repo_tpl" "$item" "$target")"
-    version="$(expand_item_template "$version_tpl" "$item" "$target")"
-    asset="$(expand_item_template "$asset_tpl" "$item" "$target")"
-    dest="$(expand_item_template "$dest_tpl" "$item" "$target")"
-    binary_as=""
-    [[ -n "$binary_as_tpl" ]] && binary_as="$(expand_item_template "$binary_as_tpl" "$item" "$target")"
+    extract_map = dict(cfg.get("extract") or {}) if has_extract else {}
+    raw_pairs = dict(cfg.get("raw-files") or {}) if has_raw else {}
 
-    local stamp_key="$dep/$item_name"
-    if [[ "$if_missing" == true ]] && stamp_matches "$stamp_key" "$version $target"; then
-        skip "$dep/$item_name $version — up to date"
-        return 0
-    fi
+    manifest = expand_template(manifest_tpl, target)
+    if not os.path.isfile(manifest):
+        return fail_dep(f"{dep}: manifest not found: {manifest}")
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            manifest_data = json.load(fh)
+    except (OSError, ValueError):
+        return fail_dep(f"{dep}: invalid JSON in manifest: {manifest}")
 
-    info "$dep/$item_name $version → $dest"
+    # Evaluate `for-each` in-process (no jq). It is always a dotted path
+    # ending in `[]` across the whole fleet (e.g. `.grammars[]`); anything
+    # outside that subset raises a clear error rather than silently misbehaving.
+    try:
+        items = eval_for_each(for_each, manifest_data)
+    except ForEachError as e:
+        return fail_dep(f"{dep}: {e}")
 
-    local item_dir="$work_dir/$dep/$item_name"
-    mkdir -p "$item_dir"
+    info(f"{dep}: iterating {for_each} over {manifest}")
 
-    download_release_asset "$repo" "$version" "$asset" "$item_dir/$asset" || return 1
+    item_failed = 0
+    for item in items:
+        if not isinstance(item, dict):
+            item = {}
+        if not fetch_iter_item(
+            dep,
+            item,
+            if_missing,
+            target,
+            work_dir,
+            repo_tpl,
+            version_tpl,
+            asset_tpl,
+            dest_tpl,
+            binary_as_tpl,
+            has_extract,
+            extract_map,
+            has_raw,
+            raw_pairs,
+        ):
+            item_failed += 1
 
-    mkdir -p "$dest"
-    if [[ -n "$binary_as" ]]; then
-        # The asset itself is the file we want — copy with the
-        # configured name. No extraction.
-        cp "$item_dir/$asset" "$dest/$binary_as"
-        ok "$binary_as → $dest/"
-    elif is_archive "$asset"; then
-        extract_archive "$item_dir/$asset" "$item_dir/out" || return 1
-        local root
-        root="$(extract_root "$item_dir/out")"
+    return item_failed == 0
 
-        if [[ "$has_extract" == "true" ]]; then
-            local expanded_extract_map
-            expanded_extract_map="$(while IFS=$'\t' read -r k v; do
-                [[ -z "$k" ]] && continue
-                ek="$(expand_item_template "$k" "$item" "$target")"
-                ev="$(expand_item_template "$v" "$item" "$target")"
-                printf '%s\t%s\n' "$ek" "$ev"
-            done <<< "$extract_map")"
-            apply_extract_map "$root" "$expanded_extract_map" \
-                || { fail_dep "$dep/$item_name: extract failed"; return 1; }
-        else
-            cp -r "$root"/. "$dest/"
-            ok "extracted → $dest/"
-        fi
-    else
+
+def fetch_iter_item(
+    dep: str,
+    item: dict,
+    if_missing: bool,
+    target: str,
+    work_dir: str,
+    repo_tpl: str,
+    version_tpl: str,
+    asset_tpl: str,
+    dest_tpl: str,
+    binary_as_tpl: str,
+    has_extract: bool,
+    extract_map: dict,
+    has_raw: bool,
+    raw_pairs: dict,
+) -> bool:
+    item_name = ""
+    if isinstance(item, dict):
+        item_name = _jq_tostring(item.get("name")) if item.get("name") is not None else ""
+    if not item_name:
+        return fail_dep(f"{dep}: iteration item missing 'name' field")
+
+    repo = expand_item_template(repo_tpl, item, target)
+    version = expand_item_template(version_tpl, item, target)
+    asset = expand_item_template(asset_tpl, item, target)
+    dest = expand_item_template(dest_tpl, item, target)
+    binary_as = expand_item_template(binary_as_tpl, item, target) if binary_as_tpl else ""
+
+    stamp_key = f"{dep}/{item_name}"
+    if if_missing and stamp_matches(stamp_key, f"{version} {target}"):
+        skip(f"{dep}/{item_name} {version} — up to date")
+        return True
+
+    info(f"{dep}/{item_name} {version} → {dest}")
+
+    item_dir = os.path.join(work_dir, dep, item_name)
+    os.makedirs(item_dir, exist_ok=True)
+
+    if not download_release_asset(repo, version, asset, os.path.join(item_dir, asset)):
+        return False
+
+    os.makedirs(dest, exist_ok=True)
+    if binary_as:
+        # The asset itself is the file we want — copy with the configured
+        # name. No extraction.
+        shutil.copy(os.path.join(item_dir, asset), os.path.join(dest, binary_as))
+        ok(f"{binary_as} → {dest}/")
+    elif is_archive(asset):
+        if not extract_archive(os.path.join(item_dir, asset), os.path.join(item_dir, "out")):
+            return False
+        root = extract_root(os.path.join(item_dir, "out"))
+        if has_extract:
+            expanded = {
+                expand_item_template(k, item, target): expand_item_template(v, item, target)
+                for k, v in extract_map.items()
+                if k
+            }
+            if not apply_extract_map(root, expanded):
+                return fail_dep(f"{dep}/{item_name}: extract failed")
+        else:
+            shutil.copytree(root, dest, dirs_exist_ok=True)
+            ok(f"extracted → {dest}/")
+    else:
         # Non-archive asset, no binary-as configured: copy as-is.
-        cp "$item_dir/$asset" "$dest/${asset##*/}"
-        ok "$asset → $dest/"
-    fi
+        shutil.copy(os.path.join(item_dir, asset), os.path.join(dest, os.path.basename(asset)))
+        ok(f"{asset} → {dest}/")
 
     # raw-files: additional files from raw.githubusercontent.com.
-    if [[ "$has_raw" == "true" ]]; then
-        local rsrc rdst esrc edst
-        while IFS=$'\t' read -r rsrc rdst; do
-            [[ -z "$rsrc" ]] && continue
-            esrc="$(expand_item_template "$rsrc" "$item" "$target")"
-            edst="$(expand_item_template "$rdst" "$item" "$target")"
-            download_raw_github "$repo" "$version" "$esrc" "$dest/$edst" \
-                || { fail_dep "$dep/$item_name: raw-file '$esrc' failed"; return 1; }
-            ok "raw $esrc → $dest/$edst"
-        done <<< "$raw_pairs"
-    fi
+    if has_raw:
+        for rsrc, rdst in raw_pairs.items():
+            if not rsrc:
+                continue
+            esrc = expand_item_template(rsrc, item, target)
+            edst = expand_item_template(rdst, item, target)
+            if not download_raw_github(repo, version, esrc, os.path.join(dest, edst)):
+                return fail_dep(f"{dep}/{item_name}: raw-file '{esrc}' failed")
+            ok(f"raw {esrc} → {dest}/{edst}")
 
-    stamp_write "$stamp_key" "$version $target"
-}
+    stamp_write(stamp_key, f"{version} {target}")
+    return True
 
-# Returns 0 if the dep is "soft" (CLI --soft flag, or "optional": true
-# in deps.json). Soft deps log warnings and don't count toward the
-# script's failure total — for postinstall hooks where hard-fail would
-# break `npm install` outside CI.
-is_soft_dep() {
-    local dep="$1" soft_flag="$2" config="$3"
-    [[ "$soft_flag" == true ]] && return 0
-    local optional
-    optional="$(jq -r --arg d "$dep" '.[$d].optional // false' "$config" | tr -d '\r')"
-    [[ "$optional" == "true" ]]
-}
+
+def is_soft_dep(cfg: dict, soft_flag: bool) -> bool:
+    """Soft deps log warnings and don't count toward the failure total."""
+    if soft_flag:
+        return True
+    return bool(cfg.get("optional", False) is True or cfg.get("optional") == "true")
+
 
 # ─── CLI ───────────────────────────────────────────────────
 
-usage() {
-    cat <<'EOF'
+USAGE = """\
 Usage: fetch-deps [options] [dep ...]
 
 Download dependencies defined in deps.json. Three shapes are supported:
@@ -704,7 +783,7 @@ deps.json — manifest iteration shape:
   {
     "dep-name": {
       "from-manifest": "resources/manifest.json",  (path on disk, templated)
-      "for-each":      ".items[]",                  (jq expression)
+      "for-each":      ".items[]",                  (array path, ends in [])
       "repo":          "{{.repo}}",                 (per-item templates)
       "version":       "{{.version}}",
       "asset":         "{{.asset_name}}",
@@ -725,77 +804,100 @@ Template variables (global, expand in any string):
 
 Per-item placeholders (iteration mode only): {{.field}} reads the named
 field from the current manifest item.
-EOF
-}
+"""
 
-main() {
-    local if_missing=false
-    local soft=false
-    local target=""
-    local config="deps.json"
-    local deps=()
 
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --if-missing) if_missing=true; shift ;;
-            --soft)       soft=true; shift ;;
-            --target)
-                [[ $# -lt 2 ]] && die "--target requires a value"
-                target="$2"; shift 2 ;;
-            --config)
-                [[ $# -lt 2 ]] && die "--config requires a value"
-                config="$2"; shift 2 ;;
-            --help)    usage; exit 0 ;;
-            --version) echo "$PROG $VERSION"; exit 0 ;;
-            -*)        die "unknown option: $1" ;;
-            *)         deps+=("$1"); shift ;;
-        esac
-    done
+def main(argv: list[str]) -> int:
+    if_missing = False
+    soft = False
+    target = ""
+    config = "deps.json"
+    deps: list[str] = []
 
-    command -v jq  &>/dev/null || die "jq is required but not found"
-    command -v curl &>/dev/null || die "curl is required but not found"
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--if-missing":
+            if_missing = True
+            i += 1
+        elif a == "--soft":
+            soft = True
+            i += 1
+        elif a == "--target":
+            if i + 1 >= len(argv):
+                raise die("--target requires a value")
+            target = argv[i + 1]
+            i += 2
+        elif a == "--config":
+            if i + 1 >= len(argv):
+                raise die("--config requires a value")
+            config = argv[i + 1]
+            i += 2
+        elif a == "--help":
+            print(USAGE, end="")
+            return 0
+        elif a == "--version":
+            print(f"{PROG} {VERSION}")
+            return 0
+        elif a.startswith("-"):
+            raise die(f"unknown option: {a}")
+        else:
+            deps.append(a)
+            i += 1
 
-    [[ -z "$target" ]] && target="$(detect_target)"
-    cache_target_vars "$target"
-    [[ -f "$config" ]] || die "config not found: $config"
-    jq empty "$config" 2>/dev/null || die "invalid JSON: $config"
+    if shutil.which("curl") is None:
+        raise die("curl is required but not found")
 
-    if [[ ${#deps[@]} -eq 0 ]]; then
-        # keys_unsorted preserves deps.json declaration order so authors
-        # can put a dep that extracts a manifest (via `extract`) before
-        # an iteration-mode dep that reads that manifest via
-        # `from-manifest`. jq's plain `keys` would sort alphabetically
-        # and break that contract.
-        local keys
-        keys="$(jq -r 'keys_unsorted[]' "$config" | tr -d '\r')"
-        while IFS= read -r d; do
-            [[ -n "$d" ]] && deps+=("$d")
-        done <<< "$keys"
-    fi
+    if not target:
+        target = detect_target()
+    cache_target_vars(target)
 
-    [[ ${#deps[@]} -eq 0 ]] && die "no deps defined in $config"
+    if not os.path.isfile(config):
+        raise die(f"config not found: {config}")
+    try:
+        with open(config, encoding="utf-8") as fh:
+            cfg_data = json.load(fh)
+    except (OSError, ValueError):
+        raise die(f"invalid JSON: {config}") from None
+    if not isinstance(cfg_data, dict):
+        raise die(f"invalid JSON: {config}")
 
-    _FETCH_DEPS_WORK_DIR="$(mktemp -d)"
-    trap 'rm -rf "${_FETCH_DEPS_WORK_DIR:-}"' EXIT
-    local work_dir="$_FETCH_DEPS_WORK_DIR"
+    if not deps:
+        # dict preserves deps.json declaration order (jq keys_unsorted), so an
+        # author can place a manifest-extracting dep before an iteration-mode
+        # dep that reads it.
+        deps = list(cfg_data.keys())
 
-    printf '%s: fetching %d dep(s) for %s\n' "$PROG" "${#deps[@]}" "$target"
+    if not deps:
+        raise die(f"no deps defined in {config}")
 
-    local hard_failed=0
-    for dep in "${deps[@]}"; do
-        if ! process_dep "$dep" "$if_missing" "$target" "$config" "$work_dir"; then
-            if is_soft_dep "$dep" "$soft" "$config"; then
-                printf '%s: ⚠ %s failed; continuing (soft mode)\n' "$PROG" "$dep" >&2
-            else
-                hard_failed=$((hard_failed + 1))
-            fi
-        fi
-    done
+    work_dir = tempfile.mkdtemp()
+    try:
+        print(f"{PROG}: fetching {len(deps)} dep(s) for {target}")
 
-    [[ $hard_failed -gt 0 ]] && die "$hard_failed dep(s) failed"
+        hard_failed = 0
+        for dep in deps:
+            cfg = cfg_data.get(dep)
+            cfg = cfg if isinstance(cfg, dict) else {}
+            if not process_dep(dep, cfg, if_missing, target, work_dir):
+                if is_soft_dep(cfg, soft):
+                    print(
+                        f"{PROG}: ⚠ {dep} failed; continuing (soft mode)",
+                        file=sys.stderr,
+                    )
+                else:
+                    hard_failed += 1
+
+        if hard_failed > 0:
+            raise die(f"{hard_failed} dep(s) failed")
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
     return 0
-}
 
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Die as e:
+        sys.exit(e.code)

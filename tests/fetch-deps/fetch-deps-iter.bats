@@ -224,6 +224,34 @@ JSON
     [[ "$output" == *"manifest not found"* ]]
 }
 
+@test "iter mode: for-each beyond the supported subset fails clearly" {
+    setup_mock_curl
+
+    mkdir -p resources
+    cat > resources/manifest.json <<'JSON'
+{ "items": [ { "name": "a" } ] }
+JSON
+
+    # A jq filter (pipe/select) is outside the supported dotted-path subset
+    # now that for-each is evaluated in-process without a jq engine.
+    cat > deps.json <<'JSON'
+{
+    "grammars": {
+        "from-manifest": "resources/manifest.json",
+        "for-each":      ".items[] | select(.name)",
+        "repo":          "ex/x",
+        "version":       "v1.0.0",
+        "asset":         "x.wasm",
+        "dest":          "out"
+    }
+}
+JSON
+
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -ne 0 ]]
+    [[ "$output" == *"unsupported for-each expression"* ]]
+}
+
 @test "iter mode: item without 'name' is a hard error" {
     setup_mock_curl
 
