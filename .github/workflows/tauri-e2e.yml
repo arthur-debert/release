@@ -1,0 +1,155 @@
+name: Tauri Native E2E (reusable)
+
+# Reusable workflow: run a Tauri app's NATIVE E2E suite — the real WebKitGTK
+# webview driven over WebDriver (tauri-driver + WebKitWebDriver, under xvfb +
+# dbus) — inside the canonical pinned tauri-driver Docker image. This is the
+# managed home for the native lane (release#445): the consumer's thin caller
+# owns the triggers (PR + nightly cron + workflow_dispatch) and passes its config
+# via `with:`; ALL the suite logic stays in the consumer's `runner-script`, which
+# runs the SAME way on a dev's machine (CI == local).
+#
+# Why a dedicated workflow and not a job on tauri-ci.yml: the native lane has its
+# OWN triggers (notably the nightly cron) that a tauri-ci job — invoked from the
+# consumer's ci.yml on push/PR — could not carry.
+#
+# Policy-clean for enterprise-Actions-restricted orgs (e.g. phos-editor): no
+# third-party Marketplace actions — pnpm lives inside the consumer's script, and
+# path-gating is plain `git diff` (not dorny/paths-filter).
+#
+# CONTRACT — the job sets these env vars for `runner-script`:
+#   NATIVE_E2E_IN_CONTAINER=1        marker: already inside the pinned image
+#   NATIVE_E2E_SIBLING_PATH=<path>   abs path of the checked-out private sibling
+#                                    (empty when no sibling-repo) — a cargo path-dep
+#   NATIVE_E2E_SCOPE=thin|full       path-gated scope (see full-scope-paths)
+#   GH_TOKEN=<gh-token|GITHUB_TOKEN> reads the private sibling + wasm release
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: 'Runner label for both jobs.'
+        type: string
+        default: 'ubuntu-22.04'
+      container-image:
+        description: 'Pinned tauri-driver image (tag@sha256). Ships tauri-driver + WebKitWebDriver + Rust + Node + Tauri v2 deps.'
+        type: string
+        default: 'ivangabriele/tauri:debian-bookworm-22@sha256:242996c7744e3dfac7a58cf06f1c6338cd700d84aae9e92a66e884ad29a602c9'
+      runner-script:
+        description: 'Consumer script that builds + runs the native suite in its in-container role. Receives the NATIVE_E2E_* env above.'
+        type: string
+        default: 'app-bin/native-e2e.sh'
+      full-scope-paths:
+        description: 'ERE regex: a changed non-doc file matching it ⇒ full scope (else thin). Doc-only PRs (*.md/*.lex) are always thin; non-PR events are always full.'
+        type: string
+        required: true
+      sibling-repo:
+        description: 'Optional PRIVATE sibling repo checked out as a cargo path-dep (e.g. a private engine crate the src-tauri/ build pins). Empty = skip.'
+        type: string
+        default: ''
+      sibling-ref:
+        description: 'Ref of the sibling repo to check out.'
+        type: string
+        default: ''
+      sibling-path:
+        description: 'Workspace-relative path to check the sibling out to; surfaced as NATIVE_E2E_SIBLING_PATH (absolute).'
+        type: string
+        default: 'native-e2e-sibling'
+      cache-paths:
+        description: 'Newline-separated paths to cache across runs (cargo registry + tauri target).'
+        type: string
+        default: |
+          /usr/local/cargo/registry
+          src-tauri/target
+      cache-key-file:
+        description: 'File whose hash keys the incremental cache.'
+        type: string
+        default: 'src-tauri/Cargo.lock'
+      failure-artifact-path:
+        description: 'Path uploaded as a debugging bundle on failure (absent on green runs is fine).'
+        type: string
+        default: 'test-results/native-e2e/'
+    secrets:
+      gh-token:
+        description: 'PAT able to read the private sibling repo + the private wasm release. Falls back to GITHUB_TOKEN.'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Decide thin|full from what the PR touches (plain git diff — no third-party
+  # action). Non-PR events (cron / dispatch) always go full.
+  scope:
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      full: ${{ steps.decide.outputs.full }}
+    steps:
+      - name: Checkout consumer (full history for base..head diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch the managed scope script
+        uses: actions/checkout@v4
+        with:
+          repository: arthur-debert/release
+          ref: v2
+          path: _managed
+          sparse-checkout: bin-internal
+
+      - name: Decide native scope
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          FULL_SCOPE_PATHS: ${{ inputs.full-scope-paths }}
+        run: bash _managed/bin-internal/native-e2e-scope.sh
+
+  native-e2e:
+    needs: scope
+    runs-on: ${{ inputs.runner }}
+    # The pinned image a dev uses locally too — CI == local, byte-for-byte.
+    container:
+      image: ${{ inputs.container-image }}
+    steps:
+      - name: Checkout consumer
+        uses: actions/checkout@v4
+
+      # Optional PRIVATE sibling, checked out as a cargo path-dep so the native
+      # build needs no in-container git auth (mirrors the local flow, where the
+      # wrapper mounts a local checkout).
+      - name: Checkout private sibling (cargo path-dep)
+        if: inputs.sibling-repo != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.sibling-repo }}
+          ref: ${{ inputs.sibling-ref }}
+          token: ${{ secrets.gh-token || github.token }}
+          path: ${{ inputs.sibling-path }}
+
+      - name: Cache cargo registry + Tauri target
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.cache-paths }}
+          key: tauri-e2e-cargo-${{ hashFiles(inputs.cache-key-file) }}
+          restore-keys: tauri-e2e-cargo-
+
+      - name: Run native-transport E2E
+        env:
+          NATIVE_E2E_IN_CONTAINER: '1'
+          NATIVE_E2E_SIBLING_PATH: ${{ inputs.sibling-repo != '' && format('{0}/{1}', github.workspace, inputs.sibling-path) || '' }}
+          NATIVE_E2E_SCOPE: ${{ needs.scope.outputs.full == 'true' && 'full' || 'thin' }}
+          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+        run: bash ${{ inputs.runner-script }}
+
+      # On failure the runner writes a bundle (event trail, state snapshot,
+      # screenshot) so investigation starts from the report, not a re-run.
+      - name: Upload native-e2e failure bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-e2e-failure-bundle
+          path: ${{ inputs.failure-artifact-path }}
+          if-no-files-found: ignore
+          retention-days: 14
