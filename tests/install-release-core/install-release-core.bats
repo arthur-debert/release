@@ -203,10 +203,12 @@ EOF
 # folded-in init: install-release-core runs `release-core init` by default
 # --------------------------------------------------------------------------
 
-@test "init: runs release-core init by default after install" {
+@test "init: runs release-core init --commit by default after install" {
   run "$BIN"
   [ "$status" -eq 0 ]
-  [ "$(cat "$INIT_LOG")" = "init" ]
+  # --commit auto-commits ONLY the generated managed config (pull-model
+  # commit-hygiene seam); the resolver opts in at SessionStart.
+  [ "$(cat "$INIT_LOG")" = "init --commit" ]
 }
 
 @test "init: --no-init installs but does NOT run init" {
@@ -235,14 +237,14 @@ STUB
   chmod +x release-core
   run "$BIN"
   [ "$status" -eq 0 ]
-  [ "$(cat "$INIT_LOG")" = "init" ]        # the stub-dir release-core ran (logs "init")
+  [ "$(cat "$INIT_LOG")" = "init --commit" ]  # the stub-dir release-core ran
   [[ "$(cat "$INIT_LOG")" != *"WRONG-CWD-BINARY"* ]]
 }
 
 @test "init: failure is best-effort — does NOT fail the resolver" {
   RELEASE_CORE_RC=1 run "$BIN"
   [ "$status" -eq 0 ]                       # install succeeded; init failure tolerated
-  [ "$(cat "$INIT_LOG")" = "init" ]         # init was attempted
+  [ "$(cat "$INIT_LOG")" = "init --commit" ]  # init was attempted
   [[ "$output" == *"release-core init failed"* ]]
 }
 

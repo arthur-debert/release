@@ -259,6 +259,82 @@ def git_log_oneline(rev_range: str, *, cwd: str):
     )
 
 
+def git_current_branch(*, cwd: str) -> str | None:
+    """`git -C <cwd> rev-parse --abbrev-ref HEAD` → the current branch name, or
+    None on a detached HEAD (returns "HEAD") / failure (unborn branch, not a
+    repo). Used by init's --commit/--push guard."""
+    res = proc.run(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"], check=False)
+    if res.returncode != 0:
+        return None
+    name = res.stdout.strip()
+    if not name or name == "HEAD":
+        return None
+    return name
+
+
+def git_default_branch(*, cwd: str) -> str | None:
+    """The repo's default branch name, or None if it can't be resolved.
+
+    Reads `origin/HEAD`'s symbolic target (`refs/remotes/origin/HEAD` →
+    `origin/<default>`); falls back to None when there is no `origin` remote or
+    its HEAD is unset. The --push guard uses this to push ONLY when the local
+    branch IS the default branch — never inventing 'main'/'master' by guess."""
+    res = proc.run(
+        ["git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"],
+        check=False,
+    )
+    if res.returncode != 0:
+        return None
+    ref = res.stdout.strip()  # e.g. "origin/main"
+    prefix = "origin/"
+    if ref.startswith(prefix):
+        return ref[len(prefix) :]
+    return ref or None
+
+
+def git_is_clean(*, cwd: str, except_paths: list[str] | None = None) -> bool:
+    """True iff `git status --porcelain` reports no changes other than the files
+    in ``except_paths`` (each compared against the porcelain path column).
+
+    The --push guard requires the working tree to be otherwise clean: we tolerate
+    only the managed paths init itself just wrote (passed as ``except_paths``)."""
+    res = proc.run(["git", "-C", cwd, "status", "--porcelain"], check=False)
+    if res.returncode != 0:
+        return False
+    allowed = set(except_paths or [])
+    for line in res.stdout.splitlines():
+        if not line.strip():
+            continue
+        # Porcelain v1: 2 status chars, a space, then the path (possibly
+        # "old -> new" for renames — managed config files are never renamed, so
+        # the simple split is sufficient for the paths we care about).
+        path = line[3:].strip()
+        if path not in allowed:
+            return False
+    return True
+
+
+def git_add(paths: list[str], *, cwd: str) -> None:
+    """`git -C <cwd> add -- <paths>` — stage ONLY the given pathspecs. Never -A.
+    Raises ProcError on failure."""
+    if not paths:
+        return
+    git(["-C", cwd, "add", "--", *paths])
+
+
+def git_commit_paths(paths: list[str], message: str, *, cwd: str) -> None:
+    """`git -C <cwd> commit -m <message> -- <paths>` — commit ONLY the given
+    pathspecs, leaving any other staged/unstaged changes untouched. Raises
+    ProcError on failure (no commit created)."""
+    git(["-C", cwd, "commit", "-m", message, "--", *paths])
+
+
+def git_push_ff(branch: str, *, cwd: str, remote: str = "origin") -> None:
+    """`git -C <cwd> push <remote> <branch>` — a plain (fast-forward-only) push.
+    Never --force. Raises ProcError on rejection (e.g. non-fast-forward)."""
+    git(["-C", cwd, "push", remote, branch])
+
+
 def git_show_bytes(rev_path: str, *, cwd: str) -> bytes:
     """`git -C <cwd> show <rev>:<path>` → the blob's RAW bytes.
 

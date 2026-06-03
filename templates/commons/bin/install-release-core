@@ -213,10 +213,20 @@ _find_release_core() {
 # composes no config) must NOT fail the resolver — the install succeeded, and the
 # committed config degrades gracefully. Runs in the CURRENT repo (the boot caller
 # cd's to the repo root first).
+# --commit: the materialized managed config tree is fully GENERATED (nothing to
+# review), so init auto-commits ONLY the files it wrote — never `git add -A`,
+# never a user's other staged/unstaged work. This closes the pull-model
+# commit-hygiene gap: without it the refreshed config sits uncommitted at
+# SessionStart until some unrelated feature PR accidentally absorbs it. We pass
+# --commit but NOT --push: the commit is made locally (riding the current branch,
+# excluded from review as a managed change); init's own --push guard would only
+# fast-forward on a clean default branch anyway, and SessionStart shouldn't push
+# on the consumer's behalf. init stays best-effort — a commit/init failure does
+# NOT fail the resolver.
 rc="$(_find_release_core || true)"
 if [ -n "$rc" ]; then
-  echo "install-release-core: installed; running release-core init" >&2
-  "$rc" init || echo "warning: release-core init failed — repo config not refreshed" >&2
+  echo "install-release-core: installed; running release-core init --commit" >&2
+  "$rc" init --commit || echo "warning: release-core init failed — repo config not refreshed" >&2
 else
   echo "warning: release-core not found after install — skipping init" >&2
 fi
