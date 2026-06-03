@@ -45,7 +45,7 @@ runs:
     # commit; a missing linter FAILS the release (it never skips). Arm the
     # toolset first. #437 (P2) armed the rust/npm/go/python composites but
     # missed nvim + tauri; this closes that gap.
-    - name: Set up Node.js (gate: markdownlint/prettier)
+    - name: Set up Node.js (gate linters markdownlint/prettier)
       if: env.SKIP_PRECOMMIT_GATE != 'true'
       uses: actions/setup-node@v4
       with:
