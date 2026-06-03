@@ -22,6 +22,10 @@ inputs:
     description: 'Optional consumer prep-script path, run before the canonical bump.'
     required: false
     default: ''
+  gh-token:
+    description: 'Token for authenticating cargo fetches of PRIVATE git dependencies (e.g. a private engine crate the src-tauri/ build pins). No-op when empty.'
+    required: false
+    default: ''
 
 outputs:
   version:
@@ -59,6 +63,17 @@ runs:
       if: env.SKIP_PRECOMMIT_GATE != 'true'
       shell: bash
       run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
+
+    # The HARD gate (below) fires cargo over src-tauri/. When the project pins a
+    # PRIVATE git dependency (a private engine crate), cargo can't clone it
+    # without auth — so set up git-CLI fetch auth here, as its own step, so the
+    # CARGO_NET_GIT_FETCH_WITH_CLI it writes to $GITHUB_ENV persists into the
+    # gate step below. No-op when gh-token is empty.
+    - name: Authenticate cargo for private git deps
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+      run: bash "${{ github.action_path }}/../../../bin-internal/setup-cargo-git-auth.sh"
 
     - name: Prepare Tauri release
       id: prep

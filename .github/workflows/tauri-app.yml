@@ -256,6 +256,9 @@ jobs:
           changelog-path: ${{ inputs.changelog-path }}
           tauri-dir: ${{ inputs.tauri-dir }}
           prep-script: ${{ inputs.prep-script }}
+          # Lets the prepare gate's cargo authenticate a PRIVATE src-tauri/ git
+          # dep (no-op when the project has none / no token).
+          gh-token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - name: Upload release notes
         uses: actions/upload-artifact@v4
@@ -303,7 +306,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v1
+          ref: v2
           path: .release
           sparse-checkout: bin-internal
 
@@ -366,6 +369,16 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: bash .release/bin-internal/setup-tauri-signing-env.sh
+
+      # `tauri build` compiles src-tauri/. When the project pins a PRIVATE git
+      # dependency, cargo can't clone it without auth — set up git-CLI fetch
+      # auth (own step: the CARGO_NET_GIT_FETCH_WITH_CLI it writes to
+      # $GITHUB_ENV persists into the Build step). No-op without a token.
+      - name: Authenticate cargo for private git deps
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: bash .release/bin-internal/setup-cargo-git-auth.sh
 
       - name: Build
         shell: bash
@@ -431,7 +444,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v1
+          ref: v2
           path: .release
           sparse-checkout: bin-internal
 
