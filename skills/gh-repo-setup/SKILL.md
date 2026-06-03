@@ -285,6 +285,6 @@ These remain `bin/` only because they touch multiple repos at once and aren't us
 - `install-release-token` — propagate `RELEASE_TOKEN` to every onboarded repo.
 - `enable-dependabot-security` — enable Dependabot vulnerability alerts portfolio-wide.
 - `audit-portfolio`, `audit-repo`, `audit-smoke-test` — read-only auditing.
-- `migrate-copilot-review`, `sweep-github-policy` (the local wrapper).
+- `sweep-github-policy` (the local wrapper).
 
 If a cloud agent needs any of these, that's a signal to escalate via the `release-issue-relay` skill (Phase 1.3) rather than reimplementing them piecemeal.

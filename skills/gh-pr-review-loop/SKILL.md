@@ -53,7 +53,6 @@ Single home: **`~/h/release/bin/`** — both the policy/setup tools and the day-
 | `detect-stack [<dir>]` | Identify the project stack (rust, electron, vsce-ext, nvim-plugin, tree-sitter, brew-tap, github-action, static-site). |
 | `install-release-token` | Read a classic PAT from stdin and propagate as `RELEASE_TOKEN` secret to every onboarded repo. Verifies persistence per repo (older silent-fail mode is fixed). Required after PAT rotation. |
 | `enable-dependabot-security [--repos ...]` | Enable Dependabot vulnerability-alerts + auto-fix on every onboarded repo via the API toggle. |
-| `migrate-copilot-review` | Sweep onboarded consumers still pointing at the legacy `gh-dagentic@main` reusable workflow and PR them to `release/@v1`. Should be a no-op now (sweep ran 2026-05-08); kept for future bulk migrations. |
 | `audit-repo [--repo <r>]` | Per-repo readout: ruleset, RELEASE_TOKEN, copilot-review pointer, CODEOWNERS, dep_security, dep_policy, ci_main_green, private go module auth. PASS/FAIL/WARN per row. |
 | `audit-portfolio [--only-failing]` | Loop `audit-repo` over the `managed-repos.yaml` fleet (the hardcoded source of truth; no discovery). Summary table + detail of problem repos. |
 | `audit-smoke-test <repo>` | Open a no-op PR, verify Copilot fires + checks trigger + Copilot is added as reviewer (timeline event), close the PR. Real end-to-end verification. Use after a config change to confirm the loop actually still works. |
@@ -346,7 +345,7 @@ Symptoms worth filing:
 
 ## Reference: the reusable copilot-review workflow
 
-Lives at `arthur-debert/release/.github/workflows/copilot-review.yml@v1`. (Migrated 2026-05-08 from `arthur-debert/gh-dagentic@main`, which used `GITHUB_TOKEN` and silently no-op'd the Copilot attach across the entire portfolio for months. The smoke test caught it; `migrate-copilot-review` swept all consumers over.) The job is named `request`. In check-run output it appears as `request / request` (caller-job / called-job format). It is *not* a required check (excluded from ruleset auto-detection by filename), so a failure of that workflow doesn't block merges — but it does mean Copilot was never requested, which is worth fixing or filing.
+Lives at `arthur-debert/release/.github/workflows/copilot-review.yml@v1`. (Migrated 2026-05-08 from `arthur-debert/gh-dagentic@main`, which used `GITHUB_TOKEN` and silently no-op'd the Copilot attach across the entire portfolio for months. The smoke test caught it; a one-off sweep migrated all consumers over.) The job is named `request`. In check-run output it appears as `request / request` (caller-job / called-job format). It is *not* a required check (excluded from ruleset auto-detection by filename), so a failure of that workflow doesn't block merges — but it does mean Copilot was never requested, which is worth fixing or filing.
 
 The workflow body uses `gh pr edit --add-reviewer @copilot` (GraphQL). It requires a user PAT with `repo + read:org` passed as `secrets.gh_token` (`RELEASE_TOKEN` is what every onboarded repo carries). Default `GITHUB_TOKEN` cannot attach Copilot — silently no-ops. Same-owner consumers can use `secrets: inherit`; cross-org consumers (lex-fmt/*) must list `gh_token: ${{ secrets.RELEASE_TOKEN }}` explicitly.
 
