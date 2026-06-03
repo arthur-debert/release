@@ -257,8 +257,8 @@ currently out of scope — commented out in the manifest.
 
 | Project | Repo | Local path |
 |---|---|---|
-| phos | `arthur-debert/phos-app` | `~/h/phos/phos-app` |
-| phos | `arthur-debert/phos-core` | `~/h/phos/phos-core` |
+| phos | `phos-editor/app` | `~/h/phos/phos-app` |
+| phos | `phos-editor/core` | `~/h/phos/phos-core` |
 | burgertocow | `arthur-debert/burgertocow` | `~/h/burgertocow` |
 | clapfig | `arthur-debert/clapfig` | `~/h/clapfig` |
 | dodot | `arthur-debert/dodot` | `~/h/dodot` |

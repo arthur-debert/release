@@ -244,28 +244,21 @@ jobs:
             echo "cache=npm" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup pnpm
-        if: steps.pm.outputs.pm == 'pnpm'
-        # Must run BEFORE setup-node so `cache: pnpm` on setup-node
-        # finds pnpm's store correctly.
+      - name: Enable corepack (pnpm/yarn)
+        if: steps.pm.outputs.pm == 'pnpm' || steps.pm.outputs.pm == 'yarn'
+        # pnpm/yarn aren't on PATH by default on the GH runner. corepack
+        # (bundled with Node ≥16.10) provisions the right one from the
+        # project's `packageManager` field if set (Corepack convention —
+        # e.g. `"packageManager": "pnpm@10.29.3"`), else a default modern
+        # release. Must run BEFORE setup-node so `cache: pnpm|yarn` on
+        # setup-node finds the package manager's store.
         #
-        # No explicit `version:` — pnpm/action-setup reads the
-        # `packageManager` field from package.json when available
-        # (Corepack convention — Node-level, applies to pnpm/yarn/npm
-        # alike; e.g. `"packageManager": "pnpm@10.29.3"`). Setting
-        # `version:` HERE while the
-        # consumer's package.json also pins triggers
-        # ERR_PNPM_BAD_PM_VERSION ("Multiple versions of pnpm
-        # specified") on the runner. phos-app surfaced this on
-        # first adoption.
-        uses: pnpm/action-setup@v4
-
-      - name: Enable corepack (yarn)
-        if: steps.pm.outputs.pm == 'yarn'
-        # yarn isn't on PATH by default on the GH runner. corepack
-        # (bundled with Node ≥16.10) provisions yarn from the project's
-        # packageManager field if set, else a default modern release.
-        # Must run BEFORE setup-node so `cache: yarn` finds the install.
+        # NOT `pnpm/action-setup`: the phos-editor org enterprise Actions
+        # policy allows only GitHub-authored + verified-Marketplace actions,
+        # and pnpm/action-setup is unverified → it startup-fails the whole
+        # workflow. corepack is the policy-clean equivalent and honors the
+        # same `packageManager` pin (setting an explicit version while the
+        # consumer's package.json also pins triggers ERR_PNPM_BAD_PM_VERSION).
         run: corepack enable
 
       - name: Setup Node.js
@@ -449,12 +442,11 @@ jobs:
             echo "cache=npm" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Setup pnpm
-        if: steps.pm.outputs.pm == 'pnpm'
-        uses: pnpm/action-setup@v4
-
-      - name: Enable corepack (yarn)
-        if: steps.pm.outputs.pm == 'yarn'
+      - name: Enable corepack (pnpm/yarn)
+        if: steps.pm.outputs.pm == 'pnpm' || steps.pm.outputs.pm == 'yarn'
+        # corepack, not pnpm/action-setup — the org Actions policy blocks the
+        # unverified action (see the check job's note above). Honors the
+        # consumer's packageManager pin; must precede setup-node's cache step.
         run: corepack enable
 
       - name: Setup Node.js
