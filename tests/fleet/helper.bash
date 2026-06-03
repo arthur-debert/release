@@ -19,7 +19,7 @@ projects:
     - { repo: lex-fmt/lex,   path: lex-fmt/lex }
     - { repo: lex-fmt/comms, path: lex-fmt/comms }
   phos:
-    - { repo: arthur-debert/phos-app, path: phos/phos-app }
+    - { repo: phos-editor/app, path: phos/phos-app }
   dodot:
     - { repo: arthur-debert/dodot, path: dodot }
 EOF
