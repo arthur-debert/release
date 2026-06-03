@@ -42,9 +42,10 @@ Auto-commit (the pull-model commit-hygiene seam, docs/proposals/init-auto-commit
     The managed config tree is fully GENERATED — nothing to review — so it can
     and should auto-commit itself instead of riding along, uncommitted, in some
     unrelated feature PR. Conservative by construction: no changes → no commit;
-    --dry-run → no commit; not a git repo / git unavailable → quiet no-op (init
-    still succeeds); if the managed paths can't be staged cleanly it prints a
-    notice and skips the commit (never fails init). Opt-in: a plain `init` stays
+    --dry-run → no commit; an unborn branch (no HEAD) or any git error makes the
+    commit *step* a quiet no-op; if the managed paths can't be staged cleanly it
+    prints a notice and skips the commit. The commit step never fails init (init
+    itself still requires its normal git context). Opt-in: a plain `init` stays
     non-committing.
   - --push (implies --commit): fast-forward push the managed commit ONLY when
     ALL hold — --push given, the current branch IS the repo's default branch,
