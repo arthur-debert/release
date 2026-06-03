@@ -236,29 +236,38 @@ JSON
     [[ "$output" != *$'\r'* ]]
 }
 
-# Unit-level: drive apply_extract_map directly with a CRLF-laden map
-# (the exact shape that reaches the function on Windows: every entry
-# but the last carries a trailing \r). Proves the per-field hardening
-# strips \r even if a future jq builder regresses and drops `tr -d`.
-@test "apply_extract_map: strips \\r per field (defense in depth)" {
-    mkdir -p root/sub
-    printf 'A' > root/a.wasm
-    printf 'B' > root/sub/b.scm
+# Multi-entry extract map lands each file in its own destination dir, with
+# no stray CR-suffixed directory. The old bash port hand-built this map as
+# `jq @tsv` output and had to strip a trailing \r per field (the Windows-jq
+# failure mode); the Python port reads `extract` straight off the parsed
+# JSON object as a dict, so that whole CRLF class is structurally gone. This
+# black-box test guards the same user-facing invariant through the real CLI.
+@test "extract mode: multi-entry map lands files in their own dirs (no CR dir)" {
+    setup_mock_curl
+    make_multi_tarball "$HARNESS_WORKSPACE/ml.tar.gz" \
+        "a.wasm:A" \
+        "sub/b.scm:B"
+    mock_release ml v1.0.0 "ml.tar.gz" "$HARNESS_WORKSPACE/ml.tar.gz"
 
-    # Both entries carry a trailing \r — the real Windows-jq failure
-    # mode (\r survives on every line, last one included, because $()
-    # strips only the trailing \n and `read` splits on \n alone).
-    local map
-    map="$(printf 'a.wasm\tresources\r\nsub\tresources/queries\r')"
+    cat > deps.json <<'JSON'
+{
+    "ml": {
+        "repo": "test/ml",
+        "version": "v1.0.0",
+        "asset": "ml.tar.gz",
+        "extract": {
+            "a.wasm": "resources",
+            "sub": "resources/queries"
+        }
+    }
+}
+JSON
 
-    run bash -c '
-        source "'"$FETCH_DEPS"'"
-        apply_extract_map root "$1"
-    ' _ "$map"
-
+    run "$FETCH_DEPS" --target aarch64-apple-darwin
     [[ "$status" -eq 0 ]]
     [[ -f resources/a.wasm ]]
     [[ -d resources/queries ]]
+    # No directory whose name carries a trailing carriage return.
     [[ ! -d "$(printf 'resources\r')" ]]
 }
 

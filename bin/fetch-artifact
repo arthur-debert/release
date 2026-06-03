@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # fetch-artifact — install a pinned cross-repo artifact from a GH release.
 #
 # Reads artifacts.json (canonical schema; see docs/artifacts-schema.md)
@@ -32,240 +32,341 @@
 #   4  download or extract failed
 #
 # Source of truth: arthur-debert/release bin/fetch-artifact.
-
-set -euo pipefail
-
-VERSION="2026-05-18-v1"
-
-usage() {
-  sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
-}
-
-err() { echo "fetch-artifact: error: $*" >&2; }
-warn() { echo "fetch-artifact: warning: $*" >&2; }
-
-# --- parse args -----------------------------------------------------------
-
-NAME=""
-MANIFEST=""
-TARGET=""
-ARCH_OVERRIDE=""
-NO_CACHE=0
-
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -h|--help)       usage; exit 0 ;;
-    --version)       echo "fetch-artifact ${VERSION}"; exit 0 ;;
-    --manifest)      MANIFEST="$2"; shift 2 ;;
-    --target)        TARGET="$2"; shift 2 ;;
-    --arch)          ARCH_OVERRIDE="$2"; shift 2 ;;
-    --no-cache)      NO_CACHE=1; shift ;;
-    --)              shift; break ;;
-    -*)              err "unknown flag: $1"; exit 1 ;;
-    *)
-      if [ -z "${NAME}" ]; then
-        NAME="$1"
-        shift
-      else
-        err "unexpected positional argument: $1"
-        exit 1
-      fi
-      ;;
-  esac
-done
-
-if [ -z "${NAME}" ]; then
-  err "missing required argument: <name>"
-  usage >&2
-  exit 1
-fi
-
-MANIFEST="${MANIFEST:-./artifacts.json}"
-TARGET="${TARGET:-${HOME}/.local/bin}"
-
-# --- deps -----------------------------------------------------------------
-
-for cmd in jq gh tar; do
-  command -v "${cmd}" >/dev/null 2>&1 || {
-    err "required command not found: ${cmd}"
-    exit 1
-  }
-done
-
-if [ ! -f "${MANIFEST}" ]; then
-  err "manifest not found: ${MANIFEST}"
-  exit 1
-fi
-
-# --- read manifest entry --------------------------------------------------
-
-if ! jq -e --arg n "${NAME}" '.[$n]' "${MANIFEST}" >/dev/null 2>&1; then
-  err "artifact \"${NAME}\" not in manifest ${MANIFEST}"
-  exit 2
-fi
-
-ENTRY="$(jq --arg n "${NAME}" '.[$n]' "${MANIFEST}")"
-# `// empty` collapses null/missing to "" so later checks are simple
-# `[ -z ]` rather than redundant null-string comparison.
-VERSION_PIN="$(jq -r '.version // empty' <<<"${ENTRY}")"
-REPO="$(jq -r '.repo // empty' <<<"${ENTRY}")"
-ASSET_PATTERN="$(jq -r '.asset // empty' <<<"${ENTRY}")"
-TYPE_DECLARED="$(jq -r '.type // empty' <<<"${ENTRY}")"
-
-# Use bash's native indirect-expansion ${!var} rather than `eval`.
-# `eval` here would execute any command substitutions present in the
-# manifest fields, which is a code-execution path; ${!var} is purely
-# variable indirection and has no such hazard.
-for field in VERSION_PIN REPO; do
-  if [ -z "${!field}" ]; then
-    err "${MANIFEST}:${NAME}: missing required field ${field,,}"
-    exit 1
-  fi
-done
-
-# --- arch resolution ------------------------------------------------------
-
-resolve_arch() {
-  if [ -n "${ARCH_OVERRIDE}" ]; then
-    echo "${ARCH_OVERRIDE}"
-    return 0
-  fi
-  local sys mach
-  sys="$(uname -s)"
-  mach="$(uname -m)"
-  case "${sys}:${mach}" in
-    Linux:x86_64)             echo "x86_64-unknown-linux-gnu" ;;
-    Linux:aarch64|Linux:arm64) echo "aarch64-unknown-linux-gnu" ;;
-    Darwin:x86_64)            echo "x86_64-apple-darwin" ;;
-    Darwin:arm64|Darwin:aarch64) echo "aarch64-apple-darwin" ;;
-    MINGW*:x86_64|MSYS*:x86_64|CYGWIN*:x86_64) echo "x86_64-pc-windows-msvc" ;;
-    MINGW*:aarch64|MSYS*:aarch64|CYGWIN*:aarch64) echo "aarch64-pc-windows-msvc" ;;
-    *)
-      err "unsupported host: ${sys} ${mach}"
-      exit 3
-      ;;
-  esac
-}
-
-ARCH="$(resolve_arch)"
-
-# --- compute asset name ---------------------------------------------------
-
-if [ -z "${ASSET_PATTERN}" ]; then
-  ASSET_PATTERN="${NAME}-{arch}.tar.gz"
-fi
-ASSET="${ASSET_PATTERN//\{arch\}/${ARCH}}"
-
-# --- idempotency: stamp check --------------------------------------------
 #
-# Two stamp locations depending on declared/auto type. We optimistically
-# check both — whichever matches counts. If neither matches, we proceed to
-# download.
+# Self-contained, stdlib-only Python (shell→Python port, see
+# docs/proposals/shell-to-python.md). It is fetched standalone via
+# raw.githubusercontent.com and run with no `release_core` present, so it
+# imports nothing beyond the stdlib and shells out to `gh`/`tar`/`unzip`
+# for network + extraction (matching the old bash byte-for-byte). The
+# manifest is parsed with `json` — `jq` is no longer required.
+"""fetch-artifact — install a pinned cross-repo artifact from a GH release."""
 
-STAMP_BIN="${TARGET}/.${NAME}.version"
-STAMP_TREE="${TARGET}/${NAME}/.version"
+from __future__ import annotations
 
-if [ "${NO_CACHE}" -eq 0 ]; then
-  for stamp in "${STAMP_BIN}" "${STAMP_TREE}"; do
-    if [ -f "${stamp}" ] && [ "$(cat "${stamp}" 2>/dev/null)" = "${VERSION_PIN}" ]; then
-      echo "fetch-artifact: ${NAME} ${VERSION_PIN} already installed (${stamp})"
-      exit 0
-    fi
-  done
-fi
+import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import tempfile
 
-# --- download -------------------------------------------------------------
+VERSION = "2026-05-18-v1"
 
-mkdir -p "${TARGET}"
-TMP="$(mktemp -d)"
-trap 'rm -rf "${TMP}"' EXIT
 
-echo "fetch-artifact: downloading ${NAME} ${VERSION_PIN} (${REPO} → ${ASSET}) ..."
-if ! gh release download "${VERSION_PIN}" \
-       --repo "${REPO}" \
-       --pattern "${ASSET}" \
-       --dir "${TMP}" \
-       --clobber >/dev/null 2>&1; then
-  err "download failed: ${REPO}@${VERSION_PIN} pattern=${ASSET}"
-  exit 4
-fi
+# Exit-code-carrying error so the body can `raise Fail(n, msg)` and the
+# top-level wrapper renders it exactly like the old `err; exit n`.
+class Fail(Exception):
+    def __init__(self, code: int, msg: str) -> None:
+        super().__init__(msg)
+        self.code = code
+        self.msg = msg
 
-ARCHIVE_PATH="${TMP}/${ASSET}"
-if [ ! -f "${ARCHIVE_PATH}" ]; then
-  # gh may strip the dir prefix or rename — fall back to the only file in TMP.
-  ARCHIVE_PATH="$(find "${TMP}" -maxdepth 1 -type f | head -1)"
-fi
-if [ ! -f "${ARCHIVE_PATH}" ]; then
-  err "expected archive missing after download: ${ASSET}"
-  exit 4
-fi
 
-# --- extract --------------------------------------------------------------
+def err(msg: str) -> None:
+    print(f"fetch-artifact: error: {msg}", file=sys.stderr)
 
-EXTRACT="${TMP}/extract"
-mkdir -p "${EXTRACT}"
-case "${ARCHIVE_PATH}" in
-  *.tar.gz|*.tgz)
-    tar -xzf "${ARCHIVE_PATH}" -C "${EXTRACT}" || { err "tar extract failed"; exit 4; }
-    ;;
-  *.zip)
-    command -v unzip >/dev/null 2>&1 || { err "unzip needed for .zip archives"; exit 1; }
-    unzip -q "${ARCHIVE_PATH}" -d "${EXTRACT}" || { err "unzip failed"; exit 4; }
-    ;;
-  *)
-    err "unsupported archive type: ${ARCHIVE_PATH}"
-    exit 4
-    ;;
-esac
 
-# --- resolve install shape ------------------------------------------------
+def warn(msg: str) -> None:
+    print(f"fetch-artifact: warning: {msg}", file=sys.stderr)
 
-TYPE="${TYPE_DECLARED}"
-if [ -z "${TYPE}" ]; then
-  # Auto-detect: look for an executable file matching <name> anywhere in the
-  # extracted tree. Match → binary. Else → tree.
-  if find "${EXTRACT}" -type f -name "${NAME}" -perm -u+x 2>/dev/null | grep -q .; then
-    TYPE="binary"
-  else
-    TYPE="tree"
-  fi
-fi
 
-# --- install --------------------------------------------------------------
+USAGE = """\
+fetch-artifact — install a pinned cross-repo artifact from a GH release.
 
-case "${TYPE}" in
-  binary)
-    BIN_SRC="$(find "${EXTRACT}" -type f -name "${NAME}" -perm -u+x 2>/dev/null | head -1)"
-    if [ -z "${BIN_SRC}" ]; then
-      # Fall back to the first executable file in the archive (e.g. when the
-      # binary is named differently than the artifact key).
-      BIN_SRC="$(find "${EXTRACT}" -type f -perm -u+x 2>/dev/null | head -1)"
-    fi
-    if [ -z "${BIN_SRC}" ]; then
-      err "no executable file found in archive for binary install"
-      exit 4
-    fi
-    install -m 0755 "${BIN_SRC}" "${TARGET}/${NAME}"
-    echo "${VERSION_PIN}" > "${STAMP_BIN}"
-    echo "fetch-artifact: installed ${NAME} ${VERSION_PIN} → ${TARGET}/${NAME}"
-    ;;
-  tree)
-    DEST="${TARGET}/${NAME}"
-    rm -rf "${DEST}"
-    mkdir -p "${DEST}"
-    # Detect single-top-level-dir tarballs (the GH convention) and unwrap.
-    TOP_ENTRIES="$(find "${EXTRACT}" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
-    SINGLE_TOP="$(find "${EXTRACT}" -mindepth 1 -maxdepth 1 -type d | head -1)"
-    if [ "${TOP_ENTRIES}" = "1" ] && [ -n "${SINGLE_TOP}" ]; then
-      cp -R "${SINGLE_TOP}"/. "${DEST}/"
-    else
-      cp -R "${EXTRACT}"/. "${DEST}/"
-    fi
-    echo "${VERSION_PIN}" > "${STAMP_TREE}"
-    echo "fetch-artifact: installed ${NAME} ${VERSION_PIN} → ${DEST}/"
-    ;;
-  *)
-    err "unknown type: ${TYPE} (must be 'binary' or 'tree')"
-    exit 1
-    ;;
-esac
+Reads artifacts.json (canonical schema; see docs/artifacts-schema.md)
+and downloads the named artifact at the pinned version.
+
+Usage:
+  fetch-artifact <name> [options]
+
+Options:
+  --manifest <path>   Path to artifacts.json (default: ./artifacts.json)
+  --target <dir>      Install dir (default: $HOME/.local/bin)
+  --arch <triple>     Override host arch detection (e.g. for cross-fetch)
+  --no-cache          Force re-download even if stamp matches
+  -h | --help         Print this help and exit
+"""
+
+
+def have(cmd: str) -> bool:
+    return shutil.which(cmd) is not None
+
+
+def resolve_arch(arch_override: str) -> str:
+    if arch_override:
+        return arch_override
+    sys_name = platform.system()
+    mach = platform.machine()
+    key = f"{sys_name}:{mach}"
+    table = {
+        "Linux:x86_64": "x86_64-unknown-linux-gnu",
+        "Linux:AMD64": "x86_64-unknown-linux-gnu",
+        "Linux:aarch64": "aarch64-unknown-linux-gnu",
+        "Linux:arm64": "aarch64-unknown-linux-gnu",
+        "Darwin:x86_64": "x86_64-apple-darwin",
+        "Darwin:arm64": "aarch64-apple-darwin",
+        "Darwin:aarch64": "aarch64-apple-darwin",
+    }
+    if key in table:
+        return table[key]
+    # Windows: platform.system() == "Windows"; map the two known arches.
+    if sys_name in ("Windows",) or sys_name.startswith(("MINGW", "MSYS", "CYGWIN")):
+        if mach in ("x86_64", "AMD64"):
+            return "x86_64-pc-windows-msvc"
+        if mach in ("aarch64", "arm64", "ARM64"):
+            return "aarch64-pc-windows-msvc"
+    raise Fail(3, f"unsupported host: {sys_name} {mach}")
+
+
+def find_executable_named(root: str, name: str) -> str | None:
+    """First executable (u+x) regular file named <name> under root."""
+    for dirpath, _dirs, files in os.walk(root):
+        for f in files:
+            if f != name:
+                continue
+            p = os.path.join(dirpath, f)
+            if os.path.isfile(p) and (os.stat(p).st_mode & 0o100):
+                return p
+    return None
+
+
+def find_first_executable(root: str) -> str | None:
+    for dirpath, _dirs, files in os.walk(root):
+        for f in sorted(files):
+            p = os.path.join(dirpath, f)
+            if os.path.isfile(p) and (os.stat(p).st_mode & 0o100):
+                return p
+    return None
+
+
+def extract_archive(archive: str, dest: str) -> None:
+    os.makedirs(dest, exist_ok=True)
+    low = archive.lower()
+    if low.endswith((".tar.gz", ".tgz")):
+        if subprocess.run(["tar", "-xzf", archive, "-C", dest]).returncode != 0:
+            raise Fail(4, "tar extract failed")
+    elif low.endswith(".zip"):
+        if not have("unzip"):
+            raise Fail(1, "unzip needed for .zip archives")
+        if subprocess.run(["unzip", "-q", archive, "-d", dest]).returncode != 0:
+            raise Fail(4, "unzip failed")
+    else:
+        raise Fail(4, f"unsupported archive type: {archive}")
+
+
+def run(argv: list[str]) -> int:
+    name = ""
+    manifest = ""
+    target = ""
+    arch_override = ""
+    no_cache = False
+
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ("-h", "--help"):
+            print(USAGE, end="")
+            return 0
+        elif a == "--version":
+            print(f"fetch-artifact {VERSION}")
+            return 0
+        elif a == "--manifest":
+            manifest = argv[i + 1]
+            i += 2
+        elif a == "--target":
+            target = argv[i + 1]
+            i += 2
+        elif a == "--arch":
+            arch_override = argv[i + 1]
+            i += 2
+        elif a == "--no-cache":
+            no_cache = True
+            i += 1
+        elif a == "--":
+            i += 1
+            break
+        elif a.startswith("-"):
+            err(f"unknown flag: {a}")
+            return 1
+        else:
+            if not name:
+                name = a
+                i += 1
+            else:
+                err(f"unexpected positional argument: {a}")
+                return 1
+
+    if not name:
+        err("missing required argument: <name>")
+        print(USAGE, end="", file=sys.stderr)
+        return 1
+
+    manifest = manifest or "./artifacts.json"
+    target = target or os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+    # --- deps ---
+    for cmd in ("gh", "tar"):
+        if not have(cmd):
+            err(f"required command not found: {cmd}")
+            return 1
+
+    if not os.path.isfile(manifest):
+        err(f"manifest not found: {manifest}")
+        return 1
+
+    # --- read manifest entry ---
+    try:
+        with open(manifest, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        err(f'artifact "{name}" not in manifest {manifest}')
+        return 2
+    if not isinstance(data, dict) or name not in data or data[name] is None:
+        err(f'artifact "{name}" not in manifest {manifest}')
+        return 2
+
+    entry = data[name]
+    entry = entry if isinstance(entry, dict) else {}
+    version_pin = str(entry.get("version") or "")
+    repo = str(entry.get("repo") or "")
+    asset_pattern = str(entry.get("asset") or "")
+    type_declared = str(entry.get("type") or "")
+
+    for field_name, val in (("version", version_pin), ("repo", repo)):
+        if not val:
+            err(f"{manifest}:{name}: missing required field {field_name}")
+            return 1
+
+    # --- arch resolution ---
+    arch = resolve_arch(arch_override)
+
+    # --- compute asset name ---
+    if not asset_pattern:
+        asset_pattern = f"{name}-{{arch}}.tar.gz"
+    asset = asset_pattern.replace("{arch}", arch)
+
+    # --- idempotency: stamp check ---
+    stamp_bin = os.path.join(target, f".{name}.version")
+    stamp_tree = os.path.join(target, name, ".version")
+
+    if not no_cache:
+        for stamp in (stamp_bin, stamp_tree):
+            if os.path.isfile(stamp):
+                try:
+                    with open(stamp, encoding="utf-8") as fh:
+                        # bash compared via $(cat …), which strips the
+                        # trailing newline the stamp is written with.
+                        recorded = fh.read().rstrip("\n")
+                except OSError:
+                    recorded = ""
+                if recorded == version_pin:
+                    print(f"fetch-artifact: {name} {version_pin} already installed ({stamp})")
+                    return 0
+
+    # --- download ---
+    os.makedirs(target, exist_ok=True)
+    tmp = tempfile.mkdtemp()
+    try:
+        print(f"fetch-artifact: downloading {name} {version_pin} ({repo} → {asset}) ...")
+        dl = subprocess.run(
+            [
+                "gh",
+                "release",
+                "download",
+                version_pin,
+                "--repo",
+                repo,
+                "--pattern",
+                asset,
+                "--dir",
+                tmp,
+                "--clobber",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if dl.returncode != 0:
+            err(f"download failed: {repo}@{version_pin} pattern={asset}")
+            return 4
+
+        archive_path = os.path.join(tmp, asset)
+        if not os.path.isfile(archive_path):
+            # gh may strip the dir prefix or rename — fall back to the only
+            # file in TMP (top level only).
+            candidates = [
+                os.path.join(tmp, e)
+                for e in sorted(os.listdir(tmp))
+                if os.path.isfile(os.path.join(tmp, e))
+            ]
+            archive_path = candidates[0] if candidates else ""
+        if not archive_path or not os.path.isfile(archive_path):
+            err(f"expected archive missing after download: {asset}")
+            return 4
+
+        # --- extract ---
+        extract = os.path.join(tmp, "extract")
+        os.makedirs(extract, exist_ok=True)
+        extract_archive(archive_path, extract)
+
+        # --- resolve install shape ---
+        artifact_type = type_declared
+        if not artifact_type:
+            artifact_type = "binary" if find_executable_named(extract, name) else "tree"
+
+        # --- install ---
+        if artifact_type == "binary":
+            bin_src = find_executable_named(extract, name)
+            if not bin_src:
+                # Fall back to the first executable file in the archive (e.g.
+                # when the binary is named differently than the artifact key).
+                bin_src = find_first_executable(extract)
+            if not bin_src:
+                err("no executable file found in archive for binary install")
+                return 4
+            dest = os.path.join(target, name)
+            shutil.copyfile(bin_src, dest)
+            os.chmod(dest, 0o755)
+            with open(stamp_bin, "w", encoding="utf-8") as fh:
+                fh.write(version_pin + "\n")
+            print(f"fetch-artifact: installed {name} {version_pin} → {dest}")
+        elif artifact_type == "tree":
+            dest = os.path.join(target, name)
+            shutil.rmtree(dest, ignore_errors=True)
+            os.makedirs(dest, exist_ok=True)
+            # Detect single-top-level-dir tarballs (the GH convention) and
+            # unwrap. Glob semantics: ignore dotfile entries, like bash `*`.
+            top = [e for e in sorted(os.listdir(extract)) if not e.startswith(".")]
+            single_top = None
+            for e in top:
+                p = os.path.join(extract, e)
+                if os.path.isdir(p):
+                    single_top = p
+                    break
+            if len(top) == 1 and single_top:
+                shutil.copytree(single_top, dest, dirs_exist_ok=True)
+            else:
+                shutil.copytree(extract, dest, dirs_exist_ok=True)
+            os.makedirs(os.path.dirname(stamp_tree), exist_ok=True)
+            with open(stamp_tree, "w", encoding="utf-8") as fh:
+                fh.write(version_pin + "\n")
+            print(f"fetch-artifact: installed {name} {version_pin} → {dest}/")
+        else:
+            err(f"unknown type: {artifact_type} (must be 'binary' or 'tree')")
+            return 1
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    return 0
+
+
+def main() -> int:
+    try:
+        return run(sys.argv[1:])
+    except Fail as f:
+        err(f.msg)
+        return f.code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
