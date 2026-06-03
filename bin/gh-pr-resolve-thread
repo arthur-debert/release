@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # Resolve the PR review thread containing a given comment.
 #
 # Usage:
@@ -22,44 +22,41 @@
 #
 # Example:
 #   gh-pr-resolve-thread 507 1234567890
+#
+# Self-contained, stdlib-only Python (shell→Python port, see
+# docs/proposals/shell-to-python.md). Network/auth still go through `gh api
+# graphql` (so no token plumbing here); the JSON it returns is parsed with
+# the stdlib `json` module, so `jq` is no longer required.
+"""gh-pr-resolve-thread — resolve the PR review thread containing a comment."""
 
-# The `$owner`/`$name`/`$pr`/`$threadId` inside the single-quoted
-# `gh api graphql -f query='…'` blocks are GraphQL variables, not shell
-# expansions — they must stay literal (gh substitutes them from the -F/-f
-# flags). SC2016 ("expressions don't expand in single quotes") is a false
-# positive for these query bodies. Disable file-wide (must precede the
-# first command to apply to the whole file).
-# shellcheck disable=SC2016
-set -euo pipefail
+from __future__ import annotations
 
-show_help() { sed -n '2,/^$/p' "$0" | sed -E 's/^# ?//'; }
+import json
+import re
+import subprocess
+import sys
 
-case "${1:-}" in
-  -h|--help) show_help; exit 0 ;;
-  '') show_help >&2; exit 64 ;;
-esac
+USAGE = """\
+Resolve the PR review thread containing a given comment.
 
-if [ $# -lt 2 ]; then
-  echo "error: need <pr-number> <comment-id>" >&2
-  show_help >&2
-  exit 64
-fi
+Usage:
+  gh-pr-resolve-thread <pr-number> <comment-id>
 
-pr=$1
-comment_id=$2
+Looks up review threads on the PR, finds the one containing the given
+review-comment id (the numeric `id` field returned by `gh api
+repos/.../pulls/<n>/comments`), and resolves it via the GraphQL
+resolveReviewThread mutation.
 
-[[ "$pr" =~ ^[0-9]+$ ]] || { echo "error: PR number must be numeric (got: $pr)" >&2; exit 64; }
-[[ "$comment_id" =~ ^[0-9]+$ ]] || { echo "error: comment id must be numeric (got: $comment_id)" >&2; exit 64; }
+Exit codes:
+  0  — thread resolved (or already resolved)
+  1  — thread not found / GraphQL error
+  64 — bad usage
 
-repo_owner=$(gh repo view --json owner -q .owner.login)
-repo_name=$(gh repo view --json name -q .name)
+Example:
+  gh-pr-resolve-thread 507 1234567890
+"""
 
-# Find the thread containing this comment.
-thread_json=$(gh api graphql \
-  -F owner="$repo_owner" \
-  -F name="$repo_name" \
-  -F pr="$pr" \
-  -f query='
+_THREADS_QUERY = """
     query($owner: String!, $name: String!, $pr: Int!) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $pr) {
@@ -72,35 +69,95 @@ thread_json=$(gh api graphql \
           }
         }
       }
-    }')
+    }"""
 
-thread_id=$(jq -r --argjson cid "$comment_id" '
-  .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.comments.nodes[] | .databaseId == $cid)
-  | .id' <<<"$thread_json" | head -1)
-
-if [ -z "$thread_id" ]; then
-  echo "error: no review thread contains comment $comment_id on $repo_owner/$repo_name#$pr" >&2
-  exit 1
-fi
-
-is_resolved=$(jq -r --arg tid "$thread_id" '
-  .data.repository.pullRequest.reviewThreads.nodes[]
-  | select(.id == $tid)
-  | .isResolved' <<<"$thread_json")
-
-if [ "$is_resolved" = "true" ]; then
-  echo "already resolved: thread $thread_id ($repo_owner/$repo_name#$pr)"
-  exit 0
-fi
-
-gh api graphql \
-  -F threadId="$thread_id" \
-  -f query='
+_RESOLVE_MUTATION = """
     mutation($threadId: ID!) {
       resolveReviewThread(input: { threadId: $threadId }) {
         thread { isResolved }
       }
-    }' >/dev/null
+    }"""
 
-echo "resolved: thread $thread_id ($repo_owner/$repo_name#$pr, comment $comment_id)"
+
+def _gh(args: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(["gh", *args], capture_output=True, text=True)
+
+
+def main(argv: list[str]) -> int:
+    if argv and argv[0] in ("-h", "--help"):
+        print(USAGE, end="")
+        return 0
+    if not argv:
+        print(USAGE, end="", file=sys.stderr)
+        return 64
+    if len(argv) < 2:
+        print("error: need <pr-number> <comment-id>", file=sys.stderr)
+        print(USAGE, end="", file=sys.stderr)
+        return 64
+
+    pr, comment_id = argv[0], argv[1]
+    if not re.fullmatch(r"[0-9]+", pr):
+        print(f"error: PR number must be numeric (got: {pr})", file=sys.stderr)
+        return 64
+    if not re.fullmatch(r"[0-9]+", comment_id):
+        print(f"error: comment id must be numeric (got: {comment_id})", file=sys.stderr)
+        return 64
+
+    cp = _gh(["repo", "view", "--json", "owner,name"])
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr)
+        return 1
+    repo = json.loads(cp.stdout)
+    owner = repo["owner"]["login"]
+    name = repo["name"]
+
+    # Find the thread containing this comment.
+    cp = _gh(
+        [
+            "api",
+            "graphql",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+            "-F",
+            f"pr={pr}",
+            "-f",
+            f"query={_THREADS_QUERY}",
+        ]
+    )
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr)
+        return 1
+
+    data = json.loads(cp.stdout)
+    nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    cid = int(comment_id)
+    thread = next(
+        (t for t in nodes if any(c.get("databaseId") == cid for c in t["comments"]["nodes"])),
+        None,
+    )
+
+    if thread is None:
+        print(
+            f"error: no review thread contains comment {comment_id} on {owner}/{name}#{pr}",
+            file=sys.stderr,
+        )
+        return 1
+
+    thread_id = thread["id"]
+    if thread.get("isResolved") is True:
+        print(f"already resolved: thread {thread_id} ({owner}/{name}#{pr})")
+        return 0
+
+    cp = _gh(["api", "graphql", "-F", f"threadId={thread_id}", "-f", f"query={_RESOLVE_MUTATION}"])
+    if cp.returncode != 0:
+        sys.stderr.write(cp.stderr)
+        return 1
+
+    print(f"resolved: thread {thread_id} ({owner}/{name}#{pr}, comment {comment_id})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
