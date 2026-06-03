@@ -22,14 +22,44 @@ upstream — see **Escalation** below.
 
 Pull requests are driven to _ready for human merge_ by a reviewer-agnostic state
 engine. Rather than piecing together which reviews are pending, which threads
-are open, and whether the PR is mergeable, ask the engine where the PR stands:
+are open, and whether the PR is mergeable, you ask the engine where the PR
+stands and act on what it reports:
 
 ```sh
 gh-task-status <pr-number>
 ```
 
-It reports the PR's lifecycle state — requested → reviewed → ready — and what is
-left before a human can merge. That is the entry point for the flow.
+It reports the PR's lifecycle state — **requested → reviewed → ready** — and what
+is left before a human can merge. That is the entry point. Opening the PR is not
+the end of your job; you own it through the whole loop:
+
+1. **Open a _live_ PR** (never a draft — a draft suppresses the automatic
+   review). The review is requested for you.
+2. **Poll `gh-task-status <pr>`.** It names what is outstanding: a pending
+   review, unresolved threads, or failing checks.
+3. **Clear what it names.** Fix the code or reply with a rationale, resolve each
+   thread, push, and let checks go green. Never bypass the gate (`--no-verify`)
+   to force a check past — fix the cause; CI re-runs the same gate on a clean
+   runner.
+4. **Repeat until the state is `ready`.** Reviews can lag — wait for them rather
+   than declaring done early.
+5. **Stop at `ready`; a human merges.** Don't self-merge. The final read and the
+   merge are the human's.
+
+That is the whole loop: open → poll the engine → clear what it names → `ready` →
+hand off. Drive it through `gh-task-status`; don't reinvent it with ad-hoc
+`gh api` calls.
+
+**Landing a feature or fix?** Add a changelog fragment in the same PR:
+
+```sh
+changelog add <slug> "<one-line summary>"
+```
+
+It writes `CHANGELOG/unreleased-<slug>.md`. The release refuses to cut without
+one — the prepare gate fails with _"No CHANGELOG/unreleased-\*.md fragments
+found"_ — so a feature that merges without a fragment silently blocks the next
+release until someone backfills it.
 
 ## Escalation — when managed infrastructure breaks
 
