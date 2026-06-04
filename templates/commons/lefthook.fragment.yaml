@@ -51,7 +51,7 @@ pre-commit:
       # "shellcheck SC1071's on a non-shell file": the old glob+exclude couldn't
       # catch extensionless non-shell files and wasn't honoured the same way
       # across lefthook modes (staged vs --all-files). check-shell is invoked
-      # identically by pre-commit, CI, and release-verify-fleet, and release
+      # identically by pre-commit, CI, and `release-core admin repos verify`, and release
       # dogfoods it over its own distributed output. See
       # docs/proposals/unified-gate.lex.
       #

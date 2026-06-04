@@ -24,26 +24,32 @@ silently dropping managed `bin/` tools).
   all consumers; Phase A3 skill-reach + Phases C/D remain), **#349 / #350**
   (`orc watch` shake-out + cloud transport). `docs/status.lex` is the
   *directional* roadmap (the why), explicitly not a task tracker.
-- **Core fleet loop:** `release-verify-fleet` (hermetic pre-flight sweep) →
-  `orc propagate` (re-sync + open a PR per consumer) → `release-advance-major`
-  (fast-forward the floating major). Always run `release-verify-fleet` before advancing.
+- **The CLI is the interface:** all infra/fleet tasks go through the
+  `release-core <group> <command>` tree — `release-core --help` is the map,
+  `release-core admin --help` is the fleet/meta-release subtree. The flat
+  maintainer command names (`release-verify-fleet`, `managed-repos`, …) still
+  work as aliases, but `release-core admin …` is the documented form; prefer it.
+- **Core fleet loop:** `release-core admin repos verify` (hermetic pre-flight
+  sweep) → `orc propagate` (re-sync + open a PR per consumer) →
+  `release-core admin release advance-major` (fast-forward the floating major).
+  Always run `release-core admin repos verify` before advancing.
 - **The load-bearing gotcha:** mechanical fleet tools run in clones *without* the
   consumer's toolchain (no `npm install` / `cargo`), so they cannot run the
   consumer gate faithfully — `propagate` commits `--no-verify` and the PR's CI is
-  the real gate; a `release-verify-fleet --all-files` FAIL on an npm/frontend repo is
-  usually a missing-deps artifact, not real debt. Review threads on synced
-  `.release/**` are upstream concerns, not consumer-PR blockers.
+  the real gate; a `release-core admin repos verify --all-files` FAIL on an
+  npm/frontend repo is usually a missing-deps artifact, not real debt. Review
+  threads on synced `.release/**` are upstream concerns, not consumer-PR blockers.
 
 ## Repo shape
 
 - `.github/workflows/rust-cli.yml`, `copilot-review.yml` — reusable workflows
 - `.github/actions/<name>/` — composite actions, atomic units shared across (future) workflows
 - `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
-  - Policy/setup: `apply-ruleset`, `sweep-github-policy`, `install-release-{secrets,token}`, `enable-dependabot-security`, `detect-stack`
+  - Policy/setup (canonical `release-core admin policy|secrets …`; flat aliases in parens): ruleset (`apply-ruleset`), sweep (`sweep-github-policy`), dependabot (`enable-dependabot-security`); `release-core admin secrets install|token` (`install-release-{secrets,token}`); plus `detect-stack`
   - Pull-model boot: `install-release-core` (THE boot resolver, ADR-0003 — resolves the `release_core` wheel from a GitHub release, installs it via `pip install --force-reinstall` (deps resolved from PyPI — release_core declares real third-party deps now, e.g. click), then runs `release-core init` in the current repo (`--no-init` to skip; init is best-effort and locates the just-installed console-script across venv/`--user`/system layouts). `--major vN` pins to the latest release in that major line, default `releases/latest` — the v3-safety filter since the wheel version is static. One command does the whole boot — NOT a pip post-install hook (wheels have none; init is repo-specific). Pure shell, runs before `release_core` is installed. Lives in the SYNCED bootstrap (`templates/commons/bin/install-release-core`, symlinked from repo-root `bin/`) so it reaches consumers — `setup-dev-env.sh` §0.2 invokes it by repo path at SessionStart (local+cloud); CI reaches it via `@vN` action_path. Tests: `tests/install-release-core/`)
-  - Release mechanics: `release-advance-major` (fast-forward the floating major branch — auto-detected highest `vN`, currently `v2` — to main after a release-side merge; one command for the old four-step `checkout vN && merge --ff-only main && push` dance)
+  - Release mechanics: `release-core admin release advance-major` (flat alias: `release-advance-major`) — fast-forward the floating major branch — auto-detected highest `vN`, currently `v2` — to main after a release-side merge; one command for the old four-step `checkout vN && merge --ff-only main && push` dance
   - Sync/drift: `release-sync` (build-dir + symlinks materializer), `release-drift-check` (consumer-side drift gate — rebuilds against the revision recorded in `.release/.release-sync-source` so it separates *drift* from mere *staleness*; see ADR-0002 + `docs/proposals/301-consumer-drift-gate-rollout.md`)
-  - Fleet: `managed-repos` (zero-logic accessor over `managed-repos.yaml` — the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`), `release-verify-fleet` (hermetic pre-flight lint sweep: clone fleet → `release-sync` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-advance-major`), `release-inbox` (read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run), `release-notify-source` (close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue). The `release-fleet-triage` skill orchestrates `release-inbox` → fix loop → `release-notify-source`. See `docs/dev/fleet-tooling.md`.
+  - Fleet (canonical: `release-core admin repos|inbox …`; flat aliases in parens): `release-core admin repos list` (`managed-repos`) — zero-logic accessor over `managed-repos.yaml`, the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`; `release-core admin repos verify` (`release-verify-fleet`) — hermetic pre-flight lint sweep: clone fleet → `release-sync` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-core admin release advance-major`; `release-core admin inbox` (`release-inbox`) — read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run; `release-core admin inbox notify-source` (`release-notify-source`) — close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue. The `release-fleet-triage` skill orchestrates inbox → fix loop → notify-source. See `docs/dev/fleet-tooling.md`.
   - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `gh-release-issue`
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)

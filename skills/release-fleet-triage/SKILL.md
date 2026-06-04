@@ -29,11 +29,12 @@ working directory / `RELEASE_HOME`).
 ## Step 1 — orient: read the inbox
 
 ```sh
-release-inbox            # human digest: open consumer-filed issues, by cluster
-release-inbox --json     # same data, machine-readable (for scripting a worklist)
+release-core admin inbox            # human digest: open consumer-filed issues, by cluster
+release-core admin inbox --json     # same data, machine-readable (for scripting a worklist)
 ```
 
-`release-inbox` groups open `consumer-filed` issues by `[component]` and sorts
+`release-core admin inbox` (flat alias: `release-inbox`) groups open
+`consumer-filed` issues by `[component]` and sorts
 clusters by **recurrence** — the comment count, which is the relay skill's
 "also hit on `<repo>`" signal appended on each duplicate. A cluster with three
 comments across two issues outranks a one-off.
@@ -70,11 +71,11 @@ rules). The mechanical path:
 4. **Advance the major** once merged so consumers on `@vN` actually get it:
 
    ```sh
-   release-advance-major          # fast-forward the highest vN to main, push
+   release-core admin release advance-major   # fast-forward the highest vN to main, push
    ```
 
-   (Run `release-verify-fleet` first if the change is broad — per the core
-   fleet loop in the repo's CLAUDE.md.)
+   (Run `release-core admin repos verify` first if the change is broad — per the
+   core fleet loop in the repo's CLAUDE.md.)
 
 ## Step 4 — close the loop
 
@@ -83,13 +84,14 @@ notify the consumers who escalated it and close the release issue:
 
 ```sh
 # Dry-run first (default) — prints the source PRs it will comment on + the body:
-release-notify-source <release-issue-#> --fix "release#<pr>, v2 advanced to <sha>"
+release-core admin inbox notify-source <release-issue-#> --fix "release#<pr>, v2 advanced to <sha>"
 
 # When the plan looks right, send it and close the release issue:
-release-notify-source <release-issue-#> --fix "release#<pr>, v2 advanced to <sha>" --post --close
+release-core admin inbox notify-source <release-issue-#> --fix "release#<pr>, v2 advanced to <sha>" --post --close
 ```
 
-`release-notify-source` reads the release issue, extracts every source PR it
+`release-core admin inbox notify-source` (flat alias: `release-notify-source`)
+reads the release issue, extracts every source PR it
 points at (the `**PR:**` body line + the relay skill's `- PR:` duplicate lines),
 and posts one consistent "upstream fix shipped — bump `@vN` and re-run" comment
 on each. It is **dry-run by default** because it fans out across consumer repos;
@@ -109,8 +111,9 @@ their tracker), then close the release issue manually.
   don't edit it to "no longer true." A recurrence files a fresh report (or adds
   a comment via the relay skill).
 - **Don't auto-merge or auto-advance without the user.** `gh-pr-review-loop`
-  stops at ready; `release-advance-major` and `release-notify-source --post` are
-  outward-facing — surface the plan and let the user greenlight.
+  stops at ready; `release-core admin release advance-major` and
+  `release-core admin inbox notify-source --post` are outward-facing — surface
+  the plan and let the user greenlight.
 - **Scope.** Only `consumer-filed` infra issues belong here. Product bugs /
   feature requests on `release/` are normal issues, not fleet-inbox items.
 
@@ -122,5 +125,6 @@ their tracker), then close the release issue manually.
 - [`release-issue-relay`](../release-issue-relay/SKILL.md) / `gh-release-issue` —
   the read-side producers that fill the inbox.
 - [`release-fleet-ops`](../release-fleet-ops/SKILL.md) — the upstream-vs-consumer
-  diagnosis + `release-advance-major` / `release-verify-fleet` doctrine.
+  diagnosis + `release-core admin release advance-major` /
+  `release-core admin repos verify` doctrine.
 - [`gh-pr-review-loop`](../gh-pr-review-loop/SKILL.md) — the PR mechanics for Step 3.

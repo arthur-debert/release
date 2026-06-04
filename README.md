@@ -282,16 +282,17 @@ currently out of scope — commented out in the manifest.
 
 Repos NOT in this list are out of scope. `managed-repos.yaml` is the
 single source of truth — there is no auto-discovery (ruleset/gh-api
-discovery was removed after it caused recurring scope bugs). `managed-repos`
-resolves each entry to `$REPOS_ROOT/<path>` with zero inference; the
-table above is the human mirror.
+discovery was removed after it caused recurring scope bugs).
+`release-core admin repos list` (flat alias: `managed-repos`) resolves each
+entry to `$REPOS_ROOT/<path>` with zero inference; the table above is the
+human mirror.
 
 ## What every onboarded repo gets
 
 Same baseline regardless of Stack:
 
-- **Branch protection** via `bin/apply-ruleset` (PR required, linear
-  history, no force-push). Template at
+- **Branch protection** via `release-core admin policy ruleset` (flat alias:
+  `apply-ruleset`) (PR required, linear history, no force-push). Template at
   `rulesets/main-protection.json.tmpl`.
 - **Auto-review on PR open** — Copilot + Gemini review every PR;
   Cloud Auto-fix wakes a fresh session per review comment when the
@@ -394,8 +395,8 @@ rollout:
 - Push a change for one Stack: `release/beta/<stack>`.
 - Ship to fleet: merge to main, delete the beta branch.
 
-`bin/release-beta-list` reports open beta branches with age and
-ahead-of-main count. Stale betas are visible; the convention is
+`release-core admin release betas` (flat alias: `release-beta-list`) reports
+open beta branches with age and ahead-of-main count. Stale betas are visible; the convention is
 delete-on-merge.
 
 ## The agentic PR loop
@@ -511,13 +512,15 @@ Per-tag history: [`docs/breaking-changes.md`](docs/breaking-changes.md).
                       one (currently rust, electron, tauri; others use
                       bespoke CI in the consumer pending #107)
   actions/            composite actions (Tasks called inside workflows)
-bin/                  human-runnable tooling, on $PATH via dodot:
+bin/                  human-runnable tooling, on $PATH via dodot.
+                      Canonical entry: the `release-core <group> <cmd>`
+                      CLI (`release-core --help` is the map); the flat
+                      names below are kept as working aliases:
                       apply-ruleset, sweep-github-policy,
                       install-release-{secrets,token}, detect-stack,
                       audit-portfolio, audit-repo, the gh-pr-* loop
                       helpers, release-sync, release-beta-list,
                       release-cut, fetch-artifact
-                      🚧 done-check (planned)
 rulesets/             branch-protection JSON templates
 bin-internal/         CI scripts exec'd by composite actions
 templates/            path-mirror layout — sync destination = source
