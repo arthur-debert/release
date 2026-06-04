@@ -79,7 +79,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     release_home = os.environ.get("RELEASE_HOME") or os.path.join(
         os.path.expanduser("~"), "release"
     )
-    if not os.path.isdir(os.path.join(release_home, ".git")):
+    if not gh.is_git_worktree(release_home):
         _err(f"release-sync: $RELEASE_HOME='{release_home}' is not a git clone")
         return 1
     if shutil.which("yq") is None:

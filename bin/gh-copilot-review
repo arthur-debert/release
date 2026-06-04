@@ -4,10 +4,11 @@
 # Usage:
 #   gh-copilot-review <pr-number>
 #
-# Composite of gh-copilot-on + gh-copilot-wait + a review-printing step.
-# Use when you want to drive a single PR end-to-end through Copilot review
-# in one foreground command. For parallel/background use, call the
-# individual scripts.
+# Composite of gh-copilot-on + gh-copilot-wait + gh-copilot-show. This
+# RE-REQUESTS a review and BLOCKS (~7m initial wait) until it lands. To just
+# READ an already-posted review without requesting or waiting, use
+# gh-copilot-show instead. For parallel/background use, call the individual
+# scripts.
 #
 # Output:
 #   - "=== copilot review on <repo>#<pr> ===" — review state + body
@@ -37,13 +38,6 @@ dir=$(cd "$(dirname "$0")" && pwd)
 "$dir/gh-copilot-on" "$pr"
 "$dir/gh-copilot-wait" "$pr"
 
-repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
-
-echo
-echo "=== copilot review on $repo#$pr ==="
-gh api "repos/{owner}/{repo}/pulls/$pr/reviews" \
-  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | "\nstate: \(.state)\nsubmitted: \(.submitted_at)\n\n\(.body)\n"'
-
-echo "=== inline comments ==="
-gh api --paginate "repos/{owner}/{repo}/pulls/$pr/comments" \
-  --jq '.[] | select(.user.login == "copilot-pull-request-reviewer[bot]") | "[\(.path):\(.line // .original_line // "?")] \(.body)\n"'
+# Print the now-posted review. gh-copilot-show is the read-only path, reused
+# here so the print format lives in exactly one place.
+"$dir/gh-copilot-show" "$pr"

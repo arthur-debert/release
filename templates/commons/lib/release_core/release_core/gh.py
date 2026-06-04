@@ -168,6 +168,30 @@ def repo_root(start: str | None = None) -> str:
     return os.path.realpath(top)
 
 
+def is_git_worktree(path: str) -> bool:
+    """True iff ``path`` is inside a git working tree (a normal clone OR a
+    linked worktree).
+
+    Replaces the ``os.path.isdir(<path>/.git)`` guard, which wrongly rejected
+    git worktrees: a linked worktree's ``.git`` is a *file* (a gitdir pointer),
+    not a directory, so the isdir check reports a real worktree as "not a git
+    clone". ``git rev-parse --is-inside-work-tree`` resolves the gitdir pointer
+    natively and is true for both layouts. Returns False (never raises) when
+    ``path`` is missing, not a repo, or git is unavailable — preserving the
+    old guard's boolean contract."""
+    import os
+
+    if not os.path.isdir(path):
+        return False
+    return (
+        proc.run(
+            ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # git plumbing wrappers (added Phase 2 / s2p2-release-sync — ADDITIVE, flagged).
 #
