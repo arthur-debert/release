@@ -138,7 +138,7 @@ When you hit the fallback, also consider filing a `release-issue-relay` issue no
 
 ## Distinct from `clone-lex-repos`
 
-`bin/clone-lex-repos` (in the same release repo) is a *release-pipeline* bootstrap used by `release-core admin release lex` (flat alias: `release-lex`) — clones 7 repos into cwd including `arthur-debert/release` itself, no flags. This skill uses `clone-lex-stack` instead, which has a different repo list (8 lex-fmt repos, no `arthur-debert/release`), different default location (`/tmp/lex-fmt/`), and the flag-driven selection model needed for agent use. Don't conflate them.
+`bin/clone-lex-repos` (in the same release repo) is a *release-pipeline* bootstrap used by `release-core admin release lex` (retired flat: `release-lex`) — clones 7 repos into cwd including `arthur-debert/release` itself, no flags. This skill uses `clone-lex-stack` instead, which has a different repo list (8 lex-fmt repos, no `arthur-debert/release`), different default location (`/tmp/lex-fmt/`), and the flag-driven selection model needed for agent use. Don't conflate them.
 
 ## Canonical repo list
 

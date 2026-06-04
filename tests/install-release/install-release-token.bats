@@ -16,25 +16,25 @@
 BIN="$BATS_TEST_DIRNAME/../../bin"
 
 @test "install-release-token --help exits 0 and prints usage" {
-  run "$BIN/install-release-token" --help
+  run "$BIN/release-core" admin secrets token --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"install-release-token"* ]]
 }
 
 @test "install-release-token unknown flag exits 64" {
-  run "$BIN/install-release-token" --bogus
+  run "$BIN/release-core" admin secrets token --bogus
   [ "$status" -eq 64 ]
 }
 
 @test "install-release-token empty stdin exits 64" {
-  run bash -c "printf '' | '$BIN/install-release-token'"
+  run bash -c "printf '' | '$BIN/release-core' admin secrets token"
   [ "$status" -eq 64 ]
   [[ "$output" == *"empty token"* ]]
 }
 
 @test "install-release-token whitespace-only stdin exits 64" {
-  run bash -c "printf '  \n\r ' | '$BIN/install-release-token'"
+  run bash -c "printf '  \n\r ' | '$BIN/release-core' admin secrets token"
   [ "$status" -eq 64 ]
   [[ "$output" == *"empty token"* ]]
 }

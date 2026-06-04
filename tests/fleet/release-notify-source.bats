@@ -34,23 +34,23 @@ JSON
 }
 
 @test "missing issue number exits 64" {
-  run "$BIN/release-notify-source" --fix x
+  run "$BIN/release-core" admin inbox notify-source --fix x
   [ "$status" -eq 64 ]
 }
 
 @test "missing --fix exits 64" {
-  run "$BIN/release-notify-source" 42
+  run "$BIN/release-core" admin inbox notify-source 42
   [ "$status" -eq 64 ]
 }
 
 @test "non-numeric issue exits 64" {
-  run "$BIN/release-notify-source" not-a-number --fix x
+  run "$BIN/release-core" admin inbox notify-source not-a-number --fix x
   [ "$status" -eq 64 ]
 }
 
 @test "dry-run lists every source PR and posts nothing" {
   _stub_gh "$(_issue_two_prs)"
-  run "$BIN/release-notify-source" 42 --fix "release#371"
+  run "$BIN/release-core" admin inbox notify-source 42 --fix "release#371"
   [ "$status" -eq 0 ]
   [[ "$output" == *"DRY-RUN"* ]]
   [[ "$output" == *"dodot/pull/118"* ]]
@@ -61,7 +61,7 @@ JSON
 
 @test "--post comments on each source PR" {
   _stub_gh "$(_issue_two_prs)"
-  run "$BIN/release-notify-source" 42 --fix "release#371" --post
+  run "$BIN/release-core" admin inbox notify-source 42 --fix "release#371" --post
   [ "$status" -eq 0 ]
   [[ "$output" == *"notified:"* ]]
   grep -q 'pr comment https://github.com/arthur-debert/dodot/pull/118' gh-calls.log
@@ -70,14 +70,14 @@ JSON
 
 @test "--post --close also closes the release issue" {
   _stub_gh "$(_issue_two_prs)"
-  run "$BIN/release-notify-source" 42 --fix "release#371" --post --close
+  run "$BIN/release-core" admin inbox notify-source 42 --fix "release#371" --post --close
   [ "$status" -eq 0 ]
   grep -q 'issue close 42' gh-calls.log
 }
 
 @test "an issue with no source PR exits 3 and names the reported repo" {
   _stub_gh '{"number":7,"title":"[ruleset] x","url":"https://github.com/arthur-debert/release/issues/7","body":"**Reported from:** arthur-debert/padz\n","comments":[]}'
-  run "$BIN/release-notify-source" 7 --fix "release#999"
+  run "$BIN/release-core" admin inbox notify-source 7 --fix "release#999"
   [ "$status" -eq 3 ]
   [[ "$output" == *"arthur-debert/padz"* ]]
   [ ! -f gh-calls.log ]

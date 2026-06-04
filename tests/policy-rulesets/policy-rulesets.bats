@@ -49,25 +49,25 @@ STUB
 # --- apply-ruleset ----------------------------------------------------
 
 @test "apply-ruleset --help exits 0 and prints usage" {
-  run "$BIN/apply-ruleset" --help
+  run "$BIN/release-core" admin policy ruleset --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"apply-ruleset"* ]]
 }
 
 @test "apply-ruleset unknown flag is a usage error (exit 64)" {
-  run "$BIN/apply-ruleset" --nope
+  run "$BIN/release-core" admin policy ruleset --nope
   [ "$status" -eq 64 ]
 }
 
 @test "apply-ruleset --checks needs a value (exit 64)" {
-  run "$BIN/apply-ruleset" --checks
+  run "$BIN/release-core" admin policy ruleset --checks
   [ "$status" -eq 64 ]
 }
 
 @test "apply-ruleset --dry-run with --checks builds + prints the payload, sends nothing" {
   _stub_gh_404
-  run "$BIN/apply-ruleset" --dry-run --checks "Test,Build (x)"
+  run "$BIN/release-core" admin policy ruleset --dry-run --checks "Test,Build (x)"
   [ "$status" -eq 0 ]
   [[ "$output" == *"repo:    o/r"* ]]
   [[ "$output" == *"ruleset: main-branch-protection (existing id: none)"* ]]
@@ -80,43 +80,43 @@ STUB
 # --- sweep-github-policy ----------------------------------------------
 
 @test "sweep-github-policy --help exits 0 and prints usage" {
-  run "$BIN/sweep-github-policy" --help
+  run "$BIN/release-core" admin policy sweep --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"sweep-github-policy"* ]]
 }
 
 @test "sweep-github-policy unknown flag is a usage error (exit 64)" {
-  run "$BIN/sweep-github-policy" --nope
+  run "$BIN/release-core" admin policy sweep --nope
   [ "$status" -eq 64 ]
 }
 
 @test "sweep-github-policy --stack needs a value (exit 64)" {
-  run "$BIN/sweep-github-policy" --stack
+  run "$BIN/release-core" admin policy sweep --stack
   [ "$status" -eq 64 ]
 }
 
 # --- enable-dependabot-security ---------------------------------------
 
 @test "enable-dependabot-security --help exits 0 and prints usage" {
-  run "$BIN/enable-dependabot-security" --help
+  run "$BIN/release-core" admin policy dependabot --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"enable-dependabot-security"* ]]
 }
 
 @test "enable-dependabot-security unknown flag is a usage error (exit 64)" {
-  run "$BIN/enable-dependabot-security" --nope
+  run "$BIN/release-core" admin policy dependabot --nope
   [ "$status" -eq 64 ]
 }
 
 @test "enable-dependabot-security --repos needs a value (exit 64)" {
-  run "$BIN/enable-dependabot-security" --repos
+  run "$BIN/release-core" admin policy dependabot --repos
   [ "$status" -eq 64 ]
 }
 
 @test "enable-dependabot-security --dry-run over explicit repos lists + summarizes" {
-  run "$BIN/enable-dependabot-security" --repos o/a,o/b --dry-run
+  run "$BIN/release-core" admin policy dependabot --repos o/a,o/b --dry-run
   [ "$status" -eq 0 ]
   [[ "$output" == *"found 2 repo(s):"* ]]
   [[ "$output" == *"[dry] PUT vulnerability-alerts"* ]]
@@ -126,7 +126,7 @@ STUB
 
 @test "enable-dependabot-security finds no onboarded repos (exit 1)" {
   _stub_gh_404
-  run "$BIN/enable-dependabot-security" --owners someorg
+  run "$BIN/release-core" admin policy dependabot --owners someorg
   [ "$status" -eq 1 ]
   [[ "$output" == *"no onboarded repos found"* ]]
 }

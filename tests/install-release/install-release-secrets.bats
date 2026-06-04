@@ -16,21 +16,21 @@
 BIN="$BATS_TEST_DIRNAME/../../bin"
 
 @test "install-release-secrets --help exits 0 and prints usage" {
-  run "$BIN/install-release-secrets" --help
+  run "$BIN/release-core" admin secrets install --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"install-release-secrets"* ]]
 }
 
 @test "install-release-secrets --help lists the secret sources" {
-  run "$BIN/install-release-secrets" --help
+  run "$BIN/release-core" admin secrets install --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"APPLE_CERTIFICATE_P12_BASE64"* ]]
   [[ "$output" == *"HOMEBREW_TAP_TOKEN"* ]]
 }
 
 @test "install-release-secrets unknown flag exits 64" {
-  run "$BIN/install-release-secrets" --bogus
+  run "$BIN/release-core" admin secrets install --bogus
   [ "$status" -eq 64 ]
 }
 
@@ -38,7 +38,7 @@ BIN="$BATS_TEST_DIRNAME/../../bin"
   # Point at an empty auth dir + clear the required env so sourcing fails fast.
   EMPTY="$(mktemp -d "${BATS_TMPDIR:-/tmp}/irs.XXXXXX")"
   run env -u CRATES_IO_KEY -u HOMEBREW_TAP_TOKEN \
-    "$BIN/install-release-secrets" --auth-dir "$EMPTY" --repos owner/repo
+    "$BIN/release-core" admin secrets install --auth-dir "$EMPTY" --repos owner/repo
   rm -rf "$EMPTY"
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing:"* ]]

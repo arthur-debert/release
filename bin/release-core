@@ -11,16 +11,23 @@
 import os
 import sys
 
+_HERE = os.path.dirname(os.path.realpath(__file__))
+# Fleet verbs reached via `release-core admin repos|release …` resolve their
+# default manifest / RELEASE_HOME from a *_SCRIPT_DIR env var pointing at this
+# bin/ dir (so resolution is cwd-independent):
+#   MANAGED_REPOS_SCRIPT_DIR  → managed_repos: bin/../managed-repos.yaml
+#   AUDIT_PORTFOLIO_SCRIPT_DIR → audit_portfolio: bin/../managed-repos.yaml
+#   VERIFY_FLEET_SCRIPT_DIR    → release_verify_fleet: RELEASE_HOME = bin/..
+# Each was exported by its now-retired flat shim (#468). The release-core shim
+# is the on-PATH entry now, so it must export all three — otherwise the verbs
+# fall back to cwd (managed-repos.yaml) or the WRONG ~/release default for
+# RELEASE_HOME.
+os.environ.setdefault("MANAGED_REPOS_SCRIPT_DIR", _HERE)
+os.environ.setdefault("AUDIT_PORTFOLIO_SCRIPT_DIR", _HERE)
+os.environ.setdefault("VERIFY_FLEET_SCRIPT_DIR", _HERE)
 sys.path.insert(
     0,
-    os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "..",
-        "templates",
-        "commons",
-        "lib",
-        "release_core",
-    ),
+    os.path.join(_HERE, "..", "templates", "commons", "lib", "release_core"),
 )
 
 from release_core.cli_entry import main  # noqa: E402 — sys.path set above

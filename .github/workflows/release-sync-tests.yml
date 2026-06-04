@@ -3,9 +3,10 @@ name: release-sync + fleet tests
 # BATS suites for the sync/drift tooling and the fleet manifest accessor:
 #   tests/release-sync — provenance marker (ADR-0002) + drift detection,
 #     syncing a synthetic consumer from this checkout (RELEASE_REF=HEAD).
-#   tests/fleet        — managed-repos zero-logic path resolution against a
-#     fixture manifest, and release-inbox clustering over a stub-gh inbox
-#     (offline; no gh/network).
+#   tests/fleet        — `release-core admin repos list` zero-logic path
+#     resolution against a fixture manifest, and `release-core admin inbox`
+#     clustering over a stub-gh inbox (offline; no gh/network). The flat
+#     managed-repos / release-inbox names were retired in the CLI cutover (#468).
 #   tests/detect-kind  — the shell→Python migration canary: the detect-kind
 #     shim's CLI contract (kind strings + exit codes) over inline fixtures.
 # Regressions surface here before riding out to consumers.
@@ -16,11 +17,8 @@ on:
     paths:
       - 'bin/release-sync'
       - 'bin/release-drift-check'
-      - 'bin/managed-repos'
-      - 'bin/release-inbox'
-      - 'bin/release-notify-source'
-      - 'bin/release-verify-fleet'
       - 'bin/detect-kind'
+      - 'bin/release-core'
       - 'managed-repos.yaml'
       - 'templates/**'
       - 'tests/release-sync/**'
@@ -31,11 +29,8 @@ on:
     paths:
       - 'bin/release-sync'
       - 'bin/release-drift-check'
-      - 'bin/managed-repos'
-      - 'bin/release-inbox'
-      - 'bin/release-notify-source'
-      - 'bin/release-verify-fleet'
       - 'bin/detect-kind'
+      - 'bin/release-core'
       - 'managed-repos.yaml'
       - 'templates/**'
       - 'tests/release-sync/**'

@@ -7,10 +7,12 @@ Guards the three invariants of the [project.scripts] → entrypoints.py seam:
 2. Each wrapper delegates to its verb's main with sys.argv[1:] and propagates
    the verb's return code out as the SystemExit code (the console-script
    contract: a wrapper raises SystemExit(<int>)).
-3. The script table covers EXACTLY the release_core-backed bin/ shims — no
-   more, no less. The expected set below is derived by hand from the bin/
-   shims that dispatch to `release_core.verbs.*` (see EXPECTED_COMMANDS); bash
-   tools (fetch-deps/fetch-artifact/gh-*/clone-*/migrate-*) are excluded.
+3. The script table covers EXACTLY the surviving CONSUMER-FACING aliases — no
+   more, no less. After the CLI cutover (#468, epic #461) the maintainer/fleet
+   verbs were retired as flat console-scripts (reachable now only via the
+   `release-core <group> <command>` tree); EXPECTED_COMMANDS is the short list of
+   verb-backed consumer aliases that remain. Bash tools
+   (fetch-deps/fetch-artifact/gh-*/clone-*/migrate-*) are excluded.
    gh-task-status is included: the PR state engine was folded into release_core
    (release_core.prstate; release#459), so it ships as a console script too —
    but it delegates to prstate.cli.task_status.main, not a verb module, so it is
@@ -33,38 +35,22 @@ import pytest
 from release_core import entrypoints
 from release_core.verbs import changelog, detect_kind
 
-# Authoritative set of on-PATH command names, derived by reading every
-# bin/<name> shim that dispatches to release_core.verbs. Keep this set in
-# lockstep with pyproject's [project.scripts] (the test below enforces ==).
+# Authoritative set of on-PATH, verb-backed command names that SURVIVE the CLI
+# cutover (#468) — the consumer-facing aliases. Keep this set in lockstep with
+# pyproject's [project.scripts] (the test below enforces ==). The retired
+# maintainer/fleet names (managed-repos, audit-*, release-cut, release-lex,
+# apply-ruleset, …) are gone from PATH and reachable only via
+# `release-core <group> <command>`.
 EXPECTED_COMMANDS = {
-    "apply-ruleset",
-    "audit-portfolio",
-    "audit-repo",
-    "audit-smoke-test",
     "changelog",
     "changelog-add",
     "changelog-cut",
     "changelog-render",
     "detect-kind",
-    "done-check",
-    "enable-dependabot-security",
     "gh-release-issue",
-    "install-release-secrets",
-    "install-release-token",
-    "list-repo-pr",
-    "list-repo-scripts",
-    "managed-repos",
-    "release-advance-major",
-    "release-beta-list",
-    "release-cut",
     "release-drift-check",
-    "release-inbox",
-    "release-lex",
-    "release-notify-source",
     "release-sync",
-    "release-verify-fleet",
     "semver",
-    "sweep-github-policy",
 }
 
 # Console scripts backed by release_core.prstate (the folded PR state engine,

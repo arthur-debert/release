@@ -1,27 +1,24 @@
 name: audit tests
 
-# BATS contract suite for the audit shims (bin/audit-repo, audit-portfolio,
-# audit-smoke-test) — the shell→Python migration's Phase-1 audit tools. The
-# pure parsing/aggregation logic is covered by pytest (release_core tests, run
-# by the CI `py-lint` job); this suite locks the shim CLI contract: help/usage,
-# flag arity, exit codes, and the --json output shape. Fully offline — a stub
-# `gh` answers the API calls, so no network/auth is needed.
+# BATS contract suite for the audit verbs via the CLI (`release-core audit`,
+# `release-core admin repos audit`, `release-core admin smoke-test`; the flat
+# audit-* names were retired in the CLI cutover #468). The pure
+# parsing/aggregation logic is covered by pytest (release_core tests, run by the
+# CI `py-lint` job); this suite locks the CLI contract: help/usage, flag arity,
+# exit codes, and the --json output shape. Fully offline — a stub `gh` answers
+# the API calls, so no network/auth is needed.
 
 on:
   push:
     branches: ["**"]
     paths:
-      - "bin/audit-repo"
-      - "bin/audit-portfolio"
-      - "bin/audit-smoke-test"
+      - "bin/release-core"
       - "templates/commons/lib/release_core/**"
       - "tests/audit/**"
       - ".github/workflows/audit-tests.yml"
   pull_request:
     paths:
-      - "bin/audit-repo"
-      - "bin/audit-portfolio"
-      - "bin/audit-smoke-test"
+      - "bin/release-core"
       - "templates/commons/lib/release_core/**"
       - "tests/audit/**"
       - ".github/workflows/audit-tests.yml"

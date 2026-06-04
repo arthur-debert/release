@@ -1,24 +1,26 @@
 name: release-lex tests
 
-# BATS suite for bin/release-lex (the lex-fmt cross-repo release
-# orchestrator). release-lex is release-only (a real file in bin/, NOT
-# synced to consumers) and runs locally + from this repo's CI; its CLI
-# contract regressions need to surface here. The pure decision logic is
+# BATS suite for `release-core admin release lex` (the lex-fmt cross-repo
+# release orchestrator; the flat `release-lex` name was retired in the CLI
+# cutover #468). It is release-only and runs locally + from this repo's CI; its
+# CLI contract regressions need to surface here. The pure decision logic is
 # covered offline by pytest (test_core_release_lex.py) under the main `ci`
-# job; this job pins the shim's byte-for-byte CLI edge via BATS.
+# job; this job pins the CLI edge via BATS.
 
 on:
   push:
     branches: ['**']
     paths:
-      - 'bin/release-lex'
+      - 'bin/release-core'
       - 'templates/commons/lib/release_core/release_core/verbs/release_lex.py'
+      - 'templates/commons/lib/release_core/release_core/cli/**'
       - 'tests/release-lex/**'
       - '.github/workflows/release-lex-tests.yml'
   pull_request:
     paths:
-      - 'bin/release-lex'
+      - 'bin/release-core'
       - 'templates/commons/lib/release_core/release_core/verbs/release_lex.py'
+      - 'templates/commons/lib/release_core/release_core/cli/**'
       - 'tests/release-lex/**'
       - '.github/workflows/release-lex-tests.yml'
 

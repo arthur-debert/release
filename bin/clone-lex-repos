@@ -12,7 +12,7 @@
 #   clone-lex-repos [<target-dir>]      # defaults to current directory
 #
 # After cloning:
-#   release-lex <bump-kind> \
+#   release-core admin release lex <bump-kind> \
 #     --comms <target>/comms \
 #     --lex   <target>/lex \
 #     --tree-sitter <target>/tree-sitter-lex \
@@ -20,7 +20,7 @@
 #     --nvim   <target>/nvim \
 #     --lexed  <target>/lexed
 #
-# `arthur-debert/release` is included so `release-lex` itself is
+# `arthur-debert/release` is included so the release tooling itself is
 # available locally (handy for CI runs that don't have ~/h/release/bin
 # on PATH).
 set -euo pipefail
