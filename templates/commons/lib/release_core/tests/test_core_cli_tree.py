@@ -153,10 +153,18 @@ def test_stub_leaf_with_extra_args_still_exits_69(capsys):
 
 def test_stub_leaf_help_is_still_reachable(capsys):
     # --help remains discoverable on a stub (shows the short_help / usage).
-    rc = cli_entry.main(["detect-kind", "--help"])
+    # Exercised on the SYNTHETIC stub leaf so the stub-factory coverage stays
+    # self-contained as real commands stop being stubs over time.
+    root = click.Group(name="x")
+    root.add_command(toplevel._stub_command("synth", "A synthetic stub leaf."))
+    try:
+        root.main(args=["synth", "--help"], prog_name="x", standalone_mode=False)
+        rc = 0
+    except SystemExit as exc:
+        rc = exc.code if isinstance(exc.code, int) else 1
     out = capsys.readouterr().out
     assert rc == 0
-    assert "detect-kind" in out or "Usage:" in out
+    assert "synth" in out or "Usage:" in out
 
 
 def test_bare_empty_stub_group_exits_69_not_silent_0(capsys):
