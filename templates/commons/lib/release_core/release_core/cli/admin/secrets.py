@@ -1,6 +1,6 @@
-"""``release-core admin secrets`` — release-secret provisioning (STUB — parallel agent).
+"""``release-core admin secrets`` — release-secret provisioning.
 
-Intended leaves (← old name), flat ``wrap_verb``::
+Flat ``wrap_verb`` leaves (← old name)::
 
   install   ← install-release-secrets   release_core.verbs.install_release_secrets.main
   token     ← install-release-token     release_core.verbs.install_release_token.main
@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import click
 
-from ..toplevel import _stub_command
+from ...verbs import install_release_secrets, install_release_token
+from .._helpers import wrap_verb
 
 
 @click.group(
@@ -18,12 +19,23 @@ from ..toplevel import _stub_command
     short_help="Provision release secrets: install / token.",
 )
 def group() -> None:
-    """Release-secret provisioning for onboarded repos. (Stub group — fill the
-    leaves with wrap_verb per the module docstring.)"""
+    """Release-secret provisioning for onboarded repos.
+
+    Install the full release secret set, or just the release token, on a repo.
+    """
 
 
-for _name, _help in (
-    ("install", "Install the release secret set on a repo. (stub ← install-release-secrets)"),
-    ("token", "Install the release token on a repo. (stub ← install-release-token)"),
-):
-    group.add_command(_stub_command(_name, _help))
+group.add_command(
+    wrap_verb(
+        install_release_secrets.main,
+        name="install",
+        short_help="Install the full release secret set on a repo.",
+    )
+)
+group.add_command(
+    wrap_verb(
+        install_release_token.main,
+        name="token",
+        short_help="Install the release token on a repo.",
+    )
+)

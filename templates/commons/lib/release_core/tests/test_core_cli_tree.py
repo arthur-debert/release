@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import click
 from release_core import cli_entry
-from release_core.cli import admin, ci, pr, toplevel
+from release_core.cli import _helpers, admin, ci, pr, toplevel
 
 
 def _root() -> click.Group:
@@ -168,17 +168,23 @@ def test_stub_leaf_help_is_still_reachable(capsys):
 
 
 def test_bare_empty_stub_group_exits_69_not_silent_0(capsys):
-    # An EMPTY stub group (still-stub admin inbox) invoked bare prints help +
-    # a stub note and exits 69 — never a silent exit 0 (Copilot review #463).
-    # (`changelog` and `ci` are now implemented groups — their bare behavior is
-    # covered by the toplevel suite + the missing-command test below.)
-    for args in (["admin", "inbox"],):
-        rc = cli_entry.main(args)
-        captured = capsys.readouterr()
-        assert rc == 69, args
-        assert "stub" in captured.err.lower(), args
-        # help is still shown (the map), on stdout.
-        assert "Usage:" in captured.out, args
+    # An EMPTY stub group invoked bare prints help + a stub note and exits 69 —
+    # never a silent exit 0 (Copilot review #463). Every real group is now wired
+    # (changelog/ci by #465; admin policy/secrets/inbox + smoke-test by #466), so
+    # this exercises the stub_group factory on a SYNTHETIC group, keeping the
+    # factory's coverage self-contained as real groups stop being stubs.
+    root = click.Group(name="x")
+    root.add_command(_helpers.stub_group("synthgrp", short_help="A synthetic stub group."))
+    try:
+        root.main(args=["synthgrp"], prog_name="x", standalone_mode=False)
+        rc = 0
+    except SystemExit as exc:
+        rc = exc.code if isinstance(exc.code, int) else 1
+    captured = capsys.readouterr()
+    assert rc == 69
+    assert "stub" in captured.err.lower()
+    # help is still shown (the map), on stdout.
+    assert "Usage:" in captured.out
 
 
 def test_bare_stub_group_help_flag_exits_0(capsys):

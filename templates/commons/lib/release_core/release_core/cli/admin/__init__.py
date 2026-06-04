@@ -14,15 +14,18 @@ so it too can be handed to several parallel agents without collisions:
 Each module exports a ``group`` (a ``click.Group``); this assembler imports
 and attaches them. Filling a nested group touches ONLY that module.
 
-ALL of admin is a STUB in Phase 1 — the groups register so ``release-core admin
---help`` shows the full shape, but the leaves are filled by parallel agents.
+Filled here: ``policy`` / ``secrets`` / ``inbox`` and the flat ``smoke-test``
+leaf. The remaining groups (``repos`` / ``release``) are still stubs filled by
+parallel agents — every group registers regardless, so ``release-core admin
+--help`` always shows the full shape.
 """
 
 from __future__ import annotations
 
 import click
 
-from ..toplevel import _stub_command  # shared stub leaf for `smoke-test`
+from ...verbs import audit_smoke_test
+from .._helpers import wrap_verb
 from . import inbox, policy, release_cmds, repos, secrets
 
 
@@ -46,11 +49,11 @@ group.add_command(policy.group)
 group.add_command(secrets.group)
 group.add_command(inbox.group)
 
-# A flat leaf directly under admin (no nested group). Stub for now; a parallel
-# agent swaps this for:  wrap_verb(audit_smoke_test.main, name="smoke-test", …)
+# A flat leaf directly under admin (no nested group).
 group.add_command(
-    _stub_command(
-        "smoke-test",
-        "Fleet smoke-test sweep. (stub ← audit-smoke-test)",
+    wrap_verb(
+        audit_smoke_test.main,
+        name="smoke-test",
+        short_help="Run the fleet smoke-test sweep.",
     )
 )

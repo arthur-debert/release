@@ -1,6 +1,6 @@
-"""``release-core admin policy`` — GitHub policy ops (STUB — parallel agent).
+"""``release-core admin policy`` — GitHub policy ops.
 
-Intended leaves (← old name), flat ``wrap_verb``::
+Flat ``wrap_verb`` leaves (← old name)::
 
   ruleset      ← apply-ruleset               release_core.verbs.apply_ruleset.main
   sweep        ← sweep-github-policy          release_core.verbs.sweep_github_policy.main
@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import click
 
-from ..toplevel import _stub_command
+from ...verbs import apply_ruleset, enable_dependabot_security, sweep_github_policy
+from .._helpers import wrap_verb
 
 
 @click.group(
@@ -19,13 +20,31 @@ from ..toplevel import _stub_command
     short_help="GitHub policy ops: ruleset / sweep / dependabot.",
 )
 def group() -> None:
-    """GitHub policy administration for fleet repos. (Stub group — fill the
-    leaves with wrap_verb per the module docstring.)"""
+    """GitHub policy administration for fleet repos.
+
+    Apply the canonical branch ruleset, sweep / reconcile broader GitHub
+    policy, and enable Dependabot security updates on onboarded repos.
+    """
 
 
-for _name, _help in (
-    ("ruleset", "Apply the canonical branch ruleset. (stub ← apply-ruleset)"),
-    ("sweep", "Sweep / reconcile GitHub policy. (stub ← sweep-github-policy)"),
-    ("dependabot", "Enable Dependabot security updates. (stub ← enable-dependabot-security)"),
-):
-    group.add_command(_stub_command(_name, _help))
+group.add_command(
+    wrap_verb(
+        apply_ruleset.main,
+        name="ruleset",
+        short_help="Apply the canonical branch ruleset to a repo.",
+    )
+)
+group.add_command(
+    wrap_verb(
+        sweep_github_policy.main,
+        name="sweep",
+        short_help="Sweep / reconcile a repo's GitHub policy settings.",
+    )
+)
+group.add_command(
+    wrap_verb(
+        enable_dependabot_security.main,
+        name="dependabot",
+        short_help="Enable Dependabot security updates on a repo.",
+    )
+)
