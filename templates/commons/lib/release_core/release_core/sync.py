@@ -550,6 +550,18 @@ def compute_mirror(
     relative to it (the bash ran after `cd "$repo_root"`)."""
     mp = MirrorPlan()
 
+    # A consumer's skill ROOT (.claude/skills/<name>) may itself be a SYMLINK —
+    # REPLACE_IF_PRESENT treats that as "present", and an old hand-symlinked dir
+    # is exactly the kind of stale copy we replace. If we did NOT handle it here,
+    # the per-file abs_f below would resolve THROUGH that symlink, so _rm_f /
+    # os.symlink would mutate the symlink's TARGET (possibly inside .release/)
+    # instead of the consumer path. So: find each symlinked skill root carrying a
+    # planned file, schedule its removal first (migrated → _rm_f removes the link,
+    # not its target), and treat files under it as absent (plain create) below.
+    symlinked_skill_roots = _symlinked_skill_roots(new_files, repo_root)
+    for root in symlinked_skill_roots:
+        mp.migrated.append(root)
+
     for f in new_files:
         if is_release_internal(f):
             continue
@@ -559,7 +571,12 @@ def compute_mirror(
 
         target = link_target(f)
         abs_f = os.path.join(repo_root, f)
-        if os.path.islink(abs_f):
+        # If f sits under a symlinked skill root we're removing, the root is gone
+        # by apply time — plan a plain create against the (soon-to-be) clean path,
+        # never reading through the still-present symlink.
+        if _under_any(f, symlinked_skill_roots):
+            mp.symlinks_to_create.append(f"{f} -> {target}")
+        elif os.path.islink(abs_f):
             current = os.readlink(abs_f)
             if current != target:
                 mp.symlinks_to_create.append(f"{f} -> {target}")
@@ -579,6 +596,39 @@ def compute_mirror(
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, tmp_release)
     mp.copies_to_remove = _find_stale_managed_copies(repo_root, set(mp.copies_to_write))
     return mp
+
+
+def _skill_root_of(dest: str) -> str | None:
+    """The `.claude/skills/<name>` root for a distributed-skill dest, else None.
+    `.claude/skills/tdd/mocking.md` → `.claude/skills/tdd`."""
+    if not is_distributed_skill_dest(dest):
+        return None
+    parts = dest.split("/")
+    # parts == [".claude", "skills", "<name>", ...] — need at least the name.
+    if len(parts) < 4:
+        return None
+    return "/".join(parts[:3])
+
+
+def _symlinked_skill_roots(new_files: list[str], repo_root: str) -> list[str]:
+    """The distinct `.claude/skills/<name>` roots that (a) carry a planned file
+    and (b) exist in the consumer tree as a SYMLINK. First-seen order, no dups."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for f in new_files:
+        root = _skill_root_of(f)
+        if root is None or root in seen:
+            continue
+        seen.add(root)
+        if os.path.islink(os.path.join(repo_root, root)):
+            out.append(root)
+    return out
+
+
+def _under_any(dest: str, roots: list[str]) -> bool:
+    """True if ``dest`` is a file under one of the given `.claude/skills/<name>`
+    roots (root + '/')."""
+    return any(dest == r or dest.startswith(r + "/") for r in roots)
 
 
 def _find_broken_release_links(repo_root: str, tmp_release: str) -> list[str]:

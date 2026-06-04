@@ -61,6 +61,36 @@ def test_rm_f_removes_real_directory(tmp_path):
     assert not d.exists()
 
 
+def test_apply_replaces_symlinked_skill_root_without_touching_target(tmp_path, monkeypatch):
+    """A symlinked skill ROOT is removed and rebuilt as a real dir of managed
+    symlinks — the apply must NOT write through the old symlink into its target."""
+    monkeypatch.chdir(tmp_path)
+    external = tmp_path / "external-target"
+    external.mkdir()
+    guarded = external / "SKILL.md"
+    guarded.write_text("# original target content — must survive\n")
+
+    skills = tmp_path / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    os.symlink(str(external), str(skills / "lex-primer"))
+
+    dest = ".claude/skills/lex-primer/SKILL.md"
+    target = sync.link_target(dest)
+    mp = sync.MirrorPlan(
+        migrated=[".claude/skills/lex-primer"],
+        symlinks_to_create=[f"{dest} -> {target}"],
+    )
+    release_sync._apply(mp, sync.ClaudeDecision(action="none"))
+
+    # Consumer path is now a real symlink into .release/, and the external target
+    # file was never deleted or overwritten.
+    link = tmp_path / dest
+    assert link.is_symlink()
+    assert os.readlink(str(link)) == target
+    assert not (skills / "lex-primer").is_symlink()  # root rebuilt as a real dir
+    assert guarded.read_text() == "# original target content — must survive\n"
+
+
 def test_rm_f_tolerates_absent_path(tmp_path):
     """_rm_f ignores absence (rm -f semantics) — covers the TOCTOU window where a
     dir vanishes between the isdir() check and the removal."""

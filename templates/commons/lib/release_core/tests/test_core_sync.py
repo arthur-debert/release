@@ -555,6 +555,39 @@ def test_compute_mirror_replaces_stale_real_skill_copy(tmp_path):
     assert dest not in mp.conflicts
 
 
+def test_compute_mirror_symlinked_skill_root_is_removed_first(tmp_path):
+    """When the consumer's skill ROOT is itself a SYMLINK, compute_mirror schedules
+    the root for removal and plans plain creates for files under it — so apply
+    never mutates the symlink's target (e.g. inside .release/)."""
+    # .claude/skills/lex-primer -> some external dir (the dangerous case).
+    external = tmp_path / "external-target"
+    (external).mkdir()
+    (external / "SKILL.md").write_text("# do not touch this target\n")
+    skills = tmp_path / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    os.symlink(str(external), str(skills / "lex-primer"))
+
+    dest = ".claude/skills/lex-primer/SKILL.md"
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+
+    # The symlinked root is removed first; the file is a plain create.
+    assert ".claude/skills/lex-primer" in mp.migrated
+    target = sync.link_target(dest)
+    assert f"{dest} -> {target}" in mp.symlinks_to_create
+    # The per-file dest is NOT separately migrated (that would read through the link).
+    assert dest not in mp.migrated
+
+
+def test_skill_root_of():
+    assert sync._skill_root_of(".claude/skills/tdd/mocking.md") == ".claude/skills/tdd"
+    assert sync._skill_root_of(".claude/skills/tdd/SKILL.md") == ".claude/skills/tdd"
+    # a bare root with no file under it, and non-skill dests → None
+    assert sync._skill_root_of(".claude/skills/tdd") is None
+    assert sync._skill_root_of("bin/check") is None
+
+
 def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
     """A real file at a NON-skill managed dest keeps the conflict guard (only
     --migrate replaces it) — the skill auto-replace is scoped to skills."""
