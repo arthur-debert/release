@@ -16,9 +16,8 @@ from release_core.cli import admin, ci, pr, toplevel
 
 
 def _root() -> click.Group:
-    """Rebuild a fresh root the way cli_entry assembles it (for introspection)."""
-    root = cli_entry.root
-    return root
+    """The assembled root group (cli_entry.root) — for tree introspection."""
+    return cli_entry.root
 
 
 # --- the full skeleton is registered (the "map") --------------------------
