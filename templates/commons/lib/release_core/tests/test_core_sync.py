@@ -255,14 +255,123 @@ def test_build_plan_precedence_last_write_wins(monkeypatch):
     assert plan.mode["bin/check"] == "100755"
 
 
-def test_build_plan_adds_pr_loop_skill(monkeypatch):
-    monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "")
-    exists = {f"ref:{sync.PR_LOOP_SKILL_SRC}"}
-    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: rp in exists)
+def _skill_tree_ls(skill_files):
+    """Build a git_ls_tree fake that serves recursive listings for skills/<name>
+    from a {skill_name: [subpath, ...]} map, and "" for everything else."""
+
+    def ls_tree(ref, path, *, cwd, recursive=False, dirs_only=False, name_only=False):
+        if path.startswith("skills/"):
+            name = path[len("skills/") :]
+            subs = skill_files.get(name)
+            if not subs:
+                return ""
+            return "".join(
+                f"100644 blob {i:040x}\tskills/{name}/{sub}\n" for i, sub in enumerate(subs)
+            )
+        return ""
+
+    return ls_tree
+
+
+def test_build_plan_distributes_push_all_skills(monkeypatch):
+    """Every PUSH_ALL skill that exists at the ref materializes whole-directory:
+    each file under skills/<name>/ → .claude/skills/<name>/<subpath>."""
+    files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
     plan = sync.build_plan("/home", "ref", "tree-sitter", [])
-    assert sync.PR_LOOP_SKILL_DEST in plan.order
-    assert plan.source[sync.PR_LOOP_SKILL_DEST] == sync.PR_LOOP_SKILL_SRC
-    assert plan.mode[sync.PR_LOOP_SKILL_DEST] == "100644"
+    for name in sync.PUSH_ALL_SKILLS:
+        dest = f".claude/skills/{name}/SKILL.md"
+        assert dest in plan.order
+        assert plan.source[dest] == f"skills/{name}/SKILL.md"
+        assert plan.mode[dest] == "100644"
+
+
+def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
+    """A multi-file skill (tdd ships several .md alongside SKILL.md) reaches the
+    consumer in full, not just its SKILL.md."""
+    files = {
+        "tdd": ["SKILL.md", "mocking.md", "tests.md", "refactoring.md"],
+        # the rest exist with just SKILL.md so the loop is well-formed
+        **{name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS if name != "tdd"},
+    }
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
+    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    for sub in ("SKILL.md", "mocking.md", "tests.md", "refactoring.md"):
+        dest = f".claude/skills/tdd/{sub}"
+        assert dest in plan.order
+        assert plan.source[dest] == f"skills/tdd/{sub}"
+
+
+def test_build_plan_tolerates_missing_skill_dir(monkeypatch):
+    """A PUSH_ALL skill whose dir is absent at the ref is silently skipped."""
+    # Only gh-pr-review-loop exists; the rest return "" (missing).
+    files = {"gh-pr-review-loop": ["SKILL.md"]}
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
+    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    assert ".claude/skills/gh-pr-review-loop/SKILL.md" in plan.order
+    # A missing skill contributes nothing.
+    assert ".claude/skills/diagnose/SKILL.md" not in plan.order
+
+
+def test_build_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tmp_path):
+    """REPLACE_IF_PRESENT skills are synced ONLY when the consumer already carries
+    .claude/skills/<name>; otherwise they are not added to the plan."""
+    files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
+    files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
+
+    # Consumer already carries lex-primer (real dir) but not the others.
+    have = sync.REPLACE_IF_PRESENT_SKILLS[0]
+    (tmp_path / ".claude" / "skills" / have).mkdir(parents=True)
+
+    plan = sync.build_plan("/home", "ref", "tree-sitter", [], repo_root=str(tmp_path))
+    assert f".claude/skills/{have}/SKILL.md" in plan.order
+    for name in sync.REPLACE_IF_PRESENT_SKILLS[1:]:
+        assert f".claude/skills/{name}/SKILL.md" not in plan.order
+
+
+def test_build_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
+    """An existing .claude/skills/<name> SYMLINK also counts as present."""
+    files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
+    files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
+
+    name = sync.REPLACE_IF_PRESENT_SKILLS[0]
+    skills_dir = tmp_path / ".claude" / "skills"
+    skills_dir.mkdir(parents=True)
+    os.symlink("/nowhere", str(skills_dir / name))  # dangling symlink still counts
+
+    plan = sync.build_plan("/home", "ref", "tree-sitter", [], repo_root=str(tmp_path))
+    assert f".claude/skills/{name}/SKILL.md" in plan.order
+
+
+def test_build_plan_replace_if_present_skipped_without_repo_root(monkeypatch):
+    """No repo_root (clone-less init) ⇒ REPLACE_IF_PRESENT skills are skipped."""
+    files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
+    files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
+    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    for name in sync.REPLACE_IF_PRESENT_SKILLS:
+        assert f".claude/skills/{name}/SKILL.md" not in plan.order
+
+
+def test_build_plan_never_distributes_release_only_skills(monkeypatch):
+    """Release-only skills are never in either catalog ⇒ never planned, even if
+    they exist at the ref."""
+    release_only = ["release-fleet-ops", "release-fleet-triage", "gh-repo-setup"]
+    files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
+    files.update({name: ["SKILL.md"] for name in release_only})
+    monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
+    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    for name in release_only:
+        assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
 def test_build_plan_lefthook_fragment_order(monkeypatch):
@@ -409,6 +518,53 @@ def test_stale_managed_copy_rel_uses_forward_slashes(tmp_path):
     out = sync._find_stale_managed_copies(str(tmp_path), set())
     assert out == [".github/workflows/old.yml"]
     assert all("\\" not in p for p in out)
+
+
+# ── distributed-skill dest replacement (the lex pr-review-respond regression) ──
+
+
+@pytest.mark.parametrize(
+    ("dest", "is_skill"),
+    [
+        (".claude/skills/pr-review-respond/SKILL.md", True),
+        (".claude/skills/tdd/mocking.md", True),
+        (".claude/settings.json", False),
+        ("bin/check", False),
+        ("lefthook.yml", False),
+    ],
+)
+def test_is_distributed_skill_dest(dest, is_skill):
+    assert sync.is_distributed_skill_dest(dest) is is_skill
+
+
+def test_compute_mirror_replaces_stale_real_skill_copy(tmp_path):
+    """A pre-existing REAL .claude/skills/<name>/SKILL.md (lex's stale hand-copy)
+    is migrated→symlinked WITHOUT --migrate — never left as a conflict."""
+    dest = ".claude/skills/pr-review-respond/SKILL.md"
+    real = tmp_path / dest
+    real.parent.mkdir(parents=True)
+    real.write_text("# stale local copy (157 lines)\n")  # a real file, not a symlink
+
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+
+    target = sync.link_target(dest)
+    assert dest in mp.migrated
+    assert f"{dest} -> {target}" in mp.symlinks_to_create
+    assert dest not in mp.conflicts
+
+
+def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
+    """A real file at a NON-skill managed dest keeps the conflict guard (only
+    --migrate replaces it) — the skill auto-replace is scoped to skills."""
+    dest = "lefthook.yml"
+    (tmp_path / dest).write_text("on: push\n")
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+    assert dest in mp.conflicts
+    assert not mp.symlinks_to_create
 
 
 # ── CLAUDE.md orientation block ───────────────────────────────────────────────

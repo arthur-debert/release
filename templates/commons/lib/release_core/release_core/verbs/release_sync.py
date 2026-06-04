@@ -161,7 +161,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     print()
 
     # --- Build the plan + materialize into a sibling tempdir -------------
-    plan = sync.build_plan(release_home, ref, kind, caps.names)
+    plan = sync.build_plan(release_home, ref, kind, caps.names, repo_root=repo_real)
 
     # Sibling tempdir so the final mv is a same-filesystem rename (atomic).
     tmp_release = tempfile.mkdtemp(prefix=".release-build.", dir=".")
@@ -360,6 +360,13 @@ def _apply(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
 
 
 def _rm_f(path: str) -> None:
-    """`rm -f` — remove if present, ignore absence."""
+    """`rm -rf` — remove if present (file, symlink, or directory), ignore absence.
+
+    A pre-existing managed dest is usually a real file (e.g. a stale hand-copied
+    .claude/skills/<name>/SKILL.md). It can also be a real directory; remove that
+    too so the managed symlink can take its place."""
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+        return
     with contextlib.suppress(FileNotFoundError):
         os.remove(path)

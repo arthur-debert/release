@@ -10,6 +10,7 @@ Pins two review-surfaced contracts:
 
 from __future__ import annotations
 
+import os
 import stat
 
 from release_core import sync
@@ -26,6 +27,38 @@ def test_apply_claude_write_is_0o644_not_0o600(tmp_path, monkeypatch):
     assert out.read_text() == "# hello\n"
     mode = stat.S_IMODE(out.stat().st_mode)
     assert mode == 0o644, f"expected 0o644, got {oct(mode)}"
+
+
+def test_apply_replaces_real_skill_file_with_symlink(tmp_path, monkeypatch):
+    """The lex pr-review-respond regression: a pre-existing REAL skill file at a
+    managed dest is removed and replaced by the managed symlink (apply phase)."""
+    monkeypatch.chdir(tmp_path)
+    dest = ".claude/skills/pr-review-respond/SKILL.md"
+    real = tmp_path / dest
+    real.parent.mkdir(parents=True)
+    real.write_text("# stale 157-line hand-copy\n")
+    assert not (tmp_path / dest).is_symlink()
+
+    target = sync.link_target(dest)
+    mp = sync.MirrorPlan(
+        migrated=[dest],
+        symlinks_to_create=[f"{dest} -> {target}"],
+    )
+    release_sync._apply(mp, sync.ClaudeDecision(action="none"))
+
+    link = tmp_path / dest
+    assert link.is_symlink()
+    assert os.readlink(str(link)) == target
+
+
+def test_rm_f_removes_real_directory(tmp_path):
+    """_rm_f handles a real directory at a managed dest (rm -rf), so a managed
+    symlink can take its place — not just files/symlinks."""
+    d = tmp_path / "stale-dir"
+    d.mkdir()
+    (d / "inner.txt").write_text("x\n")
+    release_sync._rm_f(str(d))
+    assert not d.exists()
 
 
 def test_resolve_capabilities_yamlerror_returns_1_not_traceback(tmp_path, monkeypatch, capsys):

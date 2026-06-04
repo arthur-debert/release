@@ -261,7 +261,7 @@ def _materialize_config_sources(
             sync_yaml_text = fh.read()
 
     caps = sync.resolve_capabilities(release_home, ref, kind, sync_yaml_text=sync_yaml_text)
-    plan = sync.build_plan(release_home, ref, kind, caps.names)
+    plan = sync.build_plan(release_home, ref, kind, caps.names, repo_root=repo_root)
 
     tmp_root = tempfile.mkdtemp(prefix=".release-core-init.")
     sync.materialize(release_home, ref, ref_sha, plan, tmp_root)
