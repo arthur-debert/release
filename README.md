@@ -517,10 +517,11 @@ bin/                  human-runnable tooling, on $PATH via dodot.
                       CLI (`release-core --help` is the map); the flat
                       names below are kept as working aliases:
                       apply-ruleset, sweep-github-policy,
-                      install-release-{secrets,token}, detect-stack,
-                      audit-portfolio, audit-repo, the gh-pr-* loop
-                      helpers, release-sync, release-beta-list,
-                      release-cut, fetch-artifact
+                      install-release-{secrets,token}, detect-kind,
+                      audit-portfolio, audit-repo, audit-smoke-test,
+                      done-check, the gh-pr-* loop helpers,
+                      release-sync, release-beta-list, release-cut,
+                      fetch-artifact
 rulesets/             branch-protection JSON templates
 bin-internal/         CI scripts exec'd by composite actions
 templates/            path-mirror layout — sync destination = source

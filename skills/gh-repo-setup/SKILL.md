@@ -5,7 +5,7 @@ description: "Bring a GitHub repo up to the canonical arthur-debert/* + lex-fmt/
 
 # gh-repo-setup
 
-Portable equivalent of `release-core admin policy ruleset` + `release-core admin policy sweep` + `detect-stack` (flat aliases `apply-ruleset` / `sweep-github-policy`). Brings a repo up to the canonical release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
+Portable equivalent of `release-core admin policy ruleset` + `release-core admin policy sweep` + `detect-kind` (flat aliases `apply-ruleset` / `sweep-github-policy`). Brings a repo up to the canonical release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
 
 ## When to use
 
@@ -279,7 +279,7 @@ A clean idempotent re-run reports `ok` for every file and either `updated` (PUT 
 
 ## Related local-only scripts (not ported here)
 
-These remain `bin/` only because they touch multiple repos at once and aren't useful from inside a single repo's session:
+These are not reimplemented in this portable skill because they touch multiple repos at once and aren't useful from inside a single repo's session — run them via `release-core admin …` (flat aliases shown in parens) on a machine with the release tooling on `$PATH`:
 
 - `release-core admin secrets install` (flat: `install-release-secrets`) — propagate the canonical secrets set to every onboarded repo.
 - `release-core admin secrets token` (flat: `install-release-token`) — propagate `RELEASE_TOKEN` to every onboarded repo.

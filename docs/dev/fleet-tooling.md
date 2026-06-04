@@ -57,7 +57,7 @@ release-core admin repos verify --only arthur-debert/padz   # one repo (scopes t
 ```
 
 It is **hermetic**: clones into a throwaway root (default
-`/tmp/release-fleet-verify`), syncs each consumer from the candidate
+`/tmp/release-fleet-verify-$USER`), syncs each consumer from the candidate
 revision, runs `lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
 before `release-core admin release advance-major` to catch a commons/lint
