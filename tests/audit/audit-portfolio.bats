@@ -8,25 +8,25 @@ load helper
 # ---------------------------------------------------------------------
 
 @test "--help exits 0 and prints usage" {
-  run "$BIN/audit-portfolio" --help
+  run "$BIN/release-core" admin repos audit --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
   [[ "$output" == *"audit-portfolio"* ]]
 }
 
 @test "an unknown flag is a usage error (exit 64)" {
-  run "$BIN/audit-portfolio" --nope
+  run "$BIN/release-core" admin repos audit --nope
   [ "$status" -eq 64 ]
 }
 
 @test "--repos with no value is a usage error (exit 64)" {
-  run "$BIN/audit-portfolio" --repos
+  run "$BIN/release-core" admin repos audit --repos
   [ "$status" -eq 64 ]
 }
 
 @test "--json with --repos emits one JSON object per repo" {
   _install_stub_gh
-  run "$BIN/audit-portfolio" --repos o/a,o/b --json
+  run "$BIN/release-core" admin repos audit --repos o/a,o/b --json
   [ "$status" -eq 0 ]
   # two non-empty JSON lines, each a well-formed audit-repo object.
   local lines
@@ -38,7 +38,7 @@ load helper
 
 @test "explicit --repos prints a summary table and a summary line" {
   _install_stub_gh
-  run "$BIN/audit-portfolio" --repos o/a
+  run "$BIN/release-core" admin repos audit --repos o/a
   [[ "$output" == *"REPO"* ]]
   [[ "$output" == *"STATUS"* ]]
   [[ "$output" == *"summary:"* ]]

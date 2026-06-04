@@ -24,20 +24,20 @@ teardown() {
 }
 
 @test "--help prints usage and exits 0" {
-  run "$BIN/release-advance-major" --help
+  run "$BIN/release-core" admin release advance-major --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"floating major branch"* ]]
   [[ "$output" == *"Usage:"* ]]
 }
 
 @test "-h is an alias for --help" {
-  run "$BIN/release-advance-major" -h
+  run "$BIN/release-core" admin release advance-major -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"floating major branch"* ]]
 }
 
 @test "unknown flag exits 64" {
-  run "$BIN/release-advance-major" --bogus
+  run "$BIN/release-core" admin release advance-major --bogus
   [ "$status" -eq 64 ]
   [[ "$output" == *"unknown arg"* ]]
 }
@@ -45,13 +45,13 @@ teardown() {
 @test "refuses a non-release origin" {
   git init -q
   git remote add origin git@github.com:someone/else.git
-  RELEASE_HOME="$WORK" run "$BIN/release-advance-major"
+  RELEASE_HOME="$WORK" run "$BIN/release-core" admin release advance-major
   [ "$status" -eq 1 ]
   [[ "$output" == *"refusing"* ]]
 }
 
 @test "errors when not in release repo and RELEASE_HOME points nowhere" {
-  RELEASE_HOME="$WORK/does-not-exist" run "$BIN/release-advance-major"
+  RELEASE_HOME="$WORK/does-not-exist" run "$BIN/release-core" admin release advance-major
   [ "$status" -eq 1 ]
   [[ "$output" == *"not inside the release repo"* ]]
 }

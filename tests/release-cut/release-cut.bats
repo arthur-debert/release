@@ -28,33 +28,33 @@ _write_release_yml() {
 # ---------------------------------------------------------------------
 
 @test "no args prints usage and exits 2" {
-  run "$BIN/release-cut"
+  run "$BIN/release-core" cut
   [ "$status" -eq 2 ]
   [[ "$output" == *"usage:"* ]]
 }
 
 @test "--help exits 0 and prints usage" {
-  run "$BIN/release-cut" --help
+  run "$BIN/release-core" cut --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"usage:"* ]]
 }
 
 @test "-h is an alias for --help" {
-  run "$BIN/release-cut" -h
+  run "$BIN/release-core" cut -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"usage:"* ]]
 }
 
 @test "invalid version string is rejected" {
   _write_release_yml
-  run "$BIN/release-cut" not-a-version
+  run "$BIN/release-core" cut not-a-version
   [ "$status" -eq 2 ]
   [[ "$output" == *"version must be"* ]]
 }
 
 @test "leading-v version string is rejected" {
   _write_release_yml
-  run "$BIN/release-cut" v1.2.3
+  run "$BIN/release-core" cut v1.2.3
   [ "$status" -eq 2 ]
   [[ "$output" == *"version must be"* ]]
 }
@@ -65,14 +65,14 @@ _write_release_yml() {
   # laxer and would silently accept + normalize (01.0.0 -> 1.0.0); the strict
   # validation gate must reject it exactly as the bash did. (release FU2.)
   _write_release_yml
-  run "$BIN/release-cut" 01.0.0
+  run "$BIN/release-core" cut 01.0.0
   [ "$status" -eq 2 ]
   [[ "$output" == *"version must be"* ]]
 }
 
 @test "leading-zero prerelease identifier is rejected" {
   _write_release_yml
-  run "$BIN/release-cut" 1.0.0-01
+  run "$BIN/release-core" cut 1.0.0-01
   [ "$status" -eq 2 ]
   [[ "$output" == *"version must be"* ]]
 }
@@ -84,14 +84,14 @@ _write_release_yml() {
 @test "no release.yml workflow: exits 0 with informative message" {
   # github-action repos and tree-sitter standalone grammars ship the
   # canonical shim but have nothing to dispatch.
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"no .github/workflows/release.yml"* ]]
   [[ "$output" == *"nothing to do"* ]]
 }
 
 @test "no release.yml workflow: graceful even with literal version" {
-  run "$BIN/release-cut" 1.2.3
+  run "$BIN/release-core" cut 1.2.3
   [ "$status" -eq 0 ]
   [[ "$output" == *"nothing to do"* ]]
 }
@@ -108,7 +108,7 @@ name = "foo"
 version = "1.4.2"
 EOF
   _stub_gh
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping minor: 1.4.2 -> 1.5.0"* ]]
   [[ "$output" == *"gh workflow run release.yml -f version=1.5.0"* ]]
@@ -132,7 +132,7 @@ name = "foo"
 version.workspace = true
 EOF
   _stub_gh
-  run "$BIN/release-cut" patch
+  run "$BIN/release-core" cut patch
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping patch: 0.7.2-rc.2 -> 0.7.3"* ]]
 }
@@ -158,7 +158,7 @@ name = "foo"
 version.workspace = true
 EOF
   _stub_gh
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping minor: 5.0.1-rc.1 -> 5.1.0"* ]]
 }
@@ -186,7 +186,7 @@ name = "foo-lib"
 version = "3.2.1"
 EOF
   _stub_gh
-  run "$BIN/release-cut" patch
+  run "$BIN/release-core" cut patch
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping patch: 3.2.1 -> 3.2.2"* ]]
 }
@@ -208,7 +208,7 @@ name = "foo-lib"
 version = "2.0.0"
 EOF
   _stub_gh
-  run "$BIN/release-cut" major
+  run "$BIN/release-core" cut major
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping major: 2.0.0 -> 3.0.0"* ]]
 }
@@ -226,7 +226,7 @@ EOF
 }
 EOF
   _stub_gh
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping minor: 0.10.7-rc.2 -> 0.11.0"* ]]
 }
@@ -247,7 +247,7 @@ EOF
 }
 EOF
   _stub_gh
-  run "$BIN/release-cut" patch
+  run "$BIN/release-core" cut patch
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping patch: 2.0.0 -> 2.0.1"* ]]
 }
@@ -268,7 +268,7 @@ name = "zed-lex"
 version = "0.1.2-rc.1"
 EOF
   _stub_gh
-  run "$BIN/release-cut" patch
+  run "$BIN/release-core" cut patch
   [ "$status" -eq 0 ]
   # semver bump patch strips the -rc.1 suffix and increments: rc.1 → .3.
   # To land on the un-suffixed 0.1.2 you'd type the version literally.
@@ -292,7 +292,7 @@ name = "phos"
 version = "0.7.2-rc.2"
 EOF
   _stub_gh
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping minor: 0.7.2-rc.2 -> 0.8.0"* ]]
 }
@@ -307,7 +307,7 @@ EOF
   git -c user.email=t@t -c user.name=t commit -q -m init
   git tag v0.3.1
   _stub_gh
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"Bumping minor: 0.3.1 -> 0.4.0"* ]]
 }
@@ -315,7 +315,7 @@ EOF
 @test "go-cli with no tags: informative error pointing at explicit version" {
   _write_release_yml
   echo "module example.com/foo" > go.mod
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 1 ]
   [[ "$output" == *"no git tags found"* ]]
   [[ "$output" == *"explicit version"* ]]
@@ -331,7 +331,7 @@ EOF
   # Empty repo — detect-kind would fail here. But a literal version
   # doesn't need to read the current value, so dispatch succeeds.
   _stub_gh
-  run "$BIN/release-cut" 1.2.3
+  run "$BIN/release-core" cut 1.2.3
   [ "$status" -eq 0 ]
   [[ "$output" == *"gh workflow run release.yml -f version=1.2.3"* ]]
 }
@@ -339,7 +339,7 @@ EOF
 @test "literal pre-release version is accepted" {
   _write_release_yml
   _stub_gh
-  run "$BIN/release-cut" 1.0.0-rc.1
+  run "$BIN/release-core" cut 1.0.0-rc.1
   [ "$status" -eq 0 ]
   [[ "$output" == *"gh workflow run release.yml -f version=1.0.0-rc.1"* ]]
 }
@@ -352,7 +352,7 @@ EOF
   _write_release_yml
   # No Cargo.toml, no package.json, no go.mod, no plugin layout —
   # detect-kind exits 1. Bump shortcut surfaces that.
-  run "$BIN/release-cut" minor
+  run "$BIN/release-core" cut minor
   [ "$status" -eq 1 ]
   [[ "$output" == *"detect-kind could not identify"* ]]
 }

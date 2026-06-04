@@ -283,16 +283,15 @@ currently out of scope — commented out in the manifest.
 Repos NOT in this list are out of scope. `managed-repos.yaml` is the
 single source of truth — there is no auto-discovery (ruleset/gh-api
 discovery was removed after it caused recurring scope bugs).
-`release-core admin repos list` (flat alias: `managed-repos`) resolves each
-entry to `$REPOS_ROOT/<path>` with zero inference; the table above is the
-human mirror.
+`release-core admin repos list` resolves each entry to `$REPOS_ROOT/<path>`
+with zero inference; the table above is the human mirror.
 
 ## What every onboarded repo gets
 
 Same baseline regardless of Stack:
 
-- **Branch protection** via `release-core admin policy ruleset` (flat alias:
-  `apply-ruleset`) (PR required, linear history, no force-push). Template at
+- **Branch protection** via `release-core admin policy ruleset` (PR required,
+  linear history, no force-push). Template at
   `rulesets/main-protection.json.tmpl`.
 - **Auto-review on PR open** — Copilot + Gemini review every PR;
   Cloud Auto-fix wakes a fresh session per review comment when the
@@ -395,7 +394,7 @@ rollout:
 - Push a change for one Stack: `release/beta/<stack>`.
 - Ship to fleet: merge to main, delete the beta branch.
 
-`release-core admin release betas` (flat alias: `release-beta-list`) reports
+`release-core admin release betas` reports
 open beta branches with age and ahead-of-main count. Stale betas are visible; the convention is
 delete-on-merge.
 
@@ -514,14 +513,16 @@ Per-tag history: [`docs/breaking-changes.md`](docs/breaking-changes.md).
   actions/            composite actions (Tasks called inside workflows)
 bin/                  human-runnable tooling, on $PATH via dodot.
                       Canonical entry: the `release-core <group> <cmd>`
-                      CLI (`release-core --help` is the map); the flat
-                      names below are kept as working aliases:
-                      apply-ruleset, sweep-github-policy,
-                      install-release-{secrets,token}, detect-kind,
-                      audit-portfolio, audit-repo, audit-smoke-test,
-                      done-check, the gh-pr-* loop helpers,
-                      release-sync, release-beta-list, release-cut,
-                      fetch-artifact
+                      CLI (`release-core --help` is the map). The
+                      maintainer/fleet flat names were retired in the
+                      CLI cutover (#468) — `managed-repos`, the audit-*
+                      commands, `release-cut`, `release-lex`,
+                      `apply-ruleset`, etc. are reachable only via the
+                      tree now. The flat names kept as consumer-facing
+                      aliases: detect-kind, release-sync,
+                      release-drift-check, changelog, semver,
+                      gh-task-status, gh-release-issue, the `release`
+                      shim, the gh-pr-* loop helpers, fetch-artifact
 rulesets/             branch-protection JSON templates
 bin-internal/         CI scripts exec'd by composite actions
 templates/            path-mirror layout — sync destination = source

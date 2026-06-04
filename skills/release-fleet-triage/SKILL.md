@@ -33,7 +33,7 @@ release-core admin inbox            # human digest: open consumer-filed issues, 
 release-core admin inbox --json     # same data, machine-readable (for scripting a worklist)
 ```
 
-`release-core admin inbox` (flat alias: `release-inbox`) groups open
+`release-core admin inbox` (retired flat: `release-inbox`) groups open
 `consumer-filed` issues by `[component]` and sorts
 clusters by **recurrence** — the comment count, which is the relay skill's
 "also hit on `<repo>`" signal appended on each duplicate. A cluster with three
@@ -90,7 +90,7 @@ release-core admin inbox notify-source <release-issue-#> --fix "release#<pr>, v2
 release-core admin inbox notify-source <release-issue-#> --fix "release#<pr>, v2 advanced to <sha>" --post --close
 ```
 
-`release-core admin inbox notify-source` (flat alias: `release-notify-source`)
+`release-core admin inbox notify-source` (retired flat: `release-notify-source`)
 reads the release issue, extracts every source PR it
 points at (the `**PR:**` body line + the relay skill's `- PR:` duplicate lines),
 and posts one consistent "upstream fix shipped — bump `@vN` and re-run" comment

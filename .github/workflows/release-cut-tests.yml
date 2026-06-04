@@ -1,22 +1,23 @@
 name: release-cut tests
 
-# BATS suite for bin/release-cut + templates/commons/bin/release.
-# The shim gets sweep-synced to consumer repos via release-sync;
-# release-cut runs locally on developer machines and from CI in
-# this repo. Regressions need to surface here before they ride out.
+# BATS suite for `release-core cut` (via bin/release-core) +
+# templates/commons/bin/release. The flat `release-cut` name was retired in the
+# CLI cutover (#468); the shim gets sweep-synced to consumer repos via
+# release-sync; `release-core cut` runs locally on developer machines and from
+# CI in this repo. Regressions need to surface here before they ride out.
 
 on:
   push:
     branches: ['**']
     paths:
-      - 'bin/release-cut'
+      - 'bin/release-core'
       - 'templates/commons/bin/release'
       - 'templates/commons/lib/release_core/**'
       - 'tests/release-cut/**'
       - '.github/workflows/release-cut-tests.yml'
   pull_request:
     paths:
-      - 'bin/release-cut'
+      - 'bin/release-core'
       - 'templates/commons/bin/release'
       - 'templates/commons/lib/release_core/**'
       - 'tests/release-cut/**'

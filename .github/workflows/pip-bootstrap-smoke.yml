@@ -119,15 +119,19 @@ jobs:
         # non-empty output for the per-verb scripts and the top-level CLI.
         run: |
           set -euo pipefail
-          for cmd in changelog detect-kind release-cut release-core; do
+          # The surviving consumer-facing console-scripts + the top-level CLI.
+          # The maintainer/fleet flat names were retired in the CLI cutover
+          # (#468) — they are reachable only via `release-core <group> <cmd>`,
+          # smoke-tested as a subcommand below.
+          for cmd in changelog detect-kind release-sync release-core; do
             path="$(command -v "$cmd")"
             case "$path" in
               "${RUNNER_TEMP}/venv/bin/"*) : ;;
               *) echo "ERROR: $cmd resolved to '$path', not the fresh venv" >&2; exit 1 ;;
             esac
             # Capture stdout AND stderr: the verbs follow their bin/ shims, some
-            # of which print --help usage to stderr (e.g. release-cut). The §4
-            # bar is exit 0 + non-empty help, regardless of stream.
+            # of which print --help usage to stderr. The §4 bar is exit 0 +
+            # non-empty help, regardless of stream.
             if ! out="$("$cmd" --help 2>&1)"; then
               echo "ERROR: '$cmd --help' exited non-zero" >&2
               printf '%s\n' "$out" >&2
@@ -139,6 +143,16 @@ jobs:
             fi
             echo "ok: $cmd --help -> $(printf '%s' "$out" | head -n1)"
           done
+          # A retired flat name is now a CLI subcommand: assert the cut verb is
+          # reachable as `release-core cut --help` (its usage prints to stderr
+          # with a non-zero verb-convention exit, so capture both streams and
+          # only require non-empty output).
+          cut_help="$(release-core cut --help 2>&1 || true)"
+          if [ -z "$cut_help" ]; then
+            echo "ERROR: 'release-core cut --help' produced no output" >&2
+            exit 1
+          fi
+          echo "ok: release-core cut --help -> $(printf '%s' "$cut_help" | head -n1)"
 
       - name: Create a Kind-detectable throwaway fixture repo
         # `release-core init` detects the target repo's Kind (manifest.detect_kind)

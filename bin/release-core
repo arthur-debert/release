@@ -11,16 +11,18 @@
 import os
 import sys
 
+_HERE = os.path.dirname(os.path.realpath(__file__))
+# Fleet verbs reached via `release-core admin repos|release …` (managed-repos,
+# audit-portfolio, release-verify-fleet) resolve the default manifest at
+# bin/../managed-repos.yaml from MANAGED_REPOS_SCRIPT_DIR. The flat
+# `managed-repos` shim used to export this; now that the flat names are retired
+# (#468) the release-core shim is the on-PATH entry, so it must export it too —
+# otherwise the manifest default only resolves when cwd happens to be the
+# release clone root.
+os.environ.setdefault("MANAGED_REPOS_SCRIPT_DIR", _HERE)
 sys.path.insert(
     0,
-    os.path.join(
-        os.path.dirname(os.path.realpath(__file__)),
-        "..",
-        "templates",
-        "commons",
-        "lib",
-        "release_core",
-    ),
+    os.path.join(_HERE, "..", "templates", "commons", "lib", "release_core"),
 )
 
 from release_core.cli_entry import main  # noqa: E402 — sys.path set above

@@ -7,7 +7,7 @@ load helper
 # ---------------------------------------------------------------------
 
 @test "--list prints every repo (owner/name) from the manifest" {
-  run "$BIN/managed-repos" --list
+  run "$BIN/release-core" admin repos list --list
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | wc -l | tr -d ' ')" -eq 4 ]
   [[ "$output" == *"lex-fmt/lex"* ]]
@@ -15,7 +15,7 @@ load helper
 }
 
 @test "--paths joins REPOS_ROOT/<path> verbatim — no inference from repo name" {
-  run "$BIN/managed-repos" --paths
+  run "$BIN/release-core" admin repos list --paths
   [ "$status" -eq 0 ]
   # lex-fmt/lex lives under the org-named dir, exists → found
   [[ "$output" == *"lex-fmt/lex	$REPOS_ROOT/lex-fmt/lex	found"* ]]
@@ -24,14 +24,14 @@ load helper
 }
 
 @test "--paths reports missing for repos whose path has no checkout" {
-  run "$BIN/managed-repos" --paths
+  run "$BIN/release-core" admin repos list --paths
   [ "$status" -eq 0 ]
   [[ "$output" == *"lex-fmt/comms	$REPOS_ROOT/lex-fmt/comms	missing"* ]]
   [[ "$output" == *"phos-editor/app	$REPOS_ROOT/phos/phos-app	missing"* ]]
 }
 
 @test "a trailing owner/name filter restricts every mode" {
-  run "$BIN/managed-repos" --list arthur-debert/dodot lex-fmt/comms
+  run "$BIN/release-core" admin repos list --list arthur-debert/dodot lex-fmt/comms
   [ "$status" -eq 0 ]
   [ "$(echo "$output" | wc -l | tr -d ' ')" -eq 2 ]
   [[ "$output" == *"arthur-debert/dodot"* ]]
@@ -40,12 +40,12 @@ load helper
 
 @test "REPOS_ROOT relocates the whole fleet with no logic change" {
   export REPOS_ROOT=/somewhere/else
-  run "$BIN/managed-repos" --paths
+  run "$BIN/release-core" admin repos list --paths
   [ "$status" -eq 0 ]
   [[ "$output" == *"arthur-debert/dodot	/somewhere/else/dodot	missing"* ]]
 }
 
 @test "an unknown flag is a usage error" {
-  run "$BIN/managed-repos" --bogus
+  run "$BIN/release-core" admin repos list --bogus
   [ "$status" -eq 64 ]
 }

@@ -68,7 +68,7 @@ STUB
 # --- help / usage -----------------------------------------------------
 
 @test "--help prints usage and exits 0" {
-  run "$BIN/done-check" --help
+  run "$BIN/release-core" status --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"done-check"* ]]
   [[ "$output" == *"Usage:"* ]]
@@ -77,13 +77,13 @@ STUB
 # --- arg arity --------------------------------------------------------
 
 @test "unknown arg exits 64" {
-  run "$BIN/done-check" --nope
+  run "$BIN/release-core" status --nope
   [ "$status" -eq 64 ]
   [[ "$output" == *"unknown arg: --nope"* ]]
 }
 
 @test "--repo without a value exits 64" {
-  run "$BIN/done-check" --repo
+  run "$BIN/release-core" status --repo
   [ "$status" -eq 64 ]
 }
 
@@ -93,7 +93,7 @@ STUB
   printf 'jobs:\n  release:\n    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1\n' \
     > "$WORK/release_yml"
   _install_gh_stub
-  run "$BIN/done-check" --repo o/r
+  run "$BIN/release-core" status --repo o/r
   [ "$status" -eq 0 ]
   [[ "$output" == *"Stack: rust-cli"* ]]
   [[ "$output" == *"pilot-running"* ]]
@@ -104,7 +104,7 @@ STUB
   printf 'jobs:\n  release:\n    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1\n' \
     > "$WORK/release_yml"
   _install_gh_stub
-  run "$BIN/done-check" --repo o/r --json
+  run "$BIN/release-core" status --repo o/r --json
   [ "$status" -eq 0 ]
   # last line is the JSON object (the "Detecting…/Stack:" lines precede it)
   line="$(printf '%s\n' "$output" | tail -1)"
@@ -124,7 +124,7 @@ exit 1
 STUB
   chmod +x stub/gh
   export PATH="$PWD/stub:$PATH"
-  run "$BIN/done-check" --repo o/r
+  run "$BIN/release-core" status --repo o/r
   [ "$status" -eq 65 ]
   [[ "$output" == *"could not detect stack"* ]]
 }

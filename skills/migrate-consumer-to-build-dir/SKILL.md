@@ -357,7 +357,7 @@ Do NOT `git commit --amend` an existing migration commit. Always replace it with
 ## Pitfalls
 
 - **`git add -A` is the single biggest footgun.** Untracked scratch files are everywhere in working consumer repos (nested clones, drafts, screenshots). The three-step explicit add in step 8 is non-negotiable.
-- **`release-core admin policy ruleset` (flat: `apply-ruleset`) and other release scripts can change HEAD.** If you ran one earlier in the same session, it may have left HEAD on `main` in the consumer. Always re-check `git branch --show-current` before push.
+- **`release-core admin policy ruleset` (retired flat: `apply-ruleset`) and other release scripts can change HEAD.** If you ran one earlier in the same session, it may have left HEAD on `main` in the consumer. Always re-check `git branch --show-current` before push.
 - **`release-sync --migrate` is destructive within its scope.** It removes `.release/` and recreates it from templates. If a previous migration's `.release/` was hand-edited, those edits are gone — by design.
 - **Symlinks vs real files for workflows.** `.github/workflows/copilot-review.yml` is special-cased as a real file. Don't "fix" it to be a symlink — GitHub Actions won't follow it.
 - **Don't merge.** The skill ends at ready-to-merge. The user does the merge.

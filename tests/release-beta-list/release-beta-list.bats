@@ -23,26 +23,26 @@ teardown() {
 }
 
 @test "--help prints usage and exits 0" {
-  run "$BIN/release-beta-list" --help
+  run "$BIN/release-core" admin release betas --help
   [ "$status" -eq 0 ]
   [[ "$output" == *"release/beta"* ]]
   [[ "$output" == *"Usage:"* ]]
 }
 
 @test "-h is an alias for --help" {
-  run "$BIN/release-beta-list" -h
+  run "$BIN/release-core" admin release betas -h
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage:"* ]]
 }
 
 @test "unknown arg exits 64" {
-  run "$BIN/release-beta-list" --bogus
+  run "$BIN/release-core" admin release betas --bogus
   [ "$status" -eq 64 ]
   [[ "$output" == *"unknown arg"* ]]
 }
 
 @test "RELEASE_HOME that is not a git clone errors" {
-  RELEASE_HOME="$WORK/not-a-clone" run "$BIN/release-beta-list"
+  RELEASE_HOME="$WORK/not-a-clone" run "$BIN/release-core" admin release betas
   [ "$status" -eq 1 ]
   [[ "$output" == *"is not a git clone"* ]]
 }
@@ -60,7 +60,7 @@ teardown() {
   git remote add origin "$WORK/origin.git"
   git commit -q --allow-empty -m init
   git push -q origin HEAD:refs/heads/main
-  RELEASE_HOME="$WORK/clone" run "$BIN/release-beta-list"
+  RELEASE_HOME="$WORK/clone" run "$BIN/release-core" admin release betas
   [ "$status" -eq 0 ]
   [ "$output" = "(none)" ]
 }

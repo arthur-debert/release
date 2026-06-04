@@ -5,13 +5,13 @@ description: "Bring a GitHub repo up to the canonical arthur-debert/* + lex-fmt/
 
 # gh-repo-setup
 
-Portable equivalent of `release-core admin policy ruleset` + `release-core admin policy sweep` + `detect-kind` (flat aliases `apply-ruleset` / `sweep-github-policy`). Brings a repo up to the canonical release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
+Portable equivalent of `release-core admin policy ruleset` + `release-core admin policy sweep` + `detect-kind` (retired flat names `apply-ruleset` / `sweep-github-policy`). Brings a repo up to the canonical release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
 
 ## When to use
 
 - **Onboarding a new repo** to the `arthur-debert/*` or `lex-fmt/*` portfolio.
 - **Verifying alignment** — quick way to check whether a repo has drifted from canonical.
-- **Recovery** — when `release-core audit` (flat: `audit-repo`) reports a repo is missing pieces.
+- **Recovery** — when `release-core audit` (retired flat: `audit-repo`) reports a repo is missing pieces.
 
 If you have `~/h/release/bin/` on `$PATH` (local Claude Code, dodot-set-up), prefer the local scripts — they're the same logic but quicker to invoke. This skill exists for cloud sessions and any environment without that PATH.
 
@@ -279,12 +279,12 @@ A clean idempotent re-run reports `ok` for every file and either `updated` (PUT 
 
 ## Related local-only scripts (not ported here)
 
-These are not reimplemented in this portable skill because they touch multiple repos at once and aren't useful from inside a single repo's session — run them via `release-core admin …` (flat aliases shown in parens) on a machine with the release tooling on `$PATH`:
+These are not reimplemented in this portable skill because they touch multiple repos at once and aren't useful from inside a single repo's session — run them via `release-core admin …` (retired flat names shown in parens) on a machine with the release tooling on `$PATH`:
 
-- `release-core admin secrets install` (flat: `install-release-secrets`) — propagate the canonical secrets set to every onboarded repo.
-- `release-core admin secrets token` (flat: `install-release-token`) — propagate `RELEASE_TOKEN` to every onboarded repo.
-- `release-core admin policy dependabot` (flat: `enable-dependabot-security`) — enable Dependabot vulnerability alerts portfolio-wide.
-- `release-core admin repos audit` (flat: `audit-portfolio`), `release-core audit` (flat: `audit-repo`), `release-core admin smoke-test` (flat: `audit-smoke-test`) — read-only auditing.
-- `release-core admin policy sweep` (flat: `sweep-github-policy`) — the local wrapper.
+- `release-core admin secrets install` (retired flat: `install-release-secrets`) — propagate the canonical secrets set to every onboarded repo.
+- `release-core admin secrets token` (retired flat: `install-release-token`) — propagate `RELEASE_TOKEN` to every onboarded repo.
+- `release-core admin policy dependabot` (retired flat: `enable-dependabot-security`) — enable Dependabot vulnerability alerts portfolio-wide.
+- `release-core admin repos audit` (retired flat: `audit-portfolio`), `release-core audit` (retired flat: `audit-repo`), `release-core admin smoke-test` (retired flat: `audit-smoke-test`) — read-only auditing.
+- `release-core admin policy sweep` (retired flat: `sweep-github-policy`) — the local wrapper.
 
 If a cloud agent needs any of these, that's a signal to escalate via the `release-issue-relay` skill (Phase 1.3) rather than reimplementing them piecemeal.

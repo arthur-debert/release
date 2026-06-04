@@ -14,40 +14,40 @@ load helper
   [[ "$output" == "#!/usr/bin/env bash" ]]
 }
 
-@test "shim errors with helpful message when release-cut is not on PATH" {
-  # Empty PATH except for coreutils so `command -v release-cut` fails.
+@test "shim errors with helpful message when release-core is not on PATH" {
+  # Empty PATH except for coreutils so `command -v release-core` fails.
   # Use $BASH for the bash binary instead of relying on `/usr/bin/bash`
   # or `/bin/bash` — those don't exist on NixOS, FreeBSD, or any host
   # with a custom toolchain.
   run env -i PATH=/usr/bin:/bin "$BASH" "$TEMPLATES_BIN/release" minor
   [ "$status" -eq 1 ]
-  [[ "$output" == *"release-cut not on \$PATH"* ]]
+  [[ "$output" == *"release-core not on \$PATH"* ]]
 }
 
-@test "shim forwards args to release-cut on PATH" {
-  # Drop a stub release-cut on PATH that echoes its args; the shim
-  # should exec into it transparently.
+@test "shim forwards args to release-core cut on PATH" {
+  # Drop a stub release-core on PATH that echoes its args; the shim
+  # should exec into it transparently, prepending the `cut` subcommand.
   mkdir -p bin-stub
-  cat > bin-stub/release-cut <<'EOF'
+  cat > bin-stub/release-core <<'EOF'
 #!/usr/bin/env bash
-echo "release-cut called with: $*"
+echo "release-core called with: $*"
 exit 0
 EOF
-  chmod +x bin-stub/release-cut
+  chmod +x bin-stub/release-core
   export PATH="$PWD/bin-stub:$PATH"
 
   run "$TEMPLATES_BIN/release" minor
   [ "$status" -eq 0 ]
-  [[ "$output" == "release-cut called with: minor" ]]
+  [[ "$output" == "release-core called with: cut minor" ]]
 }
 
-@test "shim propagates release-cut exit status" {
+@test "shim propagates release-core cut exit status" {
   mkdir -p bin-stub
-  cat > bin-stub/release-cut <<'EOF'
+  cat > bin-stub/release-core <<'EOF'
 #!/usr/bin/env bash
 exit 42
 EOF
-  chmod +x bin-stub/release-cut
+  chmod +x bin-stub/release-core
   export PATH="$PWD/bin-stub:$PATH"
 
   run "$TEMPLATES_BIN/release" minor
