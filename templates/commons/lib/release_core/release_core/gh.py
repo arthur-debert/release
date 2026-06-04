@@ -183,13 +183,18 @@ def is_git_worktree(path: str) -> bool:
 
     if not os.path.isdir(path):
         return False
-    return (
-        proc.run(
-            ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
-            check=False,
-        ).returncode
-        == 0
-    )
+    try:
+        return (
+            proc.run(
+                ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+                check=False,
+            ).returncode
+            == 0
+        )
+    except OSError:
+        # git not installed / not on PATH — preserve the documented "never
+        # raises, returns False when git is unavailable" contract.
+        return False
 
 
 # ──────────────────────────────────────────────────────────────────────────────

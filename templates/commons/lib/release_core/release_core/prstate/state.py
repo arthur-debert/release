@@ -202,7 +202,7 @@ def _reviews_pending_action(
 
     clauses: list[str] = []
     if request_names:
-        clauses.append(f"request copilot for the current head: {', '.join(request_names)}")
+        clauses.append(f"request for the current head: {', '.join(request_names)}")
     if rerequest_names:
         clauses.append(
             "RE-REQUEST for the current head (a prior review is stale after a push): "

@@ -83,7 +83,8 @@ def test_reviews_pending_never_requested_says_request(context):
     # REQUEST (not wait), and it must NOT mention re-request/stale.
     status = evaluate(context("copilot_never_requested"))
     assert status.state is TaskState.REVIEWS_PENDING
-    assert "request copilot for the current head" in status.next_action
+    assert "request for the current head" in status.next_action
+    assert "copilot" in status.next_action  # the reviewer is named in the clause
     assert "RE-REQUEST" not in status.next_action
     assert "stale" not in status.next_action
 
