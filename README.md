@@ -433,7 +433,10 @@ environment. It seeds:
 - OS tooling: `gh`, `lefthook`, `bats`, `vsce`, `ovsx`, Lua +
   luarocks + busted + vusted, Neovim ≥0.11, `xvfb`, `libnss3-tools`,
   Tauri's GTK system libs.
-- `~/.claude/skills/*` — standalone skills cloned from this repo.
+- `~/.claude/skills/*` — user-level skills cloned from this repo for
+  the maintainer machine/session. This is NOT the consumer
+  distribution path; consumers get the official set synced into their
+  own `.claude/skills/` by `release-sync` (see docs/skills.lex).
 - `~/.claude/CLAUDE.md` — user-level instructions from
   [`env/CLAUDE.md`](env/CLAUDE.md).
 - `~/release` — a shallow blobless clone of this repo, pinned to
@@ -537,18 +540,11 @@ templates/            path-mirror layout — sync destination = source
                       formulae)
 orchestrator/         🚧 Python harness for multi-repo work
 env/                  cloud-session setup.sh + user-level CLAUDE.md
-skills/               canonical portfolio Claude Code skills:
-                      - gh-pr-review-loop  (drive a PR through the
-                        canonical pipeline)
-                      - gh-repo-setup      (onboard a new repo)
-                      - pr-review-respond  (Copilot/Gemini triage)
-                      - release-issue-relay (file infra bugs against
-                        release/ from inside a consumer)
-                      - lex-primer         (writing valid .lex)
-                      - lex-multirepo      (cross-repo lex work)
-                      - padz-for-agents    (notes across sessions)
-                      - electron-e2e-testing
-                      - macos-signing-notarization
+skills/               canonical home for Claude Code skills. release
+                      owns the infra + dev-cycle set and SYNCS it into
+                      every consumer (symlinks into .release/);
+                      consumers own only their application-domain
+                      skills. Catalog + policy: docs/skills.lex
 docs/
   per-category/       input shapes per Stack
   per-component/      adoption guides per Component

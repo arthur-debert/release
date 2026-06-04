@@ -30,64 +30,88 @@ Skills
         `request-refactor-plan`, `improve-codebase-architecture`,
         `ubiquitous-language`, `zoom-out`, `teach`, `setup-matt-pocock-skills`.
 
-2. The Two Audiences
+2. Ownership policy
 
-    Consumer-facing:
-        Skills meant for an agent doing tasks in a consumer repo — the PR
-        loop, responding to reviews, escalating infra friction upstream,
-        writing Lex.
+    release/ is the single source of truth for infrastructure and general
+    development-cycle skills. Every consumer repo carries release's official
+    set, synced (never hand-copied) as symlinks into its `.release/` build
+    tree. A consumer owns ONLY its own application-domain skills — anything
+    specific to that project's subject matter.
 
-        - `gh-pr-review-loop` — drive a PR through push, Copilot review,
-          triage, fixups, merge-readiness. This is the only skill mechanically
-          synced into consumer repos today (see §3).
-        - `pr-review-respond` — reply to individual PR review comments.
-        - `release-issue-relay` — escalate infra friction the consumer cannot
-          fix in place to `arthur-debert/release` as a GitHub issue.
-        - `lex-primer` — write syntactically correct Lex.
+    Why: a hand-copied infra skill drifts. We found a consumer running a stale,
+    much-shortened `pr-review-respond` against release's official copy because
+    nothing kept the local copy in step. The distribution mechanism (§4) closes
+    that gap — the consumer's copy is a symlink to the synced official blob, so
+    it cannot fall behind.
 
-    Release-only:
-        Skills that only make sense while working ON this repo — fleet
-        operations, run from inside `arthur-debert/release`. They are NOT
-        synced to consumers.
+3. The Three Distribution Tiers
 
-        - `release-fleet-ops` — drive and diagnose release→consumer fleet
-          changes; the "is this a release bug or a consumer bug?" oracle.
-        - `release-fleet-triage` — drain the consumer-filed issue inbox and
-          run the batch upstream-fix loop.
+    Every skill under `skills/` falls into exactly one tier. The catalogs are
+    the literal lists `PUSH_ALL_SKILLS` and `REPLACE_IF_PRESENT_SKILLS` in
+    `templates/commons/lib/release_core/release_core/sync.py` — that file is
+    the authority; the names below are a convenience snapshot.
+
+    Push-all (synced to EVERY consumer, unconditionally):
+        The PR loop, review-response, upstream escalation, and the general
+        development-cycle skills an agent needs anywhere. Currently:
+        `gh-pr-review-loop`, `pr-review-respond`, `release-issue-relay`,
+        `diagnose`, `tdd`, `review`, `triage`, `to-issues`, `handoff`, `qa`,
+        `grill-me`, `grill-with-docs`, `improve-codebase-architecture`,
+        `request-refactor-plan`, `ubiquitous-language`, `zoom-out`, `teach`,
+        `padz-for-agents`.
+
+    Replace-if-present (upgrade-only):
+        Synced into a consumer ONLY when that consumer already carries
+        `.claude/skills/<name>` (a real dir OR a symlink). The sync upgrades
+        the existing copy to release's official; it never ADDS the skill to a
+        consumer that lacks it. Currently: `lex-primer`, `lex-multirepo`,
+        `electron-e2e-testing`, `macos-signing-notarization`.
+
+    Release-only (NEVER distributed):
+        Skills that only make sense while working ON this repo. They stay in
+        `skills/` and never reach a consumer: `release-fleet-ops`,
+        `release-fleet-triage`, `setup-matt-pocock-skills`, `gh-repo-setup`,
+        `migrate-consumer-to-build-dir`.
 
     :: note :: The maintainer's own machine reaches the full set through the
-    repo's `.claude/skills/` (real copies of vendored skills, symlinks back to
-    `skills/` for the release-only ones). That is a maintainer convenience, not
-    the consumer distribution path.
+    repo's `.claude/skills/`. That is a maintainer convenience, not the
+    consumer distribution path.
 
-3. How a Skill Reaches a Consumer
+4. How a Skill Reaches a Consumer
 
-    Distribution is deliberately narrow: only `gh-pr-review-loop` is
-    materialized into consumer repos, and it rides the same build-dir +
-    symlink mechanism as every other injected file (see injected-files.lex).
+    Distribution is whole-directory and rides the same build-dir + symlink
+    mechanism as every other injected file (see injected-files.lex). For each
+    distributed skill, EVERY file under `skills/<name>/` is materialized — so
+    a multi-file skill (e.g. `tdd`, `triage`) arrives complete, not just its
+    `SKILL.md`.
 
-    The path:
-        - Source of truth: `skills/gh-pr-review-loop/SKILL.md` in this repo.
-        - `release-sync`, run in the consumer, writes the skill as a real file
+    The path, per file under `skills/<name>/`:
+        - Source of truth: `skills/<name>/<subpath>` in this repo.
+        - `release-sync`, run in the consumer, writes the file as a real blob
           into the consumer's committed `.release/` build tree at
-          `.release/.claude/skills/gh-pr-review-loop/SKILL.md`.
+          `.release/.claude/skills/<name>/<subpath>`.
         - It then creates a relative symlink at the discovery path
-          `.claude/skills/gh-pr-review-loop/SKILL.md` pointing back into
-          `.release/`.
+          `.claude/skills/<name>/<subpath>` pointing back into `.release/`.
         - Claude Code discovers skills under `.claude/skills/`, follows the
           symlink, and reads it.
 
+    Replacing a stale local copy:
+        If the consumer already has a REAL file or directory at a managed skill
+        dest (a hand-copied skill from before this policy), the sync removes it
+        and replaces it with the managed symlink — no `--migrate` flag needed.
+        Skill dests are release-owned, so a stale hand-copy is always upgraded
+        rather than flagged as a conflict.
+
     The result in a consumer repo:
-        - `.release/.claude/skills/gh-pr-review-loop/SKILL.md` — a committed
-          real file (the materialized blob).
-        - `.claude/skills/gh-pr-review-loop/SKILL.md` — a committed symlink
-          into `.release/`.
+        - `.release/.claude/skills/<name>/<subpath>` — committed real blobs
+          (the materialized skill).
+        - `.claude/skills/<name>/<subpath>` — committed symlinks into
+          `.release/`.
 
     One source, one materialized copy, one symlink — no hand-copied skill
-    files in the consumer, so nothing can drift out of step with the upstream
-    skill.
+    files in the consumer, so nothing can drift out of step with upstream.
 
-4. Linting
+5. Linting
 
     `bin-internal/lint-skills.sh` enforces the provenance split: self-authored
     skills (no `.upstream`) are markdownlinted; vendored skills (with

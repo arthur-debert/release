@@ -20,6 +20,22 @@ Editing a managed file (anything that is a symlink into `.release/`) does not
 stick: the next sync replaces it. Changes to managed infrastructure belong
 upstream — see **Escalation** below.
 
+## Skills (managed too — don't hand-copy)
+
+This repo carries `release`'s official infrastructure and dev-cycle skills under
+`.claude/skills/` — the PR review loop, review-response, upstream escalation, and
+general dev skills (TDD, review, triage, diagnose, and more). They are **managed
+and synced**, just like the rest of `.release/`: each is a symlink into the
+materialized tree, regenerated on every sync.
+
+- **Use the synced skills as-is.** Do **not** hand-edit or hand-copy them into
+  this repo. A hand-copied skill drifts out of step with upstream — the synced
+  symlink is what keeps your copy current. If a skill needs a fix, that is an
+  upstream change (see **Escalation**).
+- **Only application-domain skills are this repo's own.** Skills specific to this
+  project's subject matter live here and are yours to maintain; the infra/dev
+  skills are not.
+
 ## The dev flow at a glance
 
 Pull requests are driven to _ready for human merge_ by a reviewer-agnostic state
