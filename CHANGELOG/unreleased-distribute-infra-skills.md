@@ -1,0 +1,1 @@
+release now distributes the full official infra/dev-cycle skill set into every consumer (whole-directory symlinks into .release/) and replaces stale consumer-local copies; application-domain skills stay consumer-owned
