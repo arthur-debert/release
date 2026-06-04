@@ -32,6 +32,10 @@ Help convention (a first-class requirement of #460):
   verb-wrap, the verb's own docstring/USAGE; for a script-wrap, the script's
   own ``--help``. So ``release-core <group> <cmd> --help`` shows the real,
   authoritative help, never a thin click re-statement of it.
+
+Stubs: :func:`stub_group` builds a registered-but-unimplemented GROUP whose bare
+invocation prints help + a stub note and exits :data:`STUB_EXIT` (never a silent
+0). The matching stub LEAF factory is ``toplevel._stub_command``.
 """
 
 from __future__ import annotations
@@ -53,6 +57,46 @@ PASSTHROUGH_CONTEXT = {
     "allow_extra_args": True,
     "help_option_names": [],  # do NOT let click intercept -h/--help
 }
+
+# Exit code for a registered-but-unimplemented command/group (EX_UNAVAILABLE).
+# A stub never silently succeeds: invoking it prints a clear message and exits
+# with this code, so it can't be mistaken for a working command.
+STUB_EXIT = 69
+
+
+def stub_group(name: str, *, short_help: str, help: str | None = None) -> click.Group:
+    """Build a registered-but-unimplemented GROUP (for a parallel agent to fill).
+
+    Shows in the parent ``--help`` like any group; ``<group> --help`` lists its
+    (possibly all-stub) subcommands. But invoking the group BARE
+    (``release-core <group>`` with no subcommand) prints the help plus a stub
+    note and exits :data:`STUB_EXIT`, rather than click's default of exiting 0
+    silently — so an empty stub group can't be mistaken for a working command.
+
+    A parallel agent fills the group by ``add_command``-ing real leaves; once the
+    bare form is meant to do something (e.g. ``admin inbox`` → release-inbox),
+    swap this for a normal ``@click.group(invoke_without_command=True)`` with the
+    real callback.
+    """
+
+    @click.group(
+        name=name,
+        short_help=short_help,
+        help=help,
+        invoke_without_command=True,
+    )
+    @click.pass_context
+    def _grp(ctx: click.Context) -> None:
+        if ctx.invoked_subcommand is None:
+            click.echo(ctx.get_help())
+            click.echo(
+                f"\nrelease-core: `{name}` is a registered stub group (no bare "
+                f"behavior yet — see #460).",
+                err=True,
+            )
+            raise SystemExit(STUB_EXIT)
+
+    return _grp
 
 
 def wrap_verb(

@@ -142,6 +142,33 @@ def test_stub_leaf_help_is_still_reachable(capsys):
     assert "detect-kind" in out or "Usage:" in out
 
 
+def test_bare_empty_stub_group_exits_69_not_silent_0(capsys):
+    # An EMPTY stub group (changelog/ci/admin inbox) invoked bare prints help +
+    # a stub note and exits 69 — never a silent exit 0 (Copilot review #463).
+    for args in (["changelog"], ["ci"], ["admin", "inbox"]):
+        rc = cli_entry.main(args)
+        captured = capsys.readouterr()
+        assert rc == 69, args
+        assert "stub" in captured.err.lower(), args
+        # help is still shown (the map), on stdout.
+        assert "Usage:" in captured.out, args
+
+
+def test_bare_stub_group_help_flag_exits_0(capsys):
+    # `<stub group> --help` is discovery, exit 0 (not the bare stub-exit path).
+    rc = cli_entry.main(["changelog", "--help"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Usage:" in out
+
+
+def test_nonempty_stub_group_bare_is_missing_command_not_silent(capsys):
+    # A group WITH subcommands (stub leaves) invoked bare is click's
+    # "Missing command" usage error (exit 2) — still never a silent 0.
+    rc = cli_entry.main(["admin", "repos"])
+    assert rc == 2
+
+
 def test_toplevel_attach_is_idempotent_shape():
     # attach() is what cli_entry calls; calling it on a fresh group yields the
     # same per-project command set (proves no hidden global state).

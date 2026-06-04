@@ -112,12 +112,28 @@ group.add_command(wrap_script(
 
 ## Stubs
 
-Unimplemented leaves are registered as **stubs** so `release-core --help` shows
-the whole intended shape. Use `toplevel._stub_command(name, short_help)`; an
-invoked stub prints a clear "registered stub (not yet wired — see #460)" message
-and exits `69` (EX_UNAVAILABLE), so it can never be mistaken for working. To
-implement one, replace the `_stub_command(...)` registration with the real
-`wrap_verb(...)` / `wrap_script(...)` — that is the entire change.
+Unimplemented commands are registered as **stubs** so `release-core --help`
+shows the whole intended shape. A stub never silently succeeds — it always exits
+`STUB_EXIT` (`69`, EX_UNAVAILABLE) with a clear "registered stub (not yet wired —
+see #460)" message — so it can't be mistaken for a working command.
+
+- **Stub leaf** — `toplevel._stub_command(name, short_help)`. Accepts any
+  args/flags (so `release-core <stub> --json` still hits the 69 path, not a
+  click usage error); `--help` stays reachable. Implement it by replacing the
+  `_stub_command(...)` registration with the real `wrap_verb(...)` /
+  `wrap_script(...)` — that is the entire change.
+- **Stub group** (an empty group, or one whose bare form isn't wired yet) —
+  `_helpers.stub_group(name, *, short_help, help=...)`. Bare invocation
+  (`release-core <group>` with no subcommand) prints the help **plus** a stub
+  note and exits `69`, instead of click's default of exiting `0` silently. Fill
+  it by `add_command`-ing real leaves; when the bare form should itself do
+  something (e.g. `admin inbox` → release-inbox), swap `stub_group` for a normal
+  `@click.group(invoke_without_command=True)` with the real callback.
+
+> A group that already has subcommands (even all-stub leaves) and uses a plain
+> `@click.group` will, when invoked bare, hit click's "Missing command" usage
+> error (exit `2`) — also never a silent `0`. Use `stub_group` for the empty
+> groups and the not-yet-wired-bare-form groups specifically.
 
 ## What's exemplar vs stub today
 

@@ -28,7 +28,7 @@ from __future__ import annotations
 import click
 
 from ..verbs import done_check, init, release_cut, selfcheck
-from ._helpers import wrap_verb
+from ._helpers import STUB_EXIT, stub_group, wrap_verb
 
 
 def attach(root: click.Group) -> None:
@@ -96,17 +96,16 @@ def attach(root: click.Group) -> None:
 
 # --------------------------------------------------------------------------
 # Stub scaffolding. These keep `release-core --help` showing the full shape
-# while a parallel agent fills the real wrap_verb in. A stub command exits 69
-# (EX_UNAVAILABLE) with a clear "not yet wired" message if actually invoked, so
-# it can never be mistaken for working.
+# while a parallel agent fills the real wrap_verb/wrap_script in. A stub leaf
+# or a bare-invoked stub group exits STUB_EXIT (69, EX_UNAVAILABLE) with a clear
+# "not yet wired" message, so it can never be mistaken for working. The group
+# factory is the shared `stub_group` in _helpers; the leaf factory is below.
 # --------------------------------------------------------------------------
-
-_STUB_EXIT = 69  # EX_UNAVAILABLE
 
 
 class _StubCommand(click.Command):
-    """A registered-but-unimplemented leaf: shows in ``--help`` like any other
-    command, but exits ``_STUB_EXIT`` with a clear message if actually invoked,
+    """A registered-but-unimplemented LEAF: shows in ``--help`` like any other
+    command, but exits ``STUB_EXIT`` with a clear message if actually invoked,
     so it can never be mistaken for working.
 
     It accepts *any* args/flags (``ignore_unknown_options`` + a catch-all
@@ -121,7 +120,7 @@ class _StubCommand(click.Command):
             f"wired to its verb — see #460).",
             err=True,
         )
-        raise SystemExit(_STUB_EXIT)
+        raise SystemExit(STUB_EXIT)
 
 
 def _stub_command(name: str, short_help: str) -> click.Command:
@@ -136,48 +135,44 @@ def _stub_command(name: str, short_help: str) -> click.Command:
 
 
 def _changelog_group() -> click.Group:
-    @click.group(
-        name="changelog",
+    return stub_group(
+        "changelog",
         short_help="Manage this repo's changelog (add/cut/render). (stub)",
+        help=(
+            "Changelog management. (Stub group ← changelog* — fill add/cut/render "
+            "with wrap_verb over release_core.verbs.changelog's *_main functions.)"
+        ),
     )
-    def changelog() -> None:
-        """Changelog management. (Stub group ← changelog* — fill add/cut/render
-        with wrap_verb over release_core.verbs.changelog's *_main functions.)"""
-
-    return changelog
 
 
 def _semver_group() -> click.Group:
-    @click.group(
-        name="semver",
+    return stub_group(
+        "semver",
         short_help="Validate / extract semver parts. (stub)",
+        help=(
+            "Semver helpers. (Stub group ← semver — fill validate/get with "
+            "wrap_verb over release_core.verbs.semver.main.)"
+        ),
     )
-    def semver() -> None:
-        """Semver helpers. (Stub group ← semver — fill validate/get with
-        wrap_verb over release_core.verbs.semver.main.)"""
-
-    return semver
 
 
 def _sync_group() -> click.Group:
-    @click.group(
-        name="sync",
+    return stub_group(
+        "sync",
         short_help="Materialize / drift-check the synced .release/ tree. (stub)",
+        help=(
+            "Sync helpers. (Stub group ← release-sync / release-drift-check — "
+            "fill the bare sync + drift-check leaf with wrap_verb.)"
+        ),
     )
-    def sync() -> None:
-        """Sync helpers. (Stub group ← release-sync / release-drift-check —
-        fill the bare sync + drift-check leaf with wrap_verb.)"""
-
-    return sync
 
 
 def _issue_group() -> click.Group:
-    @click.group(
-        name="issue",
+    return stub_group(
+        "issue",
         short_help="Escalate infra friction to arthur-debert/release. (stub)",
+        help=(
+            "Issue helpers. (Stub group ← gh-release-issue — fill `issue file` "
+            "with wrap_verb over release_core.verbs.gh_release_issue.main.)"
+        ),
     )
-    def issue() -> None:
-        """Issue helpers. (Stub group ← gh-release-issue — fill `issue file`
-        with wrap_verb over release_core.verbs.gh_release_issue.main.)"""
-
-    return issue

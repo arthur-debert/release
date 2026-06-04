@@ -18,16 +18,17 @@ To fill this in, add (this is the ENTIRE change — no other file is touched)::
 
 from __future__ import annotations
 
-import click
+from ._helpers import stub_group
 
-
-@click.group(
-    name="ci",
-    short_help="CI-glue fetch helpers (fetch-deps, fetch-artifact).",
+# Stub group: bare `release-core ci` prints help + a stub note and exits 69
+# (never a silent exit 0). A parallel agent fills it by add_command-ing the two
+# wrap_script leaves; once it has real subcommands, drop stub_group for a normal
+# @click.group.
+group = stub_group(
+    "ci",
+    short_help="CI-glue fetch helpers (fetch-deps, fetch-artifact). (stub)",
+    help=(
+        "CI-side fetch helpers, backed by the standalone fetch-deps / "
+        "fetch-artifact scripts. (Stub — fill per #460 / this module's docstring.)"
+    ),
 )
-def group() -> None:
-    """CI-side fetch helpers.
-
-    Backed by the standalone ``fetch-deps`` / ``fetch-artifact`` scripts.
-    (Stub — to be filled by a parallel agent per #460.)
-    """

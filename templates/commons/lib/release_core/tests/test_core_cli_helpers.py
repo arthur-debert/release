@@ -13,7 +13,13 @@ These pin the contract the parallel per-group agents rely on:
 from __future__ import annotations
 
 import click
-from release_core.cli._helpers import run_root, wrap_script, wrap_verb
+from release_core.cli._helpers import (
+    STUB_EXIT,
+    run_root,
+    stub_group,
+    wrap_script,
+    wrap_verb,
+)
 
 
 def _invoke(cmd: click.Command, args: list[str]) -> int:
@@ -109,3 +115,21 @@ def test_run_root_returns_exit_code_from_version_and_help():
     assert run_root(root, ["--version"]) == 0
     assert run_root(root, ["--help"]) == 0
     assert run_root(root, []) == 0
+
+
+def test_stub_group_bare_exits_stub_exit():
+    grp = stub_group("g", short_help="stub group", help="A stub group.")
+    assert run_root(grp, []) == STUB_EXIT
+
+
+def test_stub_group_help_flag_exits_0():
+    grp = stub_group("g", short_help="stub group", help="A stub group.")
+    assert run_root(grp, ["--help"]) == 0
+
+
+def test_stub_group_with_a_real_subcommand_dispatches_it():
+    grp = stub_group("g", short_help="stub group")
+    grp.add_command(wrap_verb(lambda a: 0, name="real", short_help="real leaf"))
+    # the real subcommand still works; only the BARE form stub-exits.
+    assert run_root(grp, ["real"]) == 0
+    assert run_root(grp, []) == STUB_EXIT

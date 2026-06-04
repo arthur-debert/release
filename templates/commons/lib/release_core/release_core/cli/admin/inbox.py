@@ -16,19 +16,23 @@ passthrough ``args`` argument). The agent filling this in should mirror the
 
 from __future__ import annotations
 
-import click
-
+from .._helpers import stub_group
 from ..toplevel import _stub_command
 
-
-@click.group(
-    name="inbox",
-    short_help="Consumer-feedback inbox: triage view + notify-source.",
+# Stub group for now: bare `release-core admin inbox` prints help + a stub note
+# and exits 69 (never a silent exit 0). When the bare form is implemented it
+# should forward to release_core.verbs.release_inbox.main — at that point drop
+# stub_group for a normal @click.group(invoke_without_command=True) whose
+# callback mirrors the wrap_verb passthrough settings so `admin inbox --json`
+# reaches release-inbox untouched.
+group = stub_group(
+    "inbox",
+    short_help="Consumer-feedback inbox: triage view + notify-source. (stub)",
+    help=(
+        "The #348 consumer-feedback inbox. (Stub group — the bare form will map "
+        "to release-inbox; see this module's docstring.)"
+    ),
 )
-def group() -> None:
-    """The #348 consumer-feedback inbox. (Stub group — the bare form maps to
-    release-inbox via invoke_without_command; see the module docstring.)"""
-
 
 group.add_command(
     _stub_command(
