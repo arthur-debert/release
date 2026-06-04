@@ -61,6 +61,13 @@ def test_rm_f_removes_real_directory(tmp_path):
     assert not d.exists()
 
 
+def test_rm_f_tolerates_absent_path(tmp_path):
+    """_rm_f ignores absence (rm -f semantics) — covers the TOCTOU window where a
+    dir vanishes between the isdir() check and the removal."""
+    release_sync._rm_f(str(tmp_path / "never-existed"))  # no raise
+    release_sync._rm_f(str(tmp_path / "gone" / "child"))  # no raise
+
+
 def test_resolve_capabilities_yamlerror_returns_1_not_traceback(tmp_path, monkeypatch, capsys):
     # Drive main() to the capability-resolution step and have resolve_capabilities
     # raise YamlError (as it does on malformed YAML). main must catch → exit 1 with

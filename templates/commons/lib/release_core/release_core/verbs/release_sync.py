@@ -365,12 +365,17 @@ def _rm_f(path: str) -> None:
 
     A pre-existing managed dest is usually a real file (e.g. a stale hand-copied
     .claude/skills/<name>/SKILL.md). It can also be a real directory; remove that
-    too so the managed symlink can take its place. We do NOT pass
-    ignore_errors=True to rmtree — a permission/IO failure must propagate rather
-    than be silently swallowed (which would leave the path in place and make the
-    later os.symlink fail with a confusing FileExistsError)."""
-    if os.path.isdir(path) and not os.path.islink(path):
-        shutil.rmtree(path)  # absence can't occur here (isdir just succeeded)
-        return
+    too so the managed symlink can take its place.
+
+    Absence (FileNotFoundError) is ignored — matching `rm -f` — including the
+    TOCTOU window where the dir vanishes between the isdir() check and the
+    rmtree (a concurrent/CI race). But a real failure (permission/IO) must
+    propagate rather than be silently swallowed (which would leave the path in
+    place and make the later os.symlink fail with a confusing FileExistsError),
+    so we do NOT pass ignore_errors=True; instead we suppress ONLY
+    FileNotFoundError."""
     with contextlib.suppress(FileNotFoundError):
-        os.remove(path)
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
