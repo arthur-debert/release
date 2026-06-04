@@ -77,3 +77,35 @@ def test_wrap_script_forwards_args():
 def test_wrap_script_missing_tool_is_127():
     cmd = wrap_script("release-core-nonexistent-xyz", name="missing", short_help="n/a")
     assert _invoke(cmd, []) == 127
+
+
+def test_wrap_script_non_executable_is_126(tmp_path):
+    # A file that exists but lacks the +x bit raises OSError(EACCES), not
+    # FileNotFoundError → 126 ("command invoked cannot execute"), not 127.
+    bad = tmp_path / "not-executable.sh"
+    bad.write_text("#!/bin/sh\n")
+    bad.chmod(0o644)
+    cmd = wrap_script(str(bad), name="ne", short_help="non-exec")
+    assert _invoke(cmd, []) == 126
+
+
+def test_wrap_script_signal_death_normalized_to_128_plus_n():
+    # A child that kills itself with SIGTERM (15) reports returncode -15; the
+    # wrapper normalizes to 128+15 = 143 rather than leaking the negative code.
+    cmd = wrap_script("sh", name="s", short_help="shell")
+    assert _invoke(cmd, ["-c", "kill -TERM $$"]) == 143
+
+
+def test_run_root_returns_exit_code_from_version_and_help():
+    # --help / --version are clean-exit (click.exceptions.Exit) paths; run_root
+    # must surface 0, not leak the exception.
+    @click.group(invoke_without_command=True)
+    @click.version_option(version="9.9.9", prog_name="x")
+    @click.pass_context
+    def root(ctx):
+        if ctx.invoked_subcommand is None:
+            ctx.exit(0)
+
+    assert run_root(root, ["--version"]) == 0
+    assert run_root(root, ["--help"]) == 0
+    assert run_root(root, []) == 0

@@ -107,7 +107,13 @@ _STUB_EXIT = 69  # EX_UNAVAILABLE
 class _StubCommand(click.Command):
     """A registered-but-unimplemented leaf: shows in ``--help`` like any other
     command, but exits ``_STUB_EXIT`` with a clear message if actually invoked,
-    so it can never be mistaken for working."""
+    so it can never be mistaken for working.
+
+    It accepts *any* args/flags (``ignore_unknown_options`` + a catch-all
+    ``args`` param) so that even ``release-core detect-kind --json foo`` lands on
+    the stub-exit path rather than failing with click's usage error (exit 2).
+    ``--help`` is still handled (eager), so the stub's help stays discoverable.
+    """
 
     def invoke(self, ctx: click.Context):
         click.echo(
@@ -119,7 +125,14 @@ class _StubCommand(click.Command):
 
 
 def _stub_command(name: str, short_help: str) -> click.Command:
-    return _StubCommand(name=name, short_help=short_help, callback=lambda: None)
+    cmd = _StubCommand(
+        name=name,
+        short_help=short_help,
+        callback=lambda args=None: None,
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+        params=[click.Argument(["args"], nargs=-1, type=click.UNPROCESSED)],
+    )
+    return cmd
 
 
 def _changelog_group() -> click.Group:

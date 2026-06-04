@@ -126,6 +126,22 @@ def test_invoking_a_stub_leaf_exits_69(capsys):
     assert "stub" in err.lower()
 
 
+def test_stub_leaf_with_extra_args_still_exits_69(capsys):
+    # Any flags/args land on the stub-exit path (69), not click's usage error.
+    rc = cli_entry.main(["detect-kind", "--json", "extra", "-x"])
+    err = capsys.readouterr().err
+    assert rc == 69
+    assert "stub" in err.lower()
+
+
+def test_stub_leaf_help_is_still_reachable(capsys):
+    # --help remains discoverable on a stub (shows the short_help / usage).
+    rc = cli_entry.main(["detect-kind", "--help"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "detect-kind" in out or "Usage:" in out
+
+
 def test_toplevel_attach_is_idempotent_shape():
     # attach() is what cli_entry calls; calling it on a fresh group yields the
     # same per-project command set (proves no hidden global state).

@@ -36,6 +36,7 @@ Help convention (a first-class requirement of #460):
 
 from __future__ import annotations
 
+import errno
 import subprocess
 import sys
 from collections.abc import Callable
@@ -112,13 +113,24 @@ def wrap_script(
     def _cmd(args: tuple[str, ...]) -> None:
         try:
             completed = subprocess.run([script, *args], check=False)
-        except FileNotFoundError:
+        except OSError as exc:
+            if exc.errno == errno.ENOENT:
+                click.echo(
+                    f"release-core: required tool {script!r} not found on $PATH",
+                    err=True,
+                )
+                raise SystemExit(127) from None
+            # Exists but cannot be executed (e.g. EACCES): 126, the shell's
+            # "command invoked cannot execute" convention.
             click.echo(
-                f"release-core: required tool {script!r} not found on $PATH",
+                f"release-core: cannot execute {script!r}: {exc}",
                 err=True,
             )
-            raise SystemExit(127) from None
-        raise SystemExit(completed.returncode)
+            raise SystemExit(126) from None
+        # A child killed by signal N reports returncode -N; normalize to the
+        # shell's 128+N convention so the parent never sees a negative code.
+        rc = completed.returncode
+        raise SystemExit(128 + abs(rc) if rc < 0 else rc)
 
     return _cmd
 
@@ -138,6 +150,11 @@ def run_root(root: click.Group, argv: list[str] | None = None) -> int:
     except SystemExit as exc:  # leaf passthroughs raise SystemExit(code)
         code = exc.code
         return code if isinstance(code, int) else (0 if code is None else 1)
+    except click.exceptions.Exit as exc:
+        # Clean-exit signal (e.g. --help / --version / ctx.exit). Some click 8.x
+        # versions return the code instead of raising; catch both so either way
+        # we surface the integer exit code rather than leaking the exception.
+        return exc.exit_code
     except click.exceptions.Abort:
         click.echo("Aborted!", err=True)
         return 1
