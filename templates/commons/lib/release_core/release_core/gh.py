@@ -184,17 +184,19 @@ def is_git_worktree(path: str) -> bool:
     if not os.path.isdir(path):
         return False
     try:
-        return (
-            proc.run(
-                ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
-                check=False,
-            ).returncode
-            == 0
+        result = proc.run(
+            ["git", "-C", path, "rev-parse", "--is-inside-work-tree"],
+            check=False,
         )
     except OSError:
         # git not installed / not on PATH — preserve the documented "never
         # raises, returns False when git is unavailable" contract.
         return False
+    # `--is-inside-work-tree` exits 0 AND prints "false" when run inside a .git
+    # dir or a bare repo, so the exit code alone over-accepts; require the "true"
+    # output. Non-repo paths exit non-zero. True for both a clone root and a
+    # worktree (their working trees), which is the point.
+    return result.returncode == 0 and (result.stdout or "").strip() == "true"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
