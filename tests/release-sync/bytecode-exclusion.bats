@@ -43,7 +43,9 @@ load helper
   GIT_INDEX_FILE="$tmp_index" git -C "$RELEASE_HOME" \
     update-index --add --cacheinfo "100644,$blob,$poison_rel"
   poison_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$RELEASE_HOME" write-tree)
-  poison_commit=$(git -C "$RELEASE_HOME" commit-tree "$poison_tree" -p HEAD -m "test: poison pyc")
+  poison_commit=$(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
+    GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
+    git -C "$RELEASE_HOME" commit-tree "$poison_tree" -p HEAD -m "test: poison pyc")
   rm -f "$tmp_index"
 
   # Sanity: the poison blob really is in that commit's tree (so the test would
