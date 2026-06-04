@@ -14,8 +14,10 @@ so it too can be handed to several parallel agents without collisions:
 Each module exports a ``group`` (a ``click.Group``); this assembler imports
 and attaches them. Filling a nested group touches ONLY that module.
 
-ALL of admin is a STUB in Phase 1 — the groups register so ``release-core admin
---help`` shows the full shape, but the leaves are filled by parallel agents.
+Filled here: ``policy`` / ``secrets`` / ``inbox`` and the flat ``smoke-test``
+leaf. The remaining groups (``repos`` / ``release``) are still stubs filled by
+parallel agents — every group registers regardless, so ``release-core admin
+--help`` always shows the full shape.
 """
 
 from __future__ import annotations

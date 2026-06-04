@@ -135,3 +135,21 @@ def test_inbox_notify_source_subcommand_dispatches(capsys):
     out = captured.out + captured.err
     assert rc == 0
     assert "release-notify-source" in out
+
+
+def test_inbox_option_value_matching_subcommand_is_not_dispatched(monkeypatch):
+    # A release-inbox option VALUE that happens to equal a subcommand name
+    # (e.g. `--label notify-source`) must still be forwarded to the bare verb,
+    # NOT mis-dispatched to the `notify-source` subcommand. Only argv[0] selects
+    # a subcommand for this group (it defines no options of its own).
+    seen = {}
+
+    def fake_issue_list(repo, **kwargs):
+        seen["label"] = kwargs.get("label")
+        return []
+
+    monkeypatch.setattr(gh, "issue_list", fake_issue_list)
+    rc = cli_entry.main(["admin", "inbox", "--label", "notify-source"])
+    assert rc == 0
+    # release-inbox received the value as its --label, proving it forwarded.
+    assert seen["label"] == "notify-source"

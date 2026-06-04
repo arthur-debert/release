@@ -30,15 +30,20 @@ class _InboxGroup(click.Group):
     subcommand and (b) forward an option-leading bare invocation (``admin inbox
     --json``) to a verb — click insists on resolving the leading token as a
     subcommand and chokes on ``--json``. So we intercept in ``parse_args``: if
-    the first non-flag token names a real subcommand, defer to normal click
+    the FIRST argv token names a real subcommand, defer to normal click
     dispatch; otherwise treat the whole argv as the bare-form payload (stashed
     on the context) and forward it verbatim to release-inbox in the callback
     (its own ``--help`` included).
+
+    The check is the first token specifically — not the first non-flag token
+    anywhere — because this group defines no options of its own, so a subcommand
+    can only ever be ``argv[0]``. Scanning further would mis-dispatch when a
+    release-inbox option *value* happens to equal a subcommand name (e.g.
+    ``admin inbox --label notify-source``).
     """
 
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        first = next((a for a in args if not a.startswith("-")), None)
-        if first is not None and first in self.commands:
+        if args and args[0] in self.commands:
             return super().parse_args(ctx, args)
         # Bare form: stash the whole argv for the callback to forward to
         # release-inbox untouched, and consume it so click parses nothing.
