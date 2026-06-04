@@ -360,13 +360,17 @@ def _apply(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
 
 
 def _rm_f(path: str) -> None:
-    """`rm -rf` — remove if present (file, symlink, or directory), ignore absence.
+    """`rm -rf` — remove if present (file, symlink, or directory), ignore absence
+    but surface real errors (permission/IO), like `rm -f` does for a file.
 
     A pre-existing managed dest is usually a real file (e.g. a stale hand-copied
     .claude/skills/<name>/SKILL.md). It can also be a real directory; remove that
-    too so the managed symlink can take its place."""
+    too so the managed symlink can take its place. We do NOT pass
+    ignore_errors=True to rmtree — a permission/IO failure must propagate rather
+    than be silently swallowed (which would leave the path in place and make the
+    later os.symlink fail with a confusing FileExistsError)."""
     if os.path.isdir(path) and not os.path.islink(path):
-        shutil.rmtree(path, ignore_errors=True)
+        shutil.rmtree(path)  # absence can't occur here (isdir just succeeded)
         return
     with contextlib.suppress(FileNotFoundError):
         os.remove(path)

@@ -91,5 +91,9 @@ load helper
   [ -L .claude/skills/pr-review-respond/SKILL.md ]
   [ "$(readlink .claude/skills/pr-review-respond/SKILL.md)" = \
     "../../../.release/.claude/skills/pr-review-respond/SKILL.md" ]
-  grep -qv 'stale 157-line hand-copy' .claude/skills/pr-review-respond/SKILL.md
+  # The stale text is gone (no line contains it) AND the resolved content is
+  # release's official copy (its frontmatter name) — proving a real swap, not a
+  # weak "some line differs" check.
+  ! grep -qF 'stale 157-line hand-copy' .claude/skills/pr-review-respond/SKILL.md
+  grep -qF 'name: pr-review-respond' .claude/skills/pr-review-respond/SKILL.md
 }
