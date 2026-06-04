@@ -26,7 +26,7 @@ MANAGED_MARKER = "# Managed by release-sync — do not edit. Regenerate via rele
 SOURCE_MARKER = ".release-sync-source"
 GITIGNORE_FILE = ".gitignore"
 GITIGNORE_BODY = (
-    "# Managed by release-sync — do not edit. Regenerate via release-sync.\n"
+    f"{MANAGED_MARKER}\n"
     "# Keeps host/Python-version-specific bytecode out of the committed .release/\n"
     "# even if a local regeneration writes it on disk (release#450).\n"
     "__pycache__/\n"

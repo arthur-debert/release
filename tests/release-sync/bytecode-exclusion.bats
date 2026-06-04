@@ -30,29 +30,32 @@ load helper
 }
 
 @test "a source tree carrying __pycache__/*.pyc never materializes bytecode" {
-  # Build a throwaway commit in $RELEASE_HOME that adds a poison .pyc under the
-  # commons engine package — using pure plumbing in a temp index so the real
-  # working tree, index, and refs are untouched. Sync FROM that commit (pinned
-  # via RELEASE_REF) and prove the bytecode is dropped: ls-tree lists it, but
-  # should_skip_source filters it out of the plan.
+  # Build a throwaway commit that adds a poison .pyc under the commons engine
+  # package, then sync FROM it (pinned via RELEASE_REF) and prove the bytecode
+  # is dropped: ls-tree lists it, but should_skip_source filters it from the
+  # plan. All new git objects land in a per-test --shared clone of $RELEASE_HOME
+  # (cheap: objects are borrowed via alternates), so the real clone is untouched
+  # and everything is cleaned up with the temp dir.
   poison_rel="templates/commons/lib/release_core/release_core/__pycache__/poison.cpython-313.pyc"
-  tmp_index="$(mktemp)"
-  blob=$(printf 'BYTECODE\n' | git -C "$RELEASE_HOME" hash-object -w --stdin)
+  clone="$BATS_TEST_TMPDIR/release-clone"
+  git clone -q --shared --no-checkout "$RELEASE_HOME" "$clone"
+
+  tmp_index="$BATS_TEST_TMPDIR/poison-index"
+  blob=$(printf 'BYTECODE\n' | git -C "$clone" hash-object -w --stdin)
   # Seed the temp index from HEAD, then add the poison blob at its path.
-  GIT_INDEX_FILE="$tmp_index" git -C "$RELEASE_HOME" read-tree HEAD
-  GIT_INDEX_FILE="$tmp_index" git -C "$RELEASE_HOME" \
+  GIT_INDEX_FILE="$tmp_index" git -C "$clone" read-tree HEAD
+  GIT_INDEX_FILE="$tmp_index" git -C "$clone" \
     update-index --add --cacheinfo "100644,$blob,$poison_rel"
-  poison_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$RELEASE_HOME" write-tree)
+  poison_tree=$(GIT_INDEX_FILE="$tmp_index" git -C "$clone" write-tree)
   poison_commit=$(GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t \
     GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t \
-    git -C "$RELEASE_HOME" commit-tree "$poison_tree" -p HEAD -m "test: poison pyc")
-  rm -f "$tmp_index"
+    git -C "$clone" commit-tree "$poison_tree" -p HEAD -m "test: poison pyc")
 
   # Sanity: the poison blob really is in that commit's tree (so the test would
   # fail loudly if the materializer ever stopped filtering).
-  git -C "$RELEASE_HOME" ls-tree -r --name-only "$poison_commit" | grep -qx "$poison_rel"
+  git -C "$clone" ls-tree -r --name-only "$poison_commit" | grep -qx "$poison_rel"
 
-  RELEASE_REF="$poison_commit" run "$BIN/release-sync"
+  RELEASE_HOME="$clone" RELEASE_REF="$poison_commit" run "$BIN/release-sync"
   [ "$status" -eq 0 ]
   # The poison bytecode must not appear anywhere under .release/.
   run bash -c 'find .release \( -name "*.pyc" -o -name "__pycache__" \) -print'
