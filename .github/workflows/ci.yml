@@ -49,16 +49,26 @@ jobs:
 
   tests:
     # pytest is a DIFFERENT WHAT than the lint gate (it verifies behavior, not
-    # format/lint), so it stays its own job. The stdlib-only packages
-    # (release_gh, release_core) import via pytest's pythonpath — no build.
+    # format/lint), so it stays its own job. The packages import via pytest's
+    # pythonpath — no build/install of the packages themselves. release_gh stays
+    # stdlib-only; release_core now declares real third-party deps (click), which
+    # the pythonpath-import model can't supply, so we install JUST those deps —
+    # read from release_core's pyproject so the list is never a second definition.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Install pytest
-        run: pip install pytest
+      - name: Install pytest + release_core runtime deps
+        run: |
+          pip install pytest
+          deps="$(python -c "import tomllib; print(' '.join(tomllib.load(open('templates/commons/lib/release_core/pyproject.toml','rb'))['project']['dependencies']))")"
+          echo "release_core deps: ${deps:-<none>}"
+          # word-split $deps intentionally — each space-separated token is one
+          # pip requirement (a single dep like `click>=8,<9` has no spaces).
+          # shellcheck disable=SC2086
+          [ -n "$deps" ] && pip install $deps || true
       - name: pytest
         run: pytest
 
