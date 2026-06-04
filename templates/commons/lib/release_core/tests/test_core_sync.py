@@ -32,6 +32,9 @@ from release_core import sync
         ("templates/commons/lib/release_core/release_core/__pycache__/cli.cpython-313.pyc", True),
         ("templates/commons/lib/release_core/release_core/sync.pyc", True),
         ("templates/commons/lib/release_core/release_core/sync.pyo", True),
+        # path-segment match, not a loose substring: a file merely *named* with
+        # the substring is kept (it's a real authored source, not bytecode).
+        ("templates/commons/docs/my__pycache__notes.md", False),
         ("templates/commons/bin/check", False),
         ("templates/commons/lefthook.yml", False),
     ],

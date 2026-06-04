@@ -60,7 +60,9 @@ def should_skip_source(rel: str) -> bool:
         return True
     if rel.startswith("templates/components/_"):
         return True
-    if "__pycache__/" in rel or rel.startswith("__pycache__/"):
+    # git paths are always '/'-separated, so a path-segment test is exact:
+    # match a __pycache__ dir anywhere in the path, plus loose .pyc/.pyo files.
+    if "/__pycache__/" in f"/{rel}":
         return True
     if rel.endswith((".pyc", ".pyo")):
         return True
@@ -75,8 +77,9 @@ def needs_real_file(dest: str) -> bool:
 
 def is_release_internal(dest: str) -> bool:
     """Mirror is_release_internal(): content materialized into .release/ but NOT
-    mirrored out as a symlink/copy. The provenance marker, the Python engine
-    packages (lib/release_gh/*, lib/release_core/*), and ORIENTATION.md."""
+    mirrored out as a symlink/copy. The provenance marker, the managed .gitignore
+    (release#450), the Python engine packages (lib/release_gh/*,
+    lib/release_core/*), and ORIENTATION.md."""
     if dest == SOURCE_MARKER:
         return True
     if dest == GITIGNORE_FILE:
