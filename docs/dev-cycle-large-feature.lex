@@ -9,5 +9,5 @@ The key aspect here is that there is a corresponding "over all" agent, branch an
     1.2 Create a feature branch for the work
     1.3 Ask users for decisions / clarifications as needed.
 2. Execution: 
-    The key thing is the coordinating agent should not handle the implementation. It's role is to keep the execution of various smaller parts correct, cohesive and on track. If it does the implementation itself, it will consume it's context on that front, and either worsen it's own performance as the context windows moves from good to bad context, or require compacting. Additionally, these keep the token usage smaller (good for cost.) 
-    The agent will spin subagents assigning them their own part (ideally from a gh issue for that). Each subagent will handle the full  q
+    The key thing is the coordinating agent should not handle the implementation. Its role is to keep the execution of various smaller parts correct, cohesive and on track. If it does the implementation itself, it will consume its context on that front, and either worsen its own performance as the context window moves from good to bad context, or require compaction. Additionally, this keeps the token usage smaller (good for cost.)
+    The agent will spin subagents assigning them their own part (ideally from a gh issue for that). Each subagent will handle the full single-task cycle for its part (implement, then shepherd its own PR through review and CI to Ready), reporting back to the coordinating agent, which integrates the parts and keeps the overall feature on track.
