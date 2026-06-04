@@ -10,8 +10,11 @@ Guards the three invariants of the [project.scripts] → entrypoints.py seam:
 3. The script table covers EXACTLY the release_core-backed bin/ shims — no
    more, no less. The expected set below is derived by hand from the bin/
    shims that dispatch to `release_core.verbs.*` (see EXPECTED_COMMANDS); bash
-   tools (fetch-deps/fetch-artifact/gh-*/clone-*/migrate-*) and the
-   release_gh-backed gh-task-status are intentionally excluded.
+   tools (fetch-deps/fetch-artifact/gh-*/clone-*/migrate-*) are excluded.
+   gh-task-status is included: the PR state engine was folded into release_core
+   (release_core.prstate; release#459), so it ships as a console script too —
+   but it delegates to prstate.cli.task_status.main, not a verb module, so it is
+   listed separately (PRSTATE_COMMANDS) and checked on its own.
 
 Plus a byte-identity sanity check: `detect-kind --help` through the wrapper ==
 the verb's own --help output (the wrappers only forward argv, so this holds).
@@ -64,6 +67,14 @@ EXPECTED_COMMANDS = {
     "sweep-github-policy",
 }
 
+# Console scripts backed by release_core.prstate (the folded PR state engine,
+# release#459) rather than a release_core.verbs module. They share the
+# entrypoints-wrapper contract but delegate to prstate.cli.*.main, so the
+# verb-delegation parametrize below excludes them.
+PRSTATE_COMMANDS = {
+    "gh-task-status",
+}
+
 # The top-level `release-core` CLI is its own command (the `init` subcommand
 # dispatcher, pip-bootstrap PoC §2). Unlike the per-verb scripts it does NOT map
 # into release_core.entrypoints — it points straight at the CLI's main.
@@ -85,7 +96,7 @@ def _script_table() -> dict[str, str]:
 def test_script_table_matches_expected_command_set():
     """The [project.scripts] keys == the release_core-backed bin/ shims plus the
     top-level `release-core` CLI."""
-    assert set(_script_table()) == EXPECTED_COMMANDS | {RELEASE_CORE_CLI}
+    assert set(_script_table()) == EXPECTED_COMMANDS | PRSTATE_COMMANDS | {RELEASE_CORE_CLI}
 
 
 def test_release_core_cli_registered_at_cli_entry_main():
@@ -113,6 +124,26 @@ def test_every_target_is_release_core_entrypoints_wrapper():
             inspect.signature(wrapper).bind()
         except TypeError as exc:  # pragma: no cover - failure path
             pytest.fail(f"{func} is not callable with zero arguments: {exc}")
+
+
+def test_gh_task_status_delegates_to_prstate(monkeypatch):
+    """gh-task-status forwards sys.argv[1:] to prstate.cli.task_status.main and
+    propagates its exit code (the prstate engine ships from this wheel too)."""
+    from release_core.prstate.cli import task_status
+
+    captured = {}
+
+    def fake(argv):
+        captured["argv"] = argv
+        return 7
+
+    monkeypatch.setattr(task_status, "main", fake)
+    monkeypatch.setattr(sys, "argv", ["gh-task-status", "123", "--json"])
+    with pytest.raises(SystemExit) as exc:
+        entrypoints.gh_task_status_main()
+
+    assert captured["argv"] == ["123", "--json"]
+    assert exc.value.code == 7
 
 
 @pytest.mark.parametrize("cmd", sorted(EXPECTED_COMMANDS))

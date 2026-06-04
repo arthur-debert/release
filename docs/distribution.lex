@@ -46,7 +46,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
         Some content must live in `.release/` but must *not* be mirrored out to a working-tree location. It is part of the tree (so `--check` sees it change) but no symlink/copy is created for it. Two kinds:
 
         - The provenance marker (`.release-sync-source`) — records the source revision (ADR-0002); read by `release-drift-check`, never used at a consumer location.
-        - `lib/release_gh/*` — the PR state engine package that `bin/gh-task-status` imports. It must exist in `.release/lib/` for the tool to load, but it is an internal dependency, not a file the consumer uses at a mirrored location — so no `lib/release_gh/...` symlinks get scattered through the consumer tree. The match is scoped to `lib/release_gh/`, *not* all of `lib/`: other `lib/` paths are consumer-facing and must mirror (the bats Capability ships `lib/bats-harness.bash`, which consumer test files source).
+        - `lib/release_core/*` — the Python core package (the verb layer plus the folded PR state engine, `release_core.prstate`; release#459). It ships to consumers by **pip wheel**, not sync — but when present in the tree it must exist in `.release/lib/` as a real-file internal dependency, never mirrored out to a working-tree location. The match is scoped to `lib/release_core/`, *not* all of `lib/`: other `lib/` paths are consumer-facing and must mirror (the bats Capability ships `lib/bats-harness.bash`, which consumer test files source).
 
 5. The canonical-home pattern for tools
 
@@ -59,30 +59,32 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
 
     There is exactly one copy (the template); the maintainer symlink and the consumer's `.release/` copy both point at the same source. A tool authored as a real file at repo-root `bin/` is, by definition, *not* distributed — it is maintainer-only until moved under a template.
 
-6. Worked example: the gh-task-status PR state engine
+6. Worked example: the changelog shim
 
-    `gh-task-status` is a thin Python shim plus a `release_gh` package it imports. Distributing it (release#348) exercised every rule above:
+    `changelog` is a thin Python shim plus the `release_core` package it imports. It exercises the canonical-home + sync-distribution rules above:
 
     Layout:
-        - `templates/commons/bin/gh-task-status` — the shim (canonical home).
-        - `templates/commons/lib/release_gh/` — the package (canonical, single copy; also the uv-workspace member and pytest target).
-        - `bin/gh-task-status -> ../templates/commons/bin/gh-task-status` — the maintainer symlink.
+        - `templates/commons/bin/changelog` — the shim (canonical home).
+        - `templates/commons/lib/release_core/` — the package (canonical, single copy; also the uv-workspace member and pytest target). NB: the package itself now ships to consumers by **pip wheel**, not sync (the bin/ shim is the action-download / no-pip path).
+        - `bin/changelog -> ../templates/commons/bin/changelog` — the maintainer symlink.
 
     The shim finds its package by its own realpath:
 
-        sys.path.insert(0, realpath(__file__)/../lib/release_gh)
+        sys.path.insert(0, realpath(__file__)/../lib/release_core)
 
     :: text ::
 
     That one relative path resolves correctly from both sides, because both entry points are symlinks resolving into the same layout:
 
     Resolution:
-        | Caller                              | realpath of the shim             | ../lib/release_gh resolves to        |
-        | maintainer `bin/gh-task-status`     | `templates/commons/bin/...`      | `templates/commons/lib/release_gh`   |
-        | consumer `.release/bin/gh-task-status` | `.release/bin/...`            | `.release/lib/release_gh`            |
+        | Caller                          | realpath of the shim        | ../lib/release_core resolves to        |
+        | maintainer `bin/changelog`      | `templates/commons/bin/...` | `templates/commons/lib/release_core`   |
+        | consumer `.release/bin/changelog` | `.release/bin/...`        | `.release/lib/release_core`            |
     :: table align=lll ::
 
-    The package is shielded by `is_release_internal` (`lib/release_gh/*` — scoped to the engine, so other `lib/` paths like the bats harness still mirror), so a consumer gets `.release/lib/release_gh/` (real files the shim loads) but no `lib/release_gh/...` symlinks in its tree. `tests/release-sync/engine-distribution.bats` asserts the full chain: materialized into `.release/`, mirrored as a `bin/` symlink, no leaked `lib/` symlinks, and the synced shim actually runs.
+    The package is shielded by `is_release_internal` (`lib/release_core/*` — scoped to the package, so other `lib/` paths like the bats harness still mirror), so a consumer gets `.release/lib/release_core/` (real files the shim loads) but no `lib/release_core/...` symlinks in its tree.
+
+    (Historical note: the PR state engine `gh-task-status` was originally distributed exactly this way — a `release_gh` package synced into `.release/lib/release_gh/`. It was folded into `release_core` and now ships purely as a pip console-script, retiring its sync shim entirely; release#459.)
 
 7. Provenance and drift
 

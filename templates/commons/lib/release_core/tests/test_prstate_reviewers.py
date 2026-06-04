@@ -7,8 +7,8 @@ resolved-thread filter, and Gemini's weak (reaction/comment) signals.
 
 from __future__ import annotations
 
-from release_gh.model import ReviewLifecycle
-from release_gh.reviewers import (
+from release_core.prstate.model import ReviewLifecycle
+from release_core.prstate.reviewers import (
     REGISTRY,
     CopilotAdapter,
     GeminiAdapter,
@@ -56,7 +56,7 @@ def test_gemini_review_on_earlier_head_still_counts_as_done():
     # The exact #345-fixup case: Gemini reviewed the OLD head, a fixup made a new
     # head, and the lingering eyes reaction must NOT downgrade Gemini to
     # in_progress — it reviews once and won't re-review the push.
-    from release_gh.model import PullContext, Review
+    from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
         number=1,
@@ -70,7 +70,7 @@ def test_gemini_review_on_earlier_head_still_counts_as_done():
 
 def test_copilot_review_on_earlier_head_does_NOT_count_done():
     # Contrast: Copilot is head-strict — a review on an old head is stale.
-    from release_gh.model import PullContext, Review
+    from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
         number=1,
@@ -85,7 +85,7 @@ def test_copilot_review_on_earlier_head_does_NOT_count_done():
 def test_dismissed_copilot_review_on_head_does_NOT_count_done():
     # A DISMISSED review (cleared by an admin/author) is retracted — even on the
     # current head it must not read as done; the PR falls back to REQUESTED.
-    from release_gh.model import PullContext, Review
+    from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
         number=1,
@@ -99,7 +99,7 @@ def test_dismissed_copilot_review_on_head_does_NOT_count_done():
 
 def test_dismissed_gemini_review_does_NOT_count_done():
     # Same for best-effort Gemini: a dismissed review is not a standing verdict.
-    from release_gh.model import PullContext, Review
+    from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
         number=1,

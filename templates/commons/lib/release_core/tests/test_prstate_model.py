@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from release_gh.model import PullContext, Review, ReviewComment, Thread
+from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
 
 
 def _thread(thread_id, resolved, *comments):

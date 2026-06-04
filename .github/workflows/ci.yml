@@ -50,10 +50,11 @@ jobs:
   tests:
     # pytest is a DIFFERENT WHAT than the lint gate (it verifies behavior, not
     # format/lint), so it stays its own job. The packages import via pytest's
-    # pythonpath — no build/install of the packages themselves. release_gh stays
-    # stdlib-only; release_core now declares real third-party deps (click), which
-    # the pythonpath-import model can't supply, so we install JUST those deps —
-    # read from release_core's pyproject so the list is never a second definition.
+    # pythonpath — no build/install of the packages themselves. The folded PR
+    # state engine (release_core.prstate; release#459) stays stdlib-only, but
+    # release_core declares real third-party deps (click), which the
+    # pythonpath-import model can't supply, so we install JUST those deps — read
+    # from release_core's pyproject so the list is never a second definition.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

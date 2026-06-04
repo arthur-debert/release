@@ -1,9 +1,9 @@
-"""Shared fixture loader for the release_gh tests.
+"""Shared fixture loader for the prstate (PR state engine) tests.
 
-Each JSON file under fixtures/ holds the raw `gh` payloads for one PR scenario;
-`context` builds a PullContext from one exactly as `fetch.gather()` would,
-minus the network. These are hand-shaped now and replaced with real captured
-responses by the Live-verification phase (issue #337).
+Each JSON file under prstate_fixtures/ holds the raw `gh` payloads for one PR
+scenario; `context` builds a PullContext from one exactly as `fetch.gather()`
+would, minus the network. These are hand-shaped now and replaced with real
+captured responses by the Live-verification phase (issue #337).
 """
 
 from __future__ import annotations
@@ -12,10 +12,10 @@ import json
 from pathlib import Path
 
 import pytest
-from release_gh.fetch import context_from_raw
-from release_gh.model import PullContext
+from release_core.prstate.fetch import context_from_raw
+from release_core.prstate.model import PullContext
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = Path(__file__).parent / "prstate_fixtures"
 
 
 def load_context(name: str) -> PullContext:

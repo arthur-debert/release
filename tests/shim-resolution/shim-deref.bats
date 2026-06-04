@@ -11,7 +11,7 @@
 # nonexistent top-level lib/ → ModuleNotFoundError. This killed lex's
 # rust-cli.yml@v2 prepare step (roll-changelog.sh → bin/changelog).
 #
-# For EACH of the 6 shims this suite reconstructs that exact layout — a real-file
+# For EACH of the variant-(a) shims this suite reconstructs that exact layout — a real-file
 # copy at <tmp>/bin/<name> (NOT a symlink), the package tree at
 # <tmp>/templates/commons/lib/<pkg>, and NO top-level lib/ — then runs the shim
 # and asserts it does NOT die with ModuleNotFoundError. The fix's second
@@ -19,15 +19,16 @@
 
 REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 
-# name|pkg for each variant-(a) shim. release_core for the changelog family +
-# gh-release-issue; release_gh for gh-task-status.
+# name|pkg for each variant-(a) shim. All resolve to release_core. (The PR state
+# engine's gh-task-status was folded into release_core and now ships purely as a
+# pip console-script — no sys.path shim — so it is no longer in this set;
+# release#459.)
 SHIMS=(
   "changelog|release_core"
   "changelog-add|release_core"
   "changelog-cut|release_core"
   "changelog-render|release_core"
   "gh-release-issue|release_core"
-  "gh-task-status|release_gh"
 )
 
 setup() {
@@ -86,12 +87,6 @@ _run_dereffed() {
 
 @test "gh-release-issue resolves its package when the bin symlink is dereferenced" {
   _run_dereffed gh-release-issue release_core
-  [[ "$run_output" != *"ModuleNotFoundError"* ]]
-  [[ "$run_output" != *"No module named"* ]]
-}
-
-@test "gh-task-status resolves its package when the bin symlink is dereferenced" {
-  _run_dereffed gh-task-status release_gh
   [[ "$run_output" != *"ModuleNotFoundError"* ]]
   [[ "$run_output" != *"No module named"* ]]
 }

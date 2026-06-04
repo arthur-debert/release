@@ -46,7 +46,7 @@ pre-commit:
       # The unified gate: file selection lives in bin/check-shell (a single
       # distributed runner), NOT in glob/exclude here. The runner picks shell
       # by CONTENT — a shell shebang or .sh/.bash, vendored share/ exempt — so
-      # non-shell files that live under bin/ (the gh-task-status Python shim,
+      # non-shell files that live under bin/ (the changelog Python shim,
       # Dockerfiles, etc.) fall out STRUCTURALLY. This kills the whole class of
       # "shellcheck SC1071's on a non-shell file": the old glob+exclude couldn't
       # catch extensionless non-shell files and wasn't honoured the same way

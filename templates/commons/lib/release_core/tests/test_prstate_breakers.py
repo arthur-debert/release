@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from release_gh.breakers import build_cycles, evaluate_breakers
-from release_gh.model import PullContext, Review, ReviewComment, Thread
-from release_gh.state import TaskState, evaluate
+from release_core.prstate.breakers import build_cycles, evaluate_breakers
+from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
+from release_core.prstate.state import TaskState, evaluate
 
 
 def review(rid: int, sha: str, author: str = "Copilot") -> Review:

@@ -280,7 +280,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
     if args.auto:
         _guard_billing()  # --auto spawns SDK agents
     repo_path = str(Path(args.repo).expanduser().resolve())
-    os.chdir(repo_path)  # release_gh.fetch shells `gh` in the cwd
+    os.chdir(repo_path)  # release_core.prstate.fetch shells `gh` in the cwd
     prs = args.prs  # argparse already parsed these as ints
     mode = "AUTO-FIX" if args.auto else "notify-only"
     print(

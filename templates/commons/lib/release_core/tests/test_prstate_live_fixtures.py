@@ -10,7 +10,7 @@ resolved-thread transition to READY.
 
 from __future__ import annotations
 
-from release_gh.state import TaskState, evaluate
+from release_core.prstate.state import TaskState, evaluate
 
 
 def test_live_addressing_real_payload(context):

@@ -78,13 +78,12 @@ def needs_real_file(dest: str) -> bool:
 def is_release_internal(dest: str) -> bool:
     """Mirror is_release_internal(): content materialized into .release/ but NOT
     mirrored out as a symlink/copy. The provenance marker, the managed .gitignore
-    (release#450), the Python engine packages (lib/release_gh/*,
-    lib/release_core/*), and ORIENTATION.md."""
+    (release#450), the Python engine package (lib/release_core/* — note the
+    folded PR state engine ships by pip wheel now, not sync; release#459), and
+    ORIENTATION.md."""
     if dest == SOURCE_MARKER:
         return True
     if dest == GITIGNORE_FILE:
-        return True
-    if dest.startswith("lib/release_gh/"):
         return True
     if dest.startswith("lib/release_core/"):
         return True

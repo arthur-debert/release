@@ -1,7 +1,10 @@
 """gh — the single boundary to GitHub/git: shell out, parse JSON with stdlib.
 
-Mirrors release_gh/ghapi.py conventions (they consolidate in a later phase;
-duplication is tolerated in Phase 0). Why `gh` rather than a Python client:
+Mirrors the conventions of release_core.prstate.ghapi (the folded PR state
+engine's gh boundary; release#459). The two boundaries are kept distinct on
+purpose: prstate.ghapi is stdlib-only (it runs identically in CI / Cloud /
+local), whereas this helper backs the verb layer. Why `gh` rather than a Python
+client:
 it is already provisioned in every environment release runs in, handles auth +
 pagination, and speaks GraphQL. Keeping the boundary here means every migrated
 verb is pure data transformation over the returned dicts — **no `jq`**.

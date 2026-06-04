@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from release_gh.ghapi import _merge_paginated
+from release_core.prstate.ghapi import _merge_paginated
 
 
 def test_merge_paginated_flattens_concatenated_arrays():

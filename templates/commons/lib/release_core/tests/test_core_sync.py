@@ -61,8 +61,10 @@ def test_needs_real_file(dest, real):
     [
         (".release-sync-source", True),
         (".gitignore", True),  # managed .release/.gitignore — release#450
-        ("lib/release_gh/release_gh/state.py", True),
         ("lib/release_core/release_core/sync.py", True),
+        # the PR state engine folded into release_core (release#459); its files
+        # are now under lib/release_core/ and covered by the branch above.
+        ("lib/release_core/release_core/prstate/state.py", True),
         ("ORIENTATION.md", True),
         # NOT internal — consumer-facing lib/ + everything else.
         ("lib/bats-harness.bash", False),

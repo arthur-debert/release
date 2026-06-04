@@ -1,20 +1,20 @@
 # Virtual workspace root for release/'s Python code.
 #
-# Two members, split by the environment line (see
-# docs/proposals/dev-workflow-state-engine.lex §6.2):
-#   - templates/commons/lib/release_gh : the PR state engine. stdlib + `gh` only,
-#                      runs in CI and Cloud. ZERO third-party runtime deps.
+# Two members:
+#   - templates/commons/lib/release_core : the canonical pip-distributed core +
+#                      CLI. Carries the folded PR state engine (release_core.
+#                      prstate; release#459) — stdlib-only, runs in CI and Cloud.
 #   - orchestrator   : local-only harness. May use the Claude Agent SDK
-#                      because it never runs in CI/Cloud.
+#                      because it never runs in CI/Cloud. Depends on release_core
+#                      (it imports release_core.prstate for `orc watch`).
 #
 # Toolchain (ruff, pytest) is configured ONCE here and covers both.
 [tool.uv.workspace]
-# release_gh lives under templates/commons/ because it's a release-managed file
-# set distributed to consumers (like templates/commons/bin/*). The maintainer's
-# bin/gh-task-status is a symlink into it; release-sync materializes it into a
-# consumer's .release/lib/. It is still the single canonical copy.
+# release_core lives under templates/commons/ because it's a release-managed file
+# set distributed to consumers — but, unlike the rest, it ships by pip wheel (not
+# by sync): it is the single canonical copy and the one channel for the Python
+# core, including the gh-task-status console script.
 members = [
-  "templates/commons/lib/release_gh",
   "templates/commons/lib/release_core",
   "orchestrator",
 ]
@@ -28,17 +28,16 @@ extend-exclude = ["**/.venv"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-# release_core's tests live ALONGSIDE the package (templates/commons/lib/
-# release_core/tests/) — the gh-task-status suite's tests/python/ split is for
-# the older release_gh package; the migration substrate keeps its tests next to
-# the code. Both roots are collected by the bare `pytest` CI step.
-testpaths = ["tests/python", "templates/commons/lib/release_core/tests"]
-# Import release_gh + release_core + orchestrator without a build/install step,
-# mirroring the runtime sys.path-shim model. orchestrator.watch is importable
-# for its pure logic because it lazy-imports the Claude Agent SDK (so these
-# tests need no SDK — they run under the light py-lint CI job).
+# All Python tests live ALONGSIDE the package (templates/commons/lib/
+# release_core/tests/) — including the folded PR state engine's suite
+# (test_prstate_*.py; release#459). The migration substrate keeps its tests next
+# to the code; collected by the bare `pytest` CI step.
+testpaths = ["templates/commons/lib/release_core/tests"]
+# Import release_core + orchestrator without a build/install step, mirroring the
+# runtime sys.path-shim model. orchestrator.watch is importable for its pure
+# logic because it lazy-imports the Claude Agent SDK (so these tests need no SDK
+# — they run under the light py-lint CI job).
 pythonpath = [
-  "templates/commons/lib/release_gh",
   "templates/commons/lib/release_core",
   "orchestrator",
 ]
