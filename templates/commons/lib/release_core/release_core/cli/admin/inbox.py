@@ -9,7 +9,7 @@ Bare ``admin inbox`` runs the triage view. A plain ``invoke_without_command``
 group can't BOTH dispatch a named subcommand AND forward an option-leading bare
 invocation (``admin inbox --json``) — click insists on resolving the leading
 token as a subcommand. So the group is a small :class:`_InboxGroup` whose
-``parse_args`` checks whether the leading non-flag token names a real
+``parse_args`` checks whether the first argv token (``argv[0]``) names a real
 subcommand: if so it dispatches normally; otherwise it forwards the whole argv
 verbatim to :func:`release_core.verbs.release_inbox.main` (its own ``--help``
 and usage errors included). ``notify-source`` is a plain ``wrap_verb`` leaf.
