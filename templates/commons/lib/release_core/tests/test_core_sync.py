@@ -283,8 +283,8 @@ def test_build_plan_skips_skip_sources(monkeypatch):
         "100644 blob a\ttemplates/commons/manifest.yaml\n"
         "100644 blob b\ttemplates/commons/lefthook.fragment.yaml\n"
         "100644 blob c\ttemplates/commons/.DS_Store\n"
-        "100644 blob e\ttemplates/commons/lib/release_core/release_core/__pycache__/cli.cpython-313.pyc\n"
-        "100644 blob f\ttemplates/commons/lib/release_core/release_core/cli.pyc\n"
+        "100644 blob e\ttemplates/commons/lib/rc/__pycache__/cli.cpython-313.pyc\n"
+        "100644 blob f\ttemplates/commons/lib/rc/cli.pyc\n"
         "100644 blob d\ttemplates/commons/bin/real\n"
     )
     monkeypatch.setattr(
