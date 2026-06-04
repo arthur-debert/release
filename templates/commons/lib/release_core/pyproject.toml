@@ -10,8 +10,7 @@ requires-python = ">=3.11"
 # itself already arrives over that same network. Keep deps PURE-PYTHON, no native
 # build step (click qualifies), so install stays a no-compile wheel pull. YAML
 # still goes through yamlio (shell out to `yq`), never PyYAML — that's a `yq`-CLI
-# contract, not a dependency-policy rule. See docs/proposals/pip-bootstrap-contract.md
-# §Transport and docs/proposals/shell-to-python.md §dependency frontier.
+# contract, not a dependency-policy rule.
 #   click — the CLI framework backing the `release-core <group> <command>` tree.
 dependencies = ["click>=8,<9"]
 

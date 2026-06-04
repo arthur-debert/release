@@ -52,8 +52,7 @@ pre-commit:
       # catch extensionless non-shell files and wasn't honoured the same way
       # across lefthook modes (staged vs --all-files). check-shell is invoked
       # identically by pre-commit, CI, and `release-core admin repos verify`, and release
-      # dogfoods it over its own distributed output. See
-      # docs/proposals/unified-gate.lex.
+      # dogfoods it over its own distributed output.
       #
       # The glob just decides WHEN this step runs (and what {staged_files}
       # holds); the runner does the real selection, so no `exclude` is needed.

@@ -2,7 +2,6 @@
 
 **Status:** design rationale
 **Date:** 2026-05-02
-**Related:** [pr-review-loop-circuit-breakers.md](../proposals/pr-review-loop-circuit-breakers.md)
 
 ## Problem
 

@@ -4,9 +4,9 @@ Usage:
   release-core selfcheck
 
 release_core now ships real third-party dependencies (click), resolved by the
-pull-model boot now that `install-release-core` no longer passes `--no-deps`
-(docs/proposals/pip-bootstrap-contract.md §Transport). This verb is the runtime
-canary for that contract: it is implemented WITH click and reports the
+pull-model boot now that `install-release-core` no longer passes `--no-deps`.
+This verb is the runtime canary for that contract: it is implemented WITH click
+and reports the
 importable click version. If a boot ever regresses to a `--no-deps` install,
 `import click` at the top of this module raises ModuleNotFoundError and the whole
 `release-core` CLI fails loudly — which is exactly the signal we want.

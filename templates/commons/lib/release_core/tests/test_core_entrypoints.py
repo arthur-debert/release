@@ -1,4 +1,4 @@
-"""Console-script entry points (PR-B, pip-bootstrap-contract.md §1).
+"""Console-script entry points.
 
 Guards the three invariants of the [project.scripts] → entrypoints.py seam:
 

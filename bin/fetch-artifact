@@ -33,8 +33,7 @@
 #
 # Source of truth: arthur-debert/release bin/fetch-artifact.
 #
-# Self-contained, stdlib-only Python (shell→Python port, see
-# docs/proposals/shell-to-python.md). It is fetched standalone via
+# Self-contained, stdlib-only Python (shell→Python port). It is fetched standalone via
 # raw.githubusercontent.com and run with no `release_core` present, so it
 # imports nothing beyond the stdlib and shells out to `gh`/`tar`/`unzip`
 # for network + extraction (matching the old bash byte-for-byte). The

@@ -99,7 +99,7 @@ It reads the PR once and reports exactly one lifecycle state plus the next actio
 
 **Gemini is best-effort.** A silent or quota'd Gemini never holds the PR in `REVIEWS_PENDING` — only Copilot (required) gates. The snapshot is stateless and has no clock, so the *skip-after-timeout* call for a slow best-effort reviewer is yours: if you've already waited out `release-core pr copilot wait` and Gemini still shows `in_progress`, proceed.
 
-**Circuit breakers.** When `release-core pr status` returns `BLOCKED` with a `breaker:` line (`cycle-cap`, `diff-trajectory`, `comment-set`, `repeat-finding`), the review loop is diverging — do **not** push another fixup cycle. Stop and surface the breaker reason to the user. This is the first-class "stop and hand back" outcome, not a failure. Background: `docs/proposals/pr-review-loop-circuit-breakers.md`.
+**Circuit breakers.** When `release-core pr status` returns `BLOCKED` with a `breaker:` line (`cycle-cap`, `diff-trajectory`, `comment-set`, `repeat-finding`), the review loop is diverging — do **not** push another fixup cycle. Stop and surface the breaker reason to the user. This is the first-class "stop and hand back" outcome, not a failure.
 
 ### Leave a handoff note when you open the PR
 

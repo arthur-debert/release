@@ -2,7 +2,7 @@
 
 load helper
 
-# The unified shell gate (docs/proposals/unified-gate.lex): one runner,
+# The unified shell gate: one runner,
 # content-based selection, dogfooded by release over its own distributed output.
 
 CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"

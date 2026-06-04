@@ -1,7 +1,7 @@
 name: pip-bootstrap smoke
 
-# End-to-end smoke proof for the pip-install bootstrap PoC (ADR-0003,
-# docs/proposals/pip-bootstrap-contract.md §4). Proves the WHOLE chain inside
+# End-to-end smoke proof for the pip-install bootstrap PoC (ADR-0003).
+# Proves the WHOLE chain inside
 # release's own repo, no consumer:
 #
 #   build wheel -> pip install into a fresh venv -> console-scripts on PATH ->

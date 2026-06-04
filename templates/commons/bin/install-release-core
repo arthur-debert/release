@@ -3,7 +3,7 @@
 #
 # Resolves the release_core wheel attached to a GitHub release and installs it.
 # This is THE single definition of "how a repo gets the current release_core"
-# (ADR-0003, docs/proposals/pip-bootstrap-contract.md §Transport). Both boot
+# (ADR-0003). Both boot
 # contexts call it: the SessionStart hook (setup-dev-env.sh) and the reusable CI
 # workflows. It runs BEFORE release_core is installed, so it is pure shell — it
 # cannot itself be a release_core console-script.

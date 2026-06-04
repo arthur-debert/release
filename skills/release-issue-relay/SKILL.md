@@ -5,7 +5,7 @@ description: "Escalate infrastructure friction (workflow failures, ruleset misbe
 
 # release-issue-relay
 
-Portable port of `release/bin/gh-release-issue`, with dedupe-via-search added on top. This skill is the **read-side** half of the sustainability loop from `docs/proposals/agentic-dev-workflow.lex` §5.3.1: when an agent at a consumer repo hits infrastructure friction, unblock locally and then escalate the symptom upstream so the fix lives at the source.
+Portable port of `release/bin/gh-release-issue`, with dedupe-via-search added on top. This skill is the **read-side** half of the sustainability loop: when an agent at a consumer repo hits infrastructure friction, unblock locally and then escalate the symptom upstream so the fix lives at the source.
 
 ## The hard rule about scope
 
@@ -232,4 +232,4 @@ These are the canonical buckets; the title prefix is what step 1's `--search` fi
 ## Related
 
 - `gh-release-issue` — the sibling CLI, used by humans and agents that have it on `$PATH`. Since release#348 it ships to consumers under `templates/commons/bin/` (synced into each consumer's `bin/`), so it's reachable inside a managed repo, not just on the maintainer's machine. Same body shape; no dedupe step.
-- `agentic-dev-workflow.lex` §5.3 — the broader sustainability loop this skill is half of. The other half (write-side: scheduled portfolio audit routine at release) is Phase 4b.
+- The broader sustainability loop this skill is half of. The other half (write-side: scheduled portfolio audit routine at release) is Phase 4b.

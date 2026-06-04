@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Roll a changelog for a release using the fragment-directory model
-# (per docs/proposals/changelog-handling.md and tracker #201).
+# (per tracker #201).
 #
 # Requires a `CHANGELOG/` directory at the same level as <changelog>.
 # Delegates to `bin/changelog`:
@@ -82,7 +82,7 @@ legacy_error() {
   echo "::error::Migration: (1) move existing entries to CHANGELOG/legacy.md," >&2
   echo "::error::(2) run 'release-sync' to pull bin/changelog* into the repo," >&2
   echo "::error::(3) run 'bin/changelog render' to regenerate CHANGELOG.md." >&2
-  echo "::error::See docs/proposals/changelog-handling.md for details." >&2
+  echo "::error::See CHANGELOG/README.txt for details." >&2
   exit 1
 }
 

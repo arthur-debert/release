@@ -15,7 +15,7 @@ Usage:
   list-repo-scripts --only-app-bin  # show only app-bin/ column
   list-repo-scripts --only-bin --only-scripts  # composable
 
-Shell→Python migration (docs/proposals/shell-to-python.md): the mktemp/sed/wc
+Shell→Python migration: the mktemp/sed/wc
 column-printing machinery moved into Python. The columnar output (30-col width,
 headers, rules, the per-dir totals footer) is preserved byte-for-byte. Filesystem
 only — no gh, no network.
