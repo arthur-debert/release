@@ -28,9 +28,9 @@ load helper
   [ -f .claude/skills/gh-pr-review-loop/SKILL.md ]
 }
 
-@test "the synced skill is consumer-facing (leads with gh-task-status, no auto-merge)" {
+@test "the synced skill is consumer-facing (leads with release-core pr status, no auto-merge)" {
   "$BIN/release-sync" >/dev/null
   desc=$(sed -n '/^description:/p' .claude/skills/gh-pr-review-loop/SKILL.md)
-  [[ "$desc" == *"gh-task-status"* ]]
+  [[ "$desc" == *"release-core pr status"* ]]
   [[ "$desc" == *"ready-for-human-merge"* ]]
 }
