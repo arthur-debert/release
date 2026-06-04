@@ -7,11 +7,13 @@ This note orients you: where you are, what is managed, and where problems go.
 
 ## What is managed (don't hand-edit)
 
-- **`.release/`** is the materialized managed tree. `release-sync` regenerates it
-  wholesale from `release`; anything inside it is overwritten on the next sync.
+- **`.release/`** is the materialized managed tree. `release-core sync` regenerates
+  it wholesale from `release`; anything inside it is overwritten on the next sync.
 - **`bin/`** holds release-provided tools, symlinked into `.release/`. The
   pre-commit gate (`lefthook.yml`), `.github/workflows/`, and the lint configs
-  are managed too.
+  are managed too. Every managed task is run through the **`release-core`** CLI —
+  `release-core --help` is the map (per-repo commands at the top level; fleet ops
+  under `release-core admin`).
 - **`app-bin/`** is this repo's own tooling — yours to edit freely.
 
 Editing a managed file (anything that is a symlink into `.release/`) does not
@@ -26,7 +28,7 @@ are open, and whether the PR is mergeable, you ask the engine where the PR
 stands and act on what it reports:
 
 ```sh
-gh-task-status <pr-number>
+release-core pr status <pr-number>
 ```
 
 It reports the PR's lifecycle state — **requested → reviewed → ready** — and what
@@ -35,7 +37,7 @@ the end of your job; you own it through the whole loop:
 
 1. **Open a _live_ PR** (never a draft — a draft suppresses the automatic
    review). The review is requested for you.
-2. **Poll `gh-task-status <pr>`.** It names what is outstanding: a pending
+2. **Poll `release-core pr status <pr>`.** It names what is outstanding: a pending
    review, unresolved threads, or failing checks.
 3. **Clear what it names.** Fix the code or reply with a rationale, resolve each
    thread, push, and let checks go green. Never bypass the gate (`--no-verify`)
@@ -47,13 +49,13 @@ the end of your job; you own it through the whole loop:
    merge are the human's.
 
 That is the whole loop: open → poll the engine → clear what it names → `ready` →
-hand off. Drive it through `gh-task-status`; don't reinvent it with ad-hoc
-`gh api` calls.
+hand off. Drive it through `release-core pr status`; don't reinvent it with
+ad-hoc `gh api` calls.
 
 **Landing a feature or fix?** Add a changelog fragment in the same PR:
 
 ```sh
-changelog add <slug> "<one-line summary>"
+release-core changelog add <slug> "<one-line summary>"
 ```
 
 It writes `CHANGELOG/unreleased-<slug>.md`. The release refuses to cut without
@@ -73,12 +75,12 @@ repo: the file is release's and your fix will not survive the next sync. Instead
    branch, PR, and failing run for reproduction context.
 
 ```sh
-gh-release-issue <component> "<one-line symptom>"
+release-core issue file <component> "<one-line symptom>"
 ```
 
 The fix lands in `release`, is released, and propagates to every consumer when
-the floating major you pin (`@v2`) advances — you re-run `release-sync` and pick
-it up. One fix, the whole fleet, nothing to hand-edit here.
+the floating major you pin (`@v2`) advances — you re-run `release-core sync` and
+pick it up. One fix, the whole fleet, nothing to hand-edit here.
 
 [release]: https://github.com/arthur-debert/release
 [issues]: https://github.com/arthur-debert/release/issues
