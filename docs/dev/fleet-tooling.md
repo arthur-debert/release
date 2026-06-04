@@ -1,8 +1,9 @@
-# Fleet tooling: `managed-repos` + `release-verify-fleet`
+# Fleet tooling: `release-core admin repos list` + `release-core admin repos verify`
 
 Two tools for operating across the whole managed portfolio, both built on
 one rule: **`managed-repos.yaml` is the only source of truth, and on-disk
-layout is data, not logic.**
+layout is data, not logic.** Both live under `release-core admin repos`; the
+flat names (`managed-repos`, `release-verify-fleet`) still work as aliases.
 
 ## The manifest contract
 
@@ -25,38 +26,43 @@ project. Two hard rules:
 same join describe both the real `~/h` and a throwaway synthetic checkout —
 only the root changes.
 
-## `managed-repos`
+## `release-core admin repos list`
 
-The accessor. Reads the manifest, applies the join, nothing else.
+The accessor (flat alias: `managed-repos`). Reads the manifest, applies the
+join, nothing else.
 
 ```sh
-managed-repos                       # owner/name, one per line
-managed-repos --paths               # owner/name <TAB> abspath <TAB> found|missing
-managed-repos --clone [--refresh]   # clone missing repos into their paths
-managed-repos --paths lex-fmt/lex   # trailing owner/name args restrict the set
+release-core admin repos list                       # owner/name, one per line
+release-core admin repos list --paths               # owner/name <TAB> abspath <TAB> found|missing
+release-core admin repos list --clone [--refresh]   # clone missing repos into their paths
+release-core admin repos list --paths lex-fmt/lex   # trailing owner/name args restrict the set
 ```
 
-`audit-portfolio` reads the same manifest (the only other consumer).
+`release-core admin repos audit` (flat: `audit-portfolio`) reads the same
+manifest (the only other consumer).
 
-## `release-verify-fleet`
+## `release-core admin repos verify`
 
 The pre-flight lint sweep — the realization of "checkout all repos,
 release-sync them, try to commit," using real consumer files instead of
 synthetic fixtures (this is why per-Kind fixtures, release#298, were closed
 won't-do).
 
+The flat alias is `release-verify-fleet`.
+
 ```sh
-release-verify-fleet                       # sync whole fleet from HEAD, run the gate
-release-verify-fleet --ref main            # verify what @v1 is about to point at
-release-verify-fleet --only arthur-debert/padz   # one repo (scopes the clone too)
+release-core admin repos verify                       # sync whole fleet from HEAD, run the gate
+release-core admin repos verify --ref main            # verify what @v1 is about to point at
+release-core admin repos verify --only arthur-debert/padz   # one repo (scopes the clone too)
 ```
 
 It is **hermetic**: clones into a throwaway root (default
-`/tmp/release-fleet-verify`), syncs each consumer from the candidate
+`/tmp/release-fleet-verify-$USER`), syncs each consumer from the candidate
 revision, runs `lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
-before `release-advance-major` to catch a commons/lint regression in release's
-own tree instead of one consumer at a time after the floating `@vN` moves.
+before `release-core admin release advance-major` to catch a commons/lint
+regression in release's own tree instead of one consumer at a time after the
+floating `@vN` moves.
 
 Caveats:
 

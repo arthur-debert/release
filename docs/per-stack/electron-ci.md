@@ -103,10 +103,10 @@ be reported". Update the ruleset in the same PR sweep:
 
 ```sh
 cd <consumer-repo>
-# Use --checks explicitly — apply-ruleset's auto-detect reads the
+# Use --checks explicitly — the ruleset auto-detect reads the
 # latest main-branch run, which still has the OLD names until the
 # migration PR merges. Explicit override avoids the chicken-and-egg.
-apply-ruleset --checks "check / check,e2e"
+release-core admin policy ruleset --checks "check / check,e2e"
 ```
 
 If the caller's job ID isn't `check`, adjust the prefix accordingly

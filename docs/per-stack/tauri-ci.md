@@ -127,17 +127,17 @@ be reported". Update the ruleset in the same PR sweep:
 
 ```sh
 cd <consumer-repo>
-# Use --checks explicitly — apply-ruleset's auto-detect reads the
+# Use --checks explicitly — the ruleset auto-detect reads the
 # latest main-branch run, which still has the OLD names until the
 # migration PR merges. Explicit override avoids the chicken-and-egg.
-apply-ruleset --checks "ci / check"
+release-core admin policy ruleset --checks "ci / check"
 ```
 
 If you preserved a bespoke e2e job alongside the thin caller, list
 both:
 
 ```sh
-apply-ruleset --checks "ci / check,e2e"
+release-core admin policy ruleset --checks "ci / check,e2e"
 ```
 
 If the caller's job ID isn't `ci`, adjust the prefix accordingly

@@ -28,7 +28,7 @@ consumer-side fix was wasted motion.
 ## The loop
 
 1. **Reproduce once, in one throwaway clone.** Not an agent per repo. The fleet
-   is already cloned by `release-verify-fleet` under
+   is already cloned by `release-core admin repos verify` under
    `/tmp/release-fleet-verify-$USER/`. Reset one to clean `main`, `release-sync`
    from your candidate ref, run the gate. One repo tells you what 15 would.
 2. **Consult the oracle — is it upstream?** Two cheap, deterministic signals:
@@ -70,16 +70,18 @@ exists only because the gate used to be brittle), not to re-patch upstream.
 
 ## The tools (compose these, don't reinvent)
 
-- `release-verify-fleet --ref <ref>` — hermetic pre-flight: clones the fleet,
-  syncs each from `<ref>`, runs the gate. Use it BEFORE `release-advance-major`.
-  Its clones double as your reproduction sandbox.
+- `release-core admin repos verify --ref <ref>` — hermetic pre-flight: clones the
+  fleet, syncs each from `<ref>`, runs the gate. Use it BEFORE
+  `release-core admin release advance-major`. Its clones double as your
+  reproduction sandbox. (Flat alias `release-verify-fleet` still works.)
 - `orc propagate --ref main <clone>...` — re-sync N consumers and open a PR each.
   Strict: each clone must be clean and on its base branch. Reset the clones first
   (`git checkout -B main origin/main && git reset --hard && git clean -fd`).
 - `orc probe --yes <clone> "<eval prompt>"` — spin ONE fresh agent to evaluate a
   repo's state and report. Use for a perspective check, not as a per-repo fixer.
-- `release-advance-major` — fast-forward the floating major to main (ff-only).
-  Run `release-verify-fleet` first.
+- `release-core admin release advance-major` — fast-forward the floating major to
+  main (ff-only). Run `release-core admin repos verify` first. (Flat alias
+  `release-advance-major` still works.)
 
 ## Faithful pre-flight
 

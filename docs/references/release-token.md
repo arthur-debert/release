@@ -1,7 +1,7 @@
 # Release token setup
 
 Repos onboarded to the canonical `main-branch-protection` ruleset (via
-`apply-ruleset`) require a Personal Access Token (PAT) for any release workflow
+`release-core admin policy ruleset`) require a Personal Access Token (PAT) for any release workflow
 that pushes a version-bump commit to the default branch.
 
 ## Why a PAT is required
@@ -34,7 +34,7 @@ the `RepositoryRole 5` bypass. Workflows that consume the PAT push successfully.
 2. Propagate it as `RELEASE_TOKEN` to every onboarded repo:
 
    ```sh
-   pbpaste | install-release-token
+   pbpaste | release-core admin secrets token
    ```
 
    The script auto-discovers onboarded repos by querying for the
@@ -59,7 +59,7 @@ exposed).
 ## Rotation
 
 When the PAT expires, regenerate it (same URL) and re-run
-`pbpaste | install-release-token`. Old secret is overwritten in place; no
+`pbpaste | release-core admin secrets token`. Old secret is overwritten in place; no
 workflow changes needed.
 
 ## Fine-grained alternative

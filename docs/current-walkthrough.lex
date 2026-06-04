@@ -142,9 +142,9 @@ What it is
   From a developer's perspective, cutting a release is:
 
   cd ~/h/my-project
-  release-cut minor     # or: release-cut 1.8.0
+  release-core cut minor     # or: release-core cut 1.8.0  (flat alias: release-cut)
 
-  release-cut detects the Consumer's Kind, reads the current version from that Kind's canonical source (Cargo.toml, package.json, extension.toml, or the latest git tag for Kinds without a manifest), computes the new version, and dispatches the consumer's release.yml workflow via gh workflow dispatch. Everything runs in
+  release-core cut detects the Consumer's Kind, reads the current version from that Kind's canonical source (Cargo.toml, package.json, extension.toml, or the latest git tag for Kinds without a manifest), computes the new version, and dispatches the consumer's release.yml workflow via gh workflow dispatch. Everything runs in
   CI:
 
   1. Bump version files (Cargo.toml, package.json, etc.)

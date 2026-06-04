@@ -59,13 +59,13 @@ then it becomes Case B. Do **not** auto-clean; those are the owner's changes.
 
 ## Resolving paths
 
-`REPOS_ROOT=~/h bin/managed-repos --paths` prints `owner/name <TAB> abspath
+`REPOS_ROOT=~/h release-core admin repos list --paths` prints `owner/name <TAB> abspath
 <TAB> found|missing` for the whole fleet. Filter to taste (e.g. exclude `phos`,
 pick `found` only) to build the path list.
 
 ## Pre-flight
 
-Always run `bin/release-verify-fleet --ref <candidate>` before a fleet
+Always run `release-core admin repos verify --ref <candidate>` before a fleet
 propagate. It clones the fleet hermetically and runs the gate per consumer.
 Expect npm/frontend repos (electron/tauri/vscode) to FAIL on `eslint`/`typecheck`
 with no `node_modules` in the toolchain-less clone — that's a **missing-deps

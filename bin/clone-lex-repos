@@ -52,6 +52,6 @@ done
 echo
 echo "Done. Now:"
 echo "  cd $TARGET"
-echo "  release-lex patch \\"
+echo "  release-core admin release lex patch \\"
 echo "    --comms comms --lex lex --tree-sitter tree-sitter-lex \\"
 echo "    --vscode vscode --nvim nvim --lexed lexed"

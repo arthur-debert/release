@@ -210,7 +210,7 @@ If `git status --short` shows anything staged that's not under `.release/`, `.gi
 
 ### 9. Commit with the canonical message
 
-Use a HEREDOC verbatim. The message is the same on every consumer — agents downstream (audit-portfolio, future migration verifiers) match on these exact words.
+Use a HEREDOC verbatim. The message is the same on every consumer — agents downstream (`release-core admin repos audit`, future migration verifiers) match on these exact words.
 
 ```sh
 cd "$CONSUMER_PATH"
@@ -235,7 +235,7 @@ EOF
 
 ### 10. Push
 
-`release-sync` does not switch branches, but if any earlier step (e.g. an `apply-ruleset` invocation in the same session) flipped HEAD to main, an unguarded push would land on main. The branch-current guard runs **before** the push so it actually prevents the unsafe operation.
+`release-sync` does not switch branches, but if any earlier step (e.g. a `release-core admin policy ruleset` invocation in the same session) flipped HEAD to main, an unguarded push would land on main. The branch-current guard runs **before** the push so it actually prevents the unsafe operation.
 
 ```sh
 cd "$CONSUMER_PATH"
@@ -357,7 +357,7 @@ Do NOT `git commit --amend` an existing migration commit. Always replace it with
 ## Pitfalls
 
 - **`git add -A` is the single biggest footgun.** Untracked scratch files are everywhere in working consumer repos (nested clones, drafts, screenshots). The three-step explicit add in step 8 is non-negotiable.
-- **`apply-ruleset` and other release/bin scripts can change HEAD.** If you ran one earlier in the same session, it may have left HEAD on `main` in the consumer. Always re-check `git branch --show-current` before push.
+- **`release-core admin policy ruleset` (flat: `apply-ruleset`) and other release scripts can change HEAD.** If you ran one earlier in the same session, it may have left HEAD on `main` in the consumer. Always re-check `git branch --show-current` before push.
 - **`release-sync --migrate` is destructive within its scope.** It removes `.release/` and recreates it from templates. If a previous migration's `.release/` was hand-edited, those edits are gone — by design.
 - **Symlinks vs real files for workflows.** `.github/workflows/copilot-review.yml` is special-cased as a real file. Don't "fix" it to be a symlink — GitHub Actions won't follow it.
 - **Don't merge.** The skill ends at ready-to-merge. The user does the merge.

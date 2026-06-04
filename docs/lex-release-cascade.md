@@ -96,23 +96,23 @@ all happen in CI via the reusable workflow.
 | `nvim` | `lua/lex/init.lua` `M.version` (via `version-file` input) | tag-push |
 | `lexed` | `package.json` `"version"` | tag-push |
 
-### Layer 1 — local orchestrator (`release-lex`)
+### Layer 1 — local orchestrator (`release-core admin release lex`)
 
-`release-lex` in `arthur-debert/release/bin/` walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `bin/release` to cut) in sequence. Useful for:
+`release-core admin release lex` (flat alias: `release-lex`) walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `bin/release` to cut) in sequence. Useful for:
 
 - **Local debugging** — surface primitive bugs in isolation (the `--dry-run` mode echoes every step without making changes).
 - **Recovery** — re-run from a known-good point if a cascade gets wedged mid-flight.
-- **One-button kickoff** — `release-lex patch --comms ... --lex ...` cuts the whole chain locally without involving GH events.
+- **One-button kickoff** — `release-core admin release lex patch --comms ... --lex ...` cuts the whole chain locally without involving GH events.
 
 Day-to-day, you don't need it. The event cascade (Layer 2) does the same work hands-off.
 
 ```sh
-release-lex patch \
+release-core admin release lex patch \
   --comms ../comms --lex ../lex --tree-sitter ../tree-sitter-lex \
   --vscode ../vscode --nvim ../nvim --lexed ../lexed
 
 # Status only — what would cascade if I cut comms now?
-release-lex --status \
+release-core admin release lex --status \
   --comms ../comms --lex ../lex --tree-sitter ../tree-sitter-lex \
   --vscode ../vscode --nvim ../nvim --lexed ../lexed
 ```
@@ -186,7 +186,7 @@ gh run list --repo lex-fmt/tree-sitter-lex --workflow=on-upstream-released.yml -
 ### What would cascade right now?
 
 ```sh
-release-lex --status --comms ../comms --lex ../lex \
+release-core admin release lex --status --comms ../comms --lex ../lex \
   --tree-sitter ../tree-sitter-lex --vscode ../vscode \
   --nvim ../nvim --lexed ../lexed
 ```
@@ -198,7 +198,7 @@ Runs `bin/diff-since-release` against each repo, prints a one-line answer per re
 If you want to drive the cascade locally instead of using GH events (e.g. debugging a stuck cascade), use the orchestrator:
 
 ```sh
-release-lex patch \
+release-core admin release lex patch \
   --comms ../comms --lex ../lex --tree-sitter ../tree-sitter-lex \
   --vscode ../vscode --nvim ../nvim --lexed ../lexed
 ```
