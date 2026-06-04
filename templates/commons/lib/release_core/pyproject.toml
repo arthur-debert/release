@@ -1,14 +1,19 @@
 [project]
 name = "release-core"
 version = "0.0.1"
-description = "Shared stdlib-only primitives for release's Python verbs (proc/gh/cli/yaml/semver/manifest)"
+description = "Shared primitives + CLI for release's Python verbs (proc/gh/cli/yaml/semver/manifest)"
 requires-python = ">=3.11"
-# INTENTIONALLY EMPTY and must stay so (Phase 0–1): this package runs in
-# GitHub Actions and Claude Cloud, where only the stdlib + the `gh`/`yq` CLIs
-# are guaranteed. A third-party runtime dep here breaks 3-env parity and the
-# zero-install shim model. See docs/proposals/shell-to-python.md §dependency
-# frontier. YAML goes through yamlio (shell out to `yq`), never PyYAML.
-dependencies = []
+# Third-party runtime deps ARE permitted (reversing the Phase 0–1 stdlib-only
+# freeze). The boot resolver `install-release-core` no longer passes `--no-deps`,
+# so pip resolves these from PyPI on every boot — and PyPI is reachable in all
+# three envs (GitHub Actions / Claude Cloud / local) precisely because the wheel
+# itself already arrives over that same network. Keep deps PURE-PYTHON, no native
+# build step (click qualifies), so install stays a no-compile wheel pull. YAML
+# still goes through yamlio (shell out to `yq`), never PyYAML — that's a `yq`-CLI
+# contract, not a dependency-policy rule. See docs/proposals/pip-bootstrap-contract.md
+# §Transport and docs/proposals/shell-to-python.md §dependency frontier.
+#   click — the CLI framework backing the `release-core <group> <command>` tree.
+dependencies = ["click>=8,<9"]
 
 # Console-scripts: each on-PATH command name (hyphenated, matching today's
 # bin/<name> shims exactly) → its zero-arg wrapper in release_core.entrypoints.

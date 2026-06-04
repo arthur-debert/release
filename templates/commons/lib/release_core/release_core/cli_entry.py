@@ -21,10 +21,12 @@ import sys
 
 from .cli import EXIT_OK, EXIT_USAGE
 from .verbs import init as init_verb
+from .verbs import selfcheck as selfcheck_verb
 
 # subcommand name -> its main(argv) -> int
 _SUBCOMMANDS = {
     "init": init_verb.main,
+    "selfcheck": selfcheck_verb.main,
 }
 
 USAGE = """\
@@ -35,9 +37,11 @@ Usage:
   release-core --help
 
 Subcommands:
-  init    Materialize the per-repo committed config (lefthook.yml + lint
-          configs) into the current repo. Idempotent, create-if-absent.
-          See `release-core init --help`.
+  init       Materialize the per-repo committed config (lefthook.yml + lint
+             configs) into the current repo. Idempotent, create-if-absent.
+             See `release-core init --help`.
+  selfcheck  Verify release-core's third-party runtime deps are importable
+             (the canary that the boot resolved deps, not --no-deps).
 """
 
 

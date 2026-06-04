@@ -15,12 +15,13 @@
 #     version is not stamped from the tag (it is a static 0.0.1), so once a v3
 #     release exists, `releases/latest` would hand a v2-pinned consumer the v3
 #     wheel. Pinning to the consumer's major line keeps `@vN` honest.
-#   - Install is `pip install --force-reinstall --no-deps "$url"`, NOT `-U`:
-#     because the wheel version is static, `pip install -U` sees the same 0.0.1
-#     already satisfied and SKIPS it, defeating the pull model. --force-reinstall
-#     always reinstalls; --no-deps because release_core is dependency-light
-#     (stdlib-only) and we must never let a boot mutate the environment's other
-#     packages.
+#   - Install is `pip install --force-reinstall "$url"`, NOT `-U`: because the
+#     wheel version is static, `pip install -U` sees the same 0.0.1 already
+#     satisfied and SKIPS it, defeating the pull model. --force-reinstall always
+#     reinstalls. There is deliberately NO --no-deps: release_core declares real
+#     third-party dependencies (click) that pip must resolve from PyPI on each
+#     boot. They are pure-Python and PyPI is reachable wherever this release URL
+#     is, so the boot stays a no-compile wheel pull.
 #
 # Exactly ONE wheel asset must match per release (ADR: "select one URL and error
 # otherwise"). Zero or many is a release-side packaging bug, surfaced loudly here
@@ -52,8 +53,8 @@ Usage: install-release-core [--major vN] [--repo OWNER/REPO] [--print-url]
                             [--no-init] [--user] [--break-system-packages]
 
 Resolve the release_core wheel from a GitHub release, pip-install it
-(--force-reinstall --no-deps), then run `release-core init` in the current repo.
-The pull-model boot resolver — one command does the whole boot.
+(--force-reinstall, deps resolved from PyPI), then run `release-core init` in the
+current repo. The pull-model boot resolver — one command does the whole boot.
 
 Options:
   --major vN        Pin to the latest release in major line vN (e.g. --major v2).
@@ -170,12 +171,16 @@ if [ "$PRINT_URL" -eq 1 ]; then
 fi
 
 echo "install-release-core: installing $url" >&2
-# --force-reinstall (static wheel version → -U would skip) + --no-deps
-# (dependency-light package; never touch the environment's other packages).
-# $PIP_EXTRA carries any --user / --break-system-packages the caller chose; it is
-# intentionally word-split (each token a separate pip arg), empty by default.
+# --force-reinstall: the wheel version is static (0.0.1), so `-U` would see it
+# already satisfied and skip — force-reinstall always reinstalls the wheel.
+# NO --no-deps: release_core declares real third-party deps (click) which pip
+# must resolve from PyPI on each boot. PyPI is reachable wherever this URL is
+# (the wheel itself arrived over that network), and the deps are pure-Python, so
+# this stays a no-compile install. $PIP_EXTRA carries any --user /
+# --break-system-packages the caller chose; it is intentionally word-split (each
+# token a separate pip arg), empty by default.
 # shellcheck disable=SC2086
-"$PYTHON" -m pip install --force-reinstall --no-deps $PIP_EXTRA "$url"
+"$PYTHON" -m pip install --force-reinstall $PIP_EXTRA "$url"
 
 if [ "$NO_INIT" -eq 1 ]; then
   echo "install-release-core: installed (--no-init; skipping release-core init)." >&2
