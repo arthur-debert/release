@@ -5,7 +5,7 @@
 (it *reports* READY; the caller does the draft->ready flip) and never branches
 on a reviewer's name — it consumes the adapter interface only.
 
-Two definitions anchor it (see docs/proposals/dev-workflow-state-engine.lex):
+Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
   Ready    = Reviewed + CI green + mergeable.
 

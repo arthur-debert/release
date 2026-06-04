@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------
 # policy-rulesets shims: apply-ruleset / sweep-github-policy /
 # enable-dependabot-security — the shell→Python migration's Phase 1
-# policy-rulesets unit (docs/proposals/shell-to-python.md).
+# policy-rulesets unit.
 #
 # The bash originals were replaced by thin Python shims over
 # release_core.verbs.{apply_ruleset,sweep_github_policy,

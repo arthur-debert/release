@@ -23,7 +23,7 @@ description: |
     CHANGELOG.md different from what's committed. Author runs
     `bin/changelog render` locally and commits the result.
 
-  Background: docs/proposals/changelog-handling.md, tracker #201.
+  Background: tracker #201.
 
 inputs:
   working-directory:

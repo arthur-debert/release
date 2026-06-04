@@ -54,5 +54,3 @@ Conventions:
   Render appends it verbatim at the end of CHANGELOG.md, so the
   pre-adoption history stays visible without retroactive per-version
   splitting.
-
-Background: https://github.com/arthur-debert/release/blob/main/docs/proposals/changelog-handling.md

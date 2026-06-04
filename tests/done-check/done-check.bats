@@ -3,8 +3,8 @@
 # ---------------------------------------------------------------------
 # done-check: command contract (offline — a stub `gh` returns canned JSON)
 #
-# done-check is a shell→Python migration unit (docs/proposals/
-# shell-to-python.md). The bash original was replaced by a thin Python
+# done-check is a shell→Python migration unit. The bash original was
+# replaced by a thin Python
 # shim over release_core.verbs.done_check. These tests pin the CLI
 # contract: --help/usage, arg arity (exit 64), the stack-detect failure
 # path (exit 65), and a full happy-path sweep against a stubbed gh so the

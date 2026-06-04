@@ -20,8 +20,7 @@ upstream-vs-consumer call) and no new PR mechanics (that's
 
 - "Triage the fleet inbox", "process the consumer-filed issues", "what should
   release fix next?", a batch upstream-fix session.
-- After a [Phase D](../../docs/proposals/348-feedback-loop-remaining-stages.md)
-  CI sweep files a wave of issues.
+- After a Phase D CI sweep files a wave of issues.
 
 Run it from inside `arthur-debert/release` (the tools resolve the repo from the
 working directory / `RELEASE_HOME`).

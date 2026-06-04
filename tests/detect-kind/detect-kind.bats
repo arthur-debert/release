@@ -3,8 +3,8 @@
 # ---------------------------------------------------------------------
 # detect-kind: command contract (offline — pure filesystem inspection)
 #
-# detect-kind is the shell→Python migration canary (docs/proposals/
-# shell-to-python.md). The bash original was replaced by a thin Python
+# detect-kind is the shell→Python migration canary. The bash original
+# was replaced by a thin Python
 # shim over release_core.manifest.detect_kind. These tests pin the
 # byte-for-byte CLI contract the bash version had — the SAME kind
 # strings on stdout, the SAME exit codes — because release-sync,

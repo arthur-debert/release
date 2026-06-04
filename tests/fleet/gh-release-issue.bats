@@ -5,7 +5,7 @@
 #
 # Distributed tool (real source templates/commons/bin/gh-release-issue,
 # symlinked from bin/gh-release-issue) migrated to a Python shim over
-# release_core.verbs.gh_release_issue (docs/proposals/shell-to-python.md).
+# release_core.verbs.gh_release_issue.
 # These pin the byte-for-byte CLI contract: help/usage/arity exit codes
 # and that a filed issue carries the `consumer-filed` label and the auto-
 # collected context. Fully offline — a stub `gh` records `issue create`

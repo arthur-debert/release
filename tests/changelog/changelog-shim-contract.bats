@@ -3,7 +3,7 @@
 # changelog-shim-contract — pins the shell→Python migration (Phase 1).
 #
 # The changelog-* family is now a set of thin Python shims over
-# release_core.verbs.changelog (docs/proposals/shell-to-python.md). The four
+# release_core.verbs.changelog. The four
 # behavioral suites (changelog-add/cut/render/orchestrator.bats) run the SAME
 # shims via $BIN, so they already prove the CLI contract end-to-end. This file
 # adds the migration-specific invariants: the entry points are the variant-(a)

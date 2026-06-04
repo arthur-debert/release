@@ -96,7 +96,7 @@ pre-commit:
       # done by CONTENT, not glob, exactly like
       # bin/check-shell: keep only `*.py` plus shebang-detected python shims,
       # drop everything else. This mirrors the repo's unified content-based gate
-      # (release#348 / docs/proposals/unified-gate.lex) and stays mode-invariant
+      # (release#348) and stays mode-invariant
       # across staged vs --all-files.
       glob:
         - "templates/commons/lib/**/*.py"

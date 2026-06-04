@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
 # ---------------------------------------------------------------------
-# release-advance-major: shim CLI contract (shell→Python migration,
-# docs/proposals/shell-to-python.md). The bash original was replaced by a
+# release-advance-major: shim CLI contract (shell→Python migration).
+# The bash original was replaced by a
 # thin Python shim over release_core.verbs.release_advance_major. These
 # tests pin the byte-for-byte CLI edge — help text, usage exit codes (64),
 # and the wrong-origin refusal — that the bash version had. The ff-merge

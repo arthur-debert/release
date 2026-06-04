@@ -115,4 +115,4 @@ ships) → **upstream**. The gate was shellchecking a non-shell file. Root fix:
 `bin/check-shell` selects shell by content so the shim falls out; release
 dogfoods it. One PR, merged, re-synced. The two consumers that *still* stayed red
 had stale `lefthook-local.yml` shadows — obsolete workarounds, deleted, not
-re-patched. See `docs/proposals/unified-gate.lex`.
+re-patched.

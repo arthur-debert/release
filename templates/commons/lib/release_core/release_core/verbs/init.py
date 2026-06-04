@@ -3,8 +3,8 @@
 Usage:
   release-core init [--force] [--dry-run] [--commit] [--push]
 
-`release-core init` is the seam (pip-bootstrap PoC, docs/proposals/pip-bootstrap-contract.md
-§2) that replaces release-sync's *config* materialization. The package arrives
+`release-core init` is the seam (pip-bootstrap PoC) that replaces release-sync's
+*config* materialization. The package arrives
 via `pip install`; the files a consumer must have committed IN ITS OWN GIT TREE —
 the gate definition (`lefthook.yml`) and the managed lint/format configs — are
 written here.
@@ -35,7 +35,7 @@ Behavior:
   - exits NON-ZERO on any real failure (cannot write a file it intended to). No
     silent best-effort swallowing for init's own writes.
 
-Auto-commit (the pull-model commit-hygiene seam, docs/proposals/init-auto-commit.md):
+Auto-commit (the pull-model commit-hygiene seam):
   - --commit: after a materialization that actually changed files, stage and
     commit ONLY the exact managed paths init wrote (never `git add -A`, never
     fold in a user's other staged/unstaged work) with a deterministic message.

@@ -23,8 +23,7 @@
 # Example:
 #   gh-pr-resolve-thread 507 1234567890
 #
-# Self-contained, stdlib-only Python (shell→Python port, see
-# docs/proposals/shell-to-python.md). Network/auth still go through `gh api
+# Self-contained, stdlib-only Python (shell→Python port). Network/auth still go through `gh api
 # graphql` (so no token plumbing here); the JSON it returns is parsed with
 # the stdlib `json` module, so `jq` is no longer required.
 """gh-pr-resolve-thread — resolve the PR review thread containing a comment."""

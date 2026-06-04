@@ -5,8 +5,7 @@
 # broke five consumers' CI when this was briefly symlinked (release#317).
 # A CI guard in .github/workflows/ci.yml enforces this.
 #
-# Self-contained, stdlib-only Python (shell→Python port, see
-# docs/proposals/shell-to-python.md). Fetched standalone via
+# Self-contained, stdlib-only Python (shell→Python port). Fetched standalone via
 # raw.githubusercontent.com and run with NO release_core present, so it
 # imports nothing beyond the stdlib and is NOT a release_core shim — this
 # decouples the port from the pull-model distribution. Network I/O still

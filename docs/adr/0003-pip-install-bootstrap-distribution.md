@@ -110,8 +110,7 @@ constraints. Concretely:
 
 ## Scope: this PoC vs follow-ups
 
-The contract doc (`docs/proposals/pip-bootstrap-contract.md`) holds the frozen
-interfaces. This ADR records the decision; the PoC's boundaries are:
+This ADR records the decision; the PoC's boundaries are:
 
 **This PoC does:**
 

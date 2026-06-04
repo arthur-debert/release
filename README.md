@@ -6,8 +6,6 @@ packages, GH Actions, a Homebrew tap) the same way, both **locally and
 on CI**. One canonical implementation per concern; consumers call into
 it with a thin caller or sync canonical files via `release-sync`.
 
-The full long-form rationale is in
-[`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex).
 The short version:
 
 - **Before:** each project's lint / test / build / release / publish was
@@ -421,10 +419,6 @@ fresh session per review comment / failing check when the
 the org level. The local orchestrator (below) is for cross-repo,
 human-initiated work that Cloud Auto-fix deliberately does not do.
 
-Long-form spec:
-[`docs/proposals/agentic-dev-workflow.lex`](docs/proposals/agentic-dev-workflow.lex)
-§2.
-
 ## Local and cloud orchestration
 
 Same infrastructure must work in three environments: local dev, Claude
@@ -559,7 +553,6 @@ docs/
   per-category/       input shapes per Stack
   per-component/      adoption guides per Component
   per-stack/          adoption guides per Stack
-  proposals/          spec docs + rollout plans
   references/         design notes
 tests/
   cloud-env-check/    local Docker harness approximating cloud Ubuntu
@@ -572,8 +565,6 @@ goal — this is single-developer infrastructure.
 
 ## See also
 
-- [Vision: agentic dev workflow](docs/proposals/agentic-dev-workflow.lex)
-- [Phased rollout](docs/proposals/phased-rollout.lex)
 - [Per-category input shapes](docs/per-category/)
 - [Per-component adoption guides](docs/per-component/)
 - [Per-stack adoption guides](docs/per-stack/)

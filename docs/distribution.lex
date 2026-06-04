@@ -88,7 +88,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
 
 7. Provenance and drift
 
-    Each `.release/` carries `.release-sync-source` — the exact release revision that generated it (ADR-0002). `release-drift-check` rebuilds against that recorded revision, so it distinguishes real drift (a consumer hand-edited a managed file) from mere staleness (the consumer simply hasn't re-synced). See `docs/proposals/301-consumer-drift-gate-rollout.md`.
+    Each `.release/` carries `.release-sync-source` — the exact release revision that generated it (ADR-0002). `release-drift-check` rebuilds against that recorded revision, so it distinguishes real drift (a consumer hand-edited a managed file) from mere staleness (the consumer simply hasn't re-synced).
 
 Notes
 

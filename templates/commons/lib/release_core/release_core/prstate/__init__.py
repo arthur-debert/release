@@ -15,7 +15,7 @@ load-bearing for the stdlib-only guarantee here.
 Boundary discipline: every GitHub call goes through `ghapi` (shell out to
 `gh`); everything else is pure transformation over recorded data, so it unit-
 tests against captured JSON with no network. stdlib only — no third-party
-runtime deps. See docs/proposals/dev-workflow-state-engine.lex.
+runtime deps.
 """
 
 __version__ = "0.0.1"

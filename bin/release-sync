@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # release-sync — materialize managed files into a consumer repo (ADR-0001).
 #
-# Thin shim (shell→Python Phase 2, docs/proposals/shell-to-python.md): put the
+# Thin shim (shell→Python Phase 2): put the
 # stdlib-only release_core package on sys.path and dispatch. release-sync is a
 # release-only tool (a real file in bin/, NOT synced to consumers), so realpath
 # lands in bin/ and the package sits at ../templates/commons/lib/release_core
