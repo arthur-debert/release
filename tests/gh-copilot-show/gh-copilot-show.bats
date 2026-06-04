@@ -2,7 +2,7 @@
 # Tests for bin/gh-copilot-show — the READ-ONLY Copilot-review printer.
 #
 # Network/auth is mocked by shadowing `gh` on PATH. The mock answers:
-#   - `gh repo view --json nameWithOwner` → fixed nameWithOwner JSON
+#   - `gh repo view ... -q .nameWithOwner` → a plain "owner/name" string ("O/N")
 #   - `gh api .../reviews`                → one Copilot review fixture
 #   - `gh api .../comments`               → one inline-comment fixture
 # It also records every `gh` invocation so the tests can assert that

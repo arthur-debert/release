@@ -192,11 +192,13 @@ def is_git_worktree(path: str) -> bool:
         # git not installed / not on PATH — preserve the documented "never
         # raises, returns False when git is unavailable" contract.
         return False
-    # `--is-inside-work-tree` exits 0 AND prints "false" when run inside a .git
-    # dir or a bare repo, so the exit code alone over-accepts; require the "true"
-    # output. Non-repo paths exit non-zero. True for both a clone root and a
-    # worktree (their working trees), which is the point.
-    return result.returncode == 0 and (result.stdout or "").strip() == "true"
+    # exit 0 ⟺ git resolves a repo of some kind here (a clone root, a linked
+    # worktree, or a $RELEASE_HOME we only read refs/trees from). A non-repo path
+    # exits non-zero. We deliberately accept exit 0 rather than require "true"
+    # output: this guard replaces the original os.path.isdir(.git) check, which
+    # also accepted any git dir — narrowing it to checked-out work trees only
+    # would over-reject (and breaks the $RELEASE_HOME guards' fixtures).
+    return result.returncode == 0
 
 
 # ──────────────────────────────────────────────────────────────────────────────
