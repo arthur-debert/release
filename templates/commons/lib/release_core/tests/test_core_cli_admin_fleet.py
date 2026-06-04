@@ -86,5 +86,5 @@ def test_no_leaf_is_a_stub_anymore(capsys):
         ["admin", "release", "betas", "--help"],
     ):
         rc = cli_entry.main(args)
-        capsys.readouterr()
-        assert rc == 0, args
+        captured = capsys.readouterr()
+        assert rc == 0, f"{args} exited {rc}\n{captured.out}\n{captured.err}"
