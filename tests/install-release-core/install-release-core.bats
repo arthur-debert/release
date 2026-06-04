@@ -5,7 +5,8 @@
 # applies the script's REAL --jq expression to fixture release JSON (so the
 # major-line filter, prerelease/draft exclusion, and exactly-one-wheel guard are
 # tested for real, not faked), and a stub `python3` records the pip invocation so
-# we can assert the --force-reinstall --no-deps install model.
+# we can assert the --force-reinstall install model (deps resolved from PyPI; no
+# --no-deps — release_core now declares real third-party deps).
 #
 # Requires `jq` (the stub applies the filter) — installed alongside bats in CI.
 
@@ -183,14 +184,20 @@ EOF
 }
 
 # --------------------------------------------------------------------------
-# install model: --force-reinstall --no-deps (the static-version fix)
+# install model: --force-reinstall, deps resolved (the static-version fix)
 # --------------------------------------------------------------------------
 
-@test "install: pip is invoked with --force-reinstall --no-deps and the URL" {
+@test "install: pip is invoked with --force-reinstall (no --no-deps) and the URL" {
   run "$BIN"
   [ "$status" -eq 0 ]
   line="$(cat "$PIP_LOG")"
-  [ "$line" = "-m pip install --force-reinstall --no-deps https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+  [ "$line" = "-m pip install --force-reinstall https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+}
+
+@test "install: pip is NOT invoked with --no-deps (deps must resolve)" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [[ "$(cat "$PIP_LOG")" != *"--no-deps"* ]]
 }
 
 @test "install: --print-url does NOT install (no pip call)" {
@@ -251,13 +258,13 @@ STUB
 @test "install: --user is passed through to pip" {
   run "$BIN" --user
   [ "$status" -eq 0 ]
-  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --no-deps --user https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --user https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
 }
 
 @test "install: --user --break-system-packages both passed through, in order" {
   run "$BIN" --user --break-system-packages
   [ "$status" -eq 0 ]
-  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --no-deps --user --break-system-packages https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --user --break-system-packages https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
 }
 
 @test "install: no extra pip flags by default (clean invocation)" {
@@ -276,7 +283,7 @@ STUB
   chmod +x stub/my-python
   PYTHON="$WORK/stub/my-python" run "$BIN"
   [ "$status" -eq 0 ]
-  [[ "$(cat "$PIP_LOG")" == "-m pip install --force-reinstall --no-deps "* ]]
+  [[ "$(cat "$PIP_LOG")" == "-m pip install --force-reinstall "* ]]
 }
 
 # --------------------------------------------------------------------------

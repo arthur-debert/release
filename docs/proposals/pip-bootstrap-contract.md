@@ -8,8 +8,8 @@
 ## The model (one sentence)
 
 Boot everywhere = **`install-release-core [--major vN]`** — the resolver
-`pip install`s the release_core wheel from the GitHub release (`--force-reinstall
---no-deps`; see §Transport) **and then runs `release-core init`** in the current
+`pip install`s the release_core wheel from the GitHub release (`--force-reinstall`,
+deps resolved from PyPI; see §Transport) **and then runs `release-core init`** in the current
 repo to materialize the per-repo committed bits. One command does the whole boot.
 Tools become console-scripts on PATH (current by install).
 
@@ -39,11 +39,13 @@ system layouts), best-effort so its failure never fails the resolver.
   filter is load-bearing **before any `v3` is cut**: the wheel version is a static
   `0.0.1` (not stamped from the tag), so `releases/latest` would hand a `v2`-pinned
   consumer a future `v3` wheel. `--major v2` keeps `@vN` honest.
-- Install is **`pip install --force-reinstall --no-deps "$url"`**, NOT `-U`.
-  Because the wheel version is static, `pip install -U` sees `0.0.1` already
-  satisfied and SKIPS it, defeating the pull model. `--force-reinstall` always
-  reinstalls; `--no-deps` because release_core is dependency-light (stdlib-only)
-  and a boot must never mutate the environment's other packages.
+- Install is **`pip install --force-reinstall "$url"`**, NOT `-U`. Because the
+  wheel version is static, `pip install -U` sees `0.0.1` already satisfied and
+  SKIPS it, defeating the pull model. `--force-reinstall` always reinstalls.
+  There is deliberately **no `--no-deps`**: release_core declares real
+  third-party dependencies (click) that pip resolves from PyPI on each boot. They
+  are pure-Python and PyPI is reachable wherever the release URL is (the wheel
+  arrives over that same network), so the boot stays a no-compile wheel pull.
 - **Exactly one** wheel asset must match per release; zero or many is a
   release-side packaging bug, surfaced loudly (exit 1), never silently installed.
 
