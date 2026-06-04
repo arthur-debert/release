@@ -577,6 +577,9 @@ def test_materialize_sources_release_home_overrides_bundle(tmp_path, monkeypatch
     repo.mkdir()
     clone = tmp_path / "clone"
     (clone / ".git").mkdir(parents=True)
+    # The guard now probes git (is_git_worktree) instead of os.path.isdir(.git),
+    # so this fake clone is reported as a work tree without a real `git init`.
+    monkeypatch.setattr(init.gh, "is_git_worktree", lambda path: True)
     monkeypatch.setenv("RELEASE_HOME", str(clone))
     monkeypatch.setattr(init, "_bundle_templates_root", lambda: tpl_root)
     monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "go-cli")

@@ -75,6 +75,40 @@ def test_status_to_dict_round_trips(context):
     }
 
 
+# --- REVIEWS_PENDING next-action wording (request vs re-request vs wait) ----
+
+
+def test_reviews_pending_never_requested_says_request(context):
+    # No review ever landed and Copilot is not requested → the action is to
+    # REQUEST (not wait), and it must NOT mention re-request/stale.
+    status = evaluate(context("copilot_never_requested"))
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "request for the current head" in status.next_action
+    assert "copilot" in status.next_action  # the reviewer is named in the clause
+    assert "RE-REQUEST" not in status.next_action
+    assert "stale" not in status.next_action
+
+
+def test_reviews_pending_stale_after_push_says_rerequest(context):
+    # Copilot reviewed an EARLIER commit; a push has moved the head and reset the
+    # request to not_requested. The action must distinguish this from a fresh
+    # request: RE-REQUEST for the current head, and name the staleness.
+    status = evaluate(context("copilot_stale_needs_rerequest"))
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "RE-REQUEST for the current head" in status.next_action
+    assert "stale after a push" in status.next_action
+    assert "copilot" in status.next_action
+
+
+def test_reviews_pending_already_requested_says_wait(context):
+    # Copilot is REQUESTED on the current head (no review yet) → just wait; the
+    # action must not tell the caller to (re-)request what is already pending.
+    status = evaluate(context("gemini_eyes_copilot_requested"))
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "wait (already requested on the current head)" in status.next_action
+    assert "RE-REQUEST" not in status.next_action
+
+
 # --- classify_checks ------------------------------------------------------
 
 

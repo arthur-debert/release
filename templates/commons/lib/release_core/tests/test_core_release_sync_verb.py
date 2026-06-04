@@ -106,6 +106,9 @@ def test_resolve_capabilities_yamlerror_returns_1_not_traceback(tmp_path, monkey
 
     rh = tmp_path / "release_home"
     (rh / ".git").mkdir(parents=True)
+    # The guard now probes git (is_git_worktree) instead of os.path.isdir(.git),
+    # so this fake clone is reported as a work tree without a real `git init`.
+    monkeypatch.setattr(release_sync.gh, "is_git_worktree", lambda path: True)
     monkeypatch.setenv("RELEASE_HOME", str(rh))
 
     consumer = tmp_path / "consumer"

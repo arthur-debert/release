@@ -218,7 +218,7 @@ def _materialize_config_sources(
     the wheel version on the bundle path), for use in the --commit message.
     """
     release_home = os.environ.get("RELEASE_HOME")
-    have_clone = bool(release_home) and os.path.isdir(os.path.join(release_home, ".git"))
+    have_clone = bool(release_home) and gh.is_git_worktree(release_home)
     tpl_root = _bundle_templates_root()
 
     kind = manifest.detect_kind(repo_root)
