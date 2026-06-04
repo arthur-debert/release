@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from release_gh.cli import task_status
+from release_core.prstate.cli import task_status
 
 
 def test_help_exits_zero(capsys):

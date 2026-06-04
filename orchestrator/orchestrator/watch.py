@@ -1,9 +1,9 @@
 """`orc watch` — poll a few PRs and act on lifecycle transitions.
 
 The detached, machine-stays-on transport for the PR state engine (release#338).
-NOT webhooks: a long-running local loop imports `release_gh.state` and polls
-each tracked PR (~zero agent tokens), dispatching only when a PR's lifecycle
-*state changes*. See issue #338 for the design.
+NOT webhooks: a long-running local loop imports `release_core.prstate.state` and
+polls each tracked PR (~zero agent tokens), dispatching only when a PR's
+lifecycle *state changes*. See issue #338 for the design.
 
 This module holds the pure decision logic (`decide`, `poll_once`) with all side
 effects behind an injected `Sink`, so the transition/dispatch behaviour is
@@ -18,9 +18,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from release_gh import gitstat
-from release_gh.fetch import gather
-from release_gh.state import TaskState, TaskStatus, evaluate
+from release_core.prstate import gitstat
+from release_core.prstate.fetch import gather
+from release_core.prstate.state import TaskState, TaskStatus, evaluate
 
 
 class Action(StrEnum):

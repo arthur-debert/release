@@ -5,7 +5,7 @@ description = "Local Python harness for multi-repo orchestration via the Claude 
 requires-python = ">=3.11"
 dependencies = [
     "claude-agent-sdk>=0.1.0",
-    "release-gh",
+    "release-core",
 ]
 
 [project.scripts]
@@ -19,4 +19,4 @@ build-backend = "hatchling.build"
 packages = ["orchestrator"]
 
 [tool.uv.sources]
-release-gh = { workspace = true }
+release-core = { workspace = true }

@@ -41,7 +41,7 @@ while exploring the SDK surface.
 ## `orc watch` — the detached PR transport (release#338)
 
 The poll-loop transport for the PR state engine. Instead of webhooks, a
-long-running local process imports `release_gh.state` and polls a few PRs
+long-running local process imports `release_core.prstate.state` and polls a few PRs
 (~zero agent tokens — it's `gh` calls, not an awake agent), dispatching only
 when a PR's lifecycle *state changes*.
 
@@ -162,8 +162,8 @@ branch, pass `--ref take-iii` explicitly.
 - `orchestrator/cli.py` — `orc` entry point
 - `orchestrator/session.py` — `run_session()` wrapping `ClaudeSDKClient`
 - `orchestrator/watch.py` — `orc watch` poll-loop + pure `decide()` dispatch
-  (imports `release_gh.state`; lazy-imports the SDK so its logic unit-tests
-  without it — `tests/python/test_watch.py`)
+  (imports `release_core.prstate.state`; lazy-imports the SDK so its logic
+  unit-tests without it — `templates/commons/lib/release_core/tests/test_prstate_watch.py`)
 - `orchestrator/state.py` — JSON-backed `{repo_path: session_id}` store
   at `~/.local/state/release-orchestrator/sessions.json`
 - `tests/spike.sh` — end-to-end smoke check

@@ -84,9 +84,9 @@ pre-commit:
         SHELLCHECK_OPTS='-S warning' actionlint -color
 
     ruff:
-      # Lint + format-check the Python workspace (release_gh + orchestrator)
+      # Lint + format-check the Python workspace (release_core + orchestrator)
       # PLUS the extensionless Python shims under bin/ and templates/commons/bin/
-      # (changelog, gh-task-status, release-*, …) which carry no .py extension.
+      # (changelog, release-*, …) which carry no .py extension.
       # Config lives at the workspace-root pyproject.toml [tool.ruff]. Mirrors
       # the CI `py-lint` job.
       #
@@ -101,7 +101,6 @@ pre-commit:
       glob:
         - "templates/commons/lib/**/*.py"
         - "orchestrator/**/*.py"
-        - "tests/python/**/*.py"
         - "bin/**"
         - "app-bin/**"
         - "templates/commons/bin/**"

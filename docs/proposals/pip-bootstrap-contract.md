@@ -104,6 +104,13 @@ into `templates/commons/bin/` **and** the variant-b real files in `bin/`).
 `fetch-deps` and `fetch-artifact` are **NOT** in this table yet — they are still
 bash (Bucket-C); folding them in is a follow-up (see §5).
 
+`gh-task-status` is now in this table too (release#459): the PR state engine
+that backed it (the standalone, sync-distributed `release_gh` package) was folded
+into `release_core` as the `release_core.prstate` subpackage, so it ships from
+this one wheel over the one channel instead of by sync. The synced
+`bin/gh-task-status` shim and `lib/release_gh` tree were retired — one package,
+one channel.
+
 **Invariant:** for every tool, `<name> --help` via the installed console-script
 must produce byte-identical output to the current `bin/<name> --help`. The
 existing `tests/test_core_*` suite must stay green.

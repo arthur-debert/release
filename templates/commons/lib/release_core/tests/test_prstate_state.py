@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from release_gh.state import (
+from release_core.prstate.state import (
     ChecksState,
     TaskState,
     classify_checks,

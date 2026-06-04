@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from orchestrator.watch import Action, Sink, build_fixer_prompt, decide, poll_once, run
-from release_gh.state import ChecksState, TaskState, TaskStatus
+from release_core.prstate.state import ChecksState, TaskState, TaskStatus
 
 
 def status(state: TaskState, *, breaker: str | None = None) -> TaskStatus:

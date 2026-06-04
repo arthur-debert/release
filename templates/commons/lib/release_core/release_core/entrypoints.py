@@ -7,14 +7,17 @@ plumbing — they keep their pure ``main(argv: list[str]) -> int`` signature.
 The ``[project.scripts]`` table in ``pyproject.toml`` maps each on-PATH command
 name (hyphenated, matching today's ``bin/`` shims) to one wrapper here. The set
 of wrappers == exactly the ``bin/`` shims that dispatch to ``release_core``.
-Bash tools (``fetch-deps``/``fetch-artifact``/``gh-*``/``clone-*``) and
-``release_gh``-backed tools (``gh-task-status``) are intentionally absent.
+Bash tools (``fetch-deps``/``fetch-artifact``/``gh-*``/``clone-*``) are
+intentionally absent. ``gh-task-status`` is here too: the PR state engine was
+folded in (``release_core.prstate``; release#459), so it ships as a console
+script from the one wheel instead of by sync.
 """
 
 from __future__ import annotations
 
 import sys
 
+from release_core.prstate.cli import task_status
 from release_core.verbs import (
     apply_ruleset,
     audit_portfolio,
@@ -90,6 +93,10 @@ def enable_dependabot_security_main() -> None:
 
 def gh_release_issue_main() -> None:
     raise SystemExit(gh_release_issue.main(sys.argv[1:]))
+
+
+def gh_task_status_main() -> None:
+    raise SystemExit(task_status.main(sys.argv[1:]))
 
 
 def install_release_secrets_main() -> None:

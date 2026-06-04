@@ -20,7 +20,7 @@ templates/commons/; see CONFIG_FILES below and sync.py for provenance):
   .prettierignore
 
 NOT in scope (deliberately small seam — the full sync->init migration is post-PoC):
-  - package code (lib/release_core/**, lib/release_gh/**) — arrives via pip
+  - package code (lib/release_core/**, incl. the folded prstate engine) — via pip
   - release-internal files (.release-sync-source, ORIENTATION.md)
   - the CLAUDE.md orientation block, skills, .claude/settings.json, CHANGELOG/
   - git-hook wiring (stays in setup-dev-env.sh)

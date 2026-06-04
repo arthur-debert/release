@@ -18,9 +18,11 @@ dependencies = ["click>=8,<9"]
 # Console-scripts: each on-PATH command name (hyphenated, matching today's
 # bin/<name> shims exactly) → its zero-arg wrapper in release_core.entrypoints.
 # The set == exactly the bin/ shims that dispatch to release_core. Bash tools
-# (fetch-deps, fetch-artifact, gh-*, clone-*, migrate-*) and the release_gh-
-# backed gh-task-status are intentionally absent. hatchling installs these as
-# console-scripts by default (no extra config needed).
+# (fetch-deps, fetch-artifact, gh-*, clone-*, migrate-*) are intentionally
+# absent. gh-task-status IS here: the PR state engine was folded in
+# (release_core.prstate; release#459), so it ships from this wheel instead of by
+# sync. hatchling installs these as console-scripts by default (no extra config
+# needed).
 # The top-level `release-core` CLI (release_core.cli_entry:main) — the `init`
 # subcommand dispatcher (PoC §2) — is registered here alongside the per-verb
 # scripts so `release-core init` lands on PATH from the same wheel install.
@@ -38,6 +40,7 @@ detect-kind = "release_core.entrypoints:detect_kind_main"
 done-check = "release_core.entrypoints:done_check_main"
 enable-dependabot-security = "release_core.entrypoints:enable_dependabot_security_main"
 gh-release-issue = "release_core.entrypoints:gh_release_issue_main"
+gh-task-status = "release_core.entrypoints:gh_task_status_main"
 install-release-secrets = "release_core.entrypoints:install_release_secrets_main"
 install-release-token = "release_core.entrypoints:install_release_token_main"
 list-repo-pr = "release_core.entrypoints:list_repo_pr_main"
