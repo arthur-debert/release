@@ -162,6 +162,15 @@ lex-fmt/lex v0.9.1.
   Don't whack-a-mole per file: run `lefthook run pre-commit --all-files` and
   categorize the whole repo once. Release-owned file failing the gate = release
   bug; consumer-owned = fix there.
+- **Every feature/fix PR adds a changelog fragment — in the same PR.** Run
+  `changelog add <slug> "<one-line summary>"` (writes
+  `CHANGELOG/unreleased-<slug>.md`); never hand-edit `CHANGELOG.md` (it is
+  rendered at release-cut, not in feature PRs). The release **refuses to cut
+  without a fragment** (the prepare gate fails on "No CHANGELOG/unreleased-\*.md
+  fragments found"), so a fragment-less merge silently blocks the next release
+  until someone backfills it. This applies to PRs against this repo itself, not
+  just consumers — the consumer-facing version of this rule lives in
+  `templates/commons/ORIENTATION.md`.
 - **Bug fixes go here, not in consumers.** A bug surfaced by a
   consumer is fixed here, tagged as a PATCH, and the `v1` branch
   advanced. Consumers re-run; nothing for them to edit.
