@@ -50,10 +50,18 @@ load helper
   done
 }
 
-@test "a multi-file skill (tdd) distributes ALL its files, not just SKILL.md" {
+@test "a multi-file skill (tdd) distributes EVERY source file, not just SKILL.md" {
   "$BIN/release-sync" >/dev/null
-  for f in SKILL.md mocking.md tests.md refactoring.md; do
-    [ -f ".release/.claude/skills/tdd/$f" ] || { echo "missing tdd/$f"; false; }
+  # Derive the expected file set from the source tree at the synced ref, so this
+  # catches a regression that drops ANY file (not just a hardcoded subset). tdd
+  # is multi-file (asserted below); each source blob must land materialized +
+  # symlinked. (.upstream is skipped by sync's should_skip_source? No — only the
+  # documented skip-list is dropped; .upstream IS distributed, so it's expected.)
+  mapfile -t src < <(git -C "$RELEASE_HOME" ls-tree -r --name-only "$RELEASE_REF" -- skills/tdd \
+                       | sed 's,^skills/tdd/,,')
+  [ "${#src[@]}" -gt 1 ]  # genuinely multi-file (guards the premise)
+  for f in "${src[@]}"; do
+    [ -f ".release/.claude/skills/tdd/$f" ] || { echo "missing materialized tdd/$f"; false; }
     [ -L ".claude/skills/tdd/$f" ]          || { echo "no symlink tdd/$f"; false; }
   done
 }

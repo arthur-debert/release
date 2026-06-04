@@ -38,11 +38,11 @@ Skills
     tree. A consumer owns ONLY its own application-domain skills — anything
     specific to that project's subject matter.
 
-    Why: a hand-copied infra skill drifts. We found a consumer running a stale
-    157-line `pr-review-respond` against release's official 278-line copy
-    because nothing kept the local copy in step. The distribution mechanism
-    (§4) closes that gap — the consumer's copy is a symlink to the synced
-    official blob, so it cannot fall behind.
+    Why: a hand-copied infra skill drifts. We found a consumer running a stale,
+    much-shortened `pr-review-respond` against release's official copy because
+    nothing kept the local copy in step. The distribution mechanism (§4) closes
+    that gap — the consumer's copy is a symlink to the synced official blob, so
+    it cannot fall behind.
 
 3. The Three Distribution Tiers
 
