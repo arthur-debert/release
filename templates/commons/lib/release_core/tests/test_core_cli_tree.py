@@ -119,7 +119,15 @@ def test_pr_status_dispatches_to_task_status_help(capsys):
 
 
 def test_invoking_a_stub_leaf_exits_69(capsys):
-    rc = cli_entry.main(["detect-kind"])
+    # Exercise the stub-leaf factory itself on a THROWAWAY group, so the test no
+    # longer depends on any real (now-implemented) command staying a stub.
+    root = click.Group(name="x")
+    root.add_command(toplevel._stub_command("synth", "A synthetic stub leaf."))
+    try:
+        root.main(args=["synth"], prog_name="x", standalone_mode=False)
+        rc = 0
+    except SystemExit as exc:
+        rc = exc.code if isinstance(exc.code, int) else 1
     err = capsys.readouterr().err
     assert rc == 69
     assert "stub" in err.lower()
@@ -127,7 +135,17 @@ def test_invoking_a_stub_leaf_exits_69(capsys):
 
 def test_stub_leaf_with_extra_args_still_exits_69(capsys):
     # Any flags/args land on the stub-exit path (69), not click's usage error.
-    rc = cli_entry.main(["detect-kind", "--json", "extra", "-x"])
+    root = click.Group(name="x")
+    root.add_command(toplevel._stub_command("synth", "A synthetic stub leaf."))
+    try:
+        root.main(
+            args=["synth", "--json", "extra", "-x"],
+            prog_name="x",
+            standalone_mode=False,
+        )
+        rc = 0
+    except SystemExit as exc:
+        rc = exc.code if isinstance(exc.code, int) else 1
     err = capsys.readouterr().err
     assert rc == 69
     assert "stub" in err.lower()
@@ -142,9 +160,11 @@ def test_stub_leaf_help_is_still_reachable(capsys):
 
 
 def test_bare_empty_stub_group_exits_69_not_silent_0(capsys):
-    # An EMPTY stub group (changelog/ci/admin inbox) invoked bare prints help +
+    # An EMPTY stub group (still-stub admin inbox) invoked bare prints help +
     # a stub note and exits 69 — never a silent exit 0 (Copilot review #463).
-    for args in (["changelog"], ["ci"], ["admin", "inbox"]):
+    # (`changelog` and `ci` are now implemented groups — their bare behavior is
+    # covered by the toplevel suite + the missing-command test below.)
+    for args in (["admin", "inbox"],):
         rc = cli_entry.main(args)
         captured = capsys.readouterr()
         assert rc == 69, args
