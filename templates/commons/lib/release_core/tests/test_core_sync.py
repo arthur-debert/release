@@ -28,6 +28,13 @@ from release_core import sync
         ("templates/rust-cli/manifest.yaml", True),
         ("templates/components/_lefthook-base.yaml", True),
         ("templates/commons/.DS_Store", True),
+        # Bytecode never materializes into a consumer's .release/ (release#450).
+        ("templates/commons/lib/release_core/release_core/__pycache__/cli.cpython-313.pyc", True),
+        ("templates/commons/lib/release_core/release_core/sync.pyc", True),
+        ("templates/commons/lib/release_core/release_core/sync.pyo", True),
+        # path-segment match, not a loose substring: a file merely *named* with
+        # the substring is kept (it's a real authored source, not bytecode).
+        ("templates/commons/docs/my__pycache__notes.md", False),
         ("templates/commons/bin/check", False),
         ("templates/commons/lefthook.yml", False),
     ],
@@ -53,6 +60,7 @@ def test_needs_real_file(dest, real):
     ("dest", "internal"),
     [
         (".release-sync-source", True),
+        (".gitignore", True),  # managed .release/.gitignore — release#450
         ("lib/release_gh/release_gh/state.py", True),
         ("lib/release_core/release_core/sync.py", True),
         ("ORIENTATION.md", True),
@@ -278,6 +286,8 @@ def test_build_plan_skips_skip_sources(monkeypatch):
         "100644 blob a\ttemplates/commons/manifest.yaml\n"
         "100644 blob b\ttemplates/commons/lefthook.fragment.yaml\n"
         "100644 blob c\ttemplates/commons/.DS_Store\n"
+        "100644 blob e\ttemplates/commons/lib/rc/__pycache__/cli.cpython-313.pyc\n"
+        "100644 blob f\ttemplates/commons/lib/rc/cli.pyc\n"
         "100644 blob d\ttemplates/commons/bin/real\n"
     )
     monkeypatch.setattr(
@@ -287,7 +297,26 @@ def test_build_plan_skips_skip_sources(monkeypatch):
     )
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
     plan = sync.build_plan("/home", "ref", "tree-sitter", [])
-    assert plan.order == ["bin/real"]
+    assert plan.order == ["bin/real"]  # bytecode + skip-sources dropped
+
+
+def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
+    """materialize() always writes a managed .release/.gitignore covering
+    bytecode, alongside the planned blobs (release#450)."""
+    plan = sync.Plan()
+    plan.order = ["bin/real"]
+    plan.mode = {"bin/real": "100644"}
+    plan.source = {"bin/real": "templates/commons/bin/real"}
+
+    monkeypatch.setattr(sync.gh, "git_show_bytes", lambda spec, *, cwd: b"#!/bin/sh\n")
+    sync.materialize("/home", "ref", "deadbeef" * 5, plan, str(tmp_path))
+
+    gi = tmp_path / ".gitignore"
+    assert gi.is_file()
+    body = gi.read_text()
+    assert "__pycache__/" in body
+    assert "*.pyc" in body
+    assert "*.pyo" in body
 
 
 # ── find-style traversal order (the report-ordering contract) ─────────────────

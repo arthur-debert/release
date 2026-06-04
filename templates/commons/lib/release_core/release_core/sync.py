@@ -24,6 +24,15 @@ from . import gh
 
 MANAGED_MARKER = "# Managed by release-sync — do not edit. Regenerate via release-sync."
 SOURCE_MARKER = ".release-sync-source"
+GITIGNORE_FILE = ".gitignore"
+GITIGNORE_BODY = (
+    f"{MANAGED_MARKER}\n"
+    "# Keeps host/Python-version-specific bytecode out of the committed .release/\n"
+    "# even if a local regeneration writes it on disk (release#450).\n"
+    "__pycache__/\n"
+    "*.pyc\n"
+    "*.pyo\n"
+)
 
 CLAUDE_FILE = "CLAUDE.md"
 CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
@@ -38,12 +47,24 @@ PR_LOOP_SKILL_DEST = ".claude/skills/gh-pr-review-loop/SKILL.md"
 
 def should_skip_source(rel: str) -> bool:
     """Mirror should_skip_source(): drop lefthook.fragment.yaml, manifest.yaml,
-    templates/components/_*, and *.DS_Store."""
+    templates/components/_*, and *.DS_Store.
+
+    Also drops Python bytecode (__pycache__/, *.pyc, *.pyo): host- and
+    Python-version-specific build artifacts that must never be materialized into
+    a consumer's .release/ (release#450). The release repo gitignores these, so
+    a clean ls-tree never lists them — this is defense-in-depth for a future
+    source tree that tracks them, paired with the managed .release/.gitignore."""
     if rel.endswith("/lefthook.fragment.yaml"):
         return True
     if rel.endswith("/manifest.yaml"):
         return True
     if rel.startswith("templates/components/_"):
+        return True
+    # git paths are always '/'-separated, so a path-segment test is exact:
+    # match a __pycache__ dir anywhere in the path, plus loose .pyc/.pyo files.
+    if "/__pycache__/" in f"/{rel}":
+        return True
+    if rel.endswith((".pyc", ".pyo")):
         return True
     return rel.endswith(".DS_Store")
 
@@ -56,9 +77,12 @@ def needs_real_file(dest: str) -> bool:
 
 def is_release_internal(dest: str) -> bool:
     """Mirror is_release_internal(): content materialized into .release/ but NOT
-    mirrored out as a symlink/copy. The provenance marker, the Python engine
-    packages (lib/release_gh/*, lib/release_core/*), and ORIENTATION.md."""
+    mirrored out as a symlink/copy. The provenance marker, the managed .gitignore
+    (release#450), the Python engine packages (lib/release_gh/*,
+    lib/release_core/*), and ORIENTATION.md."""
     if dest == SOURCE_MARKER:
+        return True
+    if dest == GITIGNORE_FILE:
         return True
     if dest.startswith("lib/release_gh/"):
         return True
@@ -287,6 +311,12 @@ def materialize(release_home: str, ref: str, ref_sha: str, plan: Plan, tmp_relea
 
     if plan.lefthook_frags:
         _write_lefthook(release_home, ref, ref_sha, plan.lefthook_frags, tmp_release)
+
+    # Managed .gitignore (release#450): keeps bytecode out of the committed
+    # .release/ even when a consumer regenerates from the working tree.
+    gitignore = os.path.join(tmp_release, GITIGNORE_FILE)
+    with open(gitignore, "w", encoding="utf-8") as fh:
+        fh.write(GITIGNORE_BODY)
 
     # Provenance marker (ADR-0002): static comment lines + the full source SHA.
     marker = os.path.join(tmp_release, SOURCE_MARKER)
