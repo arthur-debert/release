@@ -1,1 +1,0 @@
-tooling fixes: add gh-copilot-show (read a Copilot review without re-requesting), reviewer-agnostic PR-state next-action wording, release-sync now works inside a git worktree, gh-task-status restored on PATH, and clearer CHANGELOG fragment guidance
