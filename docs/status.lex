@@ -29,7 +29,7 @@ Getting here was a long and error-prone path while we experimented and dealt wit
 
     3.2. Missing Kind Templates
 
-        - bin/release for each Kind (currently bespoke shims in consumers, all identical thin callers of release-cut).
+        - Kind-aware cut is handled by the `release-core cut` console-script (the per-repo `bin/release` shim was retired in #476).
         - fetch-deps: support platform-templated dest paths (issue 271), removing app-bin hacks for artifact fetching.
 
     3.3. Shared Workflows and Actions

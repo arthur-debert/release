@@ -55,8 +55,6 @@ Injected Files
         | bin/check-gate | bin/check-gate | symlink |
         | bin/changelog, changelog-add/-cut/-render | bin/changelog* | symlink |
         | bin/semver | bin/semver | symlink |
-        | bin/gh-release-issue | bin/gh-release-issue | symlink |
-        | bin/release | bin/release | symlink |
         | .markdownlint.json, .markdownlintignore | (root) | symlink |
         | .yamllint, .shellcheckrc, .prettierignore | (root) | symlink |
         | .editorconfig | .editorconfig | symlink |

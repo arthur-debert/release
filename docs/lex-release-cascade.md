@@ -36,9 +36,10 @@ The automation is built in two layers. Each layer is independently useful and ca
 > `trigger-release`). Those were **retired**. There are no per-repo release
 > scripts anymore: release is driven by the managed `bin/` tooling that
 > `release-sync` materializes into every consumer —
-> [`bin/diff-since-release`](#binbin-diff-since-release) and
-> [`bin/release`](#binrelease-release-cut). The orchestrator and the
-> event-cascade handler both compose those two managed tools.
+> [`bin/diff-since-release`](#binbin-diff-since-release) and the Kind-aware
+> [`release-core cut`](#release-core-cut-formerly-the-binrelease-shim-retired-in-476).
+> The orchestrator drives those; the event-cascade handler decides via plain git
+> and dispatches `release.yml` directly.
 
 ### The managed release tools
 
@@ -58,15 +59,18 @@ It is the source for both "**is there anything to release?**" (a non-empty log
 section after the `---`) and "**what changed?**". Pre-release tags (`-rc.N`) are
 skipped, so the diff is against the last *final* release.
 
-#### `bin/release` (= `release-cut`)
+#### `release-core cut` (formerly the `bin/release` shim, retired in #476)
 
-`bin/release` is a thin shim that execs `release-cut` from
-`arthur-debert/release`. It is **Kind-aware**: it reads the current version from
-the consumer's canonical manifest source (`Cargo.toml`, `package.json`,
-`extension.toml`, or the latest git tag for manifest-less Kinds), computes the
-new version from a bump shortcut (`patch`/`minor`/`major`) or a literal
-`X.Y.Z[-PRERELEASE]`, and **dispatches `.github/workflows/release.yml`** with
-that version.
+`release-core cut` is the Kind-aware release entry point. The thin `bin/release`
+shim that used to exec it was retired in #476 — `release-core cut` is reached
+directly as the pip console-script (on the maintainer's PATH for the local
+orchestrator) or, in the event cascade, the handler dispatches `release.yml`
+itself with the explicit version. It is **Kind-aware**: it reads the current
+version from the consumer's canonical manifest source (`Cargo.toml`,
+`package.json`, `extension.toml`, or the latest git tag for manifest-less
+Kinds), computes the new version from a bump shortcut (`patch`/`minor`/`major`)
+or a literal `X.Y.Z[-PRERELEASE]`, and **dispatches
+`.github/workflows/release.yml`** with that version.
 
 Everything that mutates state then runs **in CI**: the reusable per-Kind release
 workflow (`rust-cli.yml`, `tauri-app.yml`, …) does the version bump, the
@@ -98,7 +102,7 @@ all happen in CI via the reusable workflow.
 
 ### Layer 1 — local orchestrator (`release-core admin release lex`)
 
-`release-core admin release lex` (flat alias: `release-lex`) walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `bin/release` to cut) in sequence. Useful for:
+`release-core admin release lex` (flat alias: `release-lex`) walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `release-core cut` to cut) in sequence. Useful for:
 
 - **Local debugging** — surface primitive bugs in isolation (the `--dry-run` mode echoes every step without making changes).
 - **Recovery** — re-run from a known-good point if a cascade gets wedged mid-flight.
@@ -122,7 +126,7 @@ release-core admin release lex --status \
 Every repo's `release.yml` ends with a `notify-downstreams` step that fires `repository_dispatch` events to its direct consumers. Every downstream repo has a `.github/workflows/on-upstream-released.yml` handler that:
 
 1. Receives the dispatch
-2. Decides via `bin/diff-since-release` (commits since the last final release?) → if yes, runs `bin/release <bump-kind>`, which dispatches `release.yml`; CI does the bump + CHANGELOG roll + commit + tag + build + release
+2. Decides whether to release (commits since the last final release?) → if yes, dispatches `release.yml` with the derived version; CI does the bump + CHANGELOG roll + commit + tag + build + release
 3. Cutting this repo's release fires its own `notify-downstreams` → fans further down the chain
 
 #### The cascade flow
@@ -133,7 +137,7 @@ push tag v0.16.3 to comms
     → notify-downstreams fires repository_dispatch upstream-released
         → lex/on-upstream-released.yml
             → diff-since-release: commits present (comms submodule stale)
-            → bin/release patch → dispatches release.yml (workflow_dispatch)
+            → dispatch release.yml patch (workflow_dispatch)
                 → rust-cli@v1 bumps + rolls CHANGELOG + commits + tags + publishes
                   crates + builds binaries v0.x.y
                     → lex/release.yml notify-downstreams fires upstream-released to editors
@@ -142,7 +146,7 @@ push tag v0.16.3 to comms
                 → notify-downstreams fires to editors
                     → vscode/nvim/lexed handlers each fire
                         → diff-since-release: commits present (multiple pins stale)
-                        → bin/release patch → cut their own release
+                        → dispatch release.yml patch → cut their own release
 ```
 
 #### Two-hop cascade for editors
@@ -207,7 +211,7 @@ Add `--dry-run` to echo every step without doing anything. Add `--only repo1,rep
 
 ### Recovery: a handler failed mid-cascade
 
-The cascade is idempotent at the decide level — if a handler failed before its `release.yml` CI committed the tag, you can re-fire the same dispatch and it'll resume cleanly (`bin/diff-since-release` still shows commits). If a handler failed after the tag landed, the next attempt sees an empty `diff-since-release` (everything's caught up) and exits cleanly; you only need to re-fire the *release CI* (e.g. `gh workflow run release.yml --repo lex-fmt/lex -f version=X.Y.Z`, or `bin/release X.Y.Z` from a clone).
+The cascade is idempotent at the decide level — if a handler failed before its `release.yml` CI committed the tag, you can re-fire the same dispatch and it'll resume cleanly (the decide step still sees commits). If a handler failed after the tag landed, the next attempt sees no new commits (everything's caught up) and exits cleanly; you only need to re-fire the *release CI* (e.g. `gh workflow run release.yml --repo lex-fmt/lex -f version=X.Y.Z`, or `release-core cut X.Y.Z` from a clone).
 
 Manual dispatch fire (handler will re-evaluate):
 
@@ -224,9 +228,9 @@ These all appeared at least once during the cascade's first cut. Documented so f
 
 ### Handler gotchas (the parts the cascade-handler still owns)
 
-1. **`GH_TOKEN` on every `gh`-using step.** The handler's `Decide` and `Cut release` steps run `bin/diff-since-release` / `bin/release`, and `bin/release`'s `gh workflow run` needs auth. Without `env: GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}` on those steps, `gh` fails auth and the handler bails.
+1. **`GH_TOKEN` on every `gh`-using step.** The handler's `Decide` and `Cut release` steps run `gh` (the `Cut release` step's `gh workflow run` dispatch needs auth). Without `env: GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}` on those steps, `gh` fails auth and the handler bails.
 2. **Shell-injection on payload reads.** `${{ github.event.client_payload.X }}` interpolated directly into a `run:` is a code-execution vector if the upstream is compromised. Always route through `env:`.
-3. **`bin/release` only *dispatches*; CI owns the mutation.** The handler no longer bumps files, commits, opens a PR, or admin-merges. `bin/release <bump>` fires `release.yml`; the reusable per-Kind workflow does the bump + CHANGELOG roll + commit + tag + build + release. So all the old "local pre-bump" gotchas (annotated tags, `git reset --hard` after merge, stale-branch cleanup, UNRELEASED.md seed) now live in the reusable workflow / `prepare-release` action, not in the handler.
+3. **The handler only *dispatches*; CI owns the mutation.** The handler no longer bumps files, commits, opens a PR, or admin-merges. It fires `release.yml`; the reusable per-Kind workflow does the bump + CHANGELOG roll + commit + tag + build + release. So all the old "local pre-bump" gotchas (annotated tags, `git reset --hard` after merge, stale-branch cleanup, UNRELEASED.md seed) now live in the reusable workflow / `prepare-release` action, not in the handler.
 
 ### Reusable-workflow (CI) gotchas — now handled where the mutation happens
 
@@ -234,7 +238,7 @@ These were originally handler/primitive concerns; after the `scripts/release` re
 
 4. **Annotated tags, not lightweight.** `release.yml` reads the tag message via `git tag -l --format='%(contents)'`; the workflow's tag step uses `git tag -a`. Manual cuts must too.
 5. **`--allow-same-version` on `npm version`.** Where the workflow bumps `package.json` then runs `npm version <tag>`, the flag avoids the "Version not changed" error if the bump already matched.
-6. **Manifest may drift behind tags.** `release-cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `bin/release` / the orchestrator.
+6. **Manifest may drift behind tags.** `release-cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `release-core cut` / the orchestrator.
 7. **Resume-on-existing-tag in `arthur-debert/release/.github/actions/prepare-release`.** When a reusable workflow sees an existing tag matching the requested version, it validates the manifest matches and skips the bump+commit+tag — making re-dispatch idempotent.
 8. **CHANGELOG / UNRELEASED.md.** The CI bump requires Keep-a-Changelog `## [Unreleased]`; the workflow handles the empty-UNRELEASED seed for cascade runs that carry no human-authored notes.
 
@@ -242,7 +246,7 @@ These were originally handler/primitive concerns; after the `scripts/release` re
 
 Three pieces. None is hard individually; the order matters.
 
-1. **Sync the managed release tooling.** Run `release-sync` in the new repo so it carries `bin/diff-since-release` + `bin/release` (and add a `.github/workflows/release.yml` thin caller of the right reusable per-Kind workflow). No per-repo release scripts to author — `release-cut` is Kind-aware.
+1. **Sync the managed release tooling.** Run `release-sync` in the new repo so it carries `bin/diff-since-release` (and add a `.github/workflows/release.yml` thin caller of the right reusable per-Kind workflow). Cutting goes through the `release-core cut` console-script — no per-repo release scripts to author — and it is Kind-aware.
 2. **Add `.github/workflows/on-upstream-released.yml`.** Use the
    reusable workflow (recommended) — a 6-line thin caller:
 

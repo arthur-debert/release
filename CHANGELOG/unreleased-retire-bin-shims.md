@@ -1,0 +1,1 @@
+retired the redundant consumer `bin/gh-release-issue`, `bin/gh-task-status`, and `bin/release` shims in favor of the pip-installed `gh-release-issue` / `gh-task-status` console-scripts and `release-core cut`; the cascade handler now dispatches `release.yml` directly and `done-check` probes `release.yml` instead of the retired `bin/release` (#476)

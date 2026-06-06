@@ -5,7 +5,7 @@ description: "Escalate infrastructure friction (workflow failures, ruleset misbe
 
 # release-issue-relay
 
-Portable port of `release/bin/gh-release-issue`, with dedupe-via-search added on top. This skill is the **read-side** half of the sustainability loop: when an agent at a consumer repo hits infrastructure friction, unblock locally and then escalate the symptom upstream so the fix lives at the source.
+Portable port of the `gh-release-issue` / `release-core issue file` escalation tool, with dedupe-via-search added on top. This skill is the **read-side** half of the sustainability loop: when an agent at a consumer repo hits infrastructure friction, unblock locally and then escalate the symptom upstream so the fix lives at the source.
 
 ## The hard rule about scope
 

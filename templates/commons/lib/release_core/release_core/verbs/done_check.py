@@ -233,6 +233,16 @@ def check_local(repo: str, verb: str) -> str:
     return f"FAIL|bin/{verb} missing"
 
 
+def check_release_local(repo: str) -> str:
+    """Local release wiring on the default branch. Cutting goes through the
+    `release-core cut` console-script (the per-repo `bin/release` shim was
+    retired in #476), so the local signal is the `.github/workflows/release.yml`
+    thin caller, not a `bin/` task."""
+    if _file_exists(repo, ".github/workflows/release.yml"):
+        return "PASS|release.yml"
+    return "FAIL|release.yml missing"
+
+
 def _default_branch(repo: str) -> str:
     try:
         obj = gh.rest(f"repos/{repo}")
@@ -328,7 +338,8 @@ def aggregate(repo: str, stack: str, ci_result: str, per_verb: dict[str, str]) -
     for verb in verbs:
         if verb == "release":
             rel_state, _, rel_msg = per_verb["release"].partition("|")
-            # The local column for `release` reflects bin/release's presence,
+            # The local column for `release` reflects the release.yml thin
+            # caller's presence (the `bin/release` shim was retired in #476),
             # carried in per_verb under the "release:local" key.
             local_for_release = per_verb["release:local"]
             local_state, _, local_msg = local_for_release.partition("|")
@@ -518,7 +529,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     for verb in _VERBS_FOR_STACK[stack]:
         if verb == "release":
             per_verb["release"] = check_release(repo, stack)
-            per_verb["release:local"] = check_local(repo, verb)
+            per_verb["release:local"] = check_release_local(repo)
         else:
             per_verb[verb] = check_local(repo, verb)
 

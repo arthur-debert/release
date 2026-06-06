@@ -14,10 +14,11 @@ coordinated with all consumers before cutting.
 > (`get-current-version`, `get-commits-since-release`, `should-release`,
 > `update-release`, `trigger-release`). Those primitives were **retired** —
 > there are no per-repo release scripts anymore. Release is driven by the
-> managed `bin/` tooling synced into every consumer: `bin/diff-since-release`
-> (what changed / should-release) and `bin/release` (= `release-cut`, which
-> reads the version from the Kind manifest and dispatches `release.yml`; CI
-> does the bump + CHANGELOG roll + commit + tag + build). The historical
+> managed `bin/diff-since-release` (what changed / should-release) tooling
+> synced into every consumer, plus the `release-core cut` console-script
+> (formerly the `bin/release` shim, retired in #476) which reads the version
+> from the Kind manifest and dispatches `release.yml`; CI does the bump +
+> CHANGELOG roll + commit + tag + build. The historical
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
