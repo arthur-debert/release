@@ -1222,6 +1222,17 @@ def test_no_commit_without_full_is_bad_usage(capsys):
     assert "only valid with --full" in err
 
 
+def test_commit_or_force_with_full_is_bad_usage(capsys):
+    # In --full, commit is automatic and overwrite unconditional — explicit
+    # --commit is redundant and --force a no-op; both are rejected (fail loud).
+    rc_commit = init.main(["--full", "--commit"])
+    assert rc_commit == 64
+    assert "not valid with --full" in capsys.readouterr().err
+    rc_force = init.main(["--full", "--force"])
+    assert rc_force == 64
+    assert "not valid with --full" in capsys.readouterr().err
+
+
 @_needs_yq
 @_needs_git
 def test_full_surfaces_conflicts(tmp_path, monkeypatch, capsys):

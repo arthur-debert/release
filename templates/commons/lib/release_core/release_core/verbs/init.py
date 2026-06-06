@@ -674,6 +674,18 @@ def main(argv: list[str] | None = None) -> int:
     if no_commit and not full:
         print("release-core init: --no-commit is only valid with --full", file=sys.stderr)
         return 64
+    # In --full the commit is automatic (auto-commit-on-change; --no-commit to
+    # skip) and the materialize overwrites unconditionally — so an explicit
+    # --commit is redundant and --force is a no-op. Reject rather than silently
+    # ignore (fail loud). Check the RAW --commit value, not the push-derived
+    # `commit` — --push IS valid with --full.
+    if full and (values["commit"] or force):
+        print(
+            "release-core init: --commit/--force are not valid with --full "
+            "(it auto-commits managed changes; use --no-commit to skip)",
+            file=sys.stderr,
+        )
+        return 64
 
     try:
         repo_root = gh.repo_root()
