@@ -297,9 +297,11 @@ jobs:
             exit 1
           fi
           git commit -qm 'offline init --config-only'
-          # Idempotent: a second offline run is a clean no-op.
+          # Idempotent: a second offline run is a clean no-op — assert via
+          # `git status --porcelain` (empty == clean) so a stray UNTRACKED managed
+          # file is caught too (git diff alone misses untracked).
           release-core init --config-only
-          if ! git diff --quiet || ! git diff --cached --quiet; then
+          if [ -n "$(git status --porcelain)" ]; then
             echo "ERROR: second offline 'release-core init --config-only' was not a no-op:" >&2
             git status --porcelain >&2
             exit 1
@@ -341,8 +343,10 @@ jobs:
             "chore(release): sync managed tree from"*) echo "ok: auto-committed: $subject" ;;
             *) echo "ERROR: managed tree was not auto-committed (HEAD: $subject)" >&2; exit 1 ;;
           esac
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo "ERROR: full init left an uncommitted managed diff:" >&2
+          # Fully clean after the auto-commit — `git status --porcelain` empty
+          # catches staged/unstaged AND untracked managed leftovers.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: full init left an uncommitted/untracked managed diff:" >&2
             git status --porcelain >&2
             exit 1
           fi
@@ -355,7 +359,7 @@ jobs:
             git log -1 --pretty=format:%s >&2
             exit 1
           fi
-          if ! git diff --quiet || ! git diff --cached --quiet; then
+          if [ -n "$(git status --porcelain)" ]; then
             echo "ERROR: second default 'release-core init' was not a clean no-op:" >&2
             git status --porcelain >&2
             exit 1
@@ -410,8 +414,9 @@ jobs:
           cd "${FIXTURE}"
           release-core init --config-only
           # Idempotent: the second run must leave the already-materialized files
-          # byte-identical — a clean working tree (no diff to the committed set).
-          if ! git diff --quiet || ! git diff --cached --quiet; then
+          # byte-identical — a fully clean tree. `git status --porcelain` empty
+          # catches untracked leftovers too (git diff alone would miss them).
+          if [ -n "$(git status --porcelain)" ]; then
             echo "ERROR: second 'release-core init --config-only' was not a no-op:" >&2
             git status --porcelain >&2
             git --no-pager diff >&2
