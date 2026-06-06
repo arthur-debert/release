@@ -151,11 +151,6 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-    - name: Set up Python (gate linters ruff/yamllint)
-      if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.13'
     - name: Arm the gate toolset (release#426 P2)
       if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
       shell: bash

@@ -44,7 +44,6 @@ if [ -z "$PY" ]; then
   exit 1
 fi
 
-"$PY" -m pip install --upgrade pip >/dev/null
 "$PY" -m pip install "$pkg"
 
 # Assert the console-scripts are actually resolvable on PATH (the installing

@@ -29,9 +29,21 @@ _ensure_release_core_venv() {
   # one venv per file is the right granularity (fast enough, isolated).
   local venv="$BATS_FILE_TMPDIR/release-core-venv"
   if [ ! -x "$venv/bin/changelog" ]; then
-    python3 -m venv "$venv" >/dev/null
-    "$venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null
-    "$venv/bin/python" -m pip install --quiet "$_PKG_SRC" >/dev/null
+    # helper.bash runs without `set -e`, so guard each step explicitly —
+    # a silent venv/install failure would otherwise surface as a confusing
+    # "changelog: not found" mid-test instead of a clear setup error.
+    python3 -m venv "$venv" >/dev/null || {
+      echo "release-core venv: python3 -m venv failed" >&2
+      return 1
+    }
+    "$venv/bin/python" -m pip install --quiet "$_PKG_SRC" >/dev/null || {
+      echo "release-core venv: pip install of $_PKG_SRC failed" >&2
+      return 1
+    }
+    [ -x "$venv/bin/changelog" ] || {
+      echo "release-core venv: changelog console-script missing after install" >&2
+      return 1
+    }
   fi
   BIN="$venv/bin"
   # bin-internal/roll-changelog.sh invokes the bare `changelog`
