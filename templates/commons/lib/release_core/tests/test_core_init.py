@@ -1342,6 +1342,17 @@ def test_commit_or_force_in_default_full_mode_is_bad_usage(capsys):
     assert "not valid in the default full materialize" in capsys.readouterr().err
 
 
+def test_full_flag_prints_deprecation_warning(capsys, monkeypatch, tmp_path):
+    # --full is a redundant alias; passing it explicitly warns on stderr (so
+    # stale fleet usage can be cleaned up) but is never an error. Drive it through
+    # the mutually-exclusive guard so it exits before any materialize — the
+    # warning is emitted regardless. (Gemini review on #482.)
+    rc = init.main(["--full", "--config-only"])
+    err = capsys.readouterr().err
+    assert rc == 64  # the --config-only conflict still fails fast
+    assert "--full is deprecated" in err
+
+
 def test_full_and_config_only_are_mutually_exclusive(capsys):
     # --full (redundant alias of default) and --config-only pick opposite modes.
     rc = init.main(["--full", "--config-only"])

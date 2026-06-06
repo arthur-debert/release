@@ -682,8 +682,15 @@ def main(argv: list[str] | None = None) -> int:
     config_only = bool(values["config-only"])
     # --full is a redundant/deprecated alias of the default; it simply selects the
     # now-default full materialize, so it is a no-op flag (never an error) and is
-    # NOT compatible with --config-only (they pick opposite modes).
+    # NOT compatible with --config-only (they pick opposite modes). Warn when it
+    # is explicitly passed so stale flag usage can be cleaned up across the fleet.
     full_flag = bool(values["full"])
+    if full_flag:
+        print(
+            "release-core init: --full is deprecated and redundant "
+            "(the full materialize is now the default)",
+            file=sys.stderr,
+        )
     no_commit = bool(values["no-commit"])
     # "full mode is active" — the DEFAULT — is anything that is NOT --config-only.
     # The reconciled flag guards key off THIS, not the literal --full flag.
