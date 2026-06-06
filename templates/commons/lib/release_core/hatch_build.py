@@ -57,9 +57,28 @@ _BUNDLE_DIRNAME = "_bundled_templates"
 
 # Junk that must never land in the bundle (mirrors
 # release_core.sync.should_skip_source where it concerns build artifacts/cruft).
-_SKIP_DIR_NAMES = frozenset({"__pycache__", ".git", _BUNDLE_DIRNAME})
+# Includes the local dev-tool cache dirs (.pytest_cache/.ruff_cache/.mypy_cache):
+# gitignored at repo root, but copytree reads the working tree, so a local build
+# could otherwise pick them up and bloat the wheel.
+_SKIP_DIR_NAMES = frozenset(
+    {
+        "__pycache__",
+        ".git",
+        _BUNDLE_DIRNAME,
+        ".pytest_cache",
+        ".ruff_cache",
+        ".mypy_cache",
+    }
+)
 _SKIP_FILE_SUFFIXES = (".pyc", ".pyo")
 _SKIP_FILE_NAMES = frozenset({".DS_Store"})
+
+# Top-level templates/ dirs that are NOT part of the managed sync/init surface
+# and must not be bundled. `render/` holds render-side material (the Homebrew
+# formula template) consumed at release-cut in CI, not a per-repo managed Kind —
+# sync only ever materializes commons/, components/, and a resolved Kind dir
+# (one carrying a manifest.yaml). Bundling render/ is dead weight.
+_NON_SURFACE_TEMPLATE_DIRS = frozenset({"render"})
 
 
 def _skip_names(_dir: str, names: list[str]) -> set[str]:
@@ -88,11 +107,20 @@ def _distributed_skills(repo_root: str) -> list[str]:
     wanted = {"PUSH_ALL_SKILLS", "REPLACE_IF_PRESENT_SKILLS"}
     found: dict[str, list[str]] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign):
-            continue
-        for target in node.targets:
-            if isinstance(target, ast.Name) and target.id in wanted:
-                found[target.id] = ast.literal_eval(node.value)
+        # Handle both plain (`X = [...]`) and annotated (`X: list[str] = [...]`)
+        # assignments so a future type annotation on the catalogs can't silently
+        # break the parse.
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id in wanted:
+                    found[target.id] = ast.literal_eval(node.value)
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and node.value is not None
+            and isinstance(node.target, ast.Name)
+            and node.target.id in wanted
+        ):
+            found[node.target.id] = ast.literal_eval(node.value)
     missing = wanted - found.keys()
     if missing:
         raise RuntimeError(
@@ -148,7 +176,7 @@ class CustomBuildHook(BuildHookInterface):
             src = os.path.join(repo_templates, entry)
             if not os.path.isdir(src):
                 continue
-            if entry in _SKIP_DIR_NAMES:
+            if entry in _SKIP_DIR_NAMES or entry in _NON_SURFACE_TEMPLATE_DIRS:
                 continue
             _copytree(src, os.path.join(dest_templates, entry))
 

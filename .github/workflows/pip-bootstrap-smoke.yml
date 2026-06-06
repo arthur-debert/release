@@ -153,6 +153,9 @@ jobs:
           present "skills/tdd/refactoring.md"
           # NEGATIVE: release-only skills must NOT ship to consumers.
           absent "skills/release-fleet-ops"
+          # NEGATIVE: render-side material (Homebrew formula template, consumed
+          # at release-cut, not a managed Kind) must NOT ship.
+          absent "templates/render"
           # NEGATIVE: the package subtree must NOT be copied into itself
           # (recursion/bloat guard). commons/lib/release_core IS this package.
           absent "templates/commons/lib/release_core"
