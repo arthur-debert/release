@@ -1205,6 +1205,14 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+def test_push_and_no_commit_is_bad_usage(capsys):
+    # --push implies a commit; --no-commit suppresses it — contradictory.
+    rc = init.main(["--full", "--push", "--no-commit"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "mutually exclusive" in err
+
+
 def test_full_no_bundle_and_no_clone_errors(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()

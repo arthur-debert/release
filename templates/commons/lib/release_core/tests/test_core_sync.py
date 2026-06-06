@@ -254,7 +254,8 @@ def test_resolve_capabilities_manifestless(monkeypatch):
 
 
 def test_validate_capabilities_missing_tree_raises(monkeypatch):
-    monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "")  # no tree
+    # cheap existence probe → git_cat_file_exists; absent tree raises.
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
     with pytest.raises(sync.SyncError, match="has no templates/components/ghost/"):
         sync.validate_capabilities(_git_source(), ["ghost"])
 
@@ -272,12 +273,8 @@ def test_resolve_capabilities_malformed_yaml_raises_yamlerror():
 
 
 def test_validate_capabilities_ok(monkeypatch):
-    # A non-empty tree for templates/components/x — a single file under it.
-    monkeypatch.setattr(
-        sync.gh,
-        "git_ls_tree",
-        lambda *a, **k: "100644 blob abc\ttemplates/components/x/lefthook.fragment.yaml\n",
-    )
+    # The templates/components/x tree exists → cheap existence probe passes.
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: True)
     sync.validate_capabilities(_git_source(), ["x"])  # no raise
 
 

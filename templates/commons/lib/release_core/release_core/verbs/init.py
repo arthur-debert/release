@@ -372,9 +372,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
     return source, kind, caps.names
 
 
-def _managed_paths_for_commit(
-    new_files: list[str], mirror: sync.MirrorPlan, claude: sync.ClaudeDecision
-) -> list[str]:
+def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> list[str]:
     """The exact, repo-relative managed pathspecs a full sync produced or removed
     — the ONLY paths --commit stages (never `git add -A`).
 
@@ -442,7 +440,7 @@ def _run_full_sync(repo_root: str, repo_name: str, *, dry_run: bool) -> tuple[in
             + len(mirror.copies_to_remove)
             + claude_change
         )
-        managed = _managed_paths_for_commit(new_files, mirror, claude)
+        managed = _managed_paths_for_commit(mirror, claude)
 
         if dry_run:
             return changes, managed, source.ref_sha
@@ -639,6 +637,12 @@ def main(argv: list[str] | None = None) -> int:
     no_commit = bool(values["no-commit"])
     # --push implies --commit (you cannot push a commit you never made).
     commit = bool(values["commit"]) or push
+
+    # --push implies a commit; --no-commit suppresses it — the two contradict.
+    # Reject the combo as bad usage rather than silently making --push a no-op.
+    if push and no_commit:
+        print("release-core init: --push and --no-commit are mutually exclusive", file=sys.stderr)
+        return 64
 
     try:
         repo_root = gh.repo_root()

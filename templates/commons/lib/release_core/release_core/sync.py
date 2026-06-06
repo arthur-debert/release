@@ -357,12 +357,17 @@ def resolve_capabilities(
 
 
 def validate_capabilities(source: Source, capabilities: list[str]) -> None:
-    """Mirror the per-capability existence guard: each declared Capability must
-    have a non-empty templates/components/<c>/ tree in the source."""
+    """Per-capability existence guard: each declared Capability must have a
+    templates/components/<c>/ tree in the source.
+
+    A cheap existence probe (source.exists on the tree path) — NOT a recursive
+    list_tree that build_plan immediately re-walks. A git tree is never empty,
+    and the bundle never stages an empty dir, so existence == the original
+    'non-empty tree' contract."""
     for c in capabilities:
         if not c:
             continue
-        if not source.list_tree(f"templates/components/{c}"):
+        if not source.exists(f"templates/components/{c}"):
             raise SyncError(
                 f"release-sync: declared Capability '{c}' has no "
                 f"templates/components/{c}/ tree in {source.label}"
