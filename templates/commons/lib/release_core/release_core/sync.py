@@ -20,6 +20,149 @@ from dataclasses import dataclass, field
 
 from . import gh
 
+# ── Source abstraction ────────────────────────────────────────────────────────
+#
+# The sync engine reads its template SOURCE through this minimal interface so the
+# SAME plan/materialize logic serves two backends:
+#
+#   GitSource(release_home, ref)  — the original: a git ref in a release clone,
+#       wrapping gh.git_ls_tree / git_show_bytes / git_cat_file_exists. Behavior
+#       is IDENTICAL to the pre-abstraction engine (release-sync's contract).
+#   BundleSource(bundle_root)     — the wheel bundle: the on-disk template tree
+#       hatch_build.py stages into release_core/_bundled_templates/. Lets `init`
+#       materialize the full managed tree offline, no release clone, no network.
+#
+# Paths are always git-style (POSIX, '/'-separated, relative to the source root,
+# e.g. "templates/commons/bin/check" or "skills/tdd/SKILL.md"). list_tree returns
+# (relpath, mode) pairs with mode the git filemode string ("100755"/"100644").
+
+
+class Source:
+    """The template-source interface the engine reads through.
+
+    Three operations, all keyed by git-style relative paths:
+      list_tree(subtree) -> list[(relpath, mode)]   recursive file listing
+      read_bytes(relpath) -> bytes                  a file's raw bytes
+      exists(relpath) -> bool                       does this path resolve
+
+    ``ref_sha`` is the provenance string written into .release-sync-source and
+    the lefthook header (the resolved git SHA for GitSource; the wheel version /
+    a sentinel for BundleSource). ``label`` is a human-readable description of
+    the source used only in error messages (the git ref for GitSource).
+    """
+
+    ref_sha: str = ""
+    label: str = "source"
+
+    def list_tree(self, subtree: str) -> list[tuple[str, str]]:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def read_bytes(self, relpath: str) -> bytes:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def exists(self, relpath: str) -> bool:  # pragma: no cover - interface
+        raise NotImplementedError
+
+
+class GitSource(Source):
+    """Read templates from a git ref in a release clone (the original path).
+
+    Wraps the gh.git_* chokepoint verbatim, so its behavior — including the
+    ls-tree line format, the `|| true` tolerance of a missing tree, and the
+    byte-exact `git show` — is byte-identical to the pre-abstraction engine.
+    """
+
+    def __init__(self, release_home: str, ref: str, ref_sha: str = "") -> None:
+        self.release_home = release_home
+        self.ref = ref
+        self.ref_sha = ref_sha
+        self.label = ref
+
+    def list_tree(self, subtree: str) -> list[tuple[str, str]]:
+        # `git ls-tree -r <ref> -- <subtree>` lines: "<mode> <type> <sha>\t<path>".
+        listing = gh.git_ls_tree(self.ref, subtree, cwd=self.release_home, recursive=True)
+        out: list[tuple[str, str]] = []
+        for line in listing.splitlines():
+            if not line:
+                continue
+            meta, tab, rel = line.partition("\t")
+            if not tab or not rel:
+                continue
+            file_mode = meta.split(" ", 1)[0]
+            out.append((rel, file_mode))
+        return out
+
+    def read_bytes(self, relpath: str) -> bytes:
+        return gh.git_show_bytes(f"{self.ref}:{relpath}", cwd=self.release_home)
+
+    def exists(self, relpath: str) -> bool:
+        return gh.git_cat_file_exists(f"{self.ref}:{relpath}", cwd=self.release_home)
+
+
+class BundleSource(Source):
+    """Read templates from the on-disk wheel bundle.
+
+    ``bundle_root`` is release_core/_bundled_templates/, whose layout mirrors the
+    repo: bundle_root/templates/… and bundle_root/skills/…, so a ``subtree`` like
+    "templates/commons" or "skills/tdd" resolves directly to a subdirectory.
+
+    list_tree walks the subtree recursively and reports each file's git filemode
+    from its on-disk mode bits (100755 if ANY execute bit is set — owner, group,
+    or other — else 100644, exactly how git derives a blob's mode), with rel
+    paths in sorted order for deterministic plan/output ordering across
+    filesystems.
+    """
+
+    def __init__(self, bundle_root: str, ref_sha: str = "") -> None:
+        self.bundle_root = bundle_root
+        self.ref_sha = ref_sha
+        self.label = ref_sha or "wheel bundle"
+
+    def _abs(self, relpath: str) -> str:
+        # relpath is always POSIX/'/'-separated; translate to the host separator.
+        # CONTAINMENT GUARD: capability names flow in from consumer-controlled
+        # YAML (e.g. a subtree "templates/components/<cap>"), so a malicious
+        # "../.." could otherwise escape the bundle and read arbitrary files.
+        # Resolve against the real bundle root and refuse any path that lands
+        # outside it. GitSource has no analogue (git refs can't traverse out).
+        root = os.path.realpath(self.bundle_root)
+        full = os.path.realpath(os.path.join(self.bundle_root, *relpath.split("/")))
+        if full != root and not full.startswith(root + os.sep):
+            raise SyncError(f"release-sync: bundle path escapes the bundle root: {relpath!r}")
+        return full
+
+    def list_tree(self, subtree: str) -> list[tuple[str, str]]:
+        base = self._abs(subtree)
+        if not os.path.isdir(base):
+            return []
+        out: list[tuple[str, str]] = []
+        for dirpath, dirnames, filenames in os.walk(base):
+            # Deterministic traversal regardless of readdir order.
+            dirnames.sort()
+            for name in sorted(filenames):
+                full = os.path.join(dirpath, name)
+                if os.path.islink(full):
+                    # The bundle is a flat copy (symlinks=False at build); a
+                    # symlink would be anomalous — skip rather than dereference.
+                    continue
+                rel_to_base = os.path.relpath(full, base).replace(os.sep, "/")
+                rel = f"{subtree}/{rel_to_base}"
+                # git records 100755 iff ANY execute bit (owner/group/other) is
+                # set — check the stat mode bits, NOT os.access(X_OK) (which asks
+                # whether the CURRENT user can execute and so misreports under
+                # cross-user ownership).
+                mode = "100755" if (os.stat(full).st_mode & 0o111) else "100644"
+                out.append((rel, mode))
+        return out
+
+    def read_bytes(self, relpath: str) -> bytes:
+        with open(self._abs(relpath), "rb") as fh:
+            return fh.read()
+
+    def exists(self, relpath: str) -> bool:
+        return os.path.exists(self._abs(relpath))
+
+
 # ── Constants (mirror the bash globals verbatim) ──────────────────────────────
 
 MANAGED_MARKER = "# Managed by release-sync — do not edit. Regenerate via release-sync."
@@ -193,8 +336,7 @@ def _yq_list_capabilities(text: str) -> list[str]:
 
 
 def resolve_capabilities(
-    release_home: str,
-    ref: str,
+    source: Source,
     kind: str,
     *,
     sync_yaml_text: str | None,
@@ -210,10 +352,9 @@ def resolve_capabilities(
             names=_yq_list_capabilities(sync_yaml_text),
             manifest_source=".release-sync.yaml (consumer override)",
         )
-    if gh.git_cat_file_exists(f"{ref}:templates/{kind}/manifest.yaml", cwd=release_home):
-        text = gh.git_show_bytes(f"{ref}:templates/{kind}/manifest.yaml", cwd=release_home).decode(
-            "utf-8", "replace"
-        )
+    manifest_path = f"templates/{kind}/manifest.yaml"
+    if source.exists(manifest_path):
+        text = source.read_bytes(manifest_path).decode("utf-8", "replace")
         return Capabilities(
             names=_yq_list_capabilities(text),
             manifest_source=f"templates/{kind}/manifest.yaml (Kind default)",
@@ -224,24 +365,22 @@ def resolve_capabilities(
     )
 
 
-def validate_capabilities(release_home: str, ref: str, capabilities: list[str]) -> None:
-    """Mirror the per-capability `ls-tree -d` existence guard."""
+def validate_capabilities(source: Source, capabilities: list[str]) -> None:
+    """Per-capability existence guard: each declared Capability must have a
+    templates/components/<c>/ tree in the source.
+
+    A cheap existence probe (source.exists on the tree path) — NOT a recursive
+    list_tree that build_plan immediately re-walks. A git tree is never empty,
+    and the bundle never stages an empty dir, so existence == the original
+    'non-empty tree' contract."""
     for c in capabilities:
         if not c:
             continue
-        listing = gh.git_ls_tree(
-            ref, f"templates/components/{c}", cwd=release_home, dirs_only=True, name_only=True
-        )
-        if not _has_nonempty_line(listing):
+        if not source.exists(f"templates/components/{c}"):
             raise SyncError(
                 f"release-sync: declared Capability '{c}' has no "
-                f"templates/components/{c}/ tree in {ref}"
+                f"templates/components/{c}/ tree in {source.label}"
             )
-
-
-def _has_nonempty_line(text: str) -> bool:
-    """Mirror `| grep -q .` — true iff any line has at least one character."""
-    return any(line for line in text.splitlines())
 
 
 # ── Plan: source path → (mode, dest-relative-to-.release/) ────────────────────
@@ -270,16 +409,15 @@ def subtree_list(kind: str, capabilities: list[str]) -> list[str]:
 
 
 def build_plan(
-    release_home: str,
-    ref: str,
+    source: Source,
     kind: str,
     capabilities: list[str],
     *,
     repo_root: str | None = None,
 ) -> Plan:
-    """Mirror the `--- Plan ---` block: walk each subtree with ls-tree -r, skip
-    the should_skip_source paths, strip the subtree prefix to get the dest, then
-    add the distributed skills and compose the lefthook fragment list.
+    """Mirror the `--- Plan ---` block: walk each subtree, skip the
+    should_skip_source paths, strip the subtree prefix to get the dest, then add
+    the distributed skills and compose the lefthook fragment list.
 
     ``repo_root`` is the consumer working tree. It gates the REPLACE_IF_PRESENT
     skills (synced only when the consumer already carries .claude/skills/<name>);
@@ -287,18 +425,9 @@ def build_plan(
     plan = Plan()
 
     for st in subtree_list(kind, capabilities):
-        listing = gh.git_ls_tree(ref, st, cwd=release_home, recursive=True)
-        for line in listing.splitlines():
-            if not line:
-                continue
-            # ls-tree -r line: "<mode> <type> <sha>\t<path>". meta is the part
-            # before the tab; file_mode is its first whitespace field.
-            meta, tab, rel = line.partition("\t")
-            if not tab or not rel:
-                continue
+        for rel, file_mode in source.list_tree(st):
             if should_skip_source(rel):
                 continue
-            file_mode = meta.split(" ", 1)[0]
             # dest = ${rel#"$st"/}
             prefix = st + "/"
             dest = rel[len(prefix) :] if rel.startswith(prefix) else rel
@@ -311,49 +440,41 @@ def build_plan(
     # from skills/ — whole-directory (every file under skills/<name>/), so
     # multi-file skills (tdd, triage, …) reach the consumer in full.
     for name in PUSH_ALL_SKILLS:
-        _add_skill_dir(plan, release_home, ref, name)
+        _add_skill_dir(plan, source, name)
     if repo_root is not None:
         for name in REPLACE_IF_PRESENT_SKILLS:
             if _consumer_has_skill(repo_root, name):
-                _add_skill_dir(plan, release_home, ref, name)
+                _add_skill_dir(plan, source, name)
 
     # Compose lefthook.yml fragment list: base < commons < each capability < kind.
     frags: list[str] = []
     base = "templates/components/_lefthook-base.yaml"
-    if gh.git_cat_file_exists(f"{ref}:{base}", cwd=release_home):
+    if source.exists(base):
         frags.append(base)
     commons = "templates/commons/lefthook.fragment.yaml"
-    if gh.git_cat_file_exists(f"{ref}:{commons}", cwd=release_home):
+    if source.exists(commons):
         frags.append(commons)
     for c in capabilities:
         if not c:
             continue
         fpath = f"templates/components/{c}/lefthook.fragment.yaml"
-        if gh.git_cat_file_exists(f"{ref}:{fpath}", cwd=release_home):
+        if source.exists(fpath):
             frags.append(fpath)
     stack_frag = f"templates/{kind}/lefthook.fragment.yaml"
-    if gh.git_cat_file_exists(f"{ref}:{stack_frag}", cwd=release_home):
+    if source.exists(stack_frag):
         frags.append(stack_frag)
     plan.lefthook_frags = frags
 
     return plan
 
 
-def _add_skill_dir(plan: Plan, release_home: str, ref: str, name: str) -> None:
-    """Add every file under skills/<name>/ at ``ref`` to the plan, mapping each to
-    a consumer dest of .claude/skills/<name>/<subpath>. Tolerant: a skill whose
-    dir doesn't exist at the ref (empty ls-tree) is silently skipped."""
-    src_dir = f"skills/{name}"
-    listing = gh.git_ls_tree(ref, src_dir, cwd=release_home, recursive=True)
-    for line in listing.splitlines():
-        if not line:
-            continue
-        meta, tab, rel = line.partition("\t")
-        if not tab or not rel:
-            continue
+def _add_skill_dir(plan: Plan, source: Source, name: str) -> None:
+    """Add every file under skills/<name>/ in ``source`` to the plan, mapping each
+    to a consumer dest of .claude/skills/<name>/<subpath>. Tolerant: a skill
+    whose dir doesn't exist (empty listing) is silently skipped."""
+    for rel, file_mode in source.list_tree(f"skills/{name}"):
         if should_skip_source(rel):
             continue
-        file_mode = meta.split(" ", 1)[0]
         # rel == "skills/<name>/<subpath>"; the consumer dest mirrors it under
         # .claude/ → ".claude/skills/<name>/<subpath>".
         dest = f".claude/{rel}"
@@ -390,7 +511,7 @@ def link_target(dest: str) -> str:
 # ── Materialize the new tree into a tempdir ───────────────────────────────────
 
 
-def materialize(release_home: str, ref: str, ref_sha: str, plan: Plan, tmp_release: str) -> None:
+def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
     """Mirror `--- Build the new .release/ tree in a tempdir ---`: write each
     planned blob (preserving the 100755/100644 mode), the composed lefthook.yml,
     and the provenance marker into ``tmp_release``."""
@@ -399,13 +520,13 @@ def materialize(release_home: str, ref: str, ref_sha: str, plan: Plan, tmp_relea
         fmode = plan.mode[dest]
         out_path = os.path.join(tmp_release, dest)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
-        content = gh.git_show_bytes(f"{ref}:{src}", cwd=release_home)
+        content = source.read_bytes(src)
         with open(out_path, "wb") as fh:
             fh.write(content)
         os.chmod(out_path, 0o755 if fmode == "100755" else 0o644)
 
     if plan.lefthook_frags:
-        _write_lefthook(release_home, ref, ref_sha, plan.lefthook_frags, tmp_release)
+        _write_lefthook(source, ref_sha, plan.lefthook_frags, tmp_release)
 
     # Managed .gitignore (release#450): keeps bytecode out of the committed
     # .release/ even when a consumer regenerates from the working tree.
@@ -424,9 +545,7 @@ def materialize(release_home: str, ref: str, ref_sha: str, plan: Plan, tmp_relea
         )
 
 
-def _write_lefthook(
-    release_home: str, ref: str, ref_sha: str, frags: list[str], tmp_release: str
-) -> None:
+def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release: str) -> None:
     """Mirror the lefthook.yml generation: materialize each fragment to a
     NN-<dir>.yaml temp file (the numeric prefix fixes the merge order), then
     `yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""'` over them,
@@ -443,7 +562,7 @@ def _write_lefthook(
         for i, fp in enumerate(frags):
             dirbase = os.path.basename(os.path.dirname(fp))
             out_path = os.path.join(frag_tmp, f"{i:02d}-{dirbase}.yaml")
-            content = gh.git_show_bytes(f"{ref}:{fp}", cwd=release_home)
+            content = source.read_bytes(fp)
             with open(out_path, "wb") as fh:
                 fh.write(content)
             frag_files.append(out_path)

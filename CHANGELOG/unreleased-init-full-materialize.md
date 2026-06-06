@@ -1,0 +1,1 @@
+`release-core init --full` materializes the WHOLE managed tree offline from the wheel bundle via a new sync source abstraction (GitSource/BundleSource), byte-identical to release-sync, and auto-commits only the managed paths when they change (idempotent, opt-in behind the flag) (#476)

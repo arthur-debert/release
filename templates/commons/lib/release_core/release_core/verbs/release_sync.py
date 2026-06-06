@@ -119,10 +119,11 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
         return 1
 
     ref_sha = gh.git_rev_parse(ref, cwd=release_home)
+    source = sync.GitSource(release_home, ref, ref_sha)
 
-    if not sync._has_nonempty_line(
-        gh.git_ls_tree(ref, f"templates/{kind}", cwd=release_home, dirs_only=True, name_only=True)
-    ):
+    # Cheap existence probe (git cat-file -e <ref>:templates/<kind> resolves a
+    # tree path) — NOT a recursive ls-tree; build_plan does the full walk below.
+    if not source.exists(f"templates/{kind}"):
         _err(f"release-sync: ref '{ref}' has no templates/{kind}/ tree")
         return 1
 
@@ -142,12 +143,12 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     from .. import yamlio
 
     try:
-        caps = sync.resolve_capabilities(release_home, ref, kind, sync_yaml_text=sync_yaml_text)
+        caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
     except yamlio.YamlError as exc:
         _err(f"release-sync: {exc}")
         return 1
     try:
-        sync.validate_capabilities(release_home, ref, caps.names)
+        sync.validate_capabilities(source, caps.names)
     except sync.SyncError as exc:
         _err(str(exc))
         return 1
@@ -161,13 +162,13 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     print()
 
     # --- Build the plan + materialize into a sibling tempdir -------------
-    plan = sync.build_plan(release_home, ref, kind, caps.names, repo_root=repo_real)
+    plan = sync.build_plan(source, kind, caps.names, repo_root=repo_real)
 
     # Sibling tempdir so the final mv is a same-filesystem rename (atomic).
     tmp_release = tempfile.mkdtemp(prefix=".release-build.", dir=".")
     swapped = False  # set once tmp_release is rename()d into place (consumed)
     try:
-        sync.materialize(release_home, ref, ref_sha, plan, tmp_release)
+        sync.materialize(source, ref_sha, plan, tmp_release)
 
         # --- Compute changes ---------------------------------------------
         file_diff, new_files = sync.diff_release(tmp_release, ".release")

@@ -600,7 +600,7 @@ def test_materialize_sources_release_home_overrides_bundle(tmp_path, monkeypatch
     )
     monkeypatch.setattr(init.sync, "build_plan", lambda *a, **k: object())
 
-    def _fake_materialize(home, ref, sha, plan, dest):
+    def _fake_materialize(source, sha, plan, dest):
         for name in init.CONFIG_FILES:
             with open(os.path.join(dest, name), "w", encoding="utf-8") as fh:
                 fh.write(f"# git-engine {name}\n")
@@ -938,3 +938,355 @@ def test_main_end_to_end_through_bundle_path(tmp_path, monkeypatch, capsys):
     assert "7 created" in out
     # The composed gate carries the bundle provenance header.
     assert "from the bundled templates" in (repo / "lefthook.yml").read_text()
+
+
+# --------------------------------------------------------------------------
+# init --full : the FULL managed-tree materialize + auto-commit-on-change
+# --------------------------------------------------------------------------
+# A synthetic full source (a tiny commons/ + a manifest-less kind + one
+# distributed skill) is built once, then used BOTH as a wheel bundle (the
+# BundleSource path) AND as a git release clone (the GitSource path). The two
+# materialized trees must be byte-identical modulo the provenance-marker line —
+# this is the load-bearing proof that init --full == release-sync.
+
+
+def _full_source_tree(root) -> str:
+    """Build a synthetic release-source tree under ``root``: templates/commons
+    (a lint config + a real bin tool + a lefthook fragment + ORIENTATION.md),
+    a manifest-less kind (tree-sitter) with its own fragment, and one PUSH_ALL
+    skill (gh-pr-review-loop). Returns the abs path to ``root`` (the layout root,
+    mirroring the repo: <root>/templates/… and <root>/skills/…)."""
+    tpl = root / "templates"
+    (tpl / "commons" / "bin").mkdir(parents=True)
+    (tpl / "components").mkdir(parents=True)
+    (tpl / "tree-sitter").mkdir(parents=True)
+    (root / "skills" / "gh-pr-review-loop").mkdir(parents=True)
+
+    (tpl / "commons" / ".editorconfig").write_text("root = true\n")
+    tool = tpl / "commons" / "bin" / "check"
+    tool.write_text("#!/bin/sh\necho check\n")
+    os.chmod(tool, 0o755)
+    (tpl / "commons" / "ORIENTATION.md").write_text("# Orientation\n")
+    (tpl / "commons" / "lefthook.fragment.yaml").write_text(
+        "pre-commit:\n  commands:\n    md:\n      run: echo md\n"
+    )
+    (tpl / "components" / "_lefthook-base.yaml").write_text(
+        "pre-commit:\n  parallel: true\n  commands: {}\n"
+    )
+    (tpl / "tree-sitter" / "lefthook.fragment.yaml").write_text(
+        "pre-commit:\n  commands:\n    ts:\n      run: echo ts\n"
+    )
+    (root / "skills" / "gh-pr-review-loop" / "SKILL.md").write_text("# skill\n")
+    return str(root)
+
+
+def _git_clone_from(src_root, dest) -> str:
+    """Make ``dest`` a git work tree whose committed tree IS ``src_root`` (so a
+    GitSource at HEAD reads exactly the synthetic content). Returns dest path."""
+    _shutil.copytree(src_root, dest)
+    _git(dest, "init", "-q", "-b", "main")
+    _git(dest, "config", "user.email", "t@example.com")
+    _git(dest, "config", "user.name", "Test")
+    _git(dest, "add", "-A")
+    _git(dest, "commit", "-q", "-m", "source")
+    return str(dest)
+
+
+def _materialize_via_bundle(tmp_path, src_root, kind):
+    out = tmp_path / "out-bundle"
+    out.mkdir()
+    source = sync.BundleSource(str(src_root), ref_sha="release-core test")
+    plan = sync.build_plan(source, kind, [])
+    sync.materialize(source, source.ref_sha, plan, str(out))
+    return out
+
+
+def _materialize_via_git(tmp_path, clone, kind):
+    out = tmp_path / "out-git"
+    out.mkdir()
+    source = sync.GitSource(str(clone), "HEAD", "abc123sha")
+    plan = sync.build_plan(source, kind, [])
+    sync.materialize(source, source.ref_sha, plan, str(out))
+    return out
+
+
+def _tree_files(root):
+    out = {}
+    for dirpath, _dirs, files in os.walk(root):
+        for name in files:
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root)
+            with open(full, "rb") as fh:
+                out[rel] = fh.read()
+    return out
+
+
+@_needs_yq
+@_needs_git
+def test_full_bundle_materialize_matches_git_sync(tmp_path):
+    # THE core proof: the BundleSource (init --full) tree is byte-identical to the
+    # GitSource (release-sync) tree for the same Kind, modulo only the provenance
+    # marker line (.release-sync-source) and the lefthook header sha line.
+    src = _full_source_tree(tmp_path / "src")
+    clone = _git_clone_from(src, tmp_path / "clone")
+
+    b = _materialize_via_bundle(tmp_path, src, "tree-sitter")
+    g = _materialize_via_git(tmp_path, clone, "tree-sitter")
+
+    bf = _tree_files(b)
+    gf = _tree_files(g)
+    assert set(bf) == set(gf), "the two materialized trees must list the same files"
+
+    for rel in sorted(gf):
+        if rel == ".release-sync-source":
+            continue  # provenance differs by design (wheel ver vs git sha)
+        if rel == "lefthook.yml":
+            # Only the header carries the sha; the merged body must be identical.
+            assert bf[rel].split(b"\n\n", 1)[1] == gf[rel].split(b"\n\n", 1)[1]
+            continue
+        assert bf[rel] == gf[rel], f"{rel} must be byte-identical across sources"
+
+    # Sanity: the real bin tool kept its exec bit through both paths.
+    assert os.access(os.path.join(b, "bin", "check"), os.X_OK)
+    assert os.access(os.path.join(g, "bin", "check"), os.X_OK)
+
+
+def _setup_full_repo(tmp_path, monkeypatch, src_root):
+    """A throwaway git consumer wired so init --full takes the BundleSource path
+    (no $RELEASE_HOME) against ``src_root`` as the bundle, kind tree-sitter."""
+    repo = _init_git_repo(tmp_path / "consumer")
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.delenv("RELEASE_REF", raising=False)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_bundle_root", lambda: str(src_root))
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
+    return repo
+
+
+@_needs_yq
+@_needs_git
+def test_full_materializes_tree_and_symlinks(tmp_path, monkeypatch, capsys):
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    rc = init.main(["--full", "--no-commit"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "managed-tree change(s) applied" in out
+    # .release/ build dir materialized.
+    assert (repo / ".release" / "bin" / "check").is_file()
+    assert (repo / ".release" / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_file()
+    # Working-tree symlinks mirrored.
+    assert (repo / "bin" / "check").is_symlink()
+    assert (repo / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_symlink()
+    # CLAUDE.md orientation block created.
+    assert "@.release/ORIENTATION.md" in (repo / "CLAUDE.md").read_text()
+    # ORIENTATION.md is release-internal: in .release/ but NOT mirrored to root.
+    assert (repo / ".release" / "ORIENTATION.md").is_file()
+    assert not (repo / "ORIENTATION.md").exists()
+
+
+@_needs_yq
+@_needs_git
+def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch, capsys):
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # An unrelated dirty file must NOT be folded into the managed commit.
+    (repo / "my-feature.txt").write_text("wip\n")
+
+    rc = init.main(["--full"])  # auto-commit is the default in full mode
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    subject = _git(repo, "log", "-1", "--pretty=format:%s")
+    assert subject.startswith("chore(release): sync managed tree from")
+    assert subject.endswith("[skip ci]")
+    committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
+    # Managed paths committed; the unrelated file is NOT.
+    assert ".release/bin/check" in committed
+    assert "bin/check" in committed
+    assert "CLAUDE.md" in committed
+    assert "my-feature.txt" not in committed
+    assert _git(repo, "status", "--porcelain", "my-feature.txt") == "?? my-feature.txt"
+
+
+@_needs_yq
+@_needs_git
+def test_full_is_idempotent_no_commit_second_run(tmp_path, monkeypatch, capsys):
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    assert init.main(["--full"]) == 0
+    capsys.readouterr()
+    head1 = _git(repo, "rev-parse", "HEAD")
+
+    # Second run: byte-identical tree → zero changes → no commit.
+    assert init.main(["--full"]) == 0
+    out = capsys.readouterr().out
+    assert "already current" in out
+    head2 = _git(repo, "rev-parse", "HEAD")
+    assert head1 == head2, "a no-change second run must not create a commit"
+
+
+@_needs_yq
+@_needs_git
+def test_full_no_commit_skips_commit(tmp_path, monkeypatch, capsys):
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    head_before = _git(repo, "rev-parse", "HEAD")
+
+    rc = init.main(["--full", "--no-commit"])
+    assert rc == 0
+    capsys.readouterr()
+    # Tree materialized but no commit made; managed changes left in the worktree.
+    assert _git(repo, "rev-parse", "HEAD") == head_before
+    assert _git(repo, "status", "--porcelain") != ""
+
+
+@_needs_yq
+@_needs_git
+def test_full_dry_run_writes_nothing(tmp_path, monkeypatch, capsys):
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    head_before = _git(repo, "rev-parse", "HEAD")
+
+    rc = init.main(["--full", "--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "dry-run, no writes" in out
+    assert not (repo / ".release").exists()
+    assert not (repo / "bin" / "check").exists()
+    assert _git(repo, "rev-parse", "HEAD") == head_before
+
+
+@_needs_yq
+@_needs_git
+def test_full_errors_when_source_lacks_kind_tree(tmp_path, monkeypatch, capsys):
+    # A source missing templates/<kind>/ must hard-fail (exit 1) rather than
+    # silently materialize an incomplete tree (commons/skills only).
+    src = _full_source_tree(tmp_path / "src")
+    repo = _init_git_repo(tmp_path / "consumer")
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_bundle_root", lambda: str(src))
+    # detect a Kind the bundle has no templates/<kind>/ dir for.
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "no-such-kind")
+
+    rc = init.main(["--full", "--no-commit"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "no" in err and "templates/no-such-kind/ tree" in err
+    assert not (repo / ".release").exists()
+
+
+@_needs_yq
+@_needs_git
+def test_full_commits_removals(tmp_path, monkeypatch, capsys):
+    # A "removals-only" managed update (a symlink whose .release target is gone in
+    # a later sync) must be staged + committed, not left dangling.
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    assert init.main(["--full"]) == 0
+    capsys.readouterr()
+    assert (repo / "bin" / "check").is_symlink()
+
+    # Drop the bin/check tool from the source, re-run: the managed symlink +
+    # its .release/ target must be removed AND that removal committed.
+    os.remove(os.path.join(src, "templates", "commons", "bin", "check"))
+    rc = init.main(["--full"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert not (repo / "bin" / "check").exists()
+    assert not (repo / ".release" / "bin" / "check").exists()
+    # The deletion is in the commit and the tree is clean (nothing left staged).
+    last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
+    assert "bin/check" in last
+    assert _git(repo, "status", "--porcelain") == ""
+
+
+def test_push_and_no_commit_is_bad_usage(capsys):
+    # --push implies a commit; --no-commit suppresses it — contradictory.
+    rc = init.main(["--full", "--push", "--no-commit"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "mutually exclusive" in err
+
+
+def test_no_commit_without_full_is_bad_usage(capsys):
+    # --no-commit only governs --full's auto-commit; plain init must reject it
+    # rather than silently ignore it.
+    rc = init.main(["--no-commit"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "only valid with --full" in err
+
+
+def test_commit_or_force_with_full_is_bad_usage(capsys):
+    # In --full, commit is automatic and overwrite unconditional — explicit
+    # --commit is redundant and --force a no-op; both are rejected (fail loud).
+    rc_commit = init.main(["--full", "--commit"])
+    assert rc_commit == 64
+    assert "not valid with --full" in capsys.readouterr().err
+    rc_force = init.main(["--full", "--force"])
+    assert rc_force == 64
+    assert "not valid with --full" in capsys.readouterr().err
+
+
+@_needs_yq
+@_needs_git
+def test_full_surfaces_conflicts(tmp_path, monkeypatch, capsys):
+    # A real file at a managed symlink location blocks the link (a conflict). It
+    # is reported on stderr and the run is NOT called "already current".
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # Pre-place a real bin/check (non-skill dest → conflict, not auto-migrated).
+    (repo / "bin").mkdir()
+    (repo / "bin" / "check").write_text("hand-written\n")
+
+    rc = init.main(["--full", "--no-commit"])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "conflict" in out.err
+    assert "bin/check" in out.err
+    # bin/check stays the real file (not replaced by a symlink).
+    assert not (repo / "bin" / "check").is_symlink()
+
+
+def test_full_no_bundle_and_no_clone_errors(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_bundle_root", lambda: None)
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
+
+    rc = init.main(["--full"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "no bundled templates" in err
+
+
+@_needs_yq
+@_needs_git
+def test_full_uses_release_home_clone_when_present(tmp_path, monkeypatch, capsys):
+    # An explicit $RELEASE_HOME git clone OVERRIDES the bundle (release-dev path).
+    src = _full_source_tree(tmp_path / "src")
+    clone = _git_clone_from(src, tmp_path / "clone")
+    repo = _init_git_repo(tmp_path / "consumer")
+    monkeypatch.setenv("RELEASE_HOME", str(clone))
+    monkeypatch.setenv("RELEASE_REF", "HEAD")
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
+    # The bundle path must NOT run when a clone is present.
+    monkeypatch.setattr(
+        init, "_bundle_root", lambda: (_ for _ in ()).throw(AssertionError("bundle must not run"))
+    )
+
+    rc = init.main(["--full", "--no-commit"])
+    assert rc == 0
+    capsys.readouterr()
+    assert (repo / ".release" / "bin" / "check").is_file()
+    # Provenance marker carries the git sha (not the wheel version).
+    marker = (repo / ".release" / ".release-sync-source").read_text()
+    assert "release-core" not in marker

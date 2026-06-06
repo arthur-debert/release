@@ -121,8 +121,10 @@ def test_resolve_capabilities_yamlerror_returns_1_not_traceback(tmp_path, monkey
     monkeypatch.setattr(release_sync.manifest, "detect_kind", lambda root: "docs-site")
     monkeypatch.setattr(release_sync.sync, "select_ref", lambda *a, **k: "origin/main")
     monkeypatch.setattr(release_sync.gh, "git_rev_parse", lambda *a, **k: "a" * 40)
-    monkeypatch.setattr(release_sync.sync, "_has_nonempty_line", lambda text: True)
-    monkeypatch.setattr(release_sync.gh, "git_ls_tree", lambda *a, **k: "templates/docs-site")
+    # The Kind-tree guard is now a cheap existence probe (GitSource.exists →
+    # git_cat_file_exists); stub it True so main proceeds to capability
+    # resolution.
+    monkeypatch.setattr(release_sync.gh, "git_cat_file_exists", lambda rp, *, cwd: True)
 
     def _raise(*a, **k):
         raise yamlio.YamlError("yq -o=json . failed (1): bad YAML")

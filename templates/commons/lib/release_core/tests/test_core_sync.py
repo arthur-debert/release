@@ -94,6 +94,68 @@ def test_link_target(dest, target):
     assert sync.link_target(dest) == target
 
 
+# ── BundleSource (filesystem-backed source) ───────────────────────────────────
+
+
+def test_bundle_source_list_tree_modes_and_paths(tmp_path):
+    # Layout: bundle_root/templates/commons/{bin/check (exec), .editorconfig}.
+    root = tmp_path / "bundle"
+    (root / "templates" / "commons" / "bin").mkdir(parents=True)
+    cfg = root / "templates" / "commons" / ".editorconfig"
+    cfg.write_text("x\n")
+    tool = root / "templates" / "commons" / "bin" / "check"
+    tool.write_text("#!/bin/sh\n")
+    os.chmod(tool, 0o755)
+
+    src = sync.BundleSource(str(root))
+    listing = dict(src.list_tree("templates/commons"))
+    assert listing["templates/commons/.editorconfig"] == "100644"
+    assert listing["templates/commons/bin/check"] == "100755"
+    # rel paths are git-style (subtree-prefixed, '/'-separated).
+    assert all(k.startswith("templates/commons/") for k in listing)
+    # deterministic sorted order regardless of readdir.
+    rels = [r for r, _ in src.list_tree("templates/commons")]
+    assert rels == sorted(rels)
+
+
+def test_bundle_source_missing_subtree_is_empty(tmp_path):
+    root = tmp_path / "bundle"
+    (root / "templates").mkdir(parents=True)
+    assert sync.BundleSource(str(root)).list_tree("templates/nope") == []
+
+
+def test_bundle_source_read_bytes_and_exists(tmp_path):
+    root = tmp_path / "bundle"
+    (root / "skills" / "tdd").mkdir(parents=True)
+    (root / "skills" / "tdd" / "SKILL.md").write_bytes(b"# tdd\n")
+    src = sync.BundleSource(str(root))
+    assert src.exists("skills/tdd/SKILL.md")
+    assert not src.exists("skills/tdd/nope.md")
+    assert src.read_bytes("skills/tdd/SKILL.md") == b"# tdd\n"
+
+
+def test_bundle_source_ref_sha_and_label(tmp_path):
+    src = sync.BundleSource(str(tmp_path), ref_sha="release-core 1.2.3")
+    assert src.ref_sha == "release-core 1.2.3"
+    assert src.label == "release-core 1.2.3"
+    assert sync.BundleSource(str(tmp_path)).label == "wheel bundle"
+
+
+def test_bundle_source_refuses_path_traversal(tmp_path):
+    # Capability names flow in from consumer YAML; a "../.." must not escape the
+    # bundle root (path-traversal / arbitrary-file read).
+    root = tmp_path / "bundle"
+    (root / "templates").mkdir(parents=True)
+    (tmp_path / "secret.txt").write_text("top secret\n")
+    src = sync.BundleSource(str(root))
+    with pytest.raises(sync.SyncError, match="escapes the bundle root"):
+        src.exists("templates/components/../../../secret.txt")
+    with pytest.raises(sync.SyncError, match="escapes the bundle root"):
+        src.read_bytes("templates/components/../../../secret.txt")
+    with pytest.raises(sync.SyncError, match="escapes the bundle root"):
+        src.list_tree("templates/../../elsewhere")
+
+
 # ── Ref selection precedence ──────────────────────────────────────────────────
 
 
@@ -174,10 +236,17 @@ def test_select_ref_no_candidate_raises(monkeypatch):
 # ── Capability resolution ─────────────────────────────────────────────────────
 
 
+def _git_source(release_home="/home", ref="ref", ref_sha="deadbeef"):
+    """A GitSource for the engine tests. It delegates to gh.git_*, so the existing
+    monkeypatches at sync.gh.* keep driving the data layer unchanged — the source
+    abstraction is byte-transparent over the original git path."""
+    return sync.GitSource(release_home, ref, ref_sha)
+
+
 def test_resolve_capabilities_consumer_override(monkeypatch):
     monkeypatch.setattr(sync, "_yq_list_capabilities", lambda text: ["mkdocs", "bats"])
     caps = sync.resolve_capabilities(
-        "/home", "ref", "docs-site", sync_yaml_text="capabilities:\n  - mkdocs\n  - bats\n"
+        _git_source(), "docs-site", sync_yaml_text="capabilities:\n  - mkdocs\n  - bats\n"
     )
     assert caps.names == ["mkdocs", "bats"]
     assert caps.manifest_source == ".release-sync.yaml (consumer override)"
@@ -187,22 +256,23 @@ def test_resolve_capabilities_kind_manifest(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: True)
     monkeypatch.setattr(sync.gh, "git_show_bytes", lambda rp, *, cwd: b"capabilities:\n  - x\n")
     monkeypatch.setattr(sync, "_yq_list_capabilities", lambda text: ["x"])
-    caps = sync.resolve_capabilities("/home", "ref", "rust-cli", sync_yaml_text=None)
+    caps = sync.resolve_capabilities(_git_source(), "rust-cli", sync_yaml_text=None)
     assert caps.names == ["x"]
     assert caps.manifest_source == "templates/rust-cli/manifest.yaml (Kind default)"
 
 
 def test_resolve_capabilities_manifestless(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    caps = sync.resolve_capabilities("/home", "ref", "tree-sitter", sync_yaml_text=None)
+    caps = sync.resolve_capabilities(_git_source(), "tree-sitter", sync_yaml_text=None)
     assert caps.names == []
     assert caps.manifest_source == "(none — manifest-less Kind; commons + Kind only)"
 
 
 def test_validate_capabilities_missing_tree_raises(monkeypatch):
-    monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "")  # no tree
+    # cheap existence probe → git_cat_file_exists; absent tree raises.
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
     with pytest.raises(sync.SyncError, match="has no templates/components/ghost/"):
-        sync.validate_capabilities("/home", "ref", ["ghost"])
+        sync.validate_capabilities(_git_source(), ["ghost"])
 
 
 @pytest.mark.skipif(shutil.which("yq") is None, reason="`yq` not on PATH")
@@ -213,13 +283,14 @@ def test_resolve_capabilities_malformed_yaml_raises_yamlerror():
 
     with pytest.raises(yamlio.YamlError):
         sync.resolve_capabilities(
-            "/home", "ref", "docs-site", sync_yaml_text="capabilities: [a, b\n  : : :\n"
+            _git_source(), "docs-site", sync_yaml_text="capabilities: [a, b\n  : : :\n"
         )
 
 
 def test_validate_capabilities_ok(monkeypatch):
-    monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "templates/components/x\n")
-    sync.validate_capabilities("/home", "ref", ["x"])  # no raise
+    # The templates/components/x tree exists → cheap existence probe passes.
+    monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: True)
+    sync.validate_capabilities(_git_source(), ["x"])  # no raise
 
 
 # ── subtree precedence + plan composition order ───────────────────────────────
@@ -249,7 +320,7 @@ def test_build_plan_precedence_last_write_wins(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_ls_tree", ls_tree)
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
 
-    plan = sync.build_plan("/home", "ref", "rust-cli", [])
+    plan = sync.build_plan(_git_source(), "rust-cli", [])
     assert plan.order == ["bin/check"]  # fragment skipped; single dest
     assert plan.source["bin/check"] == "templates/rust-cli/bin/check"  # last wins
     assert plan.mode["bin/check"] == "100755"
@@ -279,7 +350,7 @@ def test_build_plan_distributes_push_all_skills(monkeypatch):
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    plan = sync.build_plan(_git_source(), "tree-sitter", [])
     for name in sync.PUSH_ALL_SKILLS:
         dest = f".claude/skills/{name}/SKILL.md"
         assert dest in plan.order
@@ -297,7 +368,7 @@ def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
     }
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    plan = sync.build_plan(_git_source(), "tree-sitter", [])
     for sub in ("SKILL.md", "mocking.md", "tests.md", "refactoring.md"):
         dest = f".claude/skills/tdd/{sub}"
         assert dest in plan.order
@@ -310,7 +381,7 @@ def test_build_plan_tolerates_missing_skill_dir(monkeypatch):
     files = {"gh-pr-review-loop": ["SKILL.md"]}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    plan = sync.build_plan(_git_source(), "tree-sitter", [])
     assert ".claude/skills/gh-pr-review-loop/SKILL.md" in plan.order
     # A missing skill contributes nothing.
     assert ".claude/skills/diagnose/SKILL.md" not in plan.order
@@ -328,7 +399,7 @@ def test_build_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tm
     have = sync.REPLACE_IF_PRESENT_SKILLS[0]
     (tmp_path / ".claude" / "skills" / have).mkdir(parents=True)
 
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [], repo_root=str(tmp_path))
+    plan = sync.build_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
     assert f".claude/skills/{have}/SKILL.md" in plan.order
     for name in sync.REPLACE_IF_PRESENT_SKILLS[1:]:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
@@ -346,7 +417,7 @@ def test_build_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
     skills_dir.mkdir(parents=True)
     os.symlink("/nowhere", str(skills_dir / name))  # dangling symlink still counts
 
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [], repo_root=str(tmp_path))
+    plan = sync.build_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
     assert f".claude/skills/{name}/SKILL.md" in plan.order
 
 
@@ -356,7 +427,7 @@ def test_build_plan_replace_if_present_skipped_without_repo_root(monkeypatch):
     files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    plan = sync.build_plan(_git_source(), "tree-sitter", [])
     for name in sync.REPLACE_IF_PRESENT_SKILLS:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
@@ -369,7 +440,7 @@ def test_build_plan_never_distributes_release_only_skills(monkeypatch):
     files.update({name: ["SKILL.md"] for name in release_only})
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    plan = sync.build_plan(_git_source(), "tree-sitter", [])
     for name in release_only:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
@@ -383,7 +454,7 @@ def test_build_plan_lefthook_fragment_order(monkeypatch):
         "ref:templates/rust-cli/lefthook.fragment.yaml",
     }
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: rp in present)
-    plan = sync.build_plan("/home", "ref", "rust-cli", ["cap"])
+    plan = sync.build_plan(_git_source(), "rust-cli", ["cap"])
     assert plan.lefthook_frags == [
         "templates/components/_lefthook-base.yaml",
         "templates/commons/lefthook.fragment.yaml",
@@ -407,7 +478,7 @@ def test_build_plan_skips_skip_sources(monkeypatch):
         lambda ref, path, *, cwd, **k: listing if path == "templates/commons" else "",
     )
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan("/home", "ref", "tree-sitter", [])
+    plan = sync.build_plan(_git_source(), "tree-sitter", [])
     assert plan.order == ["bin/real"]  # bytecode + skip-sources dropped
 
 
@@ -420,7 +491,7 @@ def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
     plan.source = {"bin/real": "templates/commons/bin/real"}
 
     monkeypatch.setattr(sync.gh, "git_show_bytes", lambda spec, *, cwd: b"#!/bin/sh\n")
-    sync.materialize("/home", "ref", "deadbeef" * 5, plan, str(tmp_path))
+    sync.materialize(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
 
     gi = tmp_path / ".gitignore"
     assert gi.is_file()
