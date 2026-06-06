@@ -562,6 +562,25 @@ def test_link_swept_when_target_removed_this_sync(tmp_path):
     assert out == ["./bin/changelog"]
 
 
+def test_broken_link_target_escaping_tmp_release_is_swept(tmp_path):
+    """Containment guard: a tampered target whose post-marker path escapes
+    tmp_release via `..` must NOT probe outside the build dir — it is treated as
+    absent (→ swept), never kept by hitting an unrelated path that happens to
+    exist. Here the escape would resolve to a real sibling file outside the
+    build dir; the link must still be swept."""
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    # Create a real file OUTSIDE the build dir that the escape would resolve to.
+    outside = tmp_path / "outside"
+    outside.write_text("not a managed target\n")
+    # target post-".release/" = "../outside" → escapes tmp_release.
+    os.symlink("../.release/../outside", str(binp / "evil"))
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    assert out == ["./bin/evil"]
+
+
 def test_broken_link_ignores_non_release_targets(tmp_path):
     os.symlink("/nowhere/else", str(tmp_path / "other"))
     tmp_release = tmp_path / "tmpbuild"

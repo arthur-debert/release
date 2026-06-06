@@ -42,9 +42,10 @@ load helper
 # #476 (lex dogfood): a symlink whose target is REMOVED this sync —
 # present in the still-live OLD .release/, absent from the NEW tree —
 # must be swept. The old sweep required the link to be already-broken in
-# the live tree, but the .release/ swap happens AFTER the sweep, so a
-# resolves-fine-now link to a now-retired tool dangled afterward (the 7
-# committed dangling bin/ links lex was left with).
+# the live tree, but the .release/ swap happens AFTER the sweep, so a link
+# that still resolves now (its old target is present) yet points at a
+# now-retired tool was left dangling afterward — the 7 committed dangling
+# bin/ links lex was left with.
 # ---------------------------------------------------------------------
 @test "a link to a tool retired this sync is swept (not left dangling)" {
   # Pre-seed a live .release/ carrying a tool the source no longer ships,

@@ -781,7 +781,19 @@ def _find_broken_release_links(repo_root: str, tmp_release: str) -> list[str]:
                 # still-live old .release/, gone from tmp_release) is swept here,
                 # before the swap, so it never dangles afterward. (The old
                 # also-broken-live requirement left removed-target links behind.)
-                if not os.path.exists(os.path.join(tmp_release, tgt_rel)):
+                #
+                # Containment guard: a managed target is always a plain path
+                # directly under .release/, so the probe must stay inside
+                # tmp_release. A crafted tgt_rel with `..` (e.g. from a
+                # hand-tampered symlink) would escape and probe an unrelated
+                # path; resolve and require containment, else treat as absent
+                # (→ swept) rather than probing outside the build dir.
+                probe = os.path.normpath(os.path.join(tmp_release, tgt_rel))
+                real_tmp = os.path.realpath(tmp_release)
+                contained = os.path.realpath(probe) == real_tmp or os.path.realpath(
+                    probe
+                ).startswith(real_tmp + os.sep)
+                if not (contained and os.path.exists(probe)):
                     out.append(child_rel)
             elif entry.is_dir(follow_symlinks=False):
                 # Prune .git and .release at the top level (find -not -path).
