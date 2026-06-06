@@ -37,3 +37,29 @@ load helper
   [ "$status" -eq 0 ]
   [ ! -L bin/stale-tool ]   # nothing materializes it → correctly swept
 }
+
+# ---------------------------------------------------------------------
+# #476 (lex dogfood): a symlink whose target is REMOVED this sync —
+# present in the still-live OLD .release/, absent from the NEW tree —
+# must be swept. The old sweep required the link to be already-broken in
+# the live tree, but the .release/ swap happens AFTER the sweep, so a link
+# that still resolves now (its old target is present) yet points at a
+# now-retired tool was left dangling afterward — the 7 committed dangling
+# bin/ links lex was left with.
+# ---------------------------------------------------------------------
+@test "a link to a tool retired this sync is swept (not left dangling)" {
+  # Pre-seed a live .release/ carrying a tool the source no longer ships,
+  # and a committed bin/ symlink to it — so the link RESOLVES right now.
+  mkdir -p .release/bin bin
+  printf '#!/bin/sh\n' > .release/bin/retired-tool
+  ln -s ../.release/bin/retired-tool bin/retired-tool
+  [ -e bin/retired-tool ]   # NOT broken-live (the old false precondition)
+
+  run "$BIN/release-sync"
+  [ "$status" -eq 0 ]
+
+  # retired-tool is not a managed tool → absent from the new tree → the
+  # link must be gone entirely, not a dangling symlink.
+  [ ! -L bin/retired-tool ]
+  [ ! -e bin/retired-tool ]
+}

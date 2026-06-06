@@ -753,7 +753,9 @@ def _under_any(dest: str, roots: list[str]) -> bool:
 def _find_broken_release_links(repo_root: str, tmp_release: str) -> list[str]:
     """Mirror the broken-symlink sweep: walk the repo (excluding .git/ and
     .release/) for symlinks whose target contains `.release/`; a link is stale
-    only if its target is absent from BOTH the live tree AND the new tree.
+    iff its target is absent from the NEW tree (`tmp_release`) — the new tree is
+    authoritative, so a target removed THIS sync is swept even though the old
+    `.release/` is still live (the swap into `.release/` happens after this).
 
     Paths are returned relative to repo_root, prefixed `./` exactly as the bash
     `find . -type l` emitted them (e.g. './bin/stale-tool'), in find traversal
@@ -774,10 +776,24 @@ def _find_broken_release_links(repo_root: str, tmp_release: str) -> list[str]:
                     continue
                 # rel-after-marker = "${target##*.release/}" (text after the LAST).
                 tgt_rel = target.rsplit(".release/", 1)[1]
-                # broken (target absent live) AND not materialized this sync.
-                if not os.path.exists(entry.path) and not os.path.exists(
-                    os.path.join(tmp_release, tgt_rel)
-                ):
+                # Stale iff the target is absent from the NEW tree. The new tree
+                # is authoritative: a target removed this sync (present in the
+                # still-live old .release/, gone from tmp_release) is swept here,
+                # before the swap, so it never dangles afterward. (The old
+                # also-broken-live requirement left removed-target links behind.)
+                #
+                # Containment guard: a managed target is always a plain path
+                # directly under .release/, so the probe must stay inside
+                # tmp_release. A crafted tgt_rel with `..` (e.g. from a
+                # hand-tampered symlink) would escape and probe an unrelated
+                # path; resolve and require containment, else treat as absent
+                # (→ swept) rather than probing outside the build dir.
+                probe = os.path.normpath(os.path.join(tmp_release, tgt_rel))
+                real_tmp = os.path.realpath(tmp_release)
+                contained = os.path.realpath(probe) == real_tmp or os.path.realpath(
+                    probe
+                ).startswith(real_tmp + os.sep)
+                if not (contained and os.path.exists(probe)):
                     out.append(child_rel)
             elif entry.is_dir(follow_symlinks=False):
                 # Prune .git and .release at the top level (find -not -path).

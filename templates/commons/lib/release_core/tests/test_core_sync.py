@@ -541,6 +541,46 @@ def test_broken_link_kept_when_materialized_this_sync(tmp_path):
     assert out == []
 
 
+def test_link_swept_when_target_removed_this_sync(tmp_path):
+    """Regression for #476 (the lex dogfood): a symlink whose target STILL EXISTS
+    in the live .release/ (so it is NOT broken-live) but is ABSENT from the new
+    tree must be swept. The old condition required broken-live AND absent-new, so
+    a removed-this-sync target dangled after the .release/ swap. New rule: stale
+    iff absent from the NEW tree (authoritative)."""
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    # Live target present (link resolves fine right now) — the OLD .release/.
+    live_release = tmp_path / ".release" / "bin"
+    live_release.mkdir(parents=True)
+    (live_release / "changelog").write_text("#!/bin/sh\n")
+    os.symlink("../.release/bin/changelog", str(binp / "changelog"))
+    assert os.path.exists(str(binp / "changelog"))  # NOT broken-live
+    # New tree no longer carries it (the shim was retired this sync).
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / "bin").mkdir(parents=True)
+    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    assert out == ["./bin/changelog"]
+
+
+def test_broken_link_target_escaping_tmp_release_is_swept(tmp_path):
+    """Containment guard: a tampered target whose post-marker path escapes
+    tmp_release via `..` must NOT probe outside the build dir — it is treated as
+    absent (→ swept), never kept by hitting an unrelated path that happens to
+    exist. Here the escape would resolve to a real sibling file outside the
+    build dir; the link must still be swept."""
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    # Create a real file OUTSIDE the build dir that the escape would resolve to.
+    outside = tmp_path / "outside"
+    outside.write_text("not a managed target\n")
+    # target post-".release/" = "../outside" → escapes tmp_release.
+    os.symlink("../.release/../outside", str(binp / "evil"))
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    assert out == ["./bin/evil"]
+
+
 def test_broken_link_ignores_non_release_targets(tmp_path):
     os.symlink("/nowhere/else", str(tmp_path / "other"))
     tmp_release = tmp_path / "tmpbuild"
@@ -624,6 +664,28 @@ def test_compute_mirror_replaces_stale_real_skill_copy(tmp_path):
     assert dest in mp.migrated
     assert f"{dest} -> {target}" in mp.symlinks_to_create
     assert dest not in mp.conflicts
+
+
+def test_compute_mirror_sweeps_link_whose_target_removed_this_sync(tmp_path):
+    """#476: a consumer symlink into the LIVE .release/ whose target is gone from
+    the new tree (a retired shim) lands in symlinks_to_remove — so the .release/
+    swap doesn't leave it dangling. The new tree carries some OTHER managed file
+    (the new_files list is non-empty), but not the retired one."""
+    binp = tmp_path / "bin"
+    binp.mkdir()
+    # Live target present (resolves now); retired from the new tree this sync.
+    live = tmp_path / ".release" / "bin"
+    live.mkdir(parents=True)
+    (live / "changelog").write_text("#!/bin/sh\n")
+    os.symlink("../.release/bin/changelog", str(binp / "changelog"))
+
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / "bin").mkdir(parents=True)
+    (tmp_release / "bin" / "keep").write_text("#!/bin/sh\n")  # the surviving tool
+
+    mp = sync.compute_mirror(["bin/keep"], str(tmp_path), str(tmp_release), migrate=False)
+
+    assert "./bin/changelog" in mp.symlinks_to_remove
 
 
 def test_compute_mirror_symlinked_skill_root_is_removed_first(tmp_path):

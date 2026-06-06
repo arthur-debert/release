@@ -529,6 +529,40 @@ def test_is_git_worktree_true_for_linked_worktree(tmp_path):
 
 
 @_needs_git
+def test_git_commit_file_count_counts_real_files_not_pathspecs(tmp_path):
+    # #476: a commit created from a DIRECTORY pathspec must report its real file
+    # count, not the pathspec count (the miscount: "committed 2 files" / 140 real).
+    repo = _init_repo(tmp_path / "repo")
+    d = repo / "sub"
+    d.mkdir()
+    for i in range(5):
+        (d / f"f{i}.txt").write_text(f"{i}\n")
+    _git(repo, "add", "sub")  # one pathspec, five files
+    _git(repo, "commit", "-qm", "bulk")
+    assert gh.git_commit_file_count(cwd=str(repo)) == 5
+
+
+@_needs_git
+def test_git_commit_file_count_zero_on_bad_ref(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    assert gh.git_commit_file_count(cwd=str(repo), ref="no-such-ref") == 0
+
+
+@_needs_git
+def test_git_commit_file_count_handles_root_commit(tmp_path):
+    # A parent-less root commit must diff against the empty tree (--root), not
+    # report 0. _init_repo's first commit is exactly such a root commit (f.txt).
+    repo = _init_repo(tmp_path / "repo")
+    root = subprocess.run(
+        ["git", "-C", str(repo), "rev-list", "--max-parents=0", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert gh.git_commit_file_count(cwd=str(repo), ref=root) == 1
+
+
+@_needs_git
 def test_is_git_worktree_false_for_plain_dir(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
