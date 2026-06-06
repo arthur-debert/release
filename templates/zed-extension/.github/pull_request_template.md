@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] Changelog updated (`bin/changelog add <slug>` to add a `CHANGELOG/unreleased-*.md` fragment; `CHANGELOG.md` is generated) — or chore/docs-only
+- [ ] Changelog updated (`changelog add <slug>` to add a `CHANGELOG/unreleased-*.md` fragment; `CHANGELOG.md` is generated) — or chore/docs-only
 - [ ] Project umbrella check passes locally — `bin/check` (canonical: composes `bin/check-fmt` + `bin/check-lint` + `bin/check-tests`). Bare equivalent: `cargo fmt --all -- --check && cargo clippy --release --target wasm32-wasip2 --all-features -- -D warnings && bats test/` (the canonical `bin/check-tests` discovers the consumer's bats layout and skips with a notice if none is present).
 - [ ] Version bumped in BOTH `extension.toml` AND `Cargo.toml` (zed-extension dual-version sync — they must match) for any user-visible change
 - [ ] Tests added or updated for behavior changes

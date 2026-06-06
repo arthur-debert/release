@@ -1,0 +1,1 @@
+- Retire the `changelog`/`changelog-add`/`changelog-cut`/`changelog-render`/`semver` `bin/` shims: release CI now pip-installs `release_core` and calls the console-scripts by name (#476).

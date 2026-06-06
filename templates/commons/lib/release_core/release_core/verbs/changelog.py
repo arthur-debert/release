@@ -1,21 +1,21 @@
-"""changelog — the bin/changelog-* family (shell→Python migration, Phase 1).
+"""changelog — the changelog-* family (shell→Python migration, Phase 1).
 
 One module for the tight changelog cluster; each former bash script maps to a
 ``*_main`` here and is driven by its own thin shim on ``$PATH``:
 
-  - :func:`orchestrator_main`  ← bin/changelog (the dispatch front-end)
-  - :func:`add_main`           ← bin/changelog-add
-  - :func:`cut_main`           ← bin/changelog-cut
-  - :func:`render_main`        ← bin/changelog-render
+  - :func:`orchestrator_main`  ← changelog (the dispatch front-end)
+  - :func:`add_main`           ← changelog-add
+  - :func:`cut_main`           ← changelog-cut
+  - :func:`render_main`        ← changelog-render
 
 The CLI contract is consumed by consumers + CI (changelog-tests.yml, the
-changelog-check action, bin-internal/roll-changelog.sh shelling to bin/changelog)
+changelog-check action, bin-internal/roll-changelog.sh shelling to changelog)
 so stdout, exit codes, flags, and the generated CHANGELOG.md / fragment bytes
 match the old bash byte-for-byte. Validation reproduces the (now removed)
 vendored semver-tool's regex semantics (NAT — no leading zeros — and
 NAT/ALPHANUM prerelease identifiers) exactly via _SEMVER_TOOL_RE so validation
 parity holds. The standalone `validate`/`get` edge the rest of the pipeline
-shelled out to now lives in release_core.verbs.semver (bin/semver).
+shelled out to now lives in release_core.verbs.semver (semver).
 """
 
 from __future__ import annotations

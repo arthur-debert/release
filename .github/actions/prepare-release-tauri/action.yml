@@ -41,6 +41,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Set up Python for release_core console-scripts
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Install release_core console-scripts (changelog, semver)
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../bin-internal/install-release-core-pkg.sh"
+
     - name: Install Tauri Linux build dependencies
       shell: bash
       run: bash "${{ github.action_path }}/../../../bin-internal/install-tauri-linux-deps.sh"

@@ -115,7 +115,8 @@ def test_changelog_add_dispatches_to_add_main(capsys):
 
 def test_changelog_bare_runs_orchestrator(capsys):
     # Bare `changelog` (no subcommand) delegates to orchestrator_main, which
-    # prints the orchestrator usage on stderr and exits 2 — matching bin/changelog.
+    # prints the orchestrator usage on stderr and exits 2 — matching the
+    # `changelog` console-script.
     rc = cli_entry.main(["changelog"])
     err = capsys.readouterr().err
     assert rc == 2

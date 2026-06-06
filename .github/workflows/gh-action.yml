@@ -94,6 +94,30 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
+      # Pull the release_core console-scripts (semver, changelog) onto PATH
+      # via the consumer's synced pull-model bootstrap. The bin/semver /
+      # bin/changelog shims were retired (release#476); the prepare job now
+      # uses the pip-installed console-scripts. --no-init: we only need the
+      # package + its scripts here, not a config re-materialization. --major v2
+      # is the v3-safety pin (this workflow ships in the v2 line).
+      - name: Set up Python for release_core console-scripts
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install release_core console-scripts (semver, changelog)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: |
+          set -euo pipefail
+          bash bin/install-release-core --major v2 --no-init
+          for s in semver changelog; do
+            if ! command -v "$s" >/dev/null 2>&1; then
+              echo "::error::console-script '$s' not on PATH after install-release-core"
+              exit 1
+            fi
+          done
+
       - name: Validate + detect resume
         id: prep
         shell: bash
@@ -104,11 +128,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          SEMVER="bin/semver"
-          if [ ! -x "$SEMVER" ]; then
-            echo "::error::semver not found at $SEMVER — run release-sync to pull bin/semver into this repo"
-            exit 1
-          fi
+          SEMVER="semver"
 
           if [[ "${NEW_VERSION}" =~ ^[vV] ]] \
               || [[ "$("$SEMVER" validate "${NEW_VERSION}")" != "valid" ]] \
@@ -170,9 +190,8 @@ jobs:
             # Roll changelog + extract notes. Four branches:
             #   1. CHANGELOG input empty → user opted out; write stub.
             #   2. Fragment-dir (per #201): CHANGELOG/ sibling dir exists
-            #      → delegate to bin/changelog (cut + render). Fails
-            #      loud if bin/changelog is missing — repo declared
-            #      fragment-dir intent but didn't release-sync the tools.
+            #      → delegate to the `changelog` console-script (cut +
+            #      render).
             #   3. Single-file Keep-a-Changelog: extract from
             #      `## [Unreleased]` and roll into a versioned section.
             #   4. CHANGELOG specified but file missing → stub.
@@ -181,20 +200,16 @@ jobs:
             else
               CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
               if [ -d "${CHANGELOG_DIR}" ]; then
-                # Fragment-dir branch. Fail loud if the tooling isn't here.
-                if [ ! -x bin/changelog ]; then
-                  echo "::error::${CHANGELOG_DIR} exists (fragment-dir mode) but bin/changelog is missing or not executable."
-                  echo "::error::Run 'release-sync' to pull bin/changelog* (with bin/semver) into this repo."
-                  exit 1
-                fi
+                # Fragment-dir branch. The `changelog` console-script is on
+                # PATH (installed via the bootstrap step above).
                 if [ "${IS_PRERELEASE}" != "true" ]; then
-                  # bin/changelog walks up cwd for CHANGELOG/, so cd
+                  # changelog walks up cwd for CHANGELOG/, so cd
                   # next to the changelog file first — otherwise on
                   # monorepos with multiple changelogs the wrong
                   # CHANGELOG/ gets cut. Mirrors bin-internal/roll-changelog.sh.
                   (
                     cd "$(dirname "${CHANGELOG}")"
-                    bin/changelog new-version "${NEW_VERSION}"
+                    changelog new-version "${NEW_VERSION}"
                   )
                   awk 'NR==1 && /^## / { next } NR==2 && /^$/ { next } { print }' \
                     "${CHANGELOG_DIR}/${NEW_VERSION}.md" > release-notes.md

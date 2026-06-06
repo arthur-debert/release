@@ -5,7 +5,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
 
 1. The build-directory model
 
-    Every managed file a consumer receives lives in a single build directory, `.release/`, checked into the consumer's git with real file content. The file at its expected working-tree location (`lefthook.yml`, `bin/changelog`, …) is a *symlink* into `.release/`. Both the build dir and the symlinks are committed.
+    Every managed file a consumer receives lives in a single build directory, `.release/`, checked into the consumer's git with real file content. The file at its expected working-tree location (`lefthook.yml`, `bin/check-shell`, …) is a *symlink* into `.release/`. Both the build dir and the symlinks are committed.
 
     `.release/` is rebuilt from scratch on every sync — there is no state file and no removal manifest. The filesystem is the state. A template deleted upstream simply stops appearing in the rebuilt `.release/`; its symlink breaks; broken-symlink cleanup removes it. See ADR-0001.
 
@@ -20,7 +20,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
         - `templates/components/<capability>/` — one per Capability the consumer declares (Kind manifest, or a `.release-sync.yaml` override).
         - `templates/<kind>/` — the consumer's Kind subtree.
 
-    A file's destination in `.release/` is its path with the subtree prefix stripped: `templates/commons/bin/changelog` becomes `.release/bin/changelog`. `lefthook.yml` is the one composed file — assembled from each subtree's `lefthook.fragment.yaml` in the same precedence order, not copied from a single source.
+    A file's destination in `.release/` is its path with the subtree prefix stripped: `templates/commons/bin/check-shell` becomes `.release/bin/check-shell`. `lefthook.yml` is the one composed file — assembled from each subtree's `lefthook.fragment.yaml` in the same precedence order, not copied from a single source.
 
 3. The materialize-then-mirror cycle
 
@@ -28,7 +28,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
 
     a. Resolve Kind (`detect-kind`) and Capabilities.
     b. Build the new `.release/` tree in a tempdir by `git show`-ing every file from the composed subtrees at the selected ref.
-    c. For each file in `.release/<dest>`, ensure a *relative* symlink exists at `<dest>` in the working tree, pointing into `.release/` (e.g. `bin/changelog -> ../.release/bin/changelog`).
+    c. For each file in `.release/<dest>`, ensure a *relative* symlink exists at `<dest>` in the working tree, pointing into `.release/` (e.g. `bin/check-shell -> ../.release/bin/check-shell`).
     d. Walk the repo for symlinks pointing into `.release/` that are now broken, and delete them.
 
     Sync reads templates from a git ref, not the working tree (`git show "$ref:$path"`). So a change is only distributed once committed. The ref is chosen as: `$RELEASE_REF` if set, else a per-repo or per-Kind `release/beta/*` branch, else `origin/main`.
@@ -53,38 +53,19 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
     A tool that ships to consumers has its single source of truth *inside* `templates/commons/bin/` (or the relevant subtree) — not at repo-root `bin/`. The maintainer gets it on `$PATH` because repo-root `bin/<tool>` is a *symlink* into the template:
 
     Example:
-        bin/changelog -> ../templates/commons/bin/changelog
+        bin/install-release-core -> ../templates/commons/bin/install-release-core
 
     :: text ::
 
     There is exactly one copy (the template); the maintainer symlink and the consumer's `.release/` copy both point at the same source. A tool authored as a real file at repo-root `bin/` is, by definition, *not* distributed — it is maintainer-only until moved under a template.
 
-6. Worked example: the changelog shim
+6. The changelog / semver family: pip console-scripts, not shims
 
-    `changelog` is a thin Python shim plus the `release_core` package it imports. It exercises the canonical-home + sync-distribution rules above:
+    `changelog`, `changelog-add`, `changelog-cut`, `changelog-render` and `semver` are NO LONGER distributed as `bin/` sys.path shims. They are `release_core` **pip console-scripts**, declared in the package's `[project.scripts]` and installed when the wheel is installed (`install-release-core` at SessionStart, or `bin-internal/install-release-core-pkg.sh` in release CI).
 
-    Layout:
-        - `templates/commons/bin/changelog` — the shim (canonical home).
-        - `templates/commons/lib/release_core/` — the package (canonical, single copy; also the uv-workspace member and pytest target). NB: the package itself now ships to consumers by **pip wheel**, not sync (the bin/ shim is the action-download / no-pip path).
-        - `bin/changelog -> ../templates/commons/bin/changelog` — the maintainer symlink.
+    History: until release#476 they were thin Python shims at `templates/commons/bin/{changelog*,semver}` that put `release_core` on `sys.path` via their own realpath (`../lib/release_core`). The shims survived the first console-script cutover only because the release composite actions + `gh-action.yml` + `bin-internal/*` exec'd them BY FILE PATH from the action checkout, where the wheel was not pip-installed. release#476 fixed those call-sites to pip-install `release_core` and call the console-scripts by name, and deleted the shims.
 
-    The shim finds its package by its own realpath:
-
-        sys.path.insert(0, realpath(__file__)/../lib/release_core)
-
-    :: text ::
-
-    That one relative path resolves correctly from both sides, because both entry points are symlinks resolving into the same layout:
-
-    Resolution:
-        | Caller                          | realpath of the shim        | ../lib/release_core resolves to        |
-        | maintainer `bin/changelog`      | `templates/commons/bin/...` | `templates/commons/lib/release_core`   |
-        | consumer `.release/bin/changelog` | `.release/bin/...`        | `.release/lib/release_core`            |
-    :: table align=lll ::
-
-    The package is shielded by `is_release_internal` (`lib/release_core/*` — scoped to the package, so other `lib/` paths like the bats harness still mirror), so a consumer gets `.release/lib/release_core/` (real files the shim loads) but no `lib/release_core/...` symlinks in its tree.
-
-    (Historical note: the PR state engine `gh-task-status` was originally distributed exactly this way — a `release_gh` package synced into `.release/lib/release_gh/`. It was folded into `release_core` and now ships purely as a pip console-script, retiring its sync shim entirely; release#459.)
+    Consequence for `.release/lib`: with the changelog/semver shims gone, NO file synced to a consumer resolves `.release/lib/release_core` anymore — `release_core` reaches consumers purely by pip wheel. (The remaining `release_core` sys.path shims — `bin/release-sync`, `bin/release-core`, `bin/detect-kind`, `bin/release-drift-check` — are maintainer-only repo-root `bin/` tools that resolve `../templates/commons/lib/release_core` in the release checkout; they are never synced into a consumer's `.release/`.) This unblocks stripping `lib/release_core/*` from the synced `.release/` tree.
 
 7. Provenance and drift
 

@@ -3,8 +3,10 @@
 # (per tracker #201).
 #
 # Requires a `CHANGELOG/` directory at the same level as <changelog>.
-# Delegates to `bin/changelog`:
-#   - `roll` runs `bin/changelog new-version <version>` (cut + render),
+# Delegates to the `changelog` console-script (from the pip-installed
+# release_core package — the prepare-release composite action runs
+# install-release-core-pkg first so it is on PATH):
+#   - `roll` runs `changelog new-version <version>` (cut + render),
 #     then copies the new CHANGELOG/<version>.md body (without the
 #     `## <version> - YYYY-MM-DD` header) to <out-notes>.
 #   - `extract` concatenates the current CHANGELOG/unreleased-*.md
@@ -31,7 +33,7 @@
 set -euo pipefail
 # LC_ALL=C ensures the fragment glob below expands in stable byte
 # order on both BSD (macOS) and GNU (Linux) regardless of the caller's
-# locale — matches the convention in bin/changelog-render.
+# locale — matches the convention in changelog-render.
 export LC_ALL=C
 
 mode="${1:?mode required: extract|roll}"
@@ -47,27 +49,8 @@ detect_dir() {
   echo "$parent/CHANGELOG"
 }
 
-# Resolve bin/changelog relative to this script.
-script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-# scripts/roll-changelog.sh → ../templates/commons/bin/changelog (real file).
-# When this script is exec'd from a consumer repo via release-sync,
-# scripts/ stays under release/ (not synced); the bin/changelog inside
-# the consumer is at <consumer>/bin/changelog. Resolve in order:
-#   1. <script_dir>/../bin/changelog (when running inside release/ itself)
-#   2. <script_dir>/../templates/commons/bin/changelog (same, via the symlink)
-#   3. $(pwd)/bin/changelog (consumer running its own bin)
-locate_changelog_cli() {
-  for candidate in \
-      "$script_dir/../bin/changelog" \
-      "$script_dir/../templates/commons/bin/changelog" \
-      "$(pwd)/bin/changelog"; do
-    if [ -x "$candidate" ]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
+# The `changelog` console-script must be on PATH (the prepare-release
+# composite action runs install-release-core-pkg first).
 
 # Strip the leading "## <version> - <date>" header + blank line from a
 # CHANGELOG/<v>.md file, leaving just the body (bullets etc.) suitable
@@ -80,8 +63,8 @@ fragment_body() {
 legacy_error() {
   echo "::error::Legacy single-file changelog mode has been retired." >&2
   echo "::error::Migration: (1) move existing entries to CHANGELOG/legacy.md," >&2
-  echo "::error::(2) run 'release-sync' to pull bin/changelog* into the repo," >&2
-  echo "::error::(3) run 'bin/changelog render' to regenerate CHANGELOG.md." >&2
+  echo "::error::(2) run 'release-sync' to set up the CHANGELOG/ structure," >&2
+  echo "::error::(3) run 'changelog render' to regenerate CHANGELOG.md." >&2
   echo "::error::See CHANGELOG/README.txt for details." >&2
   exit 1
 }
@@ -104,7 +87,7 @@ case "$mode" in
         fragments=("$dir"/unreleased-*.md)
         if [ "${#fragments[@]}" -eq 0 ]; then
           echo "::error::No CHANGELOG/unreleased-*.md fragments to extract in $dir" >&2
-          echo "::error::Add an unreleased fragment via 'bin/changelog add <slug> <body>' before re-running." >&2
+          echo "::error::Add an unreleased fragment via 'changelog add <slug> <body>' before re-running." >&2
           exit 1
         fi
         for frag in "${fragments[@]}"; do
@@ -127,19 +110,19 @@ case "$mode" in
     dir=$(detect_dir "$file")
 
     if [ -d "$dir" ]; then
-      # Fragment-dir mode: hand off to bin/changelog and post-process.
-      cli=$(locate_changelog_cli) || {
-        echo "::error::CHANGELOG/ directory present but bin/changelog not found." >&2
-        echo "::error::Run 'release-sync' to pull bin/changelog* into this repo." >&2
+      # Fragment-dir mode: hand off to the `changelog` console-script.
+      if ! command -v changelog >/dev/null 2>&1; then
+        echo "::error::CHANGELOG/ directory present but the 'changelog' console-script is not on PATH." >&2
+        echo "::error::The prepare-release composite action installs release_core (install-release-core-pkg) before this runs." >&2
         exit 1
-      }
-      # bin/changelog* resolve their root by walking up cwd for
-      # CHANGELOG/, so cd next to the user-specified changelog file
-      # first — otherwise on monorepos with multiple changelogs
-      # (root + per-package) the wrong one gets cut.
+      fi
+      # changelog resolves its root by walking up cwd for CHANGELOG/,
+      # so cd next to the user-specified changelog file first —
+      # otherwise on monorepos with multiple changelogs (root +
+      # per-package) the wrong one gets cut.
       (
         cd "$(dirname "$file")"
-        "$cli" new-version "$version"
+        changelog new-version "$version"
       )
       fragment_body "$dir/$version.md" > "$out"
     else

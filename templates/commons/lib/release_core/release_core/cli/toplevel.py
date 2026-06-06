@@ -123,7 +123,7 @@ def _changelog_group() -> click.Group:
     """``changelog`` — bare runs the orchestrator; add/cut/render are leaves.
 
     Bare ``changelog`` (no subcommand) delegates to ``orchestrator_main`` so the
-    behavior matches today's ``bin/changelog`` (it prints the orchestrator usage
+    behavior matches today's ``changelog`` (it prints the orchestrator usage
     on stderr and exits 2). The add/cut/render subcommands are registered as
     discoverable ``wrap_verb`` leaves over the dedicated ``*_main`` functions, so
     ``changelog add ...`` is byte-identical to ``changelog add ...`` via the shim.

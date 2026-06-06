@@ -47,8 +47,9 @@ Deeper References:
 
     distribution.lex:
         The deep `release-sync` mechanism — the symlink-vs-copy predicates,
-        the canonical-home pattern, the worked changelog-shim example. Where
-        injected-files.lex is the map, this is the internals.
+        the canonical-home pattern, and how the changelog/semver console-scripts
+        reach consumers by pip wheel (not sync). Where injected-files.lex is the
+        map, this is the internals.
 
     breaking-changes.md:
         The versioning contract's breaking-changes log.

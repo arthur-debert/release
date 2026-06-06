@@ -2,7 +2,7 @@
 
 The Python replacement for the vendored bash `semver-tool` (formerly at
 bin/share/semver-tool/, now removed). The standalone CLI edge — `validate` and
-`get <part>` — lives in release_core.verbs.semver (bin/semver).
+`get <part>` — lives in release_core.verbs.semver (semver).
 
 SemVer is ordered so versions compare and sort with the native operators
 (``<``, ``sorted(...)``) following semver.org precedence: major/minor/patch

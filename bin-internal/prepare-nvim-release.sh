@@ -21,7 +21,9 @@ VERSION_FILE="${VERSION_FILE:-}"
 PREP_SCRIPT="${PREP_SCRIPT:-}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEMVER="$script_dir/../bin/semver"
+# semver is the release_core console-script; the prepare-release-nvim
+# composite action runs install-release-core-pkg first to put it on PATH.
+SEMVER="semver"
 
 emit() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then
