@@ -2,6 +2,7 @@
 
 Usage:
   release-core init [--force] [--dry-run] [--commit] [--push]
+  release-core init --full [--dry-run] [--no-commit] [--push]
 
 `release-core init` is the seam (pip-bootstrap PoC) that replaces release-sync's
 *config* materialization. The package arrives
@@ -58,6 +59,29 @@ Auto-commit (the pull-model commit-hygiene seam):
   CONFIG_FILES) — NOT the full `.release/` tree (that is release-sync; the
   sync->init migration is separate).
 
+Full materialize (--full, #476 part 2 — flag-gated, opt-in):
+  `release-core init --full` runs the COMPLETE release-sync pipeline (build_plan
+  + materialize + compute_mirror + apply) sourced from the wheel bundle — the
+  whole `.release/` build dir + every working-tree mirror (skills, ORIENTATION,
+  configs, per-Kind/Capability files, real-file workflow copies, the CLAUDE.md
+  managed block). It is "release-sync sourced from the wheel", so its output is
+  byte-identical to a `release-sync` run for the same Kind (modulo the
+  provenance-marker line). A real $RELEASE_HOME git clone OVERRIDES the bundle
+  (release-dev's live-templates path), exactly as the config path does.
+
+  AUTO-COMMIT ON CHANGE (the decided commit-hygiene model): after a full
+  materialize, if (and only if) managed content actually changed, --full commits
+  ONLY the managed paths with a deterministic message, on whatever branch is
+  checked out (the managed tree is generated — needs no review). Byte-identical
+  result → no commit, so churn tracks release cadence, not session count.
+  Idempotent: a second `init --full` with no upstream change makes no commit.
+  --no-commit skips committing (for tests/inspection); --dry-run computes the
+  change count and writes nothing.
+
+  Plain `init` (no --full) is UNCHANGED — the config subset only. The cutover to
+  make --full the default / wire it into the SessionStart boot is a later #476
+  step, not this one.
+
 Source resolution: the canonical config content is composed from the
 wheel-bundled templates (release_core/_bundled_templates/, staged at build time
 by hatch_build.py) so init is self-contained — no release clone, no network.
@@ -113,6 +137,21 @@ def _usage_block() -> str:
     return (USAGE.strip("\n")).rstrip("\n")
 
 
+def _bundle_root() -> str | None:
+    """Absolute path to the wheel-bundled source root (release_core/
+    _bundled_templates/), or None if not bundled.
+
+    This is the BundleSource root: its layout mirrors the repo —
+    <root>/templates/… and <root>/skills/… — so a sync ``subtree`` like
+    "templates/commons" or "skills/tdd" resolves directly. The full-tree
+    materialize (init --full) reads through this; the config-subset path uses
+    _bundle_templates_root() (the templates/ subdir) for its direct file copies.
+    """
+    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
+    root = os.path.join(here, "_bundled_templates")
+    return root if os.path.isdir(os.path.join(root, "templates")) else None
+
+
 def _bundle_templates_root() -> str | None:
     """Absolute path to the wheel-bundled templates tree, or None if not bundled.
 
@@ -122,9 +161,11 @@ def _bundle_templates_root() -> str | None:
     (it's a build artifact, gitignored), so this returns None and init falls
     back to the $RELEASE_HOME git path.
     """
-    here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
-    root = os.path.join(here, "_bundled_templates", "templates")
-    return root if os.path.isdir(root) else None
+    root = _bundle_root()
+    if root is None:
+        return None
+    templates = os.path.join(root, "templates")
+    return templates if os.path.isdir(templates) else None
 
 
 def _read_sync_yaml(repo_root: str) -> str | None:
@@ -260,11 +301,12 @@ def _materialize_config_sources(
         with open(sync_yaml, encoding="utf-8", errors="replace") as fh:
             sync_yaml_text = fh.read()
 
-    caps = sync.resolve_capabilities(release_home, ref, kind, sync_yaml_text=sync_yaml_text)
-    plan = sync.build_plan(release_home, ref, kind, caps.names, repo_root=repo_root)
+    source = sync.GitSource(release_home, ref, ref_sha)
+    caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
+    plan = sync.build_plan(source, kind, caps.names, repo_root=repo_root)
 
     tmp_root = tempfile.mkdtemp(prefix=".release-core-init.")
-    sync.materialize(release_home, ref, ref_sha, plan, tmp_root)
+    sync.materialize(source, ref_sha, plan, tmp_root)
 
     sources: dict[str, str] = {}
     for dest in CONFIG_FILES:
@@ -272,6 +314,143 @@ def _materialize_config_sources(
         if os.path.isfile(candidate):
             sources[dest] = candidate
     return sources
+
+
+# ── Full materialize (init --full): the whole managed tree, from the bundle ───
+#
+# This is "release-sync sourced from the wheel bundle": the SAME engine pipeline
+# the release_sync verb runs (build_plan + materialize + diff + compute_mirror +
+# decide_claude + apply), driven by BundleSource by default, or GitSource when a
+# real $RELEASE_HOME clone is present (release-dev override, mirroring how the
+# config path prefers $RELEASE_HOME over the bundle). It materializes the full
+# .release/ build dir plus all working-tree mirrors (symlinks, real-file copies,
+# the CLAUDE.md orientation block) — everything release-sync produces.
+
+
+def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, str, list[str]]:
+    """Pick the sync Source for a full materialize and resolve Kind + capabilities.
+
+    Returns (source, kind, capability_names). DEFAULT: BundleSource over the
+    wheel bundle (self-contained, no clone). A real $RELEASE_HOME git checkout
+    OVERRIDES it (release-dev's live-templates path), exactly as the config path
+    does. May raise manifest.KindError / sync.SyncError / yamlio.YamlError —
+    main() maps each to a clean exit 1.
+    """
+    release_home = os.environ.get("RELEASE_HOME")
+    have_clone = bool(release_home) and gh.is_git_worktree(release_home)
+    kind = manifest.detect_kind(repo_root)
+    sync_yaml_text = _read_sync_yaml(repo_root)
+
+    if not have_clone:
+        bundle_root = _bundle_root()
+        if bundle_root is None:
+            raise sync.SyncError(
+                "release-core init --full: no bundled templates and "
+                f"$RELEASE_HOME='{release_home or ''}' is not a git clone"
+            )
+        from .. import __version__ as _v
+
+        source: sync.Source = sync.BundleSource(bundle_root, ref_sha=f"release-core {_v}")
+    else:
+        assert release_home is not None
+        release_ref = os.environ.get("RELEASE_REF") or None
+        ref = sync.select_ref(release_home, repo_name, kind, release_ref)
+        ref_sha = gh.git_rev_parse(ref, cwd=release_home)
+        source = sync.GitSource(release_home, ref, ref_sha)
+
+    caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
+    sync.validate_capabilities(source, caps.names)
+    return source, kind, caps.names
+
+
+def _managed_paths_for_commit(
+    new_files: list[str], mirror: sync.MirrorPlan, claude: sync.ClaudeDecision
+) -> list[str]:
+    """The exact, repo-relative managed pathspecs a full sync produced or removed
+    — the ONLY paths --commit stages (never `git add -A`).
+
+    Covers: the whole .release/ build dir (one pathspec — git expands it to every
+    materialized file and prunes removed ones); each symlink created or removed;
+    each real-file copy written or removed; and CLAUDE.md when the orientation
+    block was created/injected/refreshed. Deterministic order, de-duplicated.
+    """
+    paths: list[str] = [".release"]
+    for s in mirror.symlinks_to_create:
+        link, _, _ = s.partition(" -> ")
+        paths.append(link)
+    for link in mirror.symlinks_to_remove:
+        # compute_mirror returns broken links as './…'; normalize for git.
+        paths.append(link[2:] if link.startswith("./") else link)
+    paths.extend(mirror.copies_to_write)
+    paths.extend(mirror.copies_to_remove)
+    if claude.action in ("create", "inject", "refresh"):
+        paths.append(sync.CLAUDE_FILE)
+    # de-dup, preserve first-seen order
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in paths:
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def _run_full_sync(repo_root: str, repo_name: str, *, dry_run: bool) -> tuple[int, list[str], str]:
+    """Run the full release-sync pipeline (bundle- or clone-sourced) and apply it.
+
+    Returns (changes, managed_paths, ref_label):
+      changes        — count of tree/mirror/claude changes (0 == already current).
+      managed_paths  — the repo-relative pathspecs touched (for --commit staging).
+      ref_label      — the source provenance (for the commit message).
+
+    In --dry-run nothing is written/applied; the plan is still computed so the
+    change count + paths are reported. Mirrors release_sync.main's apply phase
+    (atomic .release/ swap + release_sync._apply) so the result is byte-identical
+    to a `release-sync` run for the same Kind.
+    """
+    from . import release_sync as _rs
+
+    source, kind, caps_names = _resolve_full_source(repo_root, repo_name)
+    plan = sync.build_plan(source, kind, caps_names, repo_root=repo_root)
+
+    tmp_release = tempfile.mkdtemp(prefix=".release-build.", dir=repo_root)
+    swapped = False
+    try:
+        sync.materialize(source, source.ref_sha, plan, tmp_release)
+        file_diff, new_files = sync.diff_release(tmp_release, os.path.join(repo_root, ".release"))
+        mirror = sync.compute_mirror(new_files, repo_root, tmp_release, migrate=False)
+        claude = sync.decide_claude(repo_root, tmp_release)
+
+        claude_change = 1 if claude.action in ("create", "inject", "refresh") else 0
+        changes = (
+            len(file_diff.added)
+            + len(file_diff.modified)
+            + len(file_diff.removed)
+            + len(mirror.symlinks_to_create)
+            + len(mirror.symlinks_to_remove)
+            + len(mirror.migrated)
+            + len(mirror.copies_to_write)
+            + len(mirror.copies_to_remove)
+            + claude_change
+        )
+        managed = _managed_paths_for_commit(new_files, mirror, claude)
+
+        if dry_run:
+            return changes, managed, source.ref_sha
+
+        # Apply: atomic .release/ swap, then the mirror/CLAUDE.md apply phase.
+        # _apply runs relative to cwd; init has already chdir'd into repo_root.
+        release_dir = os.path.join(repo_root, ".release")
+        if os.path.isdir(release_dir):
+            shutil.rmtree(release_dir)
+        os.rename(tmp_release, release_dir)
+        swapped = True
+        _rs._apply(mirror, claude)
+    finally:
+        if not swapped:
+            shutil.rmtree(tmp_release, ignore_errors=True)
+
+    return changes, managed, source.ref_sha
 
 
 def _write_file(dest: str, src: str, *, exists: bool) -> None:
@@ -306,6 +485,14 @@ def _commit_message(source_ref: dict[str, str]) -> str:
     if ref:
         return f"chore(release): sync managed config to {ref}"
     return "chore(release): sync managed config"
+
+
+def _full_commit_message(ref_label: str) -> str:
+    """The deterministic auto-commit message for a full managed-tree sync. The
+    managed tree is fully generated (no review needed), so SessionStart can
+    auto-commit it; [skip ci] keeps the managed-only commit from spinning CI."""
+    label = ref_label or "release"
+    return f"chore(release): sync managed tree from {label} [skip ci]"
 
 
 def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool) -> None:
@@ -375,6 +562,50 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
     print(f"  pushed to {branch}.")
 
 
+def _main_full(
+    repo_root: str, repo_name: str, *, dry_run: bool, no_commit: bool, push: bool
+) -> int:
+    """The `init --full` path: full managed-tree materialize + auto-commit-on-change.
+
+    Runs the complete release-sync pipeline (build_plan + materialize +
+    compute_mirror + apply), sourced from the wheel bundle by default (or a real
+    $RELEASE_HOME clone), then — unless --no-commit/--dry-run — stages ONLY the
+    managed paths and commits iff they actually changed. Idempotent: a second run
+    with no upstream change computes zero changes → no commit.
+    """
+    try:
+        changes, managed, ref_label = _run_full_sync(repo_root, repo_name, dry_run=dry_run)
+    except manifest.KindError:
+        print(f"release-core init --full: could not detect kind of {repo_root}", file=sys.stderr)
+        return 1
+    except sync.SyncError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except yamlio.YamlError as exc:
+        print(f"release-core init --full: {exc}", file=sys.stderr)
+        return 1
+
+    if dry_run:
+        print(
+            f"summary: {changes} managed-tree change(s) "
+            f"(dry-run, no writes){' from ' + ref_label if ref_label else ''}"
+        )
+        return 0
+
+    if changes:
+        print(f"summary: {changes} managed-tree change(s) applied from {ref_label or 'release'}.")
+    else:
+        print("summary: managed tree already current (no changes).")
+
+    # AUTO-COMMIT ON CHANGE: commit only the managed paths, only when something
+    # changed. --no-commit skips the commit (for tests/inspection). Conservative
+    # and never-fail (see _auto_commit). On any branch — the managed tree is
+    # generated, needs no review.
+    if changes and not no_commit:
+        _auto_commit(repo_root, managed, _full_commit_message(ref_label), push=push)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         values, _ = cli.parse(
@@ -384,6 +615,8 @@ def main(argv: list[str] | None = None) -> int:
                 cli.Opt("--dry-run"),
                 cli.Opt("--commit"),
                 cli.Opt("--push"),
+                cli.Opt("--full"),
+                cli.Opt("--no-commit"),
             ],
             doc=_usage_block(),
         )
@@ -393,6 +626,8 @@ def main(argv: list[str] | None = None) -> int:
     force = bool(values["force"])
     dry_run = bool(values["dry-run"])
     push = bool(values["push"])
+    full = bool(values["full"])
+    no_commit = bool(values["no-commit"])
     # --push implies --commit (you cannot push a commit you never made).
     commit = bool(values["commit"]) or push
 
@@ -409,6 +644,13 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["RELEASE_HOME"] = os.path.abspath(release_home)
     os.chdir(repo_root)
     repo_name = os.path.basename(repo_root)
+
+    # --full: materialize the WHOLE managed tree (the full release-sync pipeline
+    # sourced from the wheel bundle), then AUTO-COMMIT ON CHANGE. Flag-gated and
+    # opt-in for now — plain `init` keeps the unchanged config-subset behavior
+    # (the cutover to make --full the default is a later #476 step).
+    if full:
+        return _main_full(repo_root, repo_name, dry_run=dry_run, no_commit=no_commit, push=push)
 
     source_ref: dict[str, str] = {}
     try:

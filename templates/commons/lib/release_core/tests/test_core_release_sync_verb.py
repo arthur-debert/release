@@ -121,8 +121,14 @@ def test_resolve_capabilities_yamlerror_returns_1_not_traceback(tmp_path, monkey
     monkeypatch.setattr(release_sync.manifest, "detect_kind", lambda root: "docs-site")
     monkeypatch.setattr(release_sync.sync, "select_ref", lambda *a, **k: "origin/main")
     monkeypatch.setattr(release_sync.gh, "git_rev_parse", lambda *a, **k: "a" * 40)
-    monkeypatch.setattr(release_sync.sync, "_has_nonempty_line", lambda text: True)
-    monkeypatch.setattr(release_sync.gh, "git_ls_tree", lambda *a, **k: "templates/docs-site")
+    # A non-empty templates/docs-site/ tree so the "no tree" guard passes and main
+    # proceeds to capability resolution. GitSource.list_tree parses ls-tree -r
+    # lines, so the fake must emit a real "<mode> blob <sha>\t<path>" line.
+    monkeypatch.setattr(
+        release_sync.gh,
+        "git_ls_tree",
+        lambda *a, **k: "100644 blob abc\ttemplates/docs-site/lefthook.fragment.yaml\n",
+    )
 
     def _raise(*a, **k):
         raise yamlio.YamlError("yq -o=json . failed (1): bad YAML")
