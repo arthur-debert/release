@@ -231,5 +231,5 @@ These are the canonical buckets; the title prefix is what step 1's `--search` fi
 
 ## Related
 
-- `gh-release-issue` — the sibling CLI, used by humans and agents that have it on `$PATH`. Since release#348 it ships to consumers under `templates/commons/bin/` (synced into each consumer's `bin/`), so it's reachable inside a managed repo, not just on the maintainer's machine. Same body shape; no dedupe step.
+- `gh-release-issue` — the sibling CLI, used by humans and agents that have it on `$PATH`. It reaches a consumer's PATH as a pip console-script (installed at SessionStart by `install-release-core`); the redundant synced `bin/` shim was retired in release#476. Same body shape; no dedupe step.
 - The broader sustainability loop this skill is half of. The other half (write-side: scheduled portfolio audit routine at release) is Phase 4b.

@@ -31,8 +31,11 @@ silently dropping managed `bin/` tools).
   `release-cut`, …) were RETIRED in the CLI cutover (#468) — they no longer
   exist on PATH; use `release-core <group> <command>` exclusively. The only
   flat names left are consumer-facing aliases (`changelog`, `semver`,
-  `detect-kind`, `release-sync`, `release-drift-check`, `gh-task-status`,
-  `gh-release-issue`, the `release` shim).
+  `detect-kind`, `release-sync`, `release-drift-check`). The redundant
+  `gh-task-status`, `gh-release-issue`, and `release` consumer shims were
+  retired in #476 — they reach a consumer's PATH as pip console-scripts
+  (`gh-task-status`, `gh-release-issue`) / `release-core cut`, not synced
+  `bin/` shims.
 - **Core fleet loop:** `release-core admin repos verify` (hermetic pre-flight
   sweep) → `orc propagate` (re-sync + open a PR per consumer) →
   `release-core admin release advance-major` (fast-forward the floating major).
@@ -54,7 +57,7 @@ silently dropping managed `bin/` tools).
   - Release mechanics: `release-core admin release advance-major` (← retired flat `release-advance-major`) — fast-forward the floating major branch — auto-detected highest `vN`, currently `v2` — to main after a release-side merge; one command for the old four-step `checkout vN && merge --ff-only main && push` dance
   - Sync/drift: `release-sync` (build-dir + symlinks materializer), `release-drift-check` (consumer-side drift gate — rebuilds against the revision recorded in `.release/.release-sync-source` so it separates *drift* from mere *staleness*; see ADR-0002)
   - Fleet (canonical: `release-core admin repos|inbox …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin repos list` (← `managed-repos`) — zero-logic accessor over `managed-repos.yaml`, the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`; `release-core admin repos verify` (← `release-verify-fleet`) — hermetic pre-flight lint sweep: clone fleet → `release-sync` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-core admin release advance-major`; `release-core admin inbox` (← `release-inbox`) — read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run; `release-core admin inbox notify-source` (← `release-notify-source`) — close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue. The `release-fleet-triage` skill orchestrates inbox → fix loop → notify-source. See `docs/dev/fleet-tooling.md`.
-  - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `gh-release-issue`
+  - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread` (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` shim in #476)
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
 - `tests/fixtures/` — synthetic projects per category, exercised by `_ci.yml`
