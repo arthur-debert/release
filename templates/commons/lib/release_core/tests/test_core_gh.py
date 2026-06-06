@@ -549,6 +549,20 @@ def test_git_commit_file_count_zero_on_bad_ref(tmp_path):
 
 
 @_needs_git
+def test_git_commit_file_count_handles_root_commit(tmp_path):
+    # A parent-less root commit must diff against the empty tree (--root), not
+    # report 0. _init_repo's first commit is exactly such a root commit (f.txt).
+    repo = _init_repo(tmp_path / "repo")
+    root = subprocess.run(
+        ["git", "-C", str(repo), "rev-list", "--max-parents=0", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert gh.git_commit_file_count(cwd=str(repo), ref=root) == 1
+
+
+@_needs_git
 def test_is_git_worktree_false_for_plain_dir(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()

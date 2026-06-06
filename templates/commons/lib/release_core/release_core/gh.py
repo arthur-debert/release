@@ -368,13 +368,15 @@ def git_commit_paths(paths: list[str], message: str, *, cwd: str) -> None:
 def git_commit_file_count(*, cwd: str, ref: str = "HEAD") -> int:
     """Number of files changed in ``ref``'s commit (`git show --name-only`).
 
-    Uses `git diff-tree -r --no-commit-id --name-only <ref>` — one line per
-    changed path, so the real file count of a commit even when it was created
-    from directory pathspecs (e.g. `.release` expanding to ~140 files). Returns
-    0 on any error (count is cosmetic — never fail the caller over it)."""
+    Uses `git diff-tree -r --no-commit-id --name-only --root <ref>` — one line
+    per changed path, so the real file count of a commit even when it was
+    created from directory pathspecs (e.g. `.release` expanding to ~140 files).
+    `--root` makes a parent-less root commit diff against the empty tree (else
+    diff-tree emits nothing and the count would be a spurious 0). Returns 0 on
+    any error (count is cosmetic — never fail the caller over it)."""
     try:
         raw = git(
-            ["-C", cwd, "diff-tree", "-r", "--no-commit-id", "--name-only", ref],
+            ["-C", cwd, "diff-tree", "-r", "--no-commit-id", "--name-only", "--root", ref],
             check=False,
         )
     except Exception:
