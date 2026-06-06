@@ -1,28 +1,48 @@
-"""Hatch build hook: bundle the config templates into the wheel.
+"""Hatch build hook: bundle the FULL managed tree into the wheel.
 
-`release-core init` materializes the per-repo committed config (lefthook.yml +
-lint configs) from these templates. For the pull-model the wheel must be
-self-contained — it ships the template DATA so `init` needs no release clone.
+`release-core init` materializes per-repo managed content from these bundled
+sources. For the pull-model the wheel must be self-contained — it ships the
+template DATA (and the distributable skills) so `init` needs no release clone.
 
-The templates live OUTSIDE the package build root (at <repo>/templates/...),
-so we stage the config-relevant subset into release_core/_bundled_templates/
-at build time; hatch then packages it like any in-package data. The staged
-dir is gitignored (a build artifact, never committed).
+The sources live OUTSIDE the package build root (templates at <repo>/templates/…,
+skills at <repo>/skills/…), so we stage them into
+release_core/_bundled_templates/ at build time; hatch then packages it like any
+in-package data. The staged dir is gitignored (a build artifact, never
+committed) and `finalize()` removes it post-build so an editable/source checkout
+never carries a stale bundle (a stale bundle silently flips init to the offline
+path).
 
-Only the config-composition inputs are bundled (keeps the wheel small):
-  templates/commons/<lint configs> + lefthook.fragment.yaml
-  templates/components/<cap>/lefthook.fragment.yaml + _lefthook-base.yaml
-  templates/<kind>/{lefthook.fragment.yaml,manifest.yaml}
+What gets bundled (release#476, part 1 — full-tree bundling):
+  - The FULL template tree: all of templates/commons/, all of
+    templates/components/, and EACH per-kind dir templates/<kind>/ — copied
+    whole (directories, not just the few config files), into
+    _bundled_templates/templates/<same-rel-path>.
+  - The DISTRIBUTED skills only — the PUSH_ALL_SKILLS + REPLACE_IF_PRESENT_SKILLS
+    catalog defined in release_core.sync — from <repo>/skills/<name>/ into
+    _bundled_templates/skills/<name>/. Release-only skills are NOT shipped.
+
+Recursion guard: templates/commons/lib/release_core/ IS this very package (the
+build root). It is excluded entirely so the bundle does not contain a copy of
+itself. Other templates/commons/lib/ content is kept.
+
+NOTE — config subset vs. full tree: `init` currently CONSUMES only the
+config-composition subset listed in _COMMONS_CONFIGS (lefthook.yml + lint
+configs) plus the per-kind/capability lefthook fragments + manifests. The rest
+of the now-bundled tree is PRESENT but unused until step 2 (#476) teaches `init`
+to do a full offline materialize. This part-1 change is purely additive data.
 """
 
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-# Files under templates/commons/ that init copies verbatim (kind-independent).
+# Files under templates/commons/ that init currently CONSUMES verbatim
+# (kind-independent config subset). The full commons/ tree is now bundled too
+# (see module docstring); this list documents the subset init reads today.
 _COMMONS_CONFIGS = (
     ".markdownlint.json",
     ".markdownlintignore",
@@ -35,6 +55,58 @@ _COMMONS_CONFIGS = (
 
 _BUNDLE_DIRNAME = "_bundled_templates"
 
+# Junk that must never land in the bundle (mirrors
+# release_core.sync.should_skip_source where it concerns build artifacts/cruft).
+_SKIP_DIR_NAMES = frozenset({"__pycache__", ".git", _BUNDLE_DIRNAME})
+_SKIP_FILE_SUFFIXES = (".pyc", ".pyo")
+_SKIP_FILE_NAMES = frozenset({".DS_Store"})
+
+
+def _skip_names(_dir: str, names: list[str]) -> set[str]:
+    """`shutil.copytree(ignore=…)` callback: drop bytecode dirs/files, .git,
+    .DS_Store, and the bundle dir itself, consistently at every depth."""
+    drop: set[str] = set()
+    for n in names:
+        if n in _SKIP_DIR_NAMES or n in _SKIP_FILE_NAMES or n.endswith(_SKIP_FILE_SUFFIXES):
+            drop.add(n)
+    return drop
+
+
+def _distributed_skills(repo_root: str) -> list[str]:
+    """The skill catalog to ship to consumers, read from the single source of
+    truth (release_core.sync: PUSH_ALL_SKILLS + REPLACE_IF_PRESENT_SKILLS).
+
+    Parsed statically with `ast` from sync.py rather than imported: importing the
+    package would run release_core/__init__.py (which pulls in click via the CLI
+    subpackage) and need it installed at build time. Static parse avoids that
+    while still reading the canonical lists — a drifted hand-copy is a bug."""
+    sync_py = os.path.join(
+        repo_root, "templates", "commons", "lib", "release_core", "release_core", "sync.py"
+    )
+    with open(sync_py, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read(), filename=sync_py)
+    wanted = {"PUSH_ALL_SKILLS", "REPLACE_IF_PRESENT_SKILLS"}
+    found: dict[str, list[str]] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id in wanted:
+                found[target.id] = ast.literal_eval(node.value)
+    missing = wanted - found.keys()
+    if missing:
+        raise RuntimeError(
+            f"hatch_build: could not parse skill catalog {sorted(missing)} from {sync_py!r}"
+        )
+    # De-dup defensively while preserving order; the two lists are disjoint today.
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in found["PUSH_ALL_SKILLS"] + found["REPLACE_IF_PRESENT_SKILLS"]:
+        if name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
 
 class CustomBuildHook(BuildHookInterface):
     PLUGIN_NAME = "custom"
@@ -44,39 +116,51 @@ class CustomBuildHook(BuildHookInterface):
         repo_templates = os.path.normpath(os.path.join(self.root, "..", "..", ".."))  # …/templates
         if os.path.basename(repo_templates) != "templates":
             raise RuntimeError(f"hatch_build: expected …/templates, got {repo_templates!r}")
+        repo_root = os.path.dirname(repo_templates)  # …/<repo>
 
-        dest_root = os.path.join(self.root, "release_core", _BUNDLE_DIRNAME, "templates")
-        shutil.rmtree(os.path.join(self.root, "release_core", _BUNDLE_DIRNAME), ignore_errors=True)
+        bundle_root = os.path.join(self.root, "release_core", _BUNDLE_DIRNAME)
+        dest_templates = os.path.join(bundle_root, "templates")
+        dest_skills = os.path.join(bundle_root, "skills")
+        shutil.rmtree(bundle_root, ignore_errors=True)
 
-        def _copy(rel_src: str) -> None:
-            src = os.path.join(repo_templates, rel_src)
-            if not os.path.isfile(src):
-                return
-            dst = os.path.join(dest_root, rel_src)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copyfile(src, dst)
+        # THE recursion/bloat guard: templates/commons/lib/release_core IS this
+        # package (the build root). Copy it into itself and the wheel balloons /
+        # nests forever. Exclude that one subtree; keep the rest of commons/lib.
+        pkg_subtree = os.path.normpath(
+            os.path.join(repo_templates, "commons", "lib", "release_core")
+        )
 
-        # commons lint configs + fragment
-        for name in _COMMONS_CONFIGS:
-            _copy(os.path.join("commons", name))
+        def _copytree(src: str, dst: str) -> None:
+            """Copy a directory tree, skipping junk and the package subtree."""
 
-        # capability fragments + the base fragment
-        _copy(os.path.join("components", "_lefthook-base.yaml"))
-        components = os.path.join(repo_templates, "components")
-        if os.path.isdir(components):
-            for cap in sorted(os.listdir(components)):
-                _copy(os.path.join("components", cap, "lefthook.fragment.yaml"))
+            def ignore(cur_dir: str, names: list[str]) -> set[str]:
+                drop = _skip_names(cur_dir, names)
+                # Drop the package subtree wherever it appears under commons/lib.
+                for n in names:
+                    if os.path.normpath(os.path.join(cur_dir, n)) == pkg_subtree:
+                        drop.add(n)
+                return drop
 
-        # per-kind gate fragment + manifest (kind dirs are the non-commons,
-        # non-components top-level dirs that carry a lefthook fragment).
+            shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True, symlinks=False)
+
+        # 1. FULL template tree: commons/, components/, and each per-kind dir.
         for entry in sorted(os.listdir(repo_templates)):
-            if entry in ("commons", "components"):
+            src = os.path.join(repo_templates, entry)
+            if not os.path.isdir(src):
                 continue
-            kdir = os.path.join(repo_templates, entry)
-            if not os.path.isdir(kdir):
+            if entry in _SKIP_DIR_NAMES:
                 continue
-            _copy(os.path.join(entry, "lefthook.fragment.yaml"))
-            _copy(os.path.join(entry, "manifest.yaml"))
+            _copytree(src, os.path.join(dest_templates, entry))
+
+        # 2. DISTRIBUTED skills only (from <repo>/skills/<name>/) — never the
+        #    whole skills/ dir; release-only skills must not ship to consumers.
+        skills_root = os.path.join(repo_root, "skills")
+        for name in _distributed_skills(repo_root):
+            src = os.path.join(skills_root, name)
+            if not os.path.isdir(src):
+                # A catalog name with no source dir is a packaging bug — fail loud.
+                raise RuntimeError(f"hatch_build: distributed skill {name!r} has no dir at {src!r}")
+            _copytree(src, os.path.join(dest_skills, name))
 
         # Ensure hatch includes the staged tree in the wheel.
         build_data.setdefault("artifacts", []).append(f"release_core/{_BUNDLE_DIRNAME}/**")
