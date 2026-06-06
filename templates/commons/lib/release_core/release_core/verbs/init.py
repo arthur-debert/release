@@ -160,7 +160,7 @@ def _bundle_root() -> str | None:
     This is the BundleSource root: its layout mirrors the repo —
     <root>/templates/… and <root>/skills/… — so a sync ``subtree`` like
     "templates/commons" or "skills/tdd" resolves directly. The full-tree
-    materialize (init --full) reads through this; the config-subset path uses
+    materialize (the default init) reads through this; the config-subset path uses
     _bundle_templates_root() (the templates/ subdir) for its direct file copies.
     """
     here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
@@ -361,7 +361,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
         bundle_root = _bundle_root()
         if bundle_root is None:
             raise sync.SyncError(
-                "release-core init --full: no bundled templates and "
+                "release-core init: no bundled templates and "
                 f"$RELEASE_HOME='{release_home or ''}' is not a git clone"
             )
         from .. import __version__ as _v
@@ -380,7 +380,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
     # leaving an incomplete managed tree.
     if not source.exists(f"templates/{kind}"):
         raise sync.SyncError(
-            f"release-core init --full: source '{source.label}' has no templates/{kind}/ tree"
+            f"release-core init: source '{source.label}' has no templates/{kind}/ tree"
         )
 
     caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
@@ -610,13 +610,13 @@ def _main_full(
             repo_root, repo_name, dry_run=dry_run
         )
     except manifest.KindError:
-        print(f"release-core init --full: could not detect kind of {repo_root}", file=sys.stderr)
+        print(f"release-core init: could not detect kind of {repo_root}", file=sys.stderr)
         return 1
     except sync.SyncError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     except yamlio.YamlError as exc:
-        print(f"release-core init --full: {exc}", file=sys.stderr)
+        print(f"release-core init: {exc}", file=sys.stderr)
         return 1
 
     # Surface conflicts (real file/dir at a managed location blocked a managed
@@ -625,7 +625,7 @@ def _main_full(
     if conflicts:
         print(
             "conflicts: a real file/dir blocks these managed paths (not applied) — "
-            "remove them and re-run init --full:",
+            "remove them and re-run release-core init:",
             file=sys.stderr,
         )
         for f in conflicts:
