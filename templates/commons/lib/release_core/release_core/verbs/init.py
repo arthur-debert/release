@@ -543,7 +543,11 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
         )
         return
 
-    print(f"committed {len(written)} managed file(s): {message}")
+    # Report the REAL number of files in the commit, not len(written): `written`
+    # is a list of pathspecs (".release" is ONE entry that git expands to every
+    # materialized file), so len(written) badly under-counts a full sync.
+    n = gh.git_commit_file_count(cwd=repo_root) or len(written)
+    print(f"committed {n} managed file(s): {message}")
 
     if not push:
         return

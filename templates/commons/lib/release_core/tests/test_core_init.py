@@ -1197,7 +1197,12 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "committed" in out
+    # #476: the working-tree symlink itself must be GONE — not merely a dangling
+    # link (os.path.exists follows the link, so it returns False for a broken
+    # link too; lexists/islink is what actually catches the dangle the bug left).
     assert not (repo / "bin" / "check").exists()
+    assert not os.path.lexists(repo / "bin" / "check"), "left a dangling symlink"
+    assert not (repo / "bin" / "check").is_symlink()
     assert not (repo / ".release" / "bin" / "check").exists()
     # The deletion is in the commit and the tree is clean (nothing left staged).
     last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")

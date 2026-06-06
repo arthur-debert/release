@@ -529,6 +529,26 @@ def test_is_git_worktree_true_for_linked_worktree(tmp_path):
 
 
 @_needs_git
+def test_git_commit_file_count_counts_real_files_not_pathspecs(tmp_path):
+    # #476: a commit created from a DIRECTORY pathspec must report its real file
+    # count, not the pathspec count (the miscount: "committed 2 files" / 140 real).
+    repo = _init_repo(tmp_path / "repo")
+    d = repo / "sub"
+    d.mkdir()
+    for i in range(5):
+        (d / f"f{i}.txt").write_text(f"{i}\n")
+    _git(repo, "add", "sub")  # one pathspec, five files
+    _git(repo, "commit", "-qm", "bulk")
+    assert gh.git_commit_file_count(cwd=str(repo)) == 5
+
+
+@_needs_git
+def test_git_commit_file_count_zero_on_bad_ref(tmp_path):
+    repo = _init_repo(tmp_path / "repo")
+    assert gh.git_commit_file_count(cwd=str(repo), ref="no-such-ref") == 0
+
+
+@_needs_git
 def test_is_git_worktree_false_for_plain_dir(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()

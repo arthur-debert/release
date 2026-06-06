@@ -365,6 +365,23 @@ def git_commit_paths(paths: list[str], message: str, *, cwd: str) -> None:
     git(["-C", cwd, "commit", "-m", message, "--", *paths])
 
 
+def git_commit_file_count(*, cwd: str, ref: str = "HEAD") -> int:
+    """Number of files changed in ``ref``'s commit (`git show --name-only`).
+
+    Uses `git diff-tree -r --no-commit-id --name-only <ref>` — one line per
+    changed path, so the real file count of a commit even when it was created
+    from directory pathspecs (e.g. `.release` expanding to ~140 files). Returns
+    0 on any error (count is cosmetic — never fail the caller over it)."""
+    try:
+        raw = git(
+            ["-C", cwd, "diff-tree", "-r", "--no-commit-id", "--name-only", ref],
+            check=False,
+        )
+    except Exception:
+        return 0
+    return sum(1 for line in raw.splitlines() if line.strip())
+
+
 def git_push_ff(branch: str, *, cwd: str, remote: str = "origin") -> None:
     """`git -C <cwd> push <remote> <branch>` — a plain (fast-forward-only) push.
     Never --force. Raises ProcError on rejection (e.g. non-fast-forward)."""
