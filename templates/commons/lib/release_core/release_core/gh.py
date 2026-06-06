@@ -366,7 +366,7 @@ def git_commit_paths(paths: list[str], message: str, *, cwd: str) -> None:
 
 
 def git_commit_file_count(*, cwd: str, ref: str = "HEAD") -> int:
-    """Number of files changed in ``ref``'s commit (`git show --name-only`).
+    """Number of files changed in ``ref``'s commit (via `git diff-tree`).
 
     Uses `git diff-tree -r --no-commit-id --name-only --root <ref>` — one line
     per changed path, so the real file count of a commit even when it was
