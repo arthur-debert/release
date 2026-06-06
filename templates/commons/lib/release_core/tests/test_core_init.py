@@ -1213,6 +1213,35 @@ def test_push_and_no_commit_is_bad_usage(capsys):
     assert "mutually exclusive" in err
 
 
+def test_no_commit_without_full_is_bad_usage(capsys):
+    # --no-commit only governs --full's auto-commit; plain init must reject it
+    # rather than silently ignore it.
+    rc = init.main(["--no-commit"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "only valid with --full" in err
+
+
+@_needs_yq
+@_needs_git
+def test_full_surfaces_conflicts(tmp_path, monkeypatch, capsys):
+    # A real file at a managed symlink location blocks the link (a conflict). It
+    # is reported on stderr and the run is NOT called "already current".
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # Pre-place a real bin/check (non-skill dest → conflict, not auto-migrated).
+    (repo / "bin").mkdir()
+    (repo / "bin" / "check").write_text("hand-written\n")
+
+    rc = init.main(["--full", "--no-commit"])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "conflict" in out.err
+    assert "bin/check" in out.err
+    # bin/check stays the real file (not replaced by a symlink).
+    assert not (repo / "bin" / "check").is_symlink()
+
+
 def test_full_no_bundle_and_no_clone_errors(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()

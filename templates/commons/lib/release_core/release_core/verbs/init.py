@@ -402,18 +402,23 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
     return out
 
 
-def _run_full_sync(repo_root: str, repo_name: str, *, dry_run: bool) -> tuple[int, list[str], str]:
+def _run_full_sync(
+    repo_root: str, repo_name: str, *, dry_run: bool
+) -> tuple[int, list[str], str, list[str]]:
     """Run the full release-sync pipeline (bundle- or clone-sourced) and apply it.
 
-    Returns (changes, managed_paths, ref_label):
+    Returns (changes, managed_paths, ref_label, conflicts):
       changes        — count of tree/mirror/claude changes (0 == already current).
       managed_paths  — the repo-relative pathspecs touched (for --commit staging).
       ref_label      — the source provenance (for the commit message).
+      conflicts      — managed dests blocked by a real file/dir (symlink NOT
+                       created); the caller surfaces these so a "no changes" run
+                       that still has unresolved conflicts isn't reported clean.
 
     In --dry-run nothing is written/applied; the plan is still computed so the
-    change count + paths are reported. Mirrors release_sync.main's apply phase
-    (atomic .release/ swap + release_sync._apply) so the result is byte-identical
-    to a `release-sync` run for the same Kind.
+    change count + paths + conflicts are reported. Mirrors release_sync.main's
+    apply phase (atomic .release/ swap + release_sync._apply) so the result is
+    byte-identical to a `release-sync` run for the same Kind.
     """
     from . import release_sync as _rs
 
@@ -443,7 +448,7 @@ def _run_full_sync(repo_root: str, repo_name: str, *, dry_run: bool) -> tuple[in
         managed = _managed_paths_for_commit(mirror, claude)
 
         if dry_run:
-            return changes, managed, source.ref_sha
+            return changes, managed, source.ref_sha, list(mirror.conflicts)
 
         # Apply: atomic .release/ swap, then the mirror/CLAUDE.md apply phase.
         # _apply runs relative to cwd; init has already chdir'd into repo_root.
@@ -457,7 +462,7 @@ def _run_full_sync(repo_root: str, repo_name: str, *, dry_run: bool) -> tuple[in
         if not swapped:
             shutil.rmtree(tmp_release, ignore_errors=True)
 
-    return changes, managed, source.ref_sha
+    return changes, managed, source.ref_sha, list(mirror.conflicts)
 
 
 def _write_file(dest: str, src: str, *, exists: bool) -> None:
@@ -581,7 +586,9 @@ def _main_full(
     with no upstream change computes zero changes → no commit.
     """
     try:
-        changes, managed, ref_label = _run_full_sync(repo_root, repo_name, dry_run=dry_run)
+        changes, managed, ref_label, conflicts = _run_full_sync(
+            repo_root, repo_name, dry_run=dry_run
+        )
     except manifest.KindError:
         print(f"release-core init --full: could not detect kind of {repo_root}", file=sys.stderr)
         return 1
@@ -592,15 +599,33 @@ def _main_full(
         print(f"release-core init --full: {exc}", file=sys.stderr)
         return 1
 
+    # Surface conflicts (real file/dir at a managed location blocked a managed
+    # symlink/copy). These mean the tree is NOT in steady state even when the
+    # change count is 0 — never silently report "already current".
+    if conflicts:
+        print(
+            "conflicts: a real file/dir blocks these managed paths (not applied) — "
+            "remove them and re-run init --full:",
+            file=sys.stderr,
+        )
+        for f in conflicts:
+            print(f"  !file  {f}", file=sys.stderr)
+
     if dry_run:
         print(
-            f"summary: {changes} managed-tree change(s) "
+            f"summary: {changes} managed-tree change(s), {len(conflicts)} conflict(s) "
             f"(dry-run, no writes){' from ' + ref_label if ref_label else ''}"
         )
         return 0
 
     if changes:
-        print(f"summary: {changes} managed-tree change(s) applied from {ref_label or 'release'}.")
+        suffix = f", {len(conflicts)} conflict(s)" if conflicts else ""
+        print(
+            f"summary: {changes} managed-tree change(s) applied from "
+            f"{ref_label or 'release'}{suffix}."
+        )
+    elif conflicts:
+        print(f"summary: 0 changes but {len(conflicts)} unresolved conflict(s) — see stderr.")
     else:
         print("summary: managed tree already current (no changes).")
 
@@ -642,6 +667,12 @@ def main(argv: list[str] | None = None) -> int:
     # Reject the combo as bad usage rather than silently making --push a no-op.
     if push and no_commit:
         print("release-core init: --push and --no-commit are mutually exclusive", file=sys.stderr)
+        return 64
+    # --no-commit only governs --full's auto-commit-on-change; in plain init
+    # (which doesn't commit unless --commit) it would be silently ignored — flag
+    # the contract mismatch rather than hide it.
+    if no_commit and not full:
+        print("release-core init: --no-commit is only valid with --full", file=sys.stderr)
         return 64
 
     try:

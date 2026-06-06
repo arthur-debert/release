@@ -141,6 +141,21 @@ def test_bundle_source_ref_sha_and_label(tmp_path):
     assert sync.BundleSource(str(tmp_path)).label == "wheel bundle"
 
 
+def test_bundle_source_refuses_path_traversal(tmp_path):
+    # Capability names flow in from consumer YAML; a "../.." must not escape the
+    # bundle root (path-traversal / arbitrary-file read).
+    root = tmp_path / "bundle"
+    (root / "templates").mkdir(parents=True)
+    (tmp_path / "secret.txt").write_text("top secret\n")
+    src = sync.BundleSource(str(root))
+    with pytest.raises(sync.SyncError, match="escapes the bundle root"):
+        src.exists("templates/components/../../../secret.txt")
+    with pytest.raises(sync.SyncError, match="escapes the bundle root"):
+        src.read_bytes("templates/components/../../../secret.txt")
+    with pytest.raises(sync.SyncError, match="escapes the bundle root"):
+        src.list_tree("templates/../../elsewhere")
+
+
 # ── Ref selection precedence ──────────────────────────────────────────────────
 
 

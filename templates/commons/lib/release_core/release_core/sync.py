@@ -120,7 +120,16 @@ class BundleSource(Source):
 
     def _abs(self, relpath: str) -> str:
         # relpath is always POSIX/'/'-separated; translate to the host separator.
-        return os.path.join(self.bundle_root, *relpath.split("/"))
+        # CONTAINMENT GUARD: capability names flow in from consumer-controlled
+        # YAML (e.g. a subtree "templates/components/<cap>"), so a malicious
+        # "../.." could otherwise escape the bundle and read arbitrary files.
+        # Resolve against the real bundle root and refuse any path that lands
+        # outside it. GitSource has no analogue (git refs can't traverse out).
+        root = os.path.realpath(self.bundle_root)
+        full = os.path.realpath(os.path.join(self.bundle_root, *relpath.split("/")))
+        if full != root and not full.startswith(root + os.sep):
+            raise SyncError(f"release-sync: bundle path escapes the bundle root: {relpath!r}")
+        return full
 
     def list_tree(self, subtree: str) -> list[tuple[str, str]]:
         base = self._abs(subtree)
