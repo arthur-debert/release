@@ -107,9 +107,10 @@ class BundleSource(Source):
     "templates/commons" or "skills/tdd" resolves directly to a subdirectory.
 
     list_tree walks the subtree recursively and reports each file's git filemode
-    from its on-disk executable bit (100755 if any execute bit is set, else
-    100644 — mirroring how git stores blob modes), with rel paths in sorted order
-    for deterministic plan/output ordering across filesystems.
+    from its on-disk mode bits (100755 if ANY execute bit is set — owner, group,
+    or other — else 100644, exactly how git derives a blob's mode), with rel
+    paths in sorted order for deterministic plan/output ordering across
+    filesystems.
     """
 
     def __init__(self, bundle_root: str, ref_sha: str = "") -> None:
@@ -137,7 +138,11 @@ class BundleSource(Source):
                     continue
                 rel_to_base = os.path.relpath(full, base).replace(os.sep, "/")
                 rel = f"{subtree}/{rel_to_base}"
-                mode = "100755" if os.access(full, os.X_OK) else "100644"
+                # git records 100755 iff ANY execute bit (owner/group/other) is
+                # set — check the stat mode bits, NOT os.access(X_OK) (which asks
+                # whether the CURRENT user can execute and so misreports under
+                # cross-user ownership).
+                mode = "100755" if (os.stat(full).st_mode & 0o111) else "100644"
                 out.append((rel, mode))
         return out
 

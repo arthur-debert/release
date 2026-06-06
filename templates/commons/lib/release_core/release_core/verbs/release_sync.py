@@ -121,7 +121,9 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     ref_sha = gh.git_rev_parse(ref, cwd=release_home)
     source = sync.GitSource(release_home, ref, ref_sha)
 
-    if not source.list_tree(f"templates/{kind}"):
+    # Cheap existence probe (git cat-file -e <ref>:templates/<kind> resolves a
+    # tree path) — NOT a recursive ls-tree; build_plan does the full walk below.
+    if not source.exists(f"templates/{kind}"):
         _err(f"release-sync: ref '{ref}' has no templates/{kind}/ tree")
         return 1
 

@@ -358,6 +358,15 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
         ref_sha = gh.git_rev_parse(ref, cwd=release_home)
         source = sync.GitSource(release_home, ref, ref_sha)
 
+    # Guard the Kind tree exists in the source — same early error release-sync
+    # raises. Without it a wheel/ref missing templates/<kind>/ would silently
+    # materialize only commons/components/skills and still report success,
+    # leaving an incomplete managed tree.
+    if not source.exists(f"templates/{kind}"):
+        raise sync.SyncError(
+            f"release-core init --full: source '{source.label}' has no templates/{kind}/ tree"
+        )
+
     caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
     sync.validate_capabilities(source, caps.names)
     return source, kind, caps.names

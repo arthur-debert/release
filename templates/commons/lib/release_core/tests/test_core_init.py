@@ -1159,6 +1159,52 @@ def test_full_dry_run_writes_nothing(tmp_path, monkeypatch, capsys):
     assert _git(repo, "rev-parse", "HEAD") == head_before
 
 
+@_needs_yq
+@_needs_git
+def test_full_errors_when_source_lacks_kind_tree(tmp_path, monkeypatch, capsys):
+    # A source missing templates/<kind>/ must hard-fail (exit 1) rather than
+    # silently materialize an incomplete tree (commons/skills only).
+    src = _full_source_tree(tmp_path / "src")
+    repo = _init_git_repo(tmp_path / "consumer")
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_bundle_root", lambda: str(src))
+    # detect a Kind the bundle has no templates/<kind>/ dir for.
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "no-such-kind")
+
+    rc = init.main(["--full", "--no-commit"])
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "no" in err and "templates/no-such-kind/ tree" in err
+    assert not (repo / ".release").exists()
+
+
+@_needs_yq
+@_needs_git
+def test_full_commits_removals(tmp_path, monkeypatch, capsys):
+    # A "removals-only" managed update (a symlink whose .release target is gone in
+    # a later sync) must be staged + committed, not left dangling.
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    assert init.main(["--full"]) == 0
+    capsys.readouterr()
+    assert (repo / "bin" / "check").is_symlink()
+
+    # Drop the bin/check tool from the source, re-run: the managed symlink +
+    # its .release/ target must be removed AND that removal committed.
+    os.remove(os.path.join(src, "templates", "commons", "bin", "check"))
+    rc = init.main(["--full"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert not (repo / "bin" / "check").exists()
+    assert not (repo / ".release" / "bin" / "check").exists()
+    # The deletion is in the commit and the tree is clean (nothing left staged).
+    last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
+    assert "bin/check" in last
+    assert _git(repo, "status", "--porcelain") == ""
+
+
 def test_full_no_bundle_and_no_clone_errors(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()
