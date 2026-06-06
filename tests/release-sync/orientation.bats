@@ -62,15 +62,17 @@ END_MARK='<!-- END release-managed orientation -->'
   [ "$(grep -cF "$BEGIN_MARK" CLAUDE.md)" -eq 1 ]
 }
 
-@test "the escalation tool gh-release-issue ships to consumers (#348)" {
-  # ORIENTATION.md's escalation contract tells agents to run gh-release-issue,
-  # so it must actually be on a consumer's PATH after sync (not maintainer-only).
+@test "the gh-release-issue synced shim is retired — not materialized (#476)" {
+  # The escalation tool reaches a consumer's PATH via the pip console-script
+  # (install-release-core at SessionStart), NOT a synced bin/ shim. ORIENTATION's
+  # escalation contract uses the `release-core issue file` CLI; the redundant
+  # synced shim was retired in #476 so .release/lib/release_core can later be
+  # stripped without leaving a dangling sys.path shim.
   "$BIN/release-sync" >/dev/null
-  [ -L bin/gh-release-issue ]
-  [ -f .release/bin/gh-release-issue ]
-  run ./bin/gh-release-issue --help
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"File a bug against arthur-debert/release"* ]]
+  [ ! -e bin/gh-release-issue ]
+  [ ! -e .release/bin/gh-release-issue ]
+  # ORIENTATION points agents at the console-script escalation CLI.
+  grep -qF 'release-core issue file' .release/ORIENTATION.md
 }
 
 @test "--check reports drift when the orientation block is missing" {

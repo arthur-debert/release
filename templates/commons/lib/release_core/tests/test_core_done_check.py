@@ -251,7 +251,7 @@ def test_aggregate_all_pass_is_pilot_running():
             "check": "PASS|bin/check",
             "build": "PASS|bin/build",
             "release": "PASS|v1 via rust-cli.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     assert res["state"] == "pilot-running"
@@ -267,7 +267,7 @@ def test_aggregate_local_fail_is_implemented_exit1():
             "check": "FAIL|bin/check missing",
             "build": "PASS|bin/build",
             "release": "PASS|v1 via rust-cli.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     assert res["state"] == "implemented"
@@ -283,7 +283,7 @@ def test_aggregate_ci_warn_only_is_warnings_exit2():
         {
             "check": "PASS|bin/check",
             "release": "PASS|v1 via nvim-plugin.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     assert res["state"] == "implemented+warnings"
@@ -298,14 +298,14 @@ def test_aggregate_release_row_carries_local_and_na_ci():
             "check": "PASS|bin/check",
             "build": "PASS|bin/build",
             "release": "WARN|no releases — consumer has not shipped through canonical yet",
-            "release:local": "FAIL|bin/release missing",
+            "release:local": "FAIL|release.yml missing",
         },
     )
     rel_row = res["rows"][-1]
     assert rel_row["verb"] == "release"
     assert rel_row["ci"] == "(n/a)"
     assert rel_row["local"] == "FAIL"
-    assert "[local: bin/release missing]" in rel_row["msg"]
+    assert "[local: release.yml missing]" in rel_row["msg"]
     assert res["exit_code"] == 2  # WARN release, no FAIL
 
 
@@ -317,7 +317,7 @@ def test_aggregate_fail_dominates_warn():
             "check": "PASS|bin/check",
             "build": "FAIL|bin/build missing",
             "release": "PASS|v1 via rust-cli.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     assert res["exit_code"] == 1
@@ -335,7 +335,7 @@ def test_render_json_shape_and_escaping():
             "check": "PASS|bin/check",
             "build": "PASS|bin/build",
             "release": "PASS|v1 via rust-cli.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     out = done_check.render_json(res)
@@ -355,7 +355,7 @@ def test_render_table_has_header_and_arrow():
             "check": "PASS|bin/check",
             "build": "PASS|bin/build",
             "release": "PASS|v1 via rust-cli.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     out = done_check.render_table(res, quiet=False)
@@ -372,7 +372,7 @@ def test_render_table_quiet_hides_pass_rows():
             "check": "FAIL|bin/check missing",
             "build": "PASS|bin/build",
             "release": "PASS|v1 via rust-cli.yml",
-            "release:local": "PASS|bin/release",
+            "release:local": "PASS|release.yml",
         },
     )
     out = done_check.render_table(res, quiet=True)
@@ -389,6 +389,7 @@ def _wire_main(monkeypatch, *, stack="rust-cli", ci="PASS|ci.yml"):
     monkeypatch.setattr(done_check, "check_ci", lambda r: ci)
     monkeypatch.setattr(done_check, "check_release", lambda r, s: "PASS|v1 via rust-cli.yml")
     monkeypatch.setattr(done_check, "check_local", lambda r, v: f"PASS|bin/{v}")
+    monkeypatch.setattr(done_check, "check_release_local", lambda r: "PASS|release.yml")
 
 
 def test_main_requires_repo_or_detects(monkeypatch, capsys):
@@ -454,6 +455,7 @@ def test_main_fail_exits_1(monkeypatch, capsys):
         "check_local",
         lambda r, v: "FAIL|bin/check missing" if v == "check" else f"PASS|bin/{v}",
     )
+    monkeypatch.setattr(done_check, "check_release_local", lambda r: "PASS|release.yml")
     rc = done_check.main(["--repo", "o/r"])
     assert rc == 1
 

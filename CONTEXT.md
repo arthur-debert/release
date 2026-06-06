@@ -2,7 +2,7 @@
 
 ## Kind
 
-The type of deliverable a repo ships. Answers: "when I run `bin/build`, what am I building? When I run `bin/release`, what am I publishing?" Each repo has exactly one Kind. The Kind determines the build pipeline, release pipeline, and which reusable workflow the repo calls.
+The type of deliverable a repo ships. Answers: "when I run `bin/build`, what am I building? When I run `release-core cut`, what am I publishing?" Each repo has exactly one Kind. The Kind determines the build pipeline, release pipeline, and which reusable workflow the repo calls.
 
 Examples: `rust-cli`, `rust-lib`, `electron-app`, `tauri-app`, `vscode-ext`, `nvim-plugin`, `tree-sitter`, `zed-extension`, `go-cli`, `gh-action`.
 
@@ -36,7 +36,7 @@ Examples: `arthur-debert/phos-app`, `lex-fmt/lex`, `arthur-debert/padz`.
 
 An atomic verb exposed as `bin/<verb>` in the consumer repo. Same interface regardless of Kind; behavior varies. Tasks are the unit of work a developer or agent invokes.
 
-Examples: `bin/check`, `bin/check-fmt`, `bin/check-lint`, `bin/check-tests`, `bin/build`, `bin/release`.
+Examples: `bin/check`, `bin/check-fmt`, `bin/check-lint`, `bin/check-tests`, `bin/build`. (Cutting a release is the `release-core cut` console-script, not a per-repo `bin/` Task — the `bin/release` shim was retired in #476.)
 
 ## Tool
 

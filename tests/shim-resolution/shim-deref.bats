@@ -19,16 +19,17 @@
 
 REPO_ROOT="$BATS_TEST_DIRNAME/../.."
 
-# name|pkg for each variant-(a) shim. All resolve to release_core. (The PR state
-# engine's gh-task-status was folded into release_core and now ships purely as a
-# pip console-script — no sys.path shim — so it is no longer in this set;
-# release#459.)
+# name|pkg for each variant-(a) shim. All resolve to release_core. (gh-task-status
+# and gh-release-issue were retired as synced shims in #476 — they ship purely as
+# pip console-scripts now — so they are no longer in this set. The changelog
+# family is still distributed as sys.path shims because the release composite
+# actions / gh-action.yml execute them by file-path from the action checkout,
+# where the wheel is not pip-installed; see #476's blocker note.)
 SHIMS=(
   "changelog|release_core"
   "changelog-add|release_core"
   "changelog-cut|release_core"
   "changelog-render|release_core"
-  "gh-release-issue|release_core"
 )
 
 setup() {
@@ -81,12 +82,6 @@ _run_dereffed() {
 
 @test "changelog-render resolves its package when the bin symlink is dereferenced" {
   _run_dereffed changelog-render release_core
-  [[ "$run_output" != *"ModuleNotFoundError"* ]]
-  [[ "$run_output" != *"No module named"* ]]
-}
-
-@test "gh-release-issue resolves its package when the bin symlink is dereferenced" {
-  _run_dereffed gh-release-issue release_core
   [[ "$run_output" != *"ModuleNotFoundError"* ]]
   [[ "$run_output" != *"No module named"* ]]
 }

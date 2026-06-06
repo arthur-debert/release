@@ -34,8 +34,10 @@ Five levels, used throughout the rest of this doc:
 - **Task** — atomic verb exposed as `bin/<verb>` in the consumer.
   Behavior varies per Stack; interface does not. The canonical task
   set: `bin/check`, `bin/check-fmt`, `bin/check-lint`,
-  `bin/check-tests`, `bin/build`, `bin/release`. Stacks that ship docs
+  `bin/check-tests`, `bin/build`. Stacks that ship docs
   add `bin/check-docs`; stacks with e2e add `bin/check-e2e`.
+  (Cutting a release is the `release-core cut` console-script, not a
+  per-repo `bin/` Task — the `bin/release` shim was retired in #476.)
 - **Flow** — user-level goal, implemented as a GH Actions workflow
   triggered by `push`, `pull_request`, `workflow_dispatch`, or schedule.
   The canonical flows: `ci.yml` (PR checks), `release.yml` (cut a

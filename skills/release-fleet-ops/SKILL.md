@@ -110,8 +110,9 @@ consumer's green by construction.
 
 Symptom: 15 consumer re-sync PRs red on shellcheck `SC1071` over
 `bin/gh-task-status`. Wrong path taken: fix consumers, spin agents. Right path:
-`bin/gh-task-status` is a *release-managed* symlink (a Python shim release
-ships) → **upstream**. The gate was shellchecking a non-shell file. Root fix:
+`bin/gh-task-status` was a *release-managed* symlink (a Python shim release
+shipped — since retired in #476 in favor of the pip console-script) →
+**upstream**. The gate was shellchecking a non-shell file. Root fix:
 `bin/check-shell` selects shell by content so the shim falls out; release
 dogfoods it. One PR, merged, re-synced. The two consumers that *still* stayed red
 had stale `lefthook-local.yml` shadows — obsolete workarounds, deleted, not

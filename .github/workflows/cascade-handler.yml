@@ -12,11 +12,14 @@ name: Cascade handler (reusable)
 #       secrets:
 #         RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 #
-# The contract: the consumer ships the managed `bin/release` tool (the
-# Kind-aware `release-cut` shim, re-synced from arthur-debert/release via
-# `release-sync`) that DISPATCHES `.github/workflows/release.yml`, which
-# does the bump + CHANGELOG roll + commit + tag + build + GitHub Release in
-# CI. The should-release decision is computed GENERICALLY here via plain
+# The contract: the consumer ships a `.github/workflows/release.yml` thin
+# caller of the right per-Kind reusable workflow. This handler decides whether
+# a release is due, then DISPATCHES that `release.yml`, which does the bump +
+# CHANGELOG roll + commit + tag + build + GitHub Release in CI. (The handler
+# used to go through the consumer's `bin/release` shim, retired in #476 in
+# favor of the `release-core cut` console-script; with an explicit version it
+# dispatches release.yml directly.) The should-release decision is computed
+# GENERICALLY here via plain
 # git (commits since the last final release tag) — it no longer depends on a
 # per-repo `bin/diff-since-release`, which was absent for the manifest-less
 # Kinds (docs-site / tree-sitter / nvim-plugin). The per-repo
@@ -26,9 +29,9 @@ name: Cascade handler (reusable)
 #
 # TAG-AUTHORITATIVE version: because the decision is computed off the latest
 # FINAL git tag, this handler also DERIVES the next version from that same tag
-# (apply the bump-kind to the tag) and dispatches it EXPLICITLY as
-# `./bin/release <X.Y.Z>` — it does NOT let release-cut recompute from the
-# per-consumer manifest. That manifest can drift from the tag (vscode's
+# (apply the bump-kind to the tag) and dispatches it EXPLICITLY as the
+# `version` input to release.yml — it does NOT let release-cut recompute from
+# the per-consumer manifest. That manifest can drift from the tag (vscode's
 # package.json froze at 0.4.1-rc.1 ~25 releases ago while the real version is
 # the tag v0.10.8, so a manifest-driven patch bump yields 0.4.2 instead of
 # 0.10.9). Deriving from the tag makes the cascade robust to manifest drift
@@ -59,7 +62,7 @@ on:
           1. The default GITHUB_TOKEN cannot fire cross-repo
              `repository_dispatch` events (silent 403); downstream
              handlers fan via this PAT.
-          2. `bin/release` dispatches the repo's `release.yml`, whose
+          2. This handler dispatches the repo's `release.yml`, whose
              CI does the bump + tag + push; that push needs a token
              with write/admin scope (the default GITHUB_TOKEN's pushes
              do not re-trigger workflows and may be blocked by rulesets).
@@ -110,9 +113,9 @@ jobs:
           git config user.email "${GIT_EMAIL}"
           git config user.name  "${GIT_NAME}"
 
-      # Every gh-using step gets GH_TOKEN env explicitly — without it
-      # `gh` / `bin/release`'s `gh workflow run` fail auth and the
-      # handler bails. Documented gotcha #1 in docs/lex-release-cascade.md.
+      # Every gh-using step gets GH_TOKEN env explicitly — without it the
+      # `gh workflow run` dispatch fails auth and the handler bails.
+      # Documented gotcha #1 in docs/lex-release-cascade.md.
       - name: Decide whether to release
         id: decide
         env:
@@ -133,7 +136,7 @@ jobs:
           #     they share the `## [Unreleased]` scope with the final they
           #     lead up to; the relevant diff is against the last *final*.
           #   - No final tag -> "nothing to release" (a first release is a
-          #     human-driven `bin/release X.Y.Z`).
+          #     human-driven `release-core cut X.Y.Z`).
           #   - `git log --oneline <tag>..HEAD` non-empty -> release. A nonzero
           #     exit there is likewise a genuine git failure -> FAIL loudly.
           set +e
@@ -215,10 +218,10 @@ jobs:
         if: steps.decide.outputs.release == 'no'
         run: echo "No release needed; nothing to do."
 
-      # `bin/release <X.Y.Z>` is the Kind-aware release-cut shim. We pass the
-      # EXPLICIT version the decide step derived from the latest final tag (NOT
-      # the bump-kind), so release-cut dispatches that exact version regardless
-      # of what this repo's manifest says — robust to manifest drift (the vscode
+      # We pass the EXPLICIT version the decide step derived from the latest
+      # final tag (NOT the bump-kind) as release.yml's `version` input, so it
+      # releases that exact version regardless of what this repo's manifest
+      # says — robust to manifest drift (the vscode
       # 0.4.2-vs-0.10.9 bug). release-cut dispatches
       # `.github/workflows/release.yml`; CI does the bump + CHANGELOG roll +
       # commit + tag + build + GitHub Release. No local branch / commit / PR /
@@ -230,16 +233,14 @@ jobs:
           NEXT_VERSION: ${{ steps.decide.outputs.next-version }}
         run: |
           set -e
-          # bin/release → `release-core cut` (Kind-aware; the flat release-cut
-          # name was retired in the CLI cutover #468). release-core is NOT
-          # provisioned on this runner, so if the shim can't run (not on PATH →
-          # exit 127 / exit 1), fall back to dispatching release.yml directly.
-          # Identical effect here: we pass an EXPLICIT version, so no Kind-aware
-          # compute is needed — `release-core cut` would just `gh workflow run
-          # release.yml` anyway. (release#426 P1: the cascade was dying at exit
-          # 127 on this line, leaving the editor cascade two releases behind.)
-          if ! ./bin/release "$NEXT_VERSION"; then
-            echo "::warning::bin/release failed (release-core not installed) — dispatching release.yml directly"
-            gh workflow run release.yml -f version="$NEXT_VERSION"
-          fi
+          # Dispatch release.yml directly with the EXPLICIT version the decide
+          # step derived from the latest final tag. The Kind-aware `release-core
+          # cut` (formerly reached via the now-retired `bin/release` shim, #476)
+          # would only `gh workflow run release.yml` here anyway — no Kind-aware
+          # compute is needed when we already pass an explicit X.Y.Z — and
+          # release-core is NOT provisioned on this runner. (release#426 P1: the
+          # cascade used to die at exit 127 on the `./bin/release` line, leaving
+          # the editor cascade two releases behind; dispatching directly removes
+          # that failure mode entirely.)
+          gh workflow run release.yml -f version="$NEXT_VERSION"
           echo "Dispatched release.yml (version ${NEXT_VERSION}); CI will bump + tag + build + release."
