@@ -1,27 +1,25 @@
 name: changelog-check
 description: |
   Verify that <repo>/CHANGELOG.md is in sync with <repo>/CHANGELOG/*
-  fragments by re-running bin/changelog-render and comparing. Fails
-  loud (with a diff) if the committed rendered file has drifted from
-  the source fragments — i.e. someone added a fragment but forgot to
-  re-render.
+  fragments by re-running the `changelog-render` console-script and
+  comparing. Fails loud (with a diff) if the committed rendered file
+  has drifted from the source fragments — i.e. someone added a
+  fragment but forgot to re-render.
 
   Designed to be called from consumer PR-time CI (one step in any
-  existing check workflow). The scripts must already be on disk via
-  release-sync — this action only invokes them.
+  existing check workflow). This action pip-installs the bundled
+  release_core package itself (no release-sync of the changelog tools
+  needed) and invokes the `changelog-render` console-script.
 
   ## Behavior
 
   - **Skips cleanly** if CHANGELOG/ doesn't exist. Consumers on the
     old single-file model (pre-#201 migration) don't see a failure;
-    the action becomes a no-op until they adopt the fragment-dir
-    convention.
-  - **Fails loud** if CHANGELOG/ exists but bin/changelog-render is
-    missing. That's a setup bug — release-sync didn't run, or
-    didn't run recently enough.
+    the action becomes a no-op (and skips the pip-install) until they
+    adopt the fragment-dir convention.
   - **Fails loud** with a unified diff if rendering produces a
     CHANGELOG.md different from what's committed. Author runs
-    `bin/changelog render` locally and commits the result.
+    `changelog render` locally and commits the result.
 
   Background: tracker #201.
 
@@ -34,21 +32,35 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: changelog-check
+    - name: Detect fragment-dir model
+      id: detect
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
         set -euo pipefail
-
-        if [[ ! -d CHANGELOG ]]; then
+        if [[ -d CHANGELOG ]]; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
           echo "changelog-check: CHANGELOG/ not present — repo not on the fragment-dir model yet, skipping."
-          exit 0
+          echo "present=false" >> "$GITHUB_OUTPUT"
         fi
 
-        if [[ ! -x bin/changelog-render ]]; then
-          echo "::error::bin/changelog-render not found or not executable. Run 'release-sync' to pull it down."
-          exit 1
-        fi
+    - name: Set up Python for release_core console-scripts
+      if: steps.detect.outputs.present == 'true'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Install release_core console-scripts (changelog-render)
+      if: steps.detect.outputs.present == 'true'
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../bin-internal/install-release-core-pkg.sh"
+
+    - name: changelog-check
+      if: steps.detect.outputs.present == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
 
         before=$(mktemp)
         trap 'rm -f "${before:-}"' EXIT
@@ -62,12 +74,12 @@ runs:
           : > "$before"
         fi
 
-        bin/changelog-render >/dev/null
+        changelog-render >/dev/null
 
         if ! diff -u "$before" CHANGELOG.md; then
           echo
           echo "::error::CHANGELOG.md is out of sync with CHANGELOG/* fragments."
-          echo "Run 'bin/changelog render' locally and commit the regenerated CHANGELOG.md."
+          echo "Run 'changelog render' locally and commit the regenerated CHANGELOG.md."
           exit 1
         fi
 

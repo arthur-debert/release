@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] Changelog updated (`bin/changelog add <slug>` to add a `CHANGELOG/unreleased-*.md` fragment; `CHANGELOG.md` is generated) — or chore/docs-only
+- [ ] Changelog updated (`changelog add <slug>` to add a `CHANGELOG/unreleased-*.md` fragment; `CHANGELOG.md` is generated) — or chore/docs-only
 - [ ] Project umbrella check passes locally — `bin/check` (or `gofmt -l . && go vet ./... && go test ./...`)
 - [ ] Tests added or updated for behavior changes
 

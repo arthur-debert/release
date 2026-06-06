@@ -31,6 +31,14 @@ outputs:
 runs:
   using: 'composite'
   steps:
+    - name: Set up Python for release_core console-scripts
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.13'
+    - name: Install release_core console-scripts (changelog, semver)
+      shell: bash
+      run: bash "${{ github.action_path }}/../../../bin-internal/install-release-core-pkg.sh"
+
     - name: Check changelog fragments
       shell: bash
       env:
@@ -42,7 +50,7 @@ runs:
       shell: bash
       env:
         NEW_VERSION: ${{ inputs.version }}
-        SEMVER: ${{ github.action_path }}/../../../bin/semver
+        SEMVER: semver
       run: |
         set -euo pipefail
 
@@ -145,11 +153,6 @@ runs:
       uses: actions/setup-node@v4
       with:
         node-version: '20'
-    - name: Set up Python (gate linters ruff/yamllint)
-      if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.13'
     - name: Arm the gate toolset (release#426 P2)
       if: steps.detect.outputs.skip != 'true' && env.SKIP_PRECOMMIT_GATE != 'true'
       shell: bash
@@ -182,7 +185,8 @@ runs:
         if [ "$IS_PRERELEASE" != "true" ] && [ -f "$CHANGELOG" ]; then
           git add "$CHANGELOG"
           # Fragment-dir convention (#201): roll-changelog.sh routes
-          # through bin/changelog when CHANGELOG/ exists. That creates
+          # through the `changelog` console-script when CHANGELOG/ exists.
+          # That creates
           # CHANGELOG/<version>.md and deletes the unreleased-*.md
           # fragments — stage both. Resolve sibling-of-changelog so
           # this works even when CHANGELOG.md lives in a subdir.

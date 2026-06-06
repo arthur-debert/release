@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] Changelog updated (`bin/changelog add <slug>` to add a `CHANGELOG/unreleased-*.md` fragment; `CHANGELOG.md` is generated) — or chore/docs-only
+- [ ] Changelog updated (`changelog add <slug>` to add a `CHANGELOG/unreleased-*.md` fragment; `CHANGELOG.md` is generated) — or chore/docs-only
 - [ ] Project umbrella check passes locally — `bin/check` (covers
       both the frontend half: prettier + eslint + typecheck + unit
       tests, AND the rust half: cargo fmt + clippy + tests in

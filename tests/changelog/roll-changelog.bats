@@ -23,8 +23,8 @@ SCRIPT="$BATS_TEST_DIRNAME/../../bin-internal/roll-changelog.sh"
   mkdir CHANGELOG
   echo "- fix: something" > CHANGELOG/unreleased-fix.md
   echo "## [Unreleased]" > CHANGELOG.md
-  # Need bin/changelog on PATH for fragment-dir mode — but extract
-  # doesn't call bin/changelog (only roll does), it just cats fragments.
+  # extract doesn't call the `changelog` console-script (only roll does),
+  # it just cats the fragments.
   run bash "$SCRIPT" extract CHANGELOG.md notes.md
   [ "$status" -eq 0 ]
   [ -f notes.md ]

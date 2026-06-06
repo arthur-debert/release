@@ -19,7 +19,14 @@ CHANGELOG="${CHANGELOG:-}"
 PREP_SCRIPT="${PREP_SCRIPT:-}"
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEMVER="$script_dir/../bin/semver"
+# semver is the release_core console-script; the prepare-release-tauri
+# composite action runs install-release-core-pkg first to put it on PATH.
+SEMVER="semver"
+if ! command -v "$SEMVER" >/dev/null 2>&1; then
+  echo "::error::the 'semver' console-script is not on PATH." >&2
+  echo "::error::The prepare-release-tauri composite action installs release_core (install-release-core-pkg) before this runs." >&2
+  exit 1
+fi
 
 emit() {
   if [ -n "${GITHUB_OUTPUT:-}" ]; then

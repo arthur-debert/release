@@ -1,24 +1,27 @@
 name: changelog tests
 
-# BATS suite for bin/changelog* — runs against this repo's own bin/
-# on every push and PR. The scripts themselves get sweep-synced to
-# consumer repos via release-sync; we want regressions to surface
-# here before they ride out.
+# BATS suite for the changelog console-scripts — runs against a
+# release_core venv built from this repo's bundled package, on every
+# push and PR. The console-scripts reach consumers via the pip wheel
+# (install-release-core); we want regressions to surface here before
+# they ride out.
 
 on:
   push:
     branches: ["**"]
     paths:
-      - "templates/commons/bin/changelog*"
       - "templates/commons/lib/release_core/**"
+      - "bin-internal/roll-changelog.sh"
+      - "bin-internal/check-changelog-fragments.sh"
       - "tests/changelog/**"
       - "tests/changelog-check-fixtures/**"
       - ".github/actions/changelog-check/**"
       - ".github/workflows/changelog-tests.yml"
   pull_request:
     paths:
-      - "templates/commons/bin/changelog*"
       - "templates/commons/lib/release_core/**"
+      - "bin-internal/roll-changelog.sh"
+      - "bin-internal/check-changelog-fragments.sh"
       - "tests/changelog/**"
       - "tests/changelog-check-fixtures/**"
       - ".github/actions/changelog-check/**"

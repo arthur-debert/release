@@ -19,8 +19,8 @@ Injected Files
       `.release/` directory at the consumer root. `.release/` is committed, so
       the consumer is self-contained and works offline.
     - Mirror: at each managed path in the working tree it creates a relative
-      symlink pointing into `.release/` (e.g. `bin/changelog` →
-      `.release/bin/changelog`). The exception is `.github/workflows/*.yml`,
+      symlink pointing into `.release/` (e.g. `bin/check-shell` →
+      `.release/bin/check-shell`). The exception is `.github/workflows/*.yml`,
       written as real copies because GitHub Actions cannot follow symlinks.
     - Reconcile removals: a managed symlink whose `.release/` target no longer
       exists is a broken link and gets swept; a stale managed workflow copy
@@ -53,8 +53,6 @@ Injected Files
         | bin/install-release-core | bin/install-release-core | symlink |
         | bin/check-shell | bin/check-shell | symlink |
         | bin/check-gate | bin/check-gate | symlink |
-        | bin/changelog, changelog-add/-cut/-render | bin/changelog* | symlink |
-        | bin/semver | bin/semver | symlink |
         | .markdownlint.json, .markdownlintignore | (root) | symlink |
         | .yamllint, .shellcheckrc, .prettierignore | (root) | symlink |
         | .editorconfig | .editorconfig | symlink |
@@ -144,4 +142,11 @@ Injected Files
     :: note :: The `release_core` Python package is NOT a synced file. It ships
     as a wheel from a GitHub release and is pip-installed at boot. The synced
     surface is the thin bootstrap + configs + workflow callers; the engine
-    arrives out-of-band. See tooling.lex §4.
+    arrives out-of-band. See tooling.lex §4. Its console-scripts —
+    `changelog`, `changelog-add`, `changelog-cut`, `changelog-render`,
+    `semver` (and `detect-kind`, `release-sync`, `release-drift-check`,
+    `gh-task-status`, `gh-release-issue`) — land on PATH from the wheel; they
+    are no longer synced `bin/` shims (release#476). The release CI call-sites
+    that used to exec `bin/changelog`/`bin/semver` by path now pip-install the
+    package (`bin-internal/install-release-core-pkg.sh`) and call the
+    console-scripts by name.

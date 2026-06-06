@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Verify that CHANGELOG/unreleased-*.md fragments exist before a
 # release begins. Catches the common case where an author forgets
-# `bin/changelog add` — surfaces the error in seconds (preflight)
+# `changelog add` — surfaces the error in seconds (preflight)
 # instead of after a 10-minute build.
 #
 # Env vars:
@@ -26,7 +26,7 @@ shopt -s nullglob
 fragments=("${CHANGELOG_DIR}"/unreleased-*.md)
 
 if [ "${#fragments[@]}" -eq 0 ]; then
-  echo "::error::No CHANGELOG/unreleased-*.md fragments found. Add one with 'bin/changelog add <slug> <body>' before releasing."
+  echo "::error::No CHANGELOG/unreleased-*.md fragments found. Add one with 'changelog add <slug> <body>' before releasing."
   exit 1
 fi
 

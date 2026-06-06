@@ -1,31 +1,16 @@
 #!/usr/bin/env bats
 
-# changelog-shim-contract — pins the shell→Python migration (Phase 1).
+# changelog-byte-contract — freezes byte-exact output snapshots of the
+# changelog console-scripts.
 #
-# The changelog-* family is now a set of thin Python shims over
-# release_core.verbs.changelog. The four
-# behavioral suites (changelog-add/cut/render/orchestrator.bats) run the SAME
-# shims via $BIN, so they already prove the CLI contract end-to-end. This file
-# adds the migration-specific invariants: the entry points are the variant-(a)
-# Python shims (not bash), and a couple of byte-exact output snapshots that the
-# whole fleet + CI depend on are frozen here.
+# The changelog-* family ships as release_core console-scripts (the bash
+# bin/ shims were retired in release#476). The four behavioral suites
+# (changelog-add/cut/render/orchestrator.bats) run those console-scripts
+# via $BIN and prove the CLI contract end-to-end; this file freezes a
+# couple of byte-exact output snapshots that the whole fleet + CI depend
+# on.
 
 load helper
-
-@test "shims are python3, not bash" {
-  for name in changelog changelog-add changelog-cut changelog-render; do
-    run head -1 "$BIN/$name"
-    [ "$status" -eq 0 ]
-    [ "$output" = "#!/usr/bin/env python3" ]
-  done
-}
-
-@test "shims dispatch into release_core.verbs.changelog" {
-  for name in changelog changelog-add changelog-cut changelog-render; do
-    run grep -q "from release_core.verbs import changelog" "$BIN/$name"
-    [ "$status" -eq 0 ]
-  done
-}
 
 @test "render of an empty CHANGELOG/ is byte-exact" {
   mkdir CHANGELOG
