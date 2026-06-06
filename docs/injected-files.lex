@@ -126,8 +126,15 @@ Injected Files
     - §0.1 — wire the pre-commit hook (`lefthook install`).
     - §0.2 — the pull-model boot (ADR-0003): run `bin/install-release-core`,
       which resolves the `release_core` wheel from a GitHub release,
-      `pip install --force-reinstall`s it (deps from PyPI), then runs
-      `release-core init` to materialize and commit the managed config subset.
+      `pip install --force-reinstall`s it (deps from PyPI), then runs a bare
+      `release-core init`. Since the #476 cutover that init materializes the
+      WHOLE managed tree from the wheel bundle (the `.release/` build dir + every
+      working-tree mirror — skills, ORIENTATION, configs, the CLAUDE.md block)
+      and auto-commits any managed change — not just the config subset. This is
+      the pull-model self-sync: the wheel pull carries the whole tree, so no
+      `orc propagate` push is needed in steady state. (`release-core
+      init --config-only` refreshes just the lint/gate config subset — the
+      escape hatch.)
     - §1+ (cloud only) — submodule/tag restore, dependency cache warm-up, venv
       setup, CA cert import, optional per-repo `app-bin/post-setup-hook.sh`.
 

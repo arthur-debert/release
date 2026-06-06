@@ -18,9 +18,16 @@ release-core
 1. The Shape of the Tree
 
     Consumer-facing (run from inside any repo):
-        - `release-core init` — materialize the committed managed config
-          (lefthook.yml + lint configs); `--commit` stages and commits just
-          those paths.
+        - `release-core init` — DEFAULT (post-#476): materialize the WHOLE
+          managed tree from the wheel bundle (the `.release/` build dir + every
+          working-tree mirror — skills, ORIENTATION, configs, the CLAUDE.md
+          block) and auto-commit any managed change. This is "release-sync
+          sourced from the wheel"; it is what SessionStart runs, carrying the
+          full tree so no `orc propagate` push is needed in steady state.
+          `--config-only` is the escape hatch — materialize just the config
+          subset (lefthook.yml + lint configs), where `--commit` stages and
+          commits just those paths. (`--full` is a redundant alias of the
+          default.)
         - `release-core sync run` / `sync drift-check` — materialize the
           `.release/` tree (see injected-files.lex) / fail if it has drifted.
         - `release-core changelog add|cut|render` — manage the changelog.
@@ -111,21 +118,27 @@ release-core
     - It installs with `pip install --force-reinstall` (NOT `-U`, which would
       see the static version as already-satisfied and skip). Dependencies
       (e.g. `click`) resolve from PyPI — the wheel declares real deps.
-    - It then runs `release-core init` in the repo (best-effort).
+    - It then runs a bare `release-core init` in the repo (best-effort).
 
     So a consumer gets a NEW `release_core` automatically on its next session
     start (or next CI run) — there is nothing to commit to update the engine.
     The pull model keeps consumers on the always-stable tip without per-repo
     bump PRs.
 
-    What DOES need a commit on the consumer side is the managed CONFIG —
-    `lefthook.yml` and the lint configs that `release-core init` materializes.
-    `release-core init --commit` stages and commits exactly those managed paths
-    (never `git add -A`), with a deterministic message, so the generated config
-    rides in the repo rather than sitting uncommitted under a feature branch.
-    This is the commit-hygiene closer for the pull model: the engine is pulled,
-    the config it generates is committed. `--push` additionally fast-forwards
-    when on a clean default branch; on a feature branch the commit stays local.
+    What DOES ride in the consumer's git tree is the managed TREE — the
+    `.release/` build dir + every working-tree mirror (skills, ORIENTATION,
+    configs, the CLAUDE.md block). Since the #476 cutover, a bare `release-core
+    init` materializes that whole tree from the wheel bundle and AUTO-COMMITS
+    only the managed paths it touched (never `git add -A`), with a deterministic
+    message, iff they actually changed — byte-identical → no commit, so churn
+    tracks release cadence, not session count. This is the commit-hygiene closer
+    for the pull model: the engine is pulled, the whole tree it generates is
+    committed — so the wheel pull alone carries every managed change and no
+    `orc propagate` push is needed in steady state. `--no-commit` skips the
+    commit; `--push` additionally fast-forwards on a clean default branch.
+    `--config-only` is the escape hatch (the old behavior): materialize just the
+    config subset (`lefthook.yml` + lint configs), where `--commit`/`--force`/
+    `--push` keep their opt-in create-if-absent semantics.
 
 5. orc — the Maintainer Orchestrator
 
