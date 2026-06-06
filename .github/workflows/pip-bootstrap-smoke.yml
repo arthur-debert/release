@@ -72,6 +72,10 @@ jobs:
             exit 1
           fi
           echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
+          # Print the built wheel size so we can watch bundle bloat over time
+          # (#476 part 1 grows the wheel from the config subset to the full tree
+          # + the distributed skills).
+          echo "wheel size: $(wc -c < "${wheels[0]}") bytes ($(du -h "${wheels[0]}" | cut -f1))"
 
       - name: Assert the wheel BUNDLES the config templates (self-contained)
         # The self-contained wheel ships the config templates under
@@ -102,6 +106,59 @@ jobs:
           done
           require "components/_lefthook-base.yaml"
           require "go-cli/manifest.yaml"
+
+      - name: Assert the wheel BUNDLES the FULL tree + the distributed skills (#476)
+        # Part 1 of #476: the wheel must carry the WHOLE managed tree (not just
+        # the config subset) plus the distributed skill catalog, so a later
+        # `init` can do a full OFFLINE materialize. These assertions are positive
+        # (full-tree content present) AND negative (release-only skills + the
+        # self-referential package subtree are NOT shipped — recursion/bloat
+        # guard). Inspect via zipfile so we read the wheel exactly as installed.
+        run: |
+          set -euo pipefail
+          names="$(python - "$WHEEL" <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              print("\n".join(z.namelist()))
+          PY
+          )"
+          B='release_core/_bundled_templates'
+          present() {
+            if ! printf '%s\n' "$names" | grep -qxF "$B/$1"; then
+              echo "ERROR: wheel is MISSING bundled path: $1" >&2
+              exit 1
+            fi
+            echo "ok present: $1"
+          }
+          absent() {
+            # prefix match: any entry under the path is a failure
+            if printf '%s\n' "$names" | grep -qE "^$(printf '%s' "$B/$1" | sed 's/[.[\*^$]/\\&/g')(/|$)"; then
+              echo "ERROR: wheel UNEXPECTEDLY contains: $1" >&2
+              printf '%s\n' "$names" | grep -E "^$B/$1" >&2
+              exit 1
+            fi
+            echo "ok absent: $1"
+          }
+          # commons/ carries MORE than configs now: bin/ content + ORIENTATION.md.
+          present "templates/commons/ORIENTATION.md"
+          present "templates/commons/bin/install-release-core"
+          # at least one per-kind dir with more than the fragment/manifest:
+          # rust-cli ships its bin/ build tooling + .github content.
+          present "templates/rust-cli/bin/build"
+          present "templates/rust-cli/.github/workflows/copilot-review.yml"
+          # distributed skills: a PUSH_ALL skill (single-file) AND a vendored
+          # multi-file PUSH_ALL skill (tdd) — proves whole-dir skill copy.
+          present "skills/gh-pr-review-loop/SKILL.md"
+          present "skills/tdd/SKILL.md"
+          present "skills/tdd/refactoring.md"
+          # NEGATIVE: release-only skills must NOT ship to consumers.
+          absent "skills/release-fleet-ops"
+          # NEGATIVE: render-side material (Homebrew formula template, consumed
+          # at release-cut, not a managed Kind) must NOT ship.
+          absent "templates/render"
+          # NEGATIVE: the package subtree must NOT be copied into itself
+          # (recursion/bloat guard). commons/lib/release_core IS this package.
+          absent "templates/commons/lib/release_core"
 
       - name: pip install the wheel into a FRESH venv
         # A clean venv proves the tools arrive purely from the install, not from

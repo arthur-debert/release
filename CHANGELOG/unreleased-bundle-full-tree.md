@@ -1,0 +1,1 @@
+the release_core wheel now bundles the FULL template tree (commons/, components/, every per-kind dir) plus the distributed skill catalog (PUSH_ALL + REPLACE_IF_PRESENT), excluding the package subtree and release-only skills, so a later init can materialize offline (#476)
