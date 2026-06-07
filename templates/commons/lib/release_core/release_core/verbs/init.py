@@ -1,17 +1,27 @@
-"""init — materialize the per-repo COMMITTED config files into a consumer repo.
+"""init — materialize the managed tree into a consumer repo (the pull-model boot).
 
 Usage:
-  release-core init [--force] [--dry-run] [--commit] [--push]
-  release-core init --full [--dry-run] [--no-commit] [--push]
+  release-core init [--dry-run] [--no-commit] [--push]            # DEFAULT: full
+  release-core init --config-only [--force] [--dry-run] [--commit] [--push]
+  release-core init --full ...                                    # redundant alias
 
-`release-core init` is the seam (pip-bootstrap PoC) that replaces release-sync's
-*config* materialization. The package arrives
-via `pip install`; the files a consumer must have committed IN ITS OWN GIT TREE —
-the gate definition (`lefthook.yml`) and the managed lint/format configs — are
-written here.
+`release-core init` is the pull-model seam: the SessionStart boot
+(`install-release-core`) pulls the `release_core` wheel and runs `init`, so a
+consumer self-updates its entire managed tree from the wheel bundle — no
+`orc propagate` push in steady state (#476).
 
-Scope (the CONFIG subset of what release-sync materializes from
-templates/commons/; see CONFIG_FILES below and sync.py for provenance):
+DEFAULT (full materialize): a bare `release-core init` runs the COMPLETE
+release-sync pipeline (build_plan + materialize + compute_mirror + apply) sourced
+from the wheel bundle — the whole `.release/` build dir + every working-tree
+mirror (skills, ORIENTATION, configs, per-Kind/Capability files, real-file
+workflow copies, the CLAUDE.md managed block) — then AUTO-COMMITS ONLY the managed
+paths iff they actually changed. Byte-identical result → no commit, so churn
+tracks release cadence, not session count. This is what SessionStart runs; it is
+"release-sync sourced from the wheel". (See "Full materialize" below.)
+
+--config-only (the escape hatch — the OLD default behavior): materialize ONLY the
+CONFIG subset of what release-sync produces from templates/commons/ (see
+CONFIG_FILES below and sync.py for provenance):
 
   lefthook.yml            (the gate — composed from fragments by sync)
   .markdownlint.json      .markdownlintignore
@@ -20,13 +30,16 @@ templates/commons/; see CONFIG_FILES below and sync.py for provenance):
   .editorconfig
   .prettierignore
 
-NOT in scope (deliberately small seam — the full sync->init migration is post-PoC):
-  - package code (lib/release_core/**, incl. the folded prstate engine) — via pip
-  - release-internal files (.release-sync-source, ORIENTATION.md)
-  - the CLAUDE.md orientation block, skills, .claude/settings.json, CHANGELOG/
-  - git-hook wiring (stays in setup-dev-env.sh)
+  In --config-only, --commit/--push/--force keep their original semantics (opt-in
+  commit, create-if-absent, --force to overwrite). NOT in scope of --config-only:
+  package code (via pip), release-internal files (.release-sync-source,
+  ORIENTATION.md), the CLAUDE.md block, skills, .claude/settings.json, CHANGELOG/,
+  git-hook wiring (setup-dev-env.sh) — those ride the DEFAULT full materialize.
 
-Behavior:
+--full is a REDUNDANT/DEPRECATED alias of the default (full IS the default now);
+it is still accepted so no caller breaks, and behaves exactly like a bare init.
+
+Behavior (--config-only):
   - create-if-absent: an existing file is LEFT UNTOUCHED (never overwrite a
     consumer edit in the PoC) unless --force is passed.
   - idempotent: a second run with everything present is a clean no-op (exit 0,
@@ -46,8 +59,10 @@ Auto-commit (the pull-model commit-hygiene seam):
     --dry-run → no commit; an unborn branch (no HEAD) or any git error makes the
     commit *step* a quiet no-op; if the managed paths can't be staged cleanly it
     prints a notice and skips the commit. The commit step never fails init (init
-    itself still requires its normal git context). Opt-in: a plain `init` stays
-    non-committing.
+    itself still requires its normal git context). These --commit/--push flags
+    are the OPT-IN committing for --config-only only; a `--config-only` run
+    without --commit does not commit. (The DEFAULT full materialize auto-commits
+    managed changes on its own — see "Full materialize" below.)
   - --push (implies --commit): fast-forward push the managed commit ONLY when
     ALL hold — --push given, the current branch IS the repo's default branch,
     and the working tree is otherwise clean (no non-managed changes). On a
@@ -55,12 +70,12 @@ Auto-commit (the pull-model commit-hygiene seam):
     branch — visible, and excluded from review as a managed change. Never
     force-pushes, never merges a PR.
 
-  Scope: --commit/--push cover ONLY the CONFIG subset init materializes (see
-  CONFIG_FILES) — NOT the full `.release/` tree (that is release-sync; the
-  sync->init migration is separate).
+  Scope: --config-only's --commit/--push cover ONLY the CONFIG subset init
+  materializes (see CONFIG_FILES) — NOT the full `.release/` tree (that is the
+  default full materialize below).
 
-Full materialize (--full, #476 part 2 — flag-gated, opt-in):
-  `release-core init --full` runs the COMPLETE release-sync pipeline (build_plan
+Full materialize (the DEFAULT — #476 cutover):
+  A bare `release-core init` runs the COMPLETE release-sync pipeline (build_plan
   + materialize + compute_mirror + apply) sourced from the wheel bundle — the
   whole `.release/` build dir + every working-tree mirror (skills, ORIENTATION,
   configs, per-Kind/Capability files, real-file workflow copies, the CLAUDE.md
@@ -70,17 +85,20 @@ Full materialize (--full, #476 part 2 — flag-gated, opt-in):
   (release-dev's live-templates path), exactly as the config path does.
 
   AUTO-COMMIT ON CHANGE (the decided commit-hygiene model): after a full
-  materialize, if (and only if) managed content actually changed, --full commits
+  materialize, if (and only if) managed content actually changed, init commits
   ONLY the managed paths with a deterministic message, on whatever branch is
   checked out (the managed tree is generated — needs no review). Byte-identical
   result → no commit, so churn tracks release cadence, not session count.
-  Idempotent: a second `init --full` with no upstream change makes no commit.
+  Idempotent: a second `init` with no upstream change makes no commit.
   --no-commit skips committing (for tests/inspection); --dry-run computes the
   change count and writes nothing.
 
-  Plain `init` (no --full) is UNCHANGED — the config subset only. The cutover to
-  make --full the default / wire it into the SessionStart boot is a later #476
-  step, not this one.
+  In the default (full) mode the commit is AUTOMATIC and the materialize
+  overwrites unconditionally, so an explicit --commit is redundant and --force a
+  no-op: both are rejected as bad usage (fail loud) — they are meaningful ONLY
+  with --config-only. --push remains valid (fast-forward the managed commit on a
+  clean default branch). The pull-model SessionStart boot runs a bare `init`, so
+  it gets the full self-sync + auto-commit with no flags.
 
 Source resolution: the canonical config content is composed from the
 wheel-bundled templates (release_core/_bundled_templates/, staged at build time
@@ -144,7 +162,7 @@ def _bundle_root() -> str | None:
     This is the BundleSource root: its layout mirrors the repo —
     <root>/templates/… and <root>/skills/… — so a sync ``subtree`` like
     "templates/commons" or "skills/tdd" resolves directly. The full-tree
-    materialize (init --full) reads through this; the config-subset path uses
+    materialize (the default init) reads through this; the config-subset path uses
     _bundle_templates_root() (the templates/ subdir) for its direct file copies.
     """
     here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
@@ -316,7 +334,7 @@ def _materialize_config_sources(
     return sources
 
 
-# ── Full materialize (init --full): the whole managed tree, from the bundle ───
+# ── Full materialize (the DEFAULT init): the whole managed tree, from the bundle ─
 #
 # This is "release-sync sourced from the wheel bundle": the SAME engine pipeline
 # the release_sync verb runs (build_plan + materialize + diff + compute_mirror +
@@ -345,7 +363,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
         bundle_root = _bundle_root()
         if bundle_root is None:
             raise sync.SyncError(
-                "release-core init --full: no bundled templates and "
+                "release-core init: no bundled templates and "
                 f"$RELEASE_HOME='{release_home or ''}' is not a git clone"
             )
         from .. import __version__ as _v
@@ -364,7 +382,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
     # leaving an incomplete managed tree.
     if not source.exists(f"templates/{kind}"):
         raise sync.SyncError(
-            f"release-core init --full: source '{source.label}' has no templates/{kind}/ tree"
+            f"release-core init: source '{source.label}' has no templates/{kind}/ tree"
         )
 
     caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
@@ -581,7 +599,7 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
 def _main_full(
     repo_root: str, repo_name: str, *, dry_run: bool, no_commit: bool, push: bool
 ) -> int:
-    """The `init --full` path: full managed-tree materialize + auto-commit-on-change.
+    """The default init path: full managed-tree materialize + auto-commit-on-change.
 
     Runs the complete release-sync pipeline (build_plan + materialize +
     compute_mirror + apply), sourced from the wheel bundle by default (or a real
@@ -594,13 +612,13 @@ def _main_full(
             repo_root, repo_name, dry_run=dry_run
         )
     except manifest.KindError:
-        print(f"release-core init --full: could not detect kind of {repo_root}", file=sys.stderr)
+        print(f"release-core init: could not detect kind of {repo_root}", file=sys.stderr)
         return 1
     except sync.SyncError as exc:
         print(str(exc), file=sys.stderr)
         return 1
     except yamlio.YamlError as exc:
-        print(f"release-core init --full: {exc}", file=sys.stderr)
+        print(f"release-core init: {exc}", file=sys.stderr)
         return 1
 
     # Surface conflicts (real file/dir at a managed location blocked a managed
@@ -609,7 +627,7 @@ def _main_full(
     if conflicts:
         print(
             "conflicts: a real file/dir blocks these managed paths (not applied) — "
-            "remove them and re-run init --full:",
+            "remove them and re-run release-core init:",
             file=sys.stderr,
         )
         for f in conflicts:
@@ -652,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
                 cli.Opt("--commit"),
                 cli.Opt("--push"),
                 cli.Opt("--full"),
+                cli.Opt("--config-only"),
                 cli.Opt("--no-commit"),
             ],
             doc=_usage_block(),
@@ -662,31 +681,54 @@ def main(argv: list[str] | None = None) -> int:
     force = bool(values["force"])
     dry_run = bool(values["dry-run"])
     push = bool(values["push"])
-    full = bool(values["full"])
+    config_only = bool(values["config-only"])
+    # --full is a redundant/deprecated alias of the default; it simply selects the
+    # now-default full materialize, so it is a no-op flag (never an error) and is
+    # NOT compatible with --config-only (they pick opposite modes). Warn when it
+    # is explicitly passed so stale flag usage can be cleaned up across the fleet.
+    full_flag = bool(values["full"])
+    if full_flag:
+        print(
+            "release-core init: --full is deprecated and redundant "
+            "(the full materialize is now the default)",
+            file=sys.stderr,
+        )
     no_commit = bool(values["no-commit"])
+    # "full mode is active" — the DEFAULT — is anything that is NOT --config-only.
+    # The reconciled flag guards key off THIS, not the literal --full flag.
+    full_mode = not config_only
     # --push implies --commit (you cannot push a commit you never made).
     commit = bool(values["commit"]) or push
 
+    # --full and --config-only select opposite modes — contradictory.
+    if full_flag and config_only:
+        print(
+            "release-core init: --full and --config-only are mutually exclusive",
+            file=sys.stderr,
+        )
+        return 64
     # --push implies a commit; --no-commit suppresses it — the two contradict.
     # Reject the combo as bad usage rather than silently making --push a no-op.
     if push and no_commit:
         print("release-core init: --push and --no-commit are mutually exclusive", file=sys.stderr)
         return 64
-    # --no-commit only governs --full's auto-commit-on-change; in plain init
-    # (which doesn't commit unless --commit) it would be silently ignored — flag
-    # the contract mismatch rather than hide it.
-    if no_commit and not full:
-        print("release-core init: --no-commit is only valid with --full", file=sys.stderr)
+    # --no-commit only governs the (default) full materialize's auto-commit; in
+    # --config-only (which doesn't commit unless --commit) it would be silently
+    # ignored — flag the contract mismatch rather than hide it.
+    if no_commit and config_only:
+        print("release-core init: --no-commit is not valid with --config-only", file=sys.stderr)
         return 64
-    # In --full the commit is automatic (auto-commit-on-change; --no-commit to
-    # skip) and the materialize overwrites unconditionally — so an explicit
-    # --commit is redundant and --force is a no-op. Reject rather than silently
-    # ignore (fail loud). Check the RAW --commit value, not the push-derived
-    # `commit` — --push IS valid with --full.
-    if full and (values["commit"] or force):
+    # In the default (full) mode the commit is automatic (auto-commit-on-change;
+    # --no-commit to skip) and the materialize overwrites unconditionally — so an
+    # explicit --commit is redundant and --force is a no-op. Reject rather than
+    # silently ignore (fail loud). Keyed off full_mode (the default), NOT the
+    # literal --full flag. Check the RAW --commit value, not the push-derived
+    # `commit` — --push IS valid in full mode.
+    if full_mode and (values["commit"] or force):
         print(
-            "release-core init: --commit/--force are not valid with --full "
-            "(it auto-commits managed changes; use --no-commit to skip)",
+            "release-core init: --commit/--force are not valid in the default full "
+            "materialize (it auto-commits managed changes; use --no-commit to skip, "
+            "or --config-only for the config-subset behavior)",
             file=sys.stderr,
         )
         return 64
@@ -705,11 +747,11 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(repo_root)
     repo_name = os.path.basename(repo_root)
 
-    # --full: materialize the WHOLE managed tree (the full release-sync pipeline
-    # sourced from the wheel bundle), then AUTO-COMMIT ON CHANGE. Flag-gated and
-    # opt-in for now — plain `init` keeps the unchanged config-subset behavior
-    # (the cutover to make --full the default is a later #476 step).
-    if full:
+    # DEFAULT (full mode): materialize the WHOLE managed tree (the full
+    # release-sync pipeline sourced from the wheel bundle), then AUTO-COMMIT ON
+    # CHANGE. This is what the SessionStart boot runs (a bare `init`). The
+    # config-subset behavior is the --config-only escape hatch below.
+    if full_mode:
         return _main_full(repo_root, repo_name, dry_run=dry_run, no_commit=no_commit, push=push)
 
     source_ref: dict[str, str] = {}

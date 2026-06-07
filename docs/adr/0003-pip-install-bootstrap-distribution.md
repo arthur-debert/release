@@ -66,6 +66,14 @@ followed by `release-core init`.**
   `lefthook.yml`, lint configs) are written by an idempotent `release-core init`
   subcommand. Init is the seam that replaces sync's _config_ materialization.
 
+  > **Update (#476 cutover):** `init` now defaults to materializing the WHOLE
+  > managed tree (the `.release/` build dir + every working-tree mirror — skills,
+  > ORIENTATION, configs, the CLAUDE.md block) from the wheel bundle and
+  > auto-committing managed changes — "release-sync sourced from the wheel". The
+  > config-subset behavior described here is the `--config-only` escape hatch. So
+  > the wheel pull now carries the full tree, retiring `orc propagate` in steady
+  > state (see "What this changes" → propagate bullet below, now realized).
+
 The canonical boot resolver — used by both the CI and local-dev contexts
 (`gh` is the GitHub CLI):
 
@@ -96,6 +104,10 @@ constraints. Concretely:
 - **`orc propagate` is no longer the tooling-update path.** `pip install -U` is
   the update: a consumer re-resolves the latest release wheel and installs it.
   Propagate's role narrows to per-repo config changes, not shipping new tool code.
+  _(#476 update: with the default `init` now materializing the whole managed tree
+  from the wheel + auto-committing, even per-repo config/tree changes ride the
+  pull. `orc propagate` is demoted to a "force the fleet now" override — the
+  steady-state push is retired.)_
 - **The stdlib-only rationale is retired.** It existed solely because the
   sys.path-shim model had no install step. Pip resolves dependencies, so real
   third-party deps are now possible. The package stays deliberately

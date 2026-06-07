@@ -5,7 +5,9 @@ name: pip-bootstrap smoke
 # release's own repo, no consumer:
 #
 #   build wheel -> pip install into a fresh venv -> console-scripts on PATH ->
-#   `release-core init` in a throwaway fixture repo -> re-run is idempotent.
+#   `release-core init` (DEFAULT full materialize + auto-commit, AND the
+#   `--config-only` escape hatch) in a throwaway fixture repo -> re-run is
+#   idempotent.
 #
 # A green run here IS the PoC's definition of done. This workflow is a normal PR
 # check; it is deliberately NOT in the branch-protection ruleset (a path-/event-
@@ -244,11 +246,13 @@ jobs:
           echo "documented CONFIG_FILES:"
           cat "${RUNNER_TEMP}/config_files.txt"
 
-      - name: release-core init OFFLINE — no $RELEASE_HOME, compose from the wheel
-        # The DEFAULT path a pip-installed consumer takes: NO release clone, NO
-        # network. `init` composes the gate from the templates BUNDLED in the
-        # wheel. RELEASE_HOME is explicitly unset so a leaked env can't mask a
-        # broken bundle by silently falling back to the git engine.
+      - name: release-core init --config-only OFFLINE — compose from the wheel
+        # The config-subset escape hatch (post-#476): `init --config-only`
+        # composes ONLY the gate + lint configs from the templates BUNDLED in the
+        # wheel — NO release clone, NO network. RELEASE_HOME is explicitly unset
+        # so a leaked env can't mask a broken bundle by silently falling back to
+        # the git engine. (The DEFAULT full materialize is smoke-tested in its own
+        # step below.)
         run: |
           set -euo pipefail
           unset RELEASE_HOME RELEASE_REF
@@ -261,7 +265,7 @@ jobs:
           git -C "$off" add -A
           git -C "$off" commit -qm 'fixture: go-cli marker'
           cd "$off"
-          release-core init
+          release-core init --config-only
           # Every documented config file must be materialized OFFLINE.
           missing=0
           while IFS= read -r f; do
@@ -288,33 +292,94 @@ jobs:
             | grep -vxF -f "${RUNNER_TEMP}/config_files.txt" \
             | grep -vxF 'go.mod' || true)"
           if [ -n "$extra" ]; then
-            echo "ERROR: offline init wrote files outside the documented set:" >&2
+            echo "ERROR: offline init --config-only wrote files outside the documented set:" >&2
             echo "$extra" >&2
             exit 1
           fi
-          git commit -qm 'offline init'
-          # Idempotent: a second offline run is a clean no-op.
-          release-core init
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo "ERROR: second offline 'release-core init' was not a no-op:" >&2
+          git commit -qm 'offline init --config-only'
+          # Idempotent: a second offline run is a clean no-op — assert via
+          # `git status --porcelain` (empty == clean) so a stray UNTRACKED managed
+          # file is caught too (git diff alone misses untracked).
+          release-core init --config-only
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: second offline 'release-core init --config-only' was not a no-op:" >&2
             git status --porcelain >&2
             exit 1
           fi
-          echo "ok: offline release-core init is idempotent"
+          echo "ok: offline release-core init --config-only is idempotent"
 
-      - name: release-core init OVERRIDE — first run materializes the documented set
+      - name: release-core init OFFLINE (DEFAULT full) — self-sync the whole tree
+        # The #476 cutover contract: a BARE `release-core init` (what SessionStart
+        # runs) materializes the WHOLE managed tree from the wheel bundle and
+        # auto-commits managed changes — NO release clone, NO network. This is the
+        # pull-model self-sync that retires propagate in steady state.
+        run: |
+          set -euo pipefail
+          unset RELEASE_HOME RELEASE_REF
+          full="${RUNNER_TEMP}/fixture-full"
+          rm -rf "$full"; mkdir -p "$full"
+          git -C "$full" init -q
+          git -C "$full" config user.email smoke@example.com
+          git -C "$full" config user.name 'pip-bootstrap smoke'
+          printf 'module example.com/full\n\ngo 1.22\n' > "$full/go.mod"
+          git -C "$full" add -A
+          git -C "$full" commit -qm 'fixture: go-cli marker'
+          cd "$full"
+          release-core init
+          # The FULL managed tree must be materialized: the .release/ build dir,
+          # working-tree symlink mirrors, and the CLAUDE.md orientation block.
+          test -d .release || { echo "ERROR: no .release/ build dir materialized" >&2; exit 1; }
+          test -f .release/ORIENTATION.md \
+            || { echo "ERROR: .release/ORIENTATION.md missing" >&2; exit 1; }
+          grep -qF '@.release/ORIENTATION.md' CLAUDE.md \
+            || { echo "ERROR: CLAUDE.md orientation block not injected" >&2; exit 1; }
+          # The full tree is FAR more than the config subset.
+          n="$(git ls-files | wc -l | tr -d ' ')"
+          [ "$n" -gt 20 ] || { echo "ERROR: only $n files tracked — not a full tree" >&2; exit 1; }
+          # AUTO-COMMIT ON CHANGE: the managed change must be committed (the boot
+          # passes no flags; auto-commit is the default in full mode).
+          subject="$(git log -1 --pretty=format:%s)"
+          case "$subject" in
+            "chore(release): sync managed tree from"*) echo "ok: auto-committed: $subject" ;;
+            *) echo "ERROR: managed tree was not auto-committed (HEAD: $subject)" >&2; exit 1 ;;
+          esac
+          # Fully clean after the auto-commit — `git status --porcelain` empty
+          # catches staged/unstaged AND untracked managed leftovers.
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: full init left an uncommitted/untracked managed diff:" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+          echo "ok: default full init materialized + auto-committed the whole tree"
+          # Idempotent: a second bare run is a clean no-op (no new commit).
+          head1="$(git rev-parse HEAD)"
+          release-core init
+          if [ "$(git rev-parse HEAD)" != "$head1" ]; then
+            echo "ERROR: second default 'release-core init' made a commit (not a no-op)" >&2
+            git log -1 --pretty=format:%s >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: second default 'release-core init' was not a clean no-op:" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+          echo "ok: default full release-core init is idempotent (no-op second run)"
+
+      - name: release-core init --config-only OVERRIDE — first run materializes the set
         # release-dev's path: an explicit $RELEASE_HOME git clone OVERRIDES the
         # bundle, composing from LIVE templates via the full release-sync engine.
-        # $RELEASE_REF pins composition to the exact PR commit, so it does not
-        # depend on any remote branch existing. (The wheel itself is always
-        # self-contained — this path is the deliberate dev-only escape hatch.)
+        # Exercised here through --config-only so the documented-CONFIG_FILES
+        # contract assertion holds; the DEFAULT full materialize is covered by the
+        # offline full step above. $RELEASE_REF pins composition to the exact PR
+        # commit, so it does not depend on any remote branch existing.
         env:
           RELEASE_HOME: ${{ github.workspace }}
           RELEASE_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
           cd "${FIXTURE}"
-          release-core init
+          release-core init --config-only
           echo "--- materialized (untracked) ---"
           missing=0
           while IFS= read -r f; do
@@ -338,22 +403,23 @@ jobs:
             echo "$extra" >&2
             exit 1
           fi
-          git commit -qm 'init: first run'
+          git commit -qm 'init --config-only: first run'
 
-      - name: release-core init OVERRIDE — second run is an idempotent no-op
+      - name: release-core init --config-only OVERRIDE — second run is an idempotent no-op
         env:
           RELEASE_HOME: ${{ github.workspace }}
           RELEASE_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
           cd "${FIXTURE}"
-          release-core init
+          release-core init --config-only
           # Idempotent: the second run must leave the already-materialized files
-          # byte-identical — a clean working tree (no diff to the committed set).
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            echo "ERROR: second 'release-core init' was not a no-op:" >&2
+          # byte-identical — a fully clean tree. `git status --porcelain` empty
+          # catches untracked leftovers too (git diff alone would miss them).
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: second 'release-core init --config-only' was not a no-op:" >&2
             git status --porcelain >&2
             git --no-pager diff >&2
             exit 1
           fi
-          echo "ok: release-core init is idempotent (second run = clean no-op)"
+          echo "ok: release-core init --config-only is idempotent (second run = clean no-op)"

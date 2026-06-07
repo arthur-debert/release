@@ -1,12 +1,18 @@
-"""init verb (verbs/init.py): the create-if-absent config materializer that is
-the pip-bootstrap PoC seam (§2).
+"""init verb (verbs/init.py): the managed-tree materializer.
+
+After the #476 cutover, a BARE `release-core init` runs the FULL managed-tree
+materialize + auto-commit-on-change (covered by the `init --full / default`
+section at the bottom). The CONFIG-SUBSET behavior (the old default, create-if-
+absent) is now the `--config-only` escape hatch — every config-subset test below
+drives `init.main(["--config-only", ...])`.
 
 The release-sync engine that composes the source content is exercised by
 test_core_sync.py / test_core_release_sync_verb.py; here we monkeypatch
 init._materialize_config_sources to hand back a temp tree of fixture config
-files, then pin init's OWN contract: create-if-absent, idempotency, --force
-overwrite, --dry-run, and the hard non-zero exit when a write fails. The source
-resolution + Kind/ref failure surfaces are covered by their own tests below.
+files, then pin init's OWN config-only contract: create-if-absent, idempotency,
+--force overwrite, --dry-run, and the hard non-zero exit when a write fails. The
+source resolution + Kind/ref failure surfaces are covered by their own tests
+below.
 """
 
 from __future__ import annotations
@@ -51,7 +57,7 @@ def test_init_creates_all_config_files_when_absent(tmp_path, monkeypatch, capsys
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     out = capsys.readouterr().out
     assert rc == 0
     for dest in init.CONFIG_FILES:
@@ -71,7 +77,7 @@ def test_init_leaves_existing_files_untouched(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     out = capsys.readouterr().out
     assert rc == 0
     assert (repo / "lefthook.yml").read_text() == "# CONSUMER EDIT — keep me\n"
@@ -91,14 +97,14 @@ def test_init_is_idempotent_second_run_is_clean_no_op(tmp_path, monkeypatch, cap
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    assert init.main([]) == 0
+    assert init.main(["--config-only"]) == 0
     capsys.readouterr()
     # Snapshot the tree after the first run.
     before = {
         dest: (repo / dest).read_text() for dest in init.CONFIG_FILES if (repo / dest).is_file()
     }
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     out = capsys.readouterr().out
     assert rc == 0
     after = {
@@ -121,7 +127,7 @@ def test_init_force_overwrites_existing(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main(["--force"])
+    rc = init.main(["--config-only", "--force"])
     out = capsys.readouterr().out
     assert rc == 0
     assert (repo / "lefthook.yml").read_text() == "# managed source for lefthook.yml\n"
@@ -141,7 +147,7 @@ def test_init_force_preserves_existing_file_mode(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    assert init.main(["--force"]) == 0
+    assert init.main(["--config-only", "--force"]) == 0
     capsys.readouterr()
     mode = stat.S_IMODE(os.stat(target).st_mode)
     assert mode == 0o644, f"force overwrite changed mode to {oct(mode)} (expected 0o644)"
@@ -160,7 +166,7 @@ def test_init_repairs_a_broken_symlink(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     out = capsys.readouterr().out
     assert rc == 0
     assert not os.path.islink(link), "broken symlink should be replaced by a real file"
@@ -179,7 +185,7 @@ def test_init_resolves_relative_release_home_before_chdir(tmp_path, monkeypatch)
     _patch(monkeypatch, repo, sources)
     monkeypatch.setenv("RELEASE_HOME", "rel/clone")
 
-    assert init.main([]) == 0
+    assert init.main(["--config-only"]) == 0
     assert os.environ["RELEASE_HOME"] == str(tmp_path / "rel" / "clone")
 
 
@@ -194,7 +200,7 @@ def test_init_dry_run_writes_nothing(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main(["--dry-run"])
+    rc = init.main(["--config-only", "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 0
     for dest in init.CONFIG_FILES:
@@ -221,7 +227,7 @@ def test_init_returns_1_when_a_write_fails(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(init, "_write_file", boom)
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     err = capsys.readouterr().err
     assert rc == 1
     assert "failed to write" in err
@@ -266,7 +272,7 @@ def test_init_kind_error_exits_1(tmp_path, monkeypatch, capsys):
         raise manifest.KindError("nope")
 
     monkeypatch.setattr(init, "_materialize_config_sources", raise_kind)
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     err = capsys.readouterr().err
     assert rc == 1
     assert "could not detect kind" in err
@@ -281,7 +287,7 @@ def test_init_sync_error_exits_1(tmp_path, monkeypatch, capsys):
         raise sync.SyncError("release-core init: $RELEASE_HOME=... is not a git clone")
 
     monkeypatch.setattr(init, "_materialize_config_sources", raise_sync)
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     err = capsys.readouterr().err
     assert rc == 1
     assert "is not a git clone" in err
@@ -308,7 +314,7 @@ def test_init_missing_source_for_kind_is_reported_not_fatal(tmp_path, monkeypatc
     del sources["lefthook.yml"]
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     captured = capsys.readouterr()
     assert rc == 0
     assert "absent  lefthook.yml" in captured.err
@@ -331,7 +337,7 @@ def test_init_yaml_error_exits_1_not_traceback(tmp_path, monkeypatch, capsys):
         raise yamlio.YamlError("yq -o=json . failed (1): bad YAML")
 
     monkeypatch.setattr(init, "_materialize_config_sources", raise_yaml)
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     err = capsys.readouterr().err
     assert rc == 1
     assert "bad YAML" in err
@@ -348,6 +354,11 @@ def test_init_help_exits_0_and_prints_usage(capsys):
     assert rc == 0
     assert "Usage:" in out
     assert "release-core init" in out
+    # Post-#476: help must document the default full materialize, the
+    # --config-only escape hatch, and that --full is a redundant alias.
+    assert "--config-only" in out
+    assert "DEFAULT" in out
+    assert "redundant" in out
 
 
 def test_init_unknown_flag_is_usage_error(capsys):
@@ -658,7 +669,7 @@ def test_commit_commits_only_managed_files_when_changed(tmp_path, monkeypatch, c
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     out = capsys.readouterr().out
     assert rc == 0
     # A new commit was made; its tree contains exactly the managed config files
@@ -688,7 +699,7 @@ def test_commit_message_includes_source_ref_when_known(tmp_path, monkeypatch, ca
 
     monkeypatch.setattr(init, "_materialize_config_sources", _materialize)
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     assert rc == 0
     capsys.readouterr()
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
@@ -701,12 +712,12 @@ def test_commit_no_commit_when_unchanged(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    assert init.main(["--commit"]) == 0
+    assert init.main(["--config-only", "--commit"]) == 0
     capsys.readouterr()
     head_before = _git(repo, "rev-parse", "HEAD")
 
     # Second run: everything present, changed == 0 → no commit.
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "committed" not in out
@@ -724,7 +735,7 @@ def test_commit_does_not_stage_unrelated_working_tree_changes(tmp_path, monkeypa
     (repo / "README.md").write_text("# repo — WIP edit\n")
     (repo / "feature.txt").write_text("user work\n")
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     assert rc == 0
     capsys.readouterr()
     # The managed commit must NOT include the user's files.
@@ -756,7 +767,7 @@ def test_commit_does_not_fold_in_pre_staged_unrelated_changes(tmp_path, monkeypa
     (repo / "staged.txt").write_text("already staged\n")
     _git(repo, "add", "staged.txt")
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     assert rc == 0
     capsys.readouterr()
     committed = set(_git(repo, "log", "-1", "--name-only", "--pretty=format:").splitlines())
@@ -774,7 +785,7 @@ def test_commit_dry_run_never_commits(tmp_path, monkeypatch, capsys):
     _patch(monkeypatch, repo, sources)
     head_before = _git(repo, "rev-parse", "HEAD")
 
-    rc = init.main(["--commit", "--dry-run"])
+    rc = init.main(["--config-only", "--commit", "--dry-run"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "committed" not in out
@@ -792,7 +803,7 @@ def test_commit_in_non_git_dir_is_safe_no_op(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     out = capsys.readouterr().out
     assert rc == 0
     for dest in init.CONFIG_FILES:
@@ -815,7 +826,7 @@ def test_commit_on_unborn_branch_is_safe_no_op(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     captured = capsys.readouterr()
     assert rc == 0
     # Files were still materialized.
@@ -845,7 +856,7 @@ def test_push_only_on_default_branch(tmp_path, monkeypatch, capsys):
     pushes = []
     monkeypatch.setattr(init.gh, "git_push_ff", lambda branch, **k: pushes.append(branch))
 
-    rc = init.main(["--push"])
+    rc = init.main(["--config-only", "--push"])
     err = capsys.readouterr().err
     assert rc == 0
     assert pushes == [], "must NOT push from a feature branch"
@@ -871,7 +882,7 @@ def test_push_skipped_when_tree_dirty_on_default_branch(tmp_path, monkeypatch, c
     pushes = []
     monkeypatch.setattr(init.gh, "git_push_ff", lambda branch, **k: pushes.append(branch))
 
-    rc = init.main(["--push"])
+    rc = init.main(["--config-only", "--push"])
     err = capsys.readouterr().err
     assert rc == 0
     assert pushes == [], "must NOT push with an otherwise-dirty tree"
@@ -889,7 +900,7 @@ def test_push_happens_on_clean_default_branch(tmp_path, monkeypatch, capsys):
     sources = _fixture_sources(tmp_path)
     _patch(monkeypatch, repo, sources)
 
-    rc = init.main(["--push"])
+    rc = init.main(["--config-only", "--push"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "pushed to main." in out
@@ -912,7 +923,7 @@ def test_commit_failure_does_not_fail_init(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(init.gh, "git_commit_paths", boom)
 
-    rc = init.main(["--commit"])
+    rc = init.main(["--config-only", "--commit"])
     err = capsys.readouterr().err
     assert rc == 0
     assert "--commit skipped" in err
@@ -930,7 +941,7 @@ def test_main_end_to_end_through_bundle_path(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(init, "_bundle_templates_root", lambda: tpl_root)
     monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "go-cli")
 
-    rc = init.main([])
+    rc = init.main(["--config-only"])
     out = capsys.readouterr().out
     assert rc == 0
     for name in init.CONFIG_FILES:
@@ -1061,6 +1072,73 @@ def _setup_full_repo(tmp_path, monkeypatch, src_root):
     monkeypatch.setattr(init, "_bundle_root", lambda: str(src_root))
     monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
     return repo
+
+
+@_needs_yq
+@_needs_git
+def test_bare_init_does_full_materialize_and_auto_commits(tmp_path, monkeypatch, capsys):
+    # THE cutover contract: a BARE `release-core init` (exactly what SessionStart
+    # runs, no flags) materializes the FULL managed tree from the bundle AND
+    # auto-commits the managed change. This is the #476 default.
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # An unrelated dirty file must NOT be folded into the managed commit.
+    (repo / "my-feature.txt").write_text("wip\n")
+
+    rc = init.main([])  # no flags — the SessionStart invocation
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "managed-tree change(s) applied" in out
+    # Full tree + working-tree mirrors + CLAUDE.md block, like a release-sync.
+    assert (repo / ".release" / "bin" / "check").is_file()
+    assert (repo / "bin" / "check").is_symlink()
+    assert "@.release/ORIENTATION.md" in (repo / "CLAUDE.md").read_text()
+    # Auto-committed (the default) — only managed paths, deterministic message.
+    assert "committed" in out
+    subject = _git(repo, "log", "-1", "--pretty=format:%s")
+    assert subject.startswith("chore(release): sync managed tree from")
+    committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
+    assert ".release/bin/check" in committed
+    assert "CLAUDE.md" in committed
+    assert "my-feature.txt" not in committed
+
+
+@_needs_yq
+@_needs_git
+def test_bare_init_idempotent_no_commit_second_run(tmp_path, monkeypatch, capsys):
+    # A bare second init with no upstream change → zero changes → no commit (the
+    # no-op-when-current property the pull model relies on for churn = cadence).
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    assert init.main([]) == 0
+    capsys.readouterr()
+    head1 = _git(repo, "rev-parse", "HEAD")
+    assert init.main([]) == 0
+    out = capsys.readouterr().out
+    assert "already current" in out
+    assert _git(repo, "rev-parse", "HEAD") == head1
+
+
+@_needs_yq
+@_needs_git
+def test_bare_init_commits_removals(tmp_path, monkeypatch, capsys):
+    # The removed-target sweep works through the DEFAULT (bare) path: a managed
+    # symlink whose .release target is gone in a later sync is removed AND the
+    # removal committed — no dangling link left behind (#476 / #481).
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    assert init.main([]) == 0
+    capsys.readouterr()
+    assert (repo / "bin" / "check").is_symlink()
+
+    os.remove(os.path.join(src, "templates", "commons", "bin", "check"))
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert not os.path.lexists(repo / "bin" / "check"), "left a dangling symlink"
+    assert not (repo / ".release" / "bin" / "check").exists()
+    assert _git(repo, "status", "--porcelain") == ""
 
 
 @_needs_yq
@@ -1210,32 +1288,98 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+# --------------------------------------------------------------------------
+# Flag-combo guards under the post-#476 default (full IS the default; the guards
+# key off "full mode is active" = NOT --config-only, never the literal --full).
+# --------------------------------------------------------------------------
+
+
 def test_push_and_no_commit_is_bad_usage(capsys):
-    # --push implies a commit; --no-commit suppresses it — contradictory.
-    rc = init.main(["--full", "--push", "--no-commit"])
+    # --push implies a commit; --no-commit suppresses it — contradictory. In the
+    # default (full) mode, with no other flag.
+    rc = init.main(["--push", "--no-commit"])
     err = capsys.readouterr().err
     assert rc == 64
     assert "mutually exclusive" in err
 
 
-def test_no_commit_without_full_is_bad_usage(capsys):
-    # --no-commit only governs --full's auto-commit; plain init must reject it
-    # rather than silently ignore it.
-    rc = init.main(["--no-commit"])
+def test_no_commit_with_config_only_is_bad_usage(capsys):
+    # --no-commit governs only the (default) full auto-commit; --config-only does
+    # not auto-commit, so the combo is rejected rather than silently ignored.
+    rc = init.main(["--config-only", "--no-commit"])
     err = capsys.readouterr().err
     assert rc == 64
-    assert "only valid with --full" in err
+    assert "not valid with --config-only" in err
 
 
-def test_commit_or_force_with_full_is_bad_usage(capsys):
-    # In --full, commit is automatic and overwrite unconditional — explicit
-    # --commit is redundant and --force a no-op; both are rejected (fail loud).
-    rc_commit = init.main(["--full", "--commit"])
+@_needs_yq
+@_needs_git
+def test_no_commit_in_default_full_mode_is_valid(tmp_path, monkeypatch, capsys):
+    # The flip: a BARE `--no-commit` (default full mode) is now VALID — it skips
+    # the auto-commit (was a usage error pre-#476). Run it for real and confirm
+    # rc 0, the tree materialized, and NO commit was made.
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    head_before = _git(repo, "rev-parse", "HEAD")
+
+    rc = init.main(["--no-commit"])
+    assert rc == 0
+    capsys.readouterr()
+    assert (repo / ".release" / "bin" / "check").is_file()  # full tree materialized
+    assert _git(repo, "rev-parse", "HEAD") == head_before  # but no commit
+
+
+def test_commit_or_force_in_default_full_mode_is_bad_usage(capsys):
+    # In the default (full) mode, commit is automatic and overwrite unconditional
+    # — explicit --commit is redundant and --force a no-op; both rejected (fail
+    # loud). Keyed off full-mode-active, not the literal --full flag — so a BARE
+    # --commit / --force (no --full, no --config-only) is what's rejected.
+    rc_commit = init.main(["--commit"])
     assert rc_commit == 64
-    assert "not valid with --full" in capsys.readouterr().err
-    rc_force = init.main(["--full", "--force"])
+    assert "not valid in the default full materialize" in capsys.readouterr().err
+    rc_force = init.main(["--force"])
     assert rc_force == 64
-    assert "not valid with --full" in capsys.readouterr().err
+    assert "not valid in the default full materialize" in capsys.readouterr().err
+
+
+def test_full_flag_prints_deprecation_warning(capsys, monkeypatch, tmp_path):
+    # --full is a redundant alias; passing it explicitly warns on stderr (so
+    # stale fleet usage can be cleaned up) but is never an error. Drive it through
+    # the mutually-exclusive guard so it exits before any materialize — the
+    # warning is emitted regardless. (Gemini review on #482.)
+    rc = init.main(["--full", "--config-only"])
+    err = capsys.readouterr().err
+    assert rc == 64  # the --config-only conflict still fails fast
+    assert "--full is deprecated" in err
+
+
+def test_full_and_config_only_are_mutually_exclusive(capsys):
+    # --full (redundant alias of default) and --config-only pick opposite modes.
+    rc = init.main(["--full", "--config-only"])
+    assert rc == 64
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_full_alias_is_redundant_no_op_equals_default(tmp_path, monkeypatch, capsys):
+    # --full is accepted as a redundant alias of the default: it selects the same
+    # full materialize a bare init does. Proven by running both against the same
+    # synthetic bundle and asserting identical managed-tree output.
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    # Bare init (default) materializes the full tree + auto-commits.
+    assert init.main([]) == 0
+    capsys.readouterr()
+    head_after_default = _git(repo, "rev-parse", "HEAD")
+    assert (repo / ".release" / "bin" / "check").is_file()
+    assert (repo / "bin" / "check").is_symlink()
+
+    # A second run via the --full alias is a no-op (byte-identical) → no commit,
+    # exactly like a bare second init: proof the alias == the default.
+    assert init.main(["--full"]) == 0
+    out = capsys.readouterr().out
+    assert "already current" in out
+    assert _git(repo, "rev-parse", "HEAD") == head_after_default
 
 
 @_needs_yq
