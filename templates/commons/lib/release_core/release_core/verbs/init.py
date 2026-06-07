@@ -59,8 +59,10 @@ Auto-commit (the pull-model commit-hygiene seam):
     --dry-run → no commit; an unborn branch (no HEAD) or any git error makes the
     commit *step* a quiet no-op; if the managed paths can't be staged cleanly it
     prints a notice and skips the commit. The commit step never fails init (init
-    itself still requires its normal git context). Opt-in: a plain `init` stays
-    non-committing.
+    itself still requires its normal git context). These --commit/--push flags
+    are the OPT-IN committing for --config-only only; a `--config-only` run
+    without --commit does not commit. (The DEFAULT full materialize auto-commits
+    managed changes on its own — see "Full materialize" below.)
   - --push (implies --commit): fast-forward push the managed commit ONLY when
     ALL hold — --push given, the current branch IS the repo's default branch,
     and the working tree is otherwise clean (no non-managed changes). On a
