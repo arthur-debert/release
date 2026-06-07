@@ -664,6 +664,27 @@ def _tracked_status(repo):
 
 
 @_needs_git
+def test_full_mode_tolerates_commit_flag_from_stale_resolver(tmp_path, monkeypatch, capsys):
+    """Bootstrap-forward: the deployed SessionStart resolver in a not-yet-migrated
+    consumer calls `release-core init --commit`. The default (full) init must
+    TOLERATE that (warn + proceed, exit 0), not fail with a usage error — else the
+    first cutover pull stalls the whole fleet (the resolver can't update the tree
+    that would update the resolver). Caught by the dodot carrier run."""
+    repo = _init_git_repo(tmp_path / "repo")
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    # Stub the heavy sync pipeline to a no-op so we exercise only arg handling.
+    monkeypatch.setattr(init, "_run_full_sync", lambda *a, **k: (0, [], "test-ref", []))
+
+    rc = init.main(["--commit"])
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "redundant" in err and "ignoring" in err
+
+    # --force is tolerated the same way (some resolver variants pass it).
+    assert init.main(["--force"]) == 0
+
+
+@_needs_git
 def test_commit_commits_only_managed_files_when_changed(tmp_path, monkeypatch, capsys):
     repo = _init_git_repo(tmp_path / "repo")
     sources = _fixture_sources(tmp_path)
@@ -1329,17 +1350,9 @@ def test_no_commit_in_default_full_mode_is_valid(tmp_path, monkeypatch, capsys):
     assert _git(repo, "rev-parse", "HEAD") == head_before  # but no commit
 
 
-def test_commit_or_force_in_default_full_mode_is_bad_usage(capsys):
-    # In the default (full) mode, commit is automatic and overwrite unconditional
-    # — explicit --commit is redundant and --force a no-op; both rejected (fail
-    # loud). Keyed off full-mode-active, not the literal --full flag — so a BARE
-    # --commit / --force (no --full, no --config-only) is what's rejected.
-    rc_commit = init.main(["--commit"])
-    assert rc_commit == 64
-    assert "not valid in the default full materialize" in capsys.readouterr().err
-    rc_force = init.main(["--force"])
-    assert rc_force == 64
-    assert "not valid in the default full materialize" in capsys.readouterr().err
+# NOTE: --commit/--force in default full mode are now TOLERATED (warn + proceed),
+# not rejected — the deployed stale resolver passes --commit on the first cutover
+# pull. See test_full_mode_tolerates_commit_flag_from_stale_resolver above.
 
 
 def test_full_flag_prints_deprecation_warning(capsys, monkeypatch, tmp_path):

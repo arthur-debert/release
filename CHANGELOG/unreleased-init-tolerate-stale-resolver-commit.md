@@ -1,0 +1,1 @@
+init: tolerate (warn, don't reject) --commit/--force in default full mode — the deployed stale SessionStart resolver passes --commit on the first cutover pull; rejecting it stalled the whole fleet's bootstrap-forward (#476 bake, carrier run)

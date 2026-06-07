@@ -95,10 +95,14 @@ Full materialize (the DEFAULT — #476 cutover):
 
   In the default (full) mode the commit is AUTOMATIC and the materialize
   overwrites unconditionally, so an explicit --commit is redundant and --force a
-  no-op: both are rejected as bad usage (fail loud) — they are meaningful ONLY
-  with --config-only. --push remains valid (fast-forward the managed commit on a
-  clean default branch). The pull-model SessionStart boot runs a bare `init`, so
-  it gets the full self-sync + auto-commit with no flags.
+  no-op: both are TOLERATED (warn + proceed), NOT rejected — the deployed
+  SessionStart resolver in a not-yet-migrated consumer still calls `init
+  --commit`, and that stale call performs the first cutover pull, so failing it
+  would stall the fleet (the resolver can't update the tree that updates the
+  resolver). They stay meaningful (opt-in) only with --config-only. --push
+  remains valid (fast-forward the managed commit on a clean default branch). The
+  pull-model SessionStart boot runs a bare `init`, so it gets the full self-sync
+  + auto-commit with no flags.
 
 Source resolution: the canonical config content is composed from the
 wheel-bundled templates (release_core/_bundled_templates/, staged at build time
@@ -720,18 +724,21 @@ def main(argv: list[str] | None = None) -> int:
         return 64
     # In the default (full) mode the commit is automatic (auto-commit-on-change;
     # --no-commit to skip) and the materialize overwrites unconditionally — so an
-    # explicit --commit is redundant and --force is a no-op. Reject rather than
-    # silently ignore (fail loud). Keyed off full_mode (the default), NOT the
-    # literal --full flag. Check the RAW --commit value, not the push-derived
-    # `commit` — --push IS valid in full mode.
+    # explicit --commit is redundant and --force a no-op. We must TOLERATE them
+    # (warn, don't fail): the deployed SessionStart resolver in not-yet-migrated
+    # consumers still calls `release-core init --commit`, and that stale
+    # invocation is exactly what performs the FIRST cutover pull. Failing it would
+    # stall the whole fleet — the resolver can't materialize the new tree that
+    # would in turn update the resolver (bootstrap chicken-and-egg). After the
+    # first successful pull the managed resolver no longer passes --commit, so the
+    # warning self-clears. Keyed off full_mode (the default), NOT the literal
+    # --full flag; checks the RAW --commit value (--push IS valid in full mode).
     if full_mode and (values["commit"] or force):
         print(
-            "release-core init: --commit/--force are not valid in the default full "
-            "materialize (it auto-commits managed changes; use --no-commit to skip, "
-            "or --config-only for the config-subset behavior)",
+            "release-core init: --commit/--force are redundant in the default full "
+            "materialize (it auto-commits managed changes) — ignoring",
             file=sys.stderr,
         )
-        return 64
 
     try:
         repo_root = gh.repo_root()
