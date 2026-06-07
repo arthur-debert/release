@@ -74,7 +74,8 @@ its repo root:
 
 ```yaml
 # dodot/.release-sync.yaml — opts into bats on top of rust-cli default
-kind: rust-cli
+# Only `capabilities` is honored here. Kind is auto-detected, not set in
+# this file, and release-drift-check rejects any other top-level key.
 capabilities:
   - rust-quality
   - bats
