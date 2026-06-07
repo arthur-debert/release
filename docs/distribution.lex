@@ -1,7 +1,7 @@
 Distribution:
 How release ships managed files into consumer repos
 
-Source location: arthur-debert/release, path docs/. Describes the mechanism `bin/release-sync` implements (ADR-0001, ADR-0002) — validated against the script and the `tests/release-sync/` suite, not just intent. Read this before adding anything that consumers should receive.
+Source location: arthur-debert/release, path docs/. Describes the mechanism `release-sync` implements (the `release_core.sync` engine; ADR-0001, ADR-0002) — validated against the code and the `tests/release-sync/` suite, not just intent. Read this before adding anything that consumers should receive.
 
 1. The build-directory model
 
@@ -24,7 +24,7 @@ Source location: arthur-debert/release, path docs/. Describes the mechanism `bin
 
 3. The materialize-then-mirror cycle
 
-    For each sync (`bin/release-sync`):
+    For each sync (`release-sync`, i.e. `release-core sync run`):
 
     a. Resolve Kind (`detect-kind`) and Capabilities.
     b. Build the new `.release/` tree in a tempdir by `git show`-ing every file from the composed subtrees at the selected ref.

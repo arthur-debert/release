@@ -91,6 +91,7 @@ Workflows
         - `cascade-handler.yml` — cross-repo release cascades; computes a
           version bump from commits and dispatches a consumer's release.
         - `bats-e2e.yml` — run a consumer's BATS e2e suite.
+        - `tauri-e2e.yml` — run a consumer's Tauri e2e suite.
 
     Internal to this repo (its own CI; not for consumers):
         - `ci.yml` — this repo's CI; dogfoods `gh-action-ci.yml` and runs the

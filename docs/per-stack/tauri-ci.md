@@ -1,7 +1,7 @@
 # tauri-ci
 
 Reusable PR-time check workflow for `tauri-app` consumers. Lives at
-`.github/workflows/tauri-ci.yml@v1`. The release-path sibling is
+`.github/workflows/tauri-ci.yml@v2`. The release-path sibling is
 `tauri-app.yml` (see the top-level
 [README's category matrix](../../README.md#category-matrix) and
 `.github/workflows/tauri-app.yml`).
@@ -12,7 +12,7 @@ Until this workflow landed, every tauri-app consumer's `ci.yml` was
 hand-rolled: a `setup-node + setup-rust + npm ci + frontend lint /
 typecheck / test + (sometimes) cargo fmt / clippy / test` sequence
 repeated across the fleet. Same "CI workflow reusability gap" called
-out for rust and electron, applied to the tauri-app Stack. A change
+out for rust and electron, applied to the tauri-app Kind. A change
 to the canonical node version, the cache config, the umbrella order,
 or the umbrella itself did not propagate to anyone.
 
@@ -72,7 +72,7 @@ permissions:
 
 jobs:
   ci:
-    uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v1
+    uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v2
     with:
       node-version: '22'
 ```
@@ -92,7 +92,7 @@ permissions:
 
 jobs:
   ci:
-    uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v1
+    uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v2
     with:
       node-version: '22'
       pre-test: 'pnpm fetch:wasm'
@@ -114,7 +114,7 @@ jobs:
 Reusable-workflow callee jobs are ALWAYS prefixed by the caller's
 job ID — there is no way to suppress the prefix. So when a consumer
 migrates from a hand-rolled `ci.yml` (jobs named e.g. `format`,
-`frontend`) to a thin caller (`jobs: ci: uses: …/tauri-ci.yml@v1`),
+`frontend`) to a thin caller (`jobs: ci: uses: …/tauri-ci.yml@v2`),
 the check names GitHub reports change:
 
 - before: `format`, `frontend` (or whatever the consumer named their
@@ -164,7 +164,7 @@ release-sync-managed path:
 .yamllint
 .editorconfig
 lefthook.yml
-.release-sync-state.yaml
+.release/
 .github/copilot-instructions.md
 .github/pull_request_template.md
 .github/CODEOWNERS
@@ -174,11 +174,10 @@ bin/check
 bin/check-fmt
 bin/check-lint
 bin/check-tests
-bin/diff-since-release
-scripts/setup-dev-env.sh
+bin/setup-dev-env.sh
 ```
 
-Same pattern as the electron-app Stack — surfaced empirically on
+Same pattern as the electron-app Kind — surfaced empirically on
 simple-gal-ui's adoption (the canonical `.markdownlint.json` doesn't
 match a typical project's prettier rules; prettier rejects it on
 `--check`).

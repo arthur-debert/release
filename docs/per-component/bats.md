@@ -1,6 +1,6 @@
-# `bats` Component
+# `bats` Capability
 
-Opt-in Component that gives consumers a uniform local-runner + CI
+Opt-in Capability that gives consumers a uniform local-runner + CI
 workflow for bats-based e2e suites. Adapts to existing test trees —
 doesn't force layout migration.
 
@@ -35,16 +35,16 @@ called by consumer thin-callers via `uses:`):
 ## How a consumer adopts
 
 Put `.release-sync.yaml` at the repo root and add `bats` to the
-`components:` list. **The override fully replaces the Stack default —
+`capabilities:` list. **The override fully replaces the Kind default —
 include the defaults you want to keep:**
 
 ```yaml
 # .release-sync.yaml — example for a rust-cli consumer
-components:
-  - rust-quality    # Stack default
+capabilities:
+  - rust-quality    # Kind default
   - bats            # opt-in
 # (the shell/markdown/yaml lint gate ships universally from commons —
-#  not listed as a Component; see release#320)
+#  not listed as a Capability; see release#320)
 ```
 
 Then run `release-sync` (or wait for the next session-start sync).
@@ -72,9 +72,9 @@ only if you need a custom entry point.
 ## Why no pre-commit lefthook fragment
 
 bats suites are seconds-to-minutes; pre-commit hooks need to be
-sub-second to stay out of contributors' way. The Component is
+sub-second to stay out of contributors' way. The Capability is
 CI-time + local-invocation only. If a consumer wants a pre-push hook,
-they can wire it in their own `lefthook.yml` (outside the Component).
+they can wire it in their own `lefthook.yml` (outside the Capability).
 
 ## Why no forced layout
 

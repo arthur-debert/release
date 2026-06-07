@@ -1,8 +1,8 @@
-# `mkdocs` Component
+# `mkdocs` Capability
 
-Opt-in Component for repos that build documentation with mkdocs.
+Opt-in Capability for repos that build documentation with mkdocs.
 Plugin-agnostic — the consumer's `mkdocs.yml` + `docs/requirements.txt`
-(or equivalent) own the theme/plugin choices; the Component just
+(or equivalent) own the theme/plugin choices; the Capability just
 provides the canonical build-check + deploy mechanism.
 
 ## What ships
@@ -36,16 +36,16 @@ via `uses:`):
 ## How a consumer adopts
 
 Put `.release-sync.yaml` at the repo root and add `mkdocs` to the
-`components:` list. The override **fully replaces** the Stack
+`capabilities:` list. The override **fully replaces** the Kind
 defaults — include any defaults you want to keep:
 
 ```yaml
 # .release-sync.yaml — rust-cli consumer that also ships mkdocs docs
-components:
-  - rust-quality    # Stack default
+capabilities:
+  - rust-quality    # Kind default
   - mkdocs          # opt-in
 # (the shell/markdown/yaml lint gate ships universally from commons —
-#  not listed as a Component; see release#320)
+#  not listed as a Capability; see release#320)
 ```
 
 Then run `release-sync` (or wait for the next session-start sync).
@@ -90,7 +90,7 @@ three always; it's a one-time copy-paste.
 
 ## Plugin-agnostic by design
 
-The Component does NOT decide theme or plugins. Whatever's in the
+The Capability does NOT decide theme or plugins. Whatever's in the
 consumer's `requirements` file is installed verbatim. Examples
 from the fleet:
 
@@ -99,9 +99,9 @@ from the fleet:
   syntax-highlight for the `lex` editor language).
 - **standout**: pinned set TBD (currently has a broken docs.yml
   that references `book.toml` — to be cleaned up as part of its
-  mkdocs Component adoption).
+  mkdocs Capability adoption).
 
-The Component would happily build either site as-is. If a consumer
+The Capability would happily build either site as-is. If a consumer
 uses `poetry`, `uv`, `hatch`, etc. instead of pip + requirements.txt,
 they pass `pre-install-cmd: 'uv sync --group docs'` (or equivalent).
 

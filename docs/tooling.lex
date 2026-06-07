@@ -103,8 +103,11 @@ release-core
         | release-drift-check | fail if .release/ has drifted from source |
         | gh-task-status | the PR state machine (state + next action) |
         | gh-release-issue | file or comment on a release issue upstream |
-        | release | shim → `release-core cut` |
     :: table ::
+
+    These reach a consumer's PATH as `release_core` pip console-scripts (from
+    the installed wheel), not as synced `bin/` shims. The old `release` shim was
+    retired in #476 — cut a release with `release-core cut`.
 
 4. How release-core Is Installed, and What a Consumer Must Commit
 
@@ -145,7 +148,7 @@ release-core
     `orc` is a maintainer-only fleet orchestrator that runs FROM
     `arthur-debert/release`. It is not consumer-facing and is never synced to
     consumers; it lives in this repo's `bin/` and resolves its `uv` workspace
-    (it depends on `release_gh`). Its jobs:
+    (it depends on `release_core`). Its jobs:
 
     - `orc propagate` — run `release-sync` across the fleet and open a re-sync
       PR per consumer. Mechanical, no LLM calls. This is how an upstream fix

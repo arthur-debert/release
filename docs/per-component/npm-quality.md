@@ -1,6 +1,6 @@
-# `npm-quality` Component
+# `npm-quality` Capability
 
-Stack-default Component for npm-based front-end Stacks: `electron-app`
+Kind-default Capability for npm-based front-end Kinds: `electron-app`
 today, eventually `tauri-app`, `vscode-ext`, anything that ships a
 `package.json`. Bundles the frontend hygiene hooks that should run
 identically across all of them — ESLint, Prettier, TypeScript
@@ -8,8 +8,8 @@ compiler-as-linter.
 
 ## What ships
 
-Synced by `release-sync` when a consumer's Stack manifest lists
-`npm-quality` (the `electron-app` Stack lists it by default):
+Synced by `release-sync` when a consumer's Kind manifest lists
+`npm-quality` (the `electron-app` Kind lists it by default):
 
 - **`lefthook.fragment.yaml`** — three pre-commit hooks (priority 2,
   check-only):
@@ -34,16 +34,16 @@ Synced by `release-sync` when a consumer's Stack manifest lists
   restricting it. Two layers, two scopes: pre-commit = per-file
   via npx; umbrella = whole-project via npm script.
 
-- **No `bin/` scripts at Component level.** The Stack-level
+- **No `bin/` scripts at Capability level.** The Kind-level
   `bin/check-fmt`, `bin/check-lint`, `bin/check-tests` (shipped by
   `templates/electron-app/bin/`) consume `npm run` scripts and
   compose them into the umbrella. Splitting frontend-tool wrappers
-  across both Component and Stack layers would create duplicate
+  across both Capability and Kind layers would create duplicate
   shape for no win.
 
 ## How a consumer adopts
 
-For an `electron-app` Stack consumer: no action needed. The
+For an `electron-app` Kind consumer: no action needed. The
 manifest at `templates/electron-app/manifest.yaml` lists
 `npm-quality` by default — `release-sync` picks it up.
 
@@ -52,17 +52,17 @@ override with `.release-sync.yaml`:
 
 ```yaml
 # .release-sync.yaml — opt OUT of npm-quality (atypical)
-components: []
+capabilities: []
   # npm-quality omitted on purpose. The shell/markdown/yaml lint gate
   # still applies — it ships universally from commons (release#320),
-  # not as a listed Component.
+  # not as a listed Capability.
 ```
 
-For a Stack that doesn't yet default to `npm-quality` (`tauri-app`,
+For a Kind that doesn't yet default to `npm-quality` (`tauri-app`,
 `vscode-ext` — coming soon): opt IN explicitly:
 
 ```yaml
-components:
+capabilities:
   - <other defaults>
   - npm-quality         # opt-in until tauri-app's manifest defaults it
 ```
@@ -71,7 +71,7 @@ components:
 
 The reusable CI workflow for `electron-app` is
 `electron-ci.yml@v1` — see `docs/per-stack/electron-ci.md`. That
-workflow runs the same `bin/check` umbrella the Component's hooks
+workflow runs the same `bin/check` umbrella the Capability's hooks
 preview locally. Re-running each tool as a separate CI step would
 just duplicate work the umbrella already covers.
 
@@ -81,7 +81,7 @@ they will follow the same shape: setup-node + `bin/check` —
 
 ## Script-name conventions
 
-The hooks (and the Stack-level `bin/check-*` scripts) assume the
+The hooks (and the Kind-level `bin/check-*` scripts) assume the
 consumer's `package.json` exposes the standard portfolio aliases:
 
 | Alias | Purpose |
@@ -108,7 +108,7 @@ the correct signal — fix the missing dep, don't paper over.
 
 ## Why the `bin/check-*` scripts still probe for npm scripts
 
-The Stack-level `bin/check-fmt` / `bin/check-lint` /
+The Kind-level `bin/check-fmt` / `bin/check-lint` /
 `bin/check-tests` (shipped by `templates/electron-app/bin/`)
 **do** prefer the consumer's npm script alias when present —
 because those scripts run the whole-project check the consumer

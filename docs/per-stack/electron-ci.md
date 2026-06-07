@@ -1,7 +1,7 @@
 # electron-ci
 
 Reusable PR-time check workflow for `electron-app` consumers. Lives at
-`.github/workflows/electron-ci.yml@v1`. The release-path sibling is
+`.github/workflows/electron-ci.yml@v2`. The release-path sibling is
 `electron-app.yml` (see the top-level
 [README's category matrix](../../README.md#category-matrix) — a
 dedicated per-category doc for electron-app is not yet written; the
@@ -14,7 +14,7 @@ Until this workflow landed, every electron-app consumer's `test.yml`
 was hand-rolled: a `setup-node + npm ci + (build shared) + typecheck
 + lint + test` sequence repeated verbatim across the fleet. Same
 "CI workflow reusability gap" called out for rust — see the top-level
-README — applied to the electron-app Stack. A change to the canonical
+README — applied to the electron-app Kind. A change to the canonical
 node version, the cache config, the umbrella order, or the umbrella
 itself did not propagate to anyone.
 
@@ -49,7 +49,7 @@ permissions:
 
 jobs:
   check:
-    uses: arthur-debert/release/.github/workflows/electron-ci.yml@v1
+    uses: arthur-debert/release/.github/workflows/electron-ci.yml@v2
     with:
       node-version: '22'
 ```
@@ -69,7 +69,7 @@ permissions:
 
 jobs:
   check:
-    uses: arthur-debert/release/.github/workflows/electron-ci.yml@v1
+    uses: arthur-debert/release/.github/workflows/electron-ci.yml@v2
     with:
       node-version: '22.18.0'
       shared-build-dir: shared
@@ -89,7 +89,7 @@ jobs:
 Reusable-workflow callee jobs are ALWAYS prefixed by the caller's job
 ID — there is no way to suppress the prefix. So when a consumer
 migrates from a hand-rolled `test.yml` (jobs named `build`, `e2e`) to
-a thin caller (`jobs: check: uses: …/electron-ci.yml@v1`) plus a
+a thin caller (`jobs: check: uses: …/electron-ci.yml@v2`) plus a
 bespoke `e2e` job, the check names GitHub reports change:
 
 - before: `Build and Test`, `E2E Tests` (or whatever the consumer
@@ -133,7 +133,7 @@ release-sync-managed path:
 .yamllint
 .editorconfig
 lefthook.yml
-.release-sync-state.yaml
+.release/
 .github/copilot-instructions.md
 .github/pull_request_template.md
 .github/CODEOWNERS
@@ -143,8 +143,7 @@ bin/check
 bin/check-fmt
 bin/check-lint
 bin/check-tests
-bin/diff-since-release
-scripts/setup-dev-env.sh
+bin/setup-dev-env.sh
 ```
 
 Surfaced on simple-gal-ui's adoption (the second electron-app

@@ -78,6 +78,12 @@ Injected Files
         | skills/gh-pr-review-loop/SKILL.md | .claude/skills/gh-pr-review-loop/SKILL.md | symlink |
     :: table ::
 
+    That row is one example. The full official skill set rides this same
+    mechanism: every skill in the `PUSH_ALL_SKILLS` catalog is distributed to
+    every consumer, and `REPLACE_IF_PRESENT_SKILLS` upgrades any already
+    present — whole-directory, every file under `skills/<name>/`, not just the
+    `SKILL.md`. See skills.lex for the catalogs and the distribution tiers.
+
     The gate (`lefthook.yml`) is never copied verbatim. It is composed by
     deep-merging the fragments in order — base, commons, each capability, then
     the Kind — into one `.release/lefthook.yml`. To change a check, edit a
