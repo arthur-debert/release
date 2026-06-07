@@ -648,6 +648,36 @@ def _files_equal(a: str, b: str) -> bool:
         return False
 
 
+def _expected_copy_bytes(f: str, tmp_release: str) -> bytes:
+    """The exact bytes ``_apply`` would write for the real-file copy ``f`` — the
+    materialized source under ``tmp_release``, with the managed-marker header
+    prepended for YAML (mirrors release_sync._apply's copy branch). Used to tell a
+    genuine copy change from a byte-identical re-materialize so a steady-state
+    sync is a true no-op (no phantom change count, no failed auto-commit)."""
+    with open(os.path.join(tmp_release, f), "rb") as fh:
+        body = fh.read()
+    if f.endswith((".yml", ".yaml")):
+        return (MANAGED_MARKER + "\n").encode("utf-8") + body
+    return body
+
+
+def _managed_copy_differs(f: str, repo_root: str, tmp_release: str) -> bool:
+    """True iff the managed real-file copy ``f`` would actually change the working
+    tree — absent dest, or dest bytes differ from what ``_apply`` would write.
+    Byte-identical dest → False, so the copy is skipped (no churn, no spurious
+    commit). A hand-edited/drifted dest → True, so drift is still repaired."""
+    dest = os.path.join(repo_root, f)
+    if not os.path.lexists(dest):
+        return True
+    if os.path.islink(dest):  # a stale symlink where a real file belongs → rewrite
+        return True
+    try:
+        with open(dest, "rb") as fh:
+            return fh.read() != _expected_copy_bytes(f, tmp_release)
+    except OSError:
+        return True
+
+
 # ── Symlink / copy / conflict plan against the consumer working tree ──────────
 
 
@@ -681,11 +711,22 @@ def compute_mirror(
     for root in symlinked_skill_roots:
         mp.migrated.append(root)
 
+    # Every managed real-file-copy dest this sync owns, whether or not it is being
+    # (re)written. The stale sweep keys off THIS set — a managed copy that is
+    # byte-identical (so not in copies_to_write) is still LIVE, not stale; only a
+    # marker-bearing file absent from this set is a genuinely retired copy.
+    live_copies: set[str] = set()
+
     for f in new_files:
         if is_release_internal(f):
             continue
         if needs_real_file(f):
-            mp.copies_to_write.append(f)
+            live_copies.add(f)
+            # Only queue the copy when it would actually change the dest, so a
+            # steady-state re-sync is a true no-op (no phantom change count, no
+            # auto-commit that git then rejects for "nothing to commit").
+            if _managed_copy_differs(f, repo_root, tmp_release):
+                mp.copies_to_write.append(f)
             continue
 
         target = link_target(f)
@@ -713,7 +754,7 @@ def compute_mirror(
             mp.symlinks_to_create.append(f"{f} -> {target}")
 
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, tmp_release)
-    mp.copies_to_remove = _find_stale_managed_copies(repo_root, set(mp.copies_to_write))
+    mp.copies_to_remove = _find_stale_managed_copies(repo_root, live_copies)
     return mp
 
 
