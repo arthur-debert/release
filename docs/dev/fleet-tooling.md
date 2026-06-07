@@ -48,7 +48,7 @@ won't-do).
 
 ```sh
 release-core admin repos verify                       # sync whole fleet from HEAD, run the gate
-release-core admin repos verify --ref main            # verify what @v1 is about to point at
+release-core admin repos verify --ref main            # verify what @v2 is about to point at
 release-core admin repos verify --only arthur-debert/padz   # one repo (scopes the clone too)
 ```
 

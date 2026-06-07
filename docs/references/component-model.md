@@ -50,7 +50,7 @@ A **Kind** template now consists of three things:
    `tauri.conf.json` parses).
 3. `templates/<kind>/**` — any other Kind-specific files (CI workflow
    ref isn't actually shipped via release-sync; consumers reference
-   `arthur-debert/release/.github/workflows/<kind>.yml@v1` directly).
+   `arthur-debert/release/.github/workflows/<kind>.yml@v2` directly).
 
 Most of what used to live in a Kind template (the hand-maintained
 `lefthook.yml`, language-specific lint configs) moves to Capabilities.
@@ -285,7 +285,7 @@ regardless of declared Capabilities (release#320).
 ## Open refinements for later
 
 - **Capability versioning** — independent `@v1` per Capability. Defer; the
-  whole repo's floating `@v1` is sufficient at our scale.
+  whole repo's floating `@v2` is sufficient at our scale.
 - **Conditional fragments** — a Capability fragment that varies by Kind
   context. Defer; no real case yet.
 - **Capability dependencies** — Capability A requires Capability B. Defer;

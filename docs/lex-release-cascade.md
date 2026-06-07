@@ -94,7 +94,7 @@ itself all happen in CI via the reusable workflow.
 | Repo | Version source (read by `release-core cut`) | CI trigger |
 |---|---|---|
 | `comms` | git tags (no version file) | tag-push (`on: push: tags: [v*]`) |
-| `lex` | `[workspace.package].version` in root `Cargo.toml` | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v1`) |
+| `lex` | `[workspace.package].version` in root `Cargo.toml` | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v2`) |
 | `tree-sitter-lex` | `package.json` `"version"` | tag-push |
 | `vscode` | `package.json` `"version"` | tag-push |
 | `nvim` | `lua/lex/init.lua` `M.version` (via `version-file` input) | tag-push |
@@ -138,7 +138,7 @@ push tag v0.16.3 to comms
         → lex/on-upstream-released.yml
             → diff-since-release: commits present (comms submodule stale)
             → dispatch release.yml patch (workflow_dispatch)
-                → rust-cli@v1 bumps + rolls CHANGELOG + commits + tags + publishes
+                → rust-cli@v2 bumps + rolls CHANGELOG + commits + tags + publishes
                   crates + builds binaries v0.x.y
                     → lex/release.yml notify-downstreams fires upstream-released to editors
         → tree-sitter-lex/on-upstream-released.yml
@@ -259,7 +259,7 @@ Three pieces. None is hard individually; the order matters.
 
    jobs:
      cascade:
-       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v1
+       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v2
        secrets:
          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
    ```
@@ -294,4 +294,4 @@ Then add the repo to the `release-core admin release lex` orchestrator's `ORDER`
 - Tracking issue: [lex-fmt/lex#640](https://github.com/lex-fmt/lex/issues/640)
 - Orchestrator: `release-core admin release lex`
 - Bootstrap (for fresh CI machines): [`arthur-debert/release/bin/clone-lex-repos`](../bin/clone-lex-repos)
-- Reusable rust-cli workflow (lex consumes via `@v1`): [`arthur-debert/release/.github/workflows/rust-cli.yml`](../.github/workflows/rust-cli.yml)
+- Reusable rust-cli workflow (lex consumes via `@v2`): [`arthur-debert/release/.github/workflows/rust-cli.yml`](../.github/workflows/rust-cli.yml)

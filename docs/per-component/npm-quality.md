@@ -70,7 +70,7 @@ capabilities:
 ## Why no CI workflow
 
 The reusable CI workflow for `electron-app` is
-`electron-ci.yml@v1` — see `docs/per-stack/electron-ci.md`. That
+`electron-ci.yml@v2` — see `docs/per-stack/electron-ci.md`. That
 workflow runs the same `bin/check` umbrella the Capability's hooks
 preview locally. Re-running each tool as a separate CI step would
 just duplicate work the umbrella already covers.

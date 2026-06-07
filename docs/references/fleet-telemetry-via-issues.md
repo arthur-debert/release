@@ -145,7 +145,7 @@ an existing kind with a richer body rather than minting a new one.
 - **Coupling.** Consumer repos now know a name: `arthur-debert/release`.
   If this repo is ever renamed or moved, every consumer's CI breaks.
   Mitigation: the reusable-workflow indirection (`uses:
-  arthur-debert/release/.github/workflows/report-incident.yml@v1`)
+  arthur-debert/release/.github/workflows/report-incident.yml@v2`)
   is a single rename target; consumers don't hardcode the issue
   endpoint themselves.
 

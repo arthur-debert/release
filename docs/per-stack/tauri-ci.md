@@ -174,6 +174,7 @@ bin/check
 bin/check-fmt
 bin/check-lint
 bin/check-tests
+bin/diff-since-release
 bin/setup-dev-env.sh
 ```
 

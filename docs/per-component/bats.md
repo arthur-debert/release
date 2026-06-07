@@ -61,7 +61,7 @@ on:
     branches: [main]
 jobs:
   e2e:
-    uses: arthur-debert/release/.github/workflows/bats-e2e.yml@v1
+    uses: arthur-debert/release/.github/workflows/bats-e2e.yml@v2
     with:
       pre-test: scripts/build-for-e2e   # optional — typical: build binary, prep fixtures
 ```
