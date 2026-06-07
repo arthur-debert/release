@@ -1,0 +1,1 @@
+init: content-compare managed real-file copies (.github/workflows/*) so a steady-state sync is a true no-op — fixes the phantom change count + failing auto-commit, and a flip-flop where byte-identical copies were swept as stale then rewritten each run (#476 bake)

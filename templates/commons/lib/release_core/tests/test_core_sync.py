@@ -713,6 +713,70 @@ def test_compute_mirror_symlinked_skill_root_is_removed_first(tmp_path):
     assert dest not in mp.migrated
 
 
+def test_compute_mirror_real_copy_queued_when_dest_absent_or_drifted(tmp_path):
+    """A managed real-file copy (.github/workflows/*.yml) is queued when the dest
+    is missing or its bytes drift from what _apply would write."""
+    dest = ".github/workflows/copilot-review.yml"
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / ".github" / "workflows").mkdir(parents=True)
+    (tmp_release / dest).write_text("on: pull_request\n")
+
+    # absent dest → queued
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+    assert dest in mp.copies_to_write
+
+    # drifted dest (hand-edited) → still queued (drift repaired)
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / dest).write_text("hand-edited junk\n")
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+    assert dest in mp.copies_to_write
+
+
+def test_compute_mirror_real_copy_skipped_when_byte_identical(tmp_path):
+    """#476 idempotency: a managed real-file copy whose dest already matches what
+    _apply would write (managed-marker header + body for YAML) is NOT re-queued —
+    so a steady-state init reports zero changes and skips the auto-commit instead
+    of failing it with 'nothing to commit'."""
+    dest = ".github/workflows/copilot-review.yml"
+    body = "on: pull_request\n"
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / ".github" / "workflows").mkdir(parents=True)
+    (tmp_release / dest).write_text(body)
+
+    # Dest holds exactly what _apply writes for YAML: marker line + body.
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / dest).write_text(sync.MANAGED_MARKER + "\n" + body)
+
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+    assert dest not in mp.copies_to_write
+    assert mp.copies_to_write == []
+    # And it must NOT be swept as stale just because it wasn't rewritten — that
+    # would flip-flop delete/rewrite the file on alternating syncs.
+    assert dest not in mp.copies_to_remove
+
+
+def test_compute_mirror_sweeps_only_genuinely_retired_managed_copy(tmp_path):
+    """A marker-bearing workflow that the sync no longer owns IS swept; a managed
+    copy still owned (even byte-identical, not rewritten) is NOT."""
+    owned = ".github/workflows/copilot-review.yml"
+    retired = ".github/workflows/old-thing.yml"
+    body = "on: pull_request\n"
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / ".github" / "workflows").mkdir(parents=True)
+    (tmp_release / owned).write_text(body)
+
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    # owned dest already matches _apply output → not rewritten this sync
+    (tmp_path / owned).write_text(sync.MANAGED_MARKER + "\n" + body)
+    # retired managed copy: marker-bearing, no longer in new_files
+    (tmp_path / retired).write_text(sync.MANAGED_MARKER + "\nname: gone\n")
+
+    mp = sync.compute_mirror([owned], str(tmp_path), str(tmp_release), migrate=False)
+    assert retired in mp.copies_to_remove
+    assert owned not in mp.copies_to_remove
+
+
 def test_skill_root_of():
     assert sync._skill_root_of(".claude/skills/tdd/mocking.md") == ".claude/skills/tdd"
     assert sync._skill_root_of(".claude/skills/tdd/SKILL.md") == ".claude/skills/tdd"
