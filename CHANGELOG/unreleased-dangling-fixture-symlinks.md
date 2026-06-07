@@ -1,0 +1,1 @@
+remove two vestigial dangling tracked symlinks (tests/changelog-check-fixtures/*/bin/changelog-render → retired templates/commons/bin/changelog-render) that broke 'uses: arthur-debert/release@v2' action-staging for every consumer's CI; add a guards-job check that fails on any dangling tracked symlink (#476 bake, carrier)

@@ -109,3 +109,27 @@ jobs:
             exit 1
           fi
           echo "ok: no build/package artifacts tracked in git"
+
+      - name: Tracked symlinks must not dangle (breaks @vN action-staging for every consumer)
+        # A tracked symlink whose target is missing makes GitHub Actions fail to
+        # STAGE this repo when a consumer does `uses: arthur-debert/release/...@vN`
+        # ("Could not find file .../_staging/release-<sha>/<link>") — so it breaks
+        # EVERY @vN consumer's CI, invisibly: release's own CI uses local
+        # ./.github action paths and never hits the cross-repo staging path, so it
+        # stays green. Caught when two vestigial
+        # tests/changelog-check-fixtures/*/bin/changelog-render symlinks dangled
+        # after the renderer became a pip console-script (#476).
+        run: |
+          set -euo pipefail
+          dangling="$(
+            git ls-files -s | awk -F'\t' '$1 ~ /^120000 /{print $2}' \
+            | while IFS= read -r link; do
+                [ -e "$link" ] || echo "  $link -> $(readlink "$link")"
+              done
+          )"
+          if [ -n "$dangling" ]; then
+            echo "::error::Tracked symlinks dangle (missing target) — this breaks @vN action-staging for all consumers:" >&2
+            printf '%s\n' "$dangling" >&2
+            exit 1
+          fi
+          echo "ok: no dangling tracked symlinks"
