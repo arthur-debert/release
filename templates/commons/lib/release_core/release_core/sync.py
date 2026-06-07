@@ -673,7 +673,13 @@ def _managed_copy_differs(f: str, repo_root: str, tmp_release: str) -> bool:
         return True
     try:
         with open(dest, "rb") as fh:
-            return fh.read() != _expected_copy_bytes(f, tmp_release)
+            dest_bytes = fh.read()
+        expected = _expected_copy_bytes(f, tmp_release)
+        # Compare LF-normalized: a Windows checkout (core.autocrlf) can hold CRLF
+        # while _expected_copy_bytes is LF, which would otherwise flag a phantom
+        # change on every run. Defensive only — the supported macOS/Linux runners
+        # never see CRLF here.
+        return dest_bytes.replace(b"\r\n", b"\n") != expected.replace(b"\r\n", b"\n")
     except OSError:
         return True
 
