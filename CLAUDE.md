@@ -36,10 +36,17 @@ silently dropping managed `bin/` tools).
   retired in #476 — they reach a consumer's PATH as pip console-scripts
   (`gh-task-status`, `gh-release-issue`) / `release-core cut`, not synced
   `bin/` shims.
-- **Core fleet loop:** `release-core admin repos verify` (hermetic pre-flight
-  sweep) → `orc propagate` (re-sync + open a PR per consumer) →
-  `release-core admin release advance-major` (fast-forward the floating major).
-  Always run `release-core admin repos verify` before advancing.
+- **Core fleet loop (PULL is steady-state, post-#476 / v2.11.0):** cut a release
+  (`release.yml` publishes the `release_core` wheel) → `release-core admin
+  release advance-major` (fast-forward the floating major). That's it — consumers
+  self-update at SessionStart: `install-release-core` pulls the wheel and a bare
+  `release-core init` (now the DEFAULT full materialize) re-syncs the whole
+  managed tree from the wheel bundle and auto-commits any change. **No
+  `orc propagate` is needed in steady state.** `orc propagate` is now a
+  **force-the-fleet-now override** — use it only to push a change out immediately
+  rather than waiting for each consumer's next session (e.g. an urgent fix), and
+  run `release-core admin repos verify` before it. Steady state: the wheel is the
+  carrier; pull does the rest.
 - **The load-bearing gotcha:** mechanical fleet tools run in clones *without* the
   consumer's toolchain (no `npm install` / `cargo`), so they cannot run the
   consumer gate faithfully — `propagate` commits `--no-verify` and the PR's CI is
