@@ -1,21 +1,21 @@
 # release-core CLI — the pattern (how to fill a group)
 
 This is the spec for the `release-core <group> <command>` click tree
-(epic #461, reorg #460). It is what parallel per-group agents follow so their
-work lands cleanly and identically. Read it before touching `cli/`.
+(epic #461, reorg #460, cutover #468). It is what per-group work follows so
+additions land cleanly and identically. Read it before touching `cli/`.
 
-## The one rule for Phase 1: additive only — NO cutover yet
+## The wrapping rule: wrap, never rewrite
 
-The new `release-core <group> <command>` surface is built **alongside** the
-existing `bin/<name>` console-scripts and shims. In this phase you must **not**:
+Each `release-core <group> <command>` leaf wraps an existing verb or `bin/`
+script — it does **not** reimplement it. When filling or extending a group:
 
-- remove or rewire any existing `bin/` shim, console-script, workflow, or caller;
-- change any verb's argument parsing or behavior (wrap it, never rewrite it);
-- update in-repo callers to the new paths.
+- wrap the underlying verb/script (see the two patterns below); never re-parse
+  its arguments or duplicate its behavior in click;
+- keep the wrapped verb's argument parsing and behavior byte-identical.
 
-Deleting old names and updating callers is a **later phase** (#460 step 3).
-Existing `test_core_*` stay green; existing command behavior stays
-byte-identical.
+The cutover (#468) retired the flat maintainer command names from PATH — they
+are gone, not aliased; the tree is now the only surface. Existing `test_core_*`
+stay green; wrapped command behavior stays byte-identical.
 
 ## Layout — one module per top-level group (no shared edit point)
 
@@ -30,7 +30,7 @@ release_core/
     toplevel.py           # per-project flat verbs + small per-project groups,
                           # attached to the root by attach(root).
     pr.py                 # `pr` group (EXEMPLAR: nested subgroup + both wraps).
-    ci.py                 # `ci` group (stub).
+    ci.py                 # `ci` group (fetch-deps / fetch-artifact wraps).
     admin/                # `admin` subpackage — large, so split one module per
       __init__.py         #   nested group (the admin assembler).
       repos.py            #   admin repos
@@ -135,16 +135,23 @@ see #460)" message — so it can't be mistaken for a working command.
 > error (exit `2`) — also never a silent `0`. Use `stub_group` for the empty
 > groups and the not-yet-wired-bare-form groups specifically.
 
-## What's exemplar vs stub today
+## The built-out tree
 
-- **Implemented:** `pr` (whole group: `pr copilot on|off|wait|review`,
-  `pr checks-wait`, `pr resolve-thread`, `pr status`), and the top-level
-  verb-wrap exemplars `cut` and `status`, plus the folded-in `init` /
-  `selfcheck`.
-- **Stub (for parallel agents):** `ci`, all of `admin/*`, and the remaining
-  top-level commands (`changelog`, `semver`, `sync`, `detect-kind`, `audit`,
-  `issue`). The `← old name` mapping for each is in each stub module's
-  docstring and in #460.
+The tree is fully built out — every group and leaf below is implemented and on
+PATH:
+
+- **Top-level (per-project):** `cut`, `status`, `init`, `selfcheck`,
+  `changelog`, `semver`, `sync`, `detect-kind`, `audit`, `issue`.
+- **`pr`** (whole group: `pr copilot on|off|wait|review`, `pr checks-wait`,
+  `pr resolve-thread`, `pr status`) — the nested-subgroup + both-wraps exemplar.
+- **`ci`** — `fetch-deps` / `fetch-artifact` wraps.
+- **`admin/*`** — `admin repos` (`list / prs / scripts / audit / verify`),
+  `admin release` (`advance-major / betas / lex`), `admin policy`
+  (`ruleset / sweep / dependabot`), `admin secrets` (`install / token`),
+  `admin inbox` (bare triage + `notify-source`), `admin smoke-test`.
+
+New leaves follow the same wrap-an-existing-verb/script pattern; the stub
+mechanism below stays available for registering an intended-but-unwired shape.
 
 ## Reaching the CLI two ways
 

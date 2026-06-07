@@ -87,14 +87,14 @@ that responsibility moved entirely into CI.
 
 ##### Per-repo manifest surfaces
 
-`release-cut` reads each repo's current version from its canonical source; the
-dep-pin updates (comms submodule, `shared/lex-deps.json`) and the build itself
-all happen in CI via the reusable workflow.
+`release-core cut` reads each repo's current version from its canonical source;
+the dep-pin updates (comms submodule, `shared/lex-deps.json`) and the build
+itself all happen in CI via the reusable workflow.
 
-| Repo | Version source (read by release-cut) | CI trigger |
+| Repo | Version source (read by `release-core cut`) | CI trigger |
 |---|---|---|
 | `comms` | git tags (no version file) | tag-push (`on: push: tags: [v*]`) |
-| `lex` | `[workspace.package].version` in root `Cargo.toml` | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v1`) |
+| `lex` | `[workspace.package].version` in root `Cargo.toml` | **`workflow_dispatch`** (delegates to `arthur-debert/release/rust-cli@v2`) |
 | `tree-sitter-lex` | `package.json` `"version"` | tag-push |
 | `vscode` | `package.json` `"version"` | tag-push |
 | `nvim` | `lua/lex/init.lua` `M.version` (via `version-file` input) | tag-push |
@@ -102,7 +102,7 @@ all happen in CI via the reusable workflow.
 
 ### Layer 1 — local orchestrator (`release-core admin release lex`)
 
-`release-core admin release lex` (flat alias: `release-lex`) walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `release-core cut` to cut) in sequence. Useful for:
+`release-core admin release lex` walks the dep chain locally and drives each repo's release via the managed tools (`bin/diff-since-release` to decide, `release-core cut` to cut) in sequence. Useful for:
 
 - **Local debugging** — surface primitive bugs in isolation (the `--dry-run` mode echoes every step without making changes).
 - **Recovery** — re-run from a known-good point if a cascade gets wedged mid-flight.
@@ -138,7 +138,7 @@ push tag v0.16.3 to comms
         → lex/on-upstream-released.yml
             → diff-since-release: commits present (comms submodule stale)
             → dispatch release.yml patch (workflow_dispatch)
-                → rust-cli@v1 bumps + rolls CHANGELOG + commits + tags + publishes
+                → rust-cli@v2 bumps + rolls CHANGELOG + commits + tags + publishes
                   crates + builds binaries v0.x.y
                     → lex/release.yml notify-downstreams fires upstream-released to editors
         → tree-sitter-lex/on-upstream-released.yml
@@ -238,7 +238,7 @@ These were originally handler/primitive concerns; after the `scripts/release` re
 
 4. **Annotated tags, not lightweight.** `release.yml` reads the tag message via `git tag -l --format='%(contents)'`; the workflow's tag step uses `git tag -a`. Manual cuts must too.
 5. **`--allow-same-version` on `npm version`.** Where the workflow bumps `package.json` then runs `npm version <tag>`, the flag avoids the "Version not changed" error if the bump already matched.
-6. **Manifest may drift behind tags.** `release-cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `release-core cut` / the orchestrator.
+6. **Manifest may drift behind tags.** `release-core cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `release-core cut` / the orchestrator.
 7. **Resume-on-existing-tag in `arthur-debert/release/.github/actions/prepare-release`.** When a reusable workflow sees an existing tag matching the requested version, it validates the manifest matches and skips the bump+commit+tag — making re-dispatch idempotent.
 8. **CHANGELOG / UNRELEASED.md.** The CI bump requires Keep-a-Changelog `## [Unreleased]`; the workflow handles the empty-UNRELEASED seed for cascade runs that carry no human-authored notes.
 
@@ -259,7 +259,7 @@ Three pieces. None is hard individually; the order matters.
 
    jobs:
      cascade:
-       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v1
+       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v2
        secrets:
          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
    ```
@@ -287,11 +287,11 @@ Three pieces. None is hard individually; the order matters.
    out.
 3. **Add `notify-downstreams` step to `.github/workflows/release.yml`.** Fires `repository_dispatch upstream-released` to the new repo's direct consumers (if any).
 
-Then add the repo to `release-lex`'s `ORDER` array and dep-chain validation. Done.
+Then add the repo to the `release-core admin release lex` orchestrator's `ORDER` array and dep-chain validation. Done.
 
 ## References
 
 - Tracking issue: [lex-fmt/lex#640](https://github.com/lex-fmt/lex/issues/640)
-- Orchestrator: [`arthur-debert/release/bin/release-lex`](../bin/release-lex)
+- Orchestrator: `release-core admin release lex`
 - Bootstrap (for fresh CI machines): [`arthur-debert/release/bin/clone-lex-repos`](../bin/clone-lex-repos)
-- Reusable rust-cli workflow (lex consumes via `@v1`): [`arthur-debert/release/.github/workflows/rust-cli.yml`](../.github/workflows/rust-cli.yml)
+- Reusable rust-cli workflow (lex consumes via `@v2`): [`arthur-debert/release/.github/workflows/rust-cli.yml`](../.github/workflows/rust-cli.yml)

@@ -3,11 +3,9 @@
 Canonical cross-repo artifact-pin file. Every onboarded repo that
 consumes a binary or source-tree artifact from another repo's GitHub
 release declares those pins in a single `artifacts.json` at the repo
-root. The fetcher (composite action + CLI, tracked at #60 — Wave 1.2)
-reads this schema and resolves the pins to actual downloads. Paths
-referenced below as `.github/actions/fetch-artifact/` and
-`bin/fetch-artifact` land in that PR; until it merges, treat those
-references as forward-looking.
+root. The fetcher (composite action + CLI) reads this schema and
+resolves the pins to actual downloads: `.github/actions/fetch-artifact/`
+and `bin/fetch-artifact`.
 
 This file is the **interface contract**. Anything that fetches
 cross-repo artifacts in the portfolio is expected to read this schema.
@@ -163,9 +161,9 @@ shortens to `phos-color-wasm.tar.gz`.)
 }
 ```
 
-This is what `lex-fmt/vscode`, `lex-fmt/nvim`, `lex-fmt/lexed` will
-look like post Wave-3 migration (today they have the older
-`shared/lex-deps.json` shape; the data is the same, the file moves).
+This is what `lex-fmt/vscode`, `lex-fmt/nvim`, `lex-fmt/lexed` look
+like once migrated off the older `shared/lex-deps.json` shape (the data
+is the same, the file moves).
 
 ## Install shape
 
@@ -186,8 +184,7 @@ binary (move to `<target>/<name>`) or a directory tree (extract to
 
 ## Fetcher behavior summary
 
-(Full details land in #60 — `bin/fetch-artifact` and
-`.github/actions/fetch-artifact/`.)
+The fetcher (`bin/fetch-artifact` and `.github/actions/fetch-artifact/`):
 
 - Reads `./artifacts.json` (or `--manifest <path>`).
 - Looks up `<artifact-name>` key. If missing → exit non-zero, no-op.
@@ -226,10 +223,9 @@ Alternatives considered + dropped:
 
 ## Migration from `shared/lex-deps.json`
 
-The existing `lex-fmt/{vscode,nvim,lexed}` repos carry
-`shared/lex-deps.json` (flat schema for vscode/nvim, nested for lexed).
-These move to canonical `artifacts.json` at the repo root during the
-**Wave 3** migration sweep (one PR per repo).
+The `lex-fmt/{vscode,nvim,lexed}` repos that still carry
+`shared/lex-deps.json` (flat schema for vscode/nvim, nested for lexed)
+move to canonical `artifacts.json` at the repo root one PR per repo.
 
 ### Before (e.g. `lex-fmt/nvim/shared/lex-deps.json`, flat schema)
 
@@ -265,7 +261,7 @@ is deleted once the repo's `update-release` is updated.
 
 ## References
 
-- Fetcher implementation (Wave 1.2 in flight): #60 — lands as
-  `bin/fetch-artifact` + `.github/actions/fetch-artifact/`
+- Fetcher implementation: `bin/fetch-artifact` +
+  `.github/actions/fetch-artifact/`
 - Cascade architecture: [`docs/lex-release-cascade.md`](lex-release-cascade.md)
 - Tracking: #59 (this schema), #60 (fetcher), #61 (cascade-handler)

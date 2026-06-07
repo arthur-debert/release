@@ -2,8 +2,7 @@
 
 Two tools for operating across the whole managed portfolio, both built on
 one rule: **`managed-repos.yaml` is the only source of truth, and on-disk
-layout is data, not logic.** Both live under `release-core admin repos`; the
-flat names (`managed-repos`, `release-verify-fleet`) still work as aliases.
+layout is data, not logic.** Both live under `release-core admin repos`.
 
 ## The manifest contract
 
@@ -28,8 +27,7 @@ only the root changes.
 
 ## `release-core admin repos list`
 
-The accessor (flat alias: `managed-repos`). Reads the manifest, applies the
-join, nothing else.
+The accessor. Reads the manifest, applies the join, nothing else.
 
 ```sh
 release-core admin repos list                       # owner/name, one per line
@@ -38,8 +36,8 @@ release-core admin repos list --clone [--refresh]   # clone missing repos into t
 release-core admin repos list --paths lex-fmt/lex   # trailing owner/name args restrict the set
 ```
 
-`release-core admin repos audit` (flat: `audit-portfolio`) reads the same
-manifest (the only other consumer).
+`release-core admin repos audit` reads the same manifest (the only other
+consumer).
 
 ## `release-core admin repos verify`
 
@@ -48,11 +46,9 @@ release-sync them, try to commit," using real consumer files instead of
 synthetic fixtures (this is why per-Kind fixtures, release#298, were closed
 won't-do).
 
-The flat alias is `release-verify-fleet`.
-
 ```sh
 release-core admin repos verify                       # sync whole fleet from HEAD, run the gate
-release-core admin repos verify --ref main            # verify what @v1 is about to point at
+release-core admin repos verify --ref main            # verify what @v2 is about to point at
 release-core admin repos verify --only arthur-debert/padz   # one repo (scopes the clone too)
 ```
 

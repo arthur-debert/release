@@ -40,9 +40,9 @@ Getting here was a long and error-prone path while we experimented and dealt wit
 
 4. Development Cycle  [DONE — epic #332, closed]
 
-    The PR flow is unreliable in both local and cloud environments. Agents cannot reliably request reviewers, detect completed reviews, resolve comments, or determine when a PR is mergeable. See docs/foundational-gh-layer.lex for the full analysis.
+    The PR flow is unreliable in both local and cloud environments. Agents cannot reliably request reviewers, detect completed reviews, resolve comments, or determine when a PR is mergeable.
 
-    Shipped: the reviewer-agnostic gh-task-status state engine (release_gh) + orc watch poll-loop, distributed to consumers and review-hardened. Residual tracked in #349 (orc watch --auto live shake-out) and #350 (cloud transport).
+    Shipped: the reviewer-agnostic gh-task-status state engine (the `release_core.prstate` module — its former standalone `release_gh` package was folded into `release_core` in #462) + orc watch poll-loop, distributed to consumers and review-hardened. Residual tracked in #349 (orc watch --auto live shake-out) and #350 (cloud transport).
 
     4.1. gh-task-status: a single command that tells the agent where it stands in the PR lifecycle. Orchestrates existing primitives (gh-copilot-wait, gh-pr-resolve-thread, gh-pr-checks-wait) rather than replacing them.
 
@@ -60,13 +60,13 @@ Getting here was a long and error-prone path while we experimented and dealt wit
 
 6. Architectural Fine Tuning
 
-    See docs/foundational-arch-review.lex. The current cut of Kinds and Capabilities is less decoupled than it needs to be. Building, packing, signing, and publishing should be more clearly separated and composable.
+    The current cut of Kinds and Capabilities is less decoupled than it needs to be. Building, packing, signing, and publishing should be more clearly separated and composable.
 
     Research into existing ecosystem tools (goreleaser-style solutions) for common use cases like cross-platform CLI distribution and desktop app packaging.
 
 7. Later Phases
 
-    7.1. Secret Management: formalize per docs/foundational-secret-management.lex. Doppler integration, automated population of GitHub repo secrets.
+    7.1. Secret Management: Doppler integration, automated population of GitHub repo secrets.
 
     7.2. Missing Features:
         - Windows support for build and release

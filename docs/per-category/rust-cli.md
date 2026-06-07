@@ -1,6 +1,6 @@
 # rust-cli
 
-The reusable workflow at `.github/workflows/rust-cli.yml@v1` covers the
+The reusable workflow at `.github/workflows/rust-cli.yml@v2` covers the
 full release lifecycle for a Rust CLI workspace: bump versions, push tag,
 create GH release, build cross-target binaries (with optional macOS
 sign + notarize), publish crates to crates.io, render and push a
@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1
+    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v2
     with:
       version: ${{ inputs.version }}
       crates: my-core,my-cli              # topological dep order
@@ -134,7 +134,7 @@ prepare ──────┤
 ```yaml
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1
+    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v2
     with:
       version: ${{ inputs.version }}
       crates: lex-core,lex-babel,lex-config,lex-analysis,lex-lsp-core,lexd-lsp,lexd

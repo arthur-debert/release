@@ -2,7 +2,7 @@
 
 Reusable PR-time check workflow for Rust consumers (both `rust-cli`
 and `rust-lib`). Lives at
-`.github/workflows/rust-ci.yml@v1`. The release-path sibling is
+`.github/workflows/rust-ci.yml@v2`. The release-path sibling is
 `rust-cli.yml`; see `per-category/rust-cli.md`.
 
 ## Why this exists
@@ -36,7 +36,7 @@ permissions:
 
 jobs:
   ci:
-    uses: arthur-debert/release/.github/workflows/rust-ci.yml@v1
+    uses: arthur-debert/release/.github/workflows/rust-ci.yml@v2
     with:
       binary-name: my-cli      # optional — see below
       bats: true               # optional — see below
@@ -51,7 +51,7 @@ Its hand-rolled ci.yml went from ~75 lines to ~12.
 Reusable-workflow callee jobs are ALWAYS prefixed by the caller's
 job ID — there is no way to suppress the prefix. So when a
 consumer migrates from a hand-rolled `ci.yml` (jobs named `check`,
-`e2e`) to a thin caller (`jobs: ci: uses: …/rust-ci.yml@v1`), the
+`e2e`) to a thin caller (`jobs: ci: uses: …/rust-ci.yml@v2`), the
 check names GitHub reports change:
 
 - before: `check`, `e2e`
@@ -106,7 +106,7 @@ When **both** are set, the e2e job:
 3. `chmod +x` the downloaded binary.
 
 This convention matches what dodot's bats suite (and others using
-the `bats` Component) expects: a `<PROJECT>_BIN` env var pointing
+the `bats` Capability) expects: a `<PROJECT>_BIN` env var pointing
 at a prebuilt binary. The binary-name → env-var mapping uppercases
 and replaces `-` with `_` (so `binary-name: foo-bar` →
 `FOO_BAR_BIN`).
@@ -142,7 +142,7 @@ opt-in needed.
   via `rust-cli.yml`'s matrix. Adding a check-time matrix would
   pay cost on every PR with little extra signal — keep it lean.
 * **`cargo-deny` / supply-chain checks.** Out of scope for the
-  umbrella; that's a separate Component / workflow.
+  umbrella; that's a separate Capability / workflow.
 * **Coverage upload.** Same reasoning.
 
 Add follow-up inputs when a real consumer needs them, not

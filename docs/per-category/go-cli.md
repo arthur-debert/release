@@ -1,6 +1,6 @@
 # go-cli
 
-The reusable workflow at `.github/workflows/go-cli.yml@v1` covers the
+The reusable workflow at `.github/workflows/go-cli.yml@v2` covers the
 release lifecycle for a Go CLI: roll the changelog, push tag, create GH
 release, build cross-target binaries (with optional macOS sign +
 notarize), and render + push a Homebrew formula. Differences from
@@ -34,7 +34,7 @@ permissions:
 
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/go-cli.yml@v1
+    uses: arthur-debert/release/.github/workflows/go-cli.yml@v2
     with:
       version:         ${{ inputs.version }}
       bin-name:        my-cli                    # built from ./cmd/my-cli by default
