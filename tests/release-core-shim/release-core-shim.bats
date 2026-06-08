@@ -72,8 +72,11 @@ STUB
   _install_venv_stub
   run "${NOCLICK[@]}" "$SHIM" --version
   [ "$status" -eq 0 ]
-  # PYTHONPATH starts with the checkout's release_core lib dir.
-  grep -q "PYTHONPATH: .*${LIB_REL}" "$REEXEC_LOG"
+  # PYTHONPATH's FIRST colon-delimited segment is the checkout's release_core
+  # lib dir — `[^:]*` forbids any earlier segment, so a regressed ordering (lib
+  # appended after a pre-existing entry) fails the test instead of passing on a
+  # bare "appears somewhere" match.
+  grep -q "PYTHONPATH: [^:]*${LIB_REL}" "$REEXEC_LOG"
 }
 
 @test "click missing + NO venv → actionable hint, exit 1 (no raw traceback)" {
