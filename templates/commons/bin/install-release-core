@@ -220,7 +220,8 @@ echo "install-release-core: installing $source into $VENV_DIR" >&2
 # Reuse an existing venv (fast); recreate only if it's missing or broken (e.g. a
 # python upgrade left it dangling).
 if ! "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
-  rm -rf "$VENV_DIR"
+  # Guard the rm -rf: never act on an empty/`/` VENV_DIR (env misconfiguration).
+  [ -n "$VENV_DIR" ] && [ "$VENV_DIR" != "/" ] && rm -rf "$VENV_DIR"
   "$PYTHON" -m venv "$VENV_DIR"
 fi
 # --force-reinstall: the wheel version is static (0.0.1), so `-U` would see it
@@ -236,7 +237,7 @@ fi
 # without the tool venv itself being on PATH. Skip the venv's own internals.
 mkdir -p "$BIN_DIR"
 for _s in "$VENV_DIR"/bin/*; do
-  [ -e "$_s" ] || [ -L "$_s" ] || continue  # empty glob → literal '*'; skip it
+  [ -f "$_s" ] || [ -L "$_s" ] || continue  # files + symlinks only (skip dirs / empty-glob '*')
   _name="$(basename "$_s")"
   case "$_name" in
     python*|pip*|activate*|Activate.ps1|wheel|*.py) continue ;;
