@@ -1,0 +1,35 @@
+name: pr-loop-guard tests
+
+# BATS suite for bin/pr-loop-guard — the PreToolUse forcing function that routes
+# PR creation through the gh-pr-review-loop skill (release#495, epic #348). Locks
+# the allow/deny contract: real `gh pr create` (unarmed) denies, armed allows +
+# consumes the sentinel, mere mentions of the phrase (grep/echo) and unrelated
+# commands allow, and malformed/non-git input fails open. No network/auth.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "templates/commons/bin/pr-loop-guard"
+      - "bin/pr-loop-guard"
+      - "tests/pr-loop-guard/**"
+      - ".github/workflows/pr-loop-guard-tests.yml"
+  pull_request:
+    paths:
+      - "templates/commons/bin/pr-loop-guard"
+      - "bin/pr-loop-guard"
+      - "tests/pr-loop-guard/**"
+      - ".github/workflows/pr-loop-guard-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/pr-loop-guard/
