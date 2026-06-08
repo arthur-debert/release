@@ -64,6 +64,16 @@ on:
         description: 'File whose hash keys the incremental cache.'
         type: string
         default: 'src-tauri/Cargo.lock'
+      cache-key-prefix:
+        description: >-
+          Namespace for this lane''s cache. A consumer running the suite more
+          than once with DIFFERENT cargo features (e.g. a second non-gating
+          `--features X` lane) MUST give each lane its own prefix, or they
+          collide on one key+restore-keys and the heavier lane poisons the lean
+          gate''s `target/` (release#491). Both `key` and `restore-keys` are
+          scoped to this prefix, so distinct prefixes never cross-match.
+        type: string
+        default: 'tauri-e2e-cargo'
       failure-artifact-path:
         description: 'Path uploaded as a debugging bundle on failure (absent on green runs is fine).'
         type: string
@@ -128,12 +138,25 @@ jobs:
           token: ${{ secrets.gh-token || github.token }}
           path: ${{ inputs.sibling-path }}
 
+      # Weekly cache rotation bounds growth (release#491). Raw `actions/cache`
+      # of `target/` has no pruning: each new Cargo.lock hash restores the prior
+      # (ever-larger) target via restore-keys, builds on top, and saves a bigger
+      # entry — monotonic creep until `No space left on device`. Swatinem's
+      # pruning isn't an option here (phos bans third-party Marketplace actions).
+      # Instead the key/restore-keys carry an ISO-week stamp scoped to the lane
+      # prefix: incremental WITHIN a week, then a clean cold rebuild at the week
+      # boundary as the bloated prior-week caches age out via GitHub's eviction.
+      - name: Compute weekly cache-rotation stamp
+        id: cache_stamp
+        run: echo "week=$(date -u +%G%V)" >> "$GITHUB_OUTPUT"
+
       - name: Cache cargo registry + Tauri target
         uses: actions/cache@v4
         with:
           path: ${{ inputs.cache-paths }}
-          key: tauri-e2e-cargo-${{ hashFiles(inputs.cache-key-file) }}
-          restore-keys: tauri-e2e-cargo-
+          key: ${{ inputs.cache-key-prefix }}-${{ steps.cache_stamp.outputs.week }}-${{ hashFiles(inputs.cache-key-file) }}
+          restore-keys: |
+            ${{ inputs.cache-key-prefix }}-${{ steps.cache_stamp.outputs.week }}-
 
       - name: Run native-transport E2E
         env:
