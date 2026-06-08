@@ -559,7 +559,11 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
         return
 
     try:
-        gh.git_add(written, cwd=repo_root)
+        # force=True: managed paths are release-owned and must be tracked even if
+        # the consumer's .gitignore covers one (e.g. `.claude/` shadowing the
+        # managed `.claude/skills/`) — otherwise the migration commit silently
+        # fails on the ignored path.
+        gh.git_add(written, cwd=repo_root, force=True)
         # Commit ONLY the managed pathspecs. A pathspec-scoped commit ignores any
         # other staged changes, so a user's in-progress staging is never folded
         # in. If staging produced nothing to commit (e.g. the managed bytes were
