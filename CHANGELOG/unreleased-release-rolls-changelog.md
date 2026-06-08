@@ -1,0 +1,1 @@
+release.yml: stop opting out of changelog handling (changelog-path: '' → CHANGELOG.md) so each cut rolls the unreleased fragments into CHANGELOG/<version>.md + renders CHANGELOG.md via the fragment-directory model — fixes the backlog where 14 fragments accumulated unconsumed across v2.10–v2.11.5
