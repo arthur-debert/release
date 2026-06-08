@@ -26,9 +26,11 @@
 set -euo pipefail
 
 # Pure-bash dir of this script (no external `dirname`/`pwd` — keeps working under
-# the hermetic `env -i` PATH the tests run it with). This script is always invoked
-# by path (bin-internal/, never on PATH), so BASH_SOURCE[0] carries a dir.
+# the hermetic `env -i` PATH the tests run it with). When invoked as a bare name
+# from within bin-internal/ (`bash provision-gate-toolset.sh`), BASH_SOURCE[0]
+# has no `/`, so `%/*` is a no-op and leaves the filename — fall back to `.`.
 _THIS_DIR="${BASH_SOURCE[0]%/*}"
+[ "$_THIS_DIR" = "${BASH_SOURCE[0]}" ] && _THIS_DIR="."
 # shellcheck source=/dev/null
 . "${_THIS_DIR}/../templates/commons/bin/gate-tool-versions.sh"
 

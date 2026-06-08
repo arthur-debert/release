@@ -30,8 +30,9 @@ PROVISION="$ROOT/bin-internal/provision-gate-toolset.sh"
 @test "both provisioners source the shared file (no independent re-pin)" {
   grep -q 'gate-tool-versions.sh' "$SETUP"
   grep -q 'gate-tool-versions.sh' "$PROVISION"
-  # provision-gate-toolset.sh must NOT carry its own RUFF/ACTIONLINT literal pin.
-  run grep -E '^(RUFF|ACTIONLINT)_VERSION="[0-9]' "$PROVISION"
+  # provision-gate-toolset.sh must NOT carry its own RUFF/ACTIONLINT literal pin
+  # — match an assignment with double, single, or no quotes around the version.
+  run grep -E "^(RUFF|ACTIONLINT)_VERSION=['\"]?[0-9]" "$PROVISION"
   [ "$status" -ne 0 ]
 }
 
