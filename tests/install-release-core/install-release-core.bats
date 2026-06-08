@@ -43,27 +43,41 @@ if [ -n "$expr" ]; then jq -r "$expr" < "$f"; else cat "$f"; fi
 STUB
   chmod +x stub/gh
 
-  # --- stub python3: record the pip args so the install model is assertable. -
+  # --- stub python3: the interpreter used to BUILD the isolated tool venv.
+  # On `-m venv <dir>` it scaffolds a fake venv whose `python` records pip args
+  # (PIP_LOG) and whose console-scripts record their invocation (INIT_LOG, honors
+  # $RELEASE_CORE_RC for a simulated init failure) — so the install model + the
+  # folded-in init are assertable without a real venv. Other calls go to PY_LOG.
   cat > stub/python3 <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$PY_LOG"
+if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then
+  d="$3"; mkdir -p "$d/bin"
+  cat > "$d/bin/python" <<'INNER'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$PIP_LOG"
 exit 0
+INNER
+  chmod +x "$d/bin/python"
+  for s in release-core changelog changelog-render changelog-add changelog-cut semver; do
+    cat > "$d/bin/$s" <<'INNER'
+#!/usr/bin/env bash
+printf '%s\n' "$(basename "$0") $*" >> "$INIT_LOG"
+exit ${RELEASE_CORE_RC:-0}
+INNER
+    chmod +x "$d/bin/$s"
+  done
+fi
+exit 0
 STUB
   chmod +x stub/python3
-  export PIP_LOG="$WORK/pip.log"
-  : > "$PIP_LOG"
+  export PY_LOG="$WORK/py.log";   : > "$PY_LOG"
+  export PIP_LOG="$WORK/pip.log"; : > "$PIP_LOG"
+  export INIT_LOG="$WORK/init.log"; : > "$INIT_LOG"
 
-  # --- stub release-core: record `init` so the folded-in init is assertable.
-  # Found via `command -v` (step 2 of the resolver's _find_release_core). Honors
-  # $RELEASE_CORE_RC so a test can simulate an init failure.
-  cat > stub/release-core <<'STUB'
-#!/usr/bin/env bash
-printf '%s\n' "$*" >> "$INIT_LOG"
-exit "${RELEASE_CORE_RC:-0}"
-STUB
-  chmod +x stub/release-core
-  export INIT_LOG="$WORK/init.log"
-  : > "$INIT_LOG"
+  # Isolate the tool venv + the script-symlink dir under WORK (teardown removes).
+  export RELEASE_CORE_HOME="$WORK/relcore"
+  export XDG_BIN_HOME="$WORK/binhome"
 
   export PATH="$WORK/stub:$PATH"
 
@@ -187,11 +201,42 @@ EOF
 # install model: --force-reinstall, deps resolved (the static-version fix)
 # --------------------------------------------------------------------------
 
-@test "install: pip is invoked with --force-reinstall (no --no-deps) and the URL" {
+@test "install: the venv's pip is invoked with --force-reinstall (no --no-deps) and the URL" {
   run "$BIN"
   [ "$status" -eq 0 ]
   line="$(cat "$PIP_LOG")"
-  [ "$line" = "-m pip install --force-reinstall https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+  [ "$line" = "-m pip install --disable-pip-version-check --force-reinstall https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+}
+
+@test "install: builds a DEDICATED venv (never the user pip / site)" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  # python3 was asked to build the tool venv, and the wheel was installed by that
+  # venv's OWN python — not the host python3 directly (no `--user`, no user site).
+  [[ "$(cat "$PY_LOG")" == *"-m venv $WORK/relcore/venv"* ]]
+  [ -x "$WORK/relcore/venv/bin/release-core" ]
+}
+
+@test "install: console-scripts are symlinked onto PATH (BIN_DIR)" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  for s in release-core changelog changelog-render changelog-add changelog-cut semver; do
+    [ -L "$WORK/binhome/$s" ] || { echo "missing symlink: $s"; false; }
+    [ "$(readlink "$WORK/binhome/$s")" = "$WORK/relcore/venv/bin/$s" ]
+  done
+}
+
+@test "install: persists BIN_DIR to \$GITHUB_PATH under GitHub Actions (no YAML scripting needed)" {
+  export GITHUB_PATH="$WORK/gh_path"; : > "$GITHUB_PATH"
+  run "$BIN" --no-init
+  [ "$status" -eq 0 ]
+  [ "$(cat "$GITHUB_PATH")" = "$WORK/binhome" ]
+}
+
+@test "install: leaves \$GITHUB_PATH alone when not in GitHub Actions" {
+  run "$BIN" --no-init
+  [ "$status" -eq 0 ]
+  [ ! -e "$WORK/gh_path" ]
 }
 
 @test "install: pip is NOT invoked with --no-deps (deps must resolve)" {
@@ -200,10 +245,49 @@ EOF
   [[ "$(cat "$PIP_LOG")" != *"--no-deps"* ]]
 }
 
-@test "install: --print-url does NOT install (no pip call)" {
+@test "install: --print-url does NOT install (no venv, no pip call)" {
   run "$BIN" --print-url
   [ "$status" -eq 0 ]
   [ ! -s "$PIP_LOG" ]
+  [ ! -e "$WORK/relcore/venv" ]
+}
+
+# --------------------------------------------------------------------------
+# --from-source: install the local checkout's package (release CI), SAME
+# isolated-venv machinery — no second install script.
+# --------------------------------------------------------------------------
+
+@test "from-source: installs the local PATH into the venv, NO release resolution (no gh)" {
+  mkdir -p "$WORK/src"; : > "$WORK/src/pyproject.toml"
+  # Make gh fail loudly: a passing run proves --from-source never resolves a release.
+  printf '#!/usr/bin/env bash\necho "gh must not run in --from-source" >&2; exit 99\n' > stub/gh
+  run "$BIN" --from-source "$WORK/src" --no-init
+  [ "$status" -eq 0 ]
+  [ "$(cat "$PIP_LOG")" = "-m pip install --disable-pip-version-check --force-reinstall $WORK/src" ]
+}
+
+@test "from-source: --print-url prints the local path" {
+  mkdir -p "$WORK/src"; : > "$WORK/src/pyproject.toml"
+  printf '#!/usr/bin/env bash\nexit 99\n' > stub/gh
+  run "$BIN" --from-source "$WORK/src" --print-url
+  [ "$status" -eq 0 ]
+  [ "$output" = "$WORK/src" ]
+}
+
+@test "from-source: a path without pyproject.toml errors" {
+  mkdir -p "$WORK/empty"
+  run "$BIN" --from-source "$WORK/empty" --no-init
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no pyproject.toml"* ]]
+}
+
+@test "from-source: still exposes console-scripts + persists GITHUB_PATH (same machinery)" {
+  mkdir -p "$WORK/src"; : > "$WORK/src/pyproject.toml"
+  export GITHUB_PATH="$WORK/gh_path"; : > "$GITHUB_PATH"
+  run "$BIN" --from-source "$WORK/src" --no-init
+  [ "$status" -eq 0 ]
+  [ -L "$WORK/binhome/release-core" ]
+  [ "$(cat "$GITHUB_PATH")" = "$WORK/binhome" ]
 }
 
 # --------------------------------------------------------------------------
@@ -214,10 +298,9 @@ EOF
   run "$BIN"
   [ "$status" -eq 0 ]
   # #476 cutover: a bare `init` IS the full managed-tree materialize + auto-commit
-  # on change. The resolver passes NO flags (--commit is redundant and rejected in
-  # the default full mode); auto-commit is the default. This is the pull-model
-  # self-sync that carries the whole tree.
-  [ "$(cat "$INIT_LOG")" = "init" ]
+  # on change. The resolver passes NO flags; auto-commit is the default. init is
+  # invoked from the tool venv's own bin.
+  [ "$(cat "$INIT_LOG")" = "release-core init" ]
 }
 
 @test "init: --no-init installs but does NOT run init" {
@@ -235,57 +318,52 @@ EOF
   [ ! -s "$INIT_LOG" ]
 }
 
-@test "init: bare \$PYTHON resolves to its real dir, not a stray ./release-core in cwd" {
-  # Regression: dirname of a bare `python3` is `.`, which would (mis)pick an
-  # unrelated ./release-core in the repo root. The resolver must resolve $PYTHON
-  # to its absolute path first and use the interpreter-adjacent script.
-  cat > release-core <<'STUB'
-#!/usr/bin/env bash
-printf 'WRONG-CWD-BINARY\n' >> "$INIT_LOG"
-STUB
-  chmod +x release-core
-  run "$BIN"
-  [ "$status" -eq 0 ]
-  [ "$(cat "$INIT_LOG")" = "init" ]  # the stub-dir release-core ran
-  [[ "$(cat "$INIT_LOG")" != *"WRONG-CWD-BINARY"* ]]
-}
-
 @test "init: failure is best-effort — does NOT fail the resolver" {
   RELEASE_CORE_RC=1 run "$BIN"
-  [ "$status" -eq 0 ]                       # install succeeded; init failure tolerated
-  [ "$(cat "$INIT_LOG")" = "init" ]  # init was attempted
+  [ "$status" -eq 0 ]                                # install succeeded; init failure tolerated
+  [ "$(cat "$INIT_LOG")" = "release-core init" ]     # init was attempted
   [[ "$output" == *"release-core init failed"* ]]
 }
 
-@test "install: --user is passed through to pip" {
+@test "install: --user is TOLERATED (accepted + ignored, never reaches pip)" {
+  # The deployed pre-isolation SessionStart caller still passes --user; the
+  # isolated-venv install must accept it (exit 0) and never forward it to pip.
   run "$BIN" --user
   [ "$status" -eq 0 ]
-  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --user https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+  [[ "$(cat "$PIP_LOG")" != *"--user"* ]]
+  [ -x "$WORK/relcore/venv/bin/release-core" ]
 }
 
-@test "install: --user --break-system-packages both passed through, in order" {
+@test "install: --user --break-system-packages both tolerated (ignored)" {
   run "$BIN" --user --break-system-packages
   [ "$status" -eq 0 ]
-  [ "$(cat "$PIP_LOG")" = "-m pip install --force-reinstall --user --break-system-packages https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+  [[ "$(cat "$PIP_LOG")" != *"--user"* ]]
+  [[ "$(cat "$PIP_LOG")" != *"--break-system-packages"* ]]
 }
 
-@test "install: no extra pip flags by default (clean invocation)" {
+@test "install: no stray pip flags (clean isolated invocation)" {
   run "$BIN"
   [ "$status" -eq 0 ]
   [[ "$(cat "$PIP_LOG")" != *"--user"* ]]
   [[ "$(cat "$PIP_LOG")" != *"--break-system-packages"* ]]
 }
 
-@test "install: honors \$PYTHON override" {
+@test "install: honors \$PYTHON override as the venv builder" {
   cat > stub/my-python <<'STUB'
 #!/usr/bin/env bash
-printf '%s\n' "$*" >> "$PIP_LOG"
+printf '%s\n' "$*" >> "$PY_LOG"
+if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then
+  d="$3"; mkdir -p "$d/bin"
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$PIP_LOG"\n' > "$d/bin/python"
+  printf '#!/usr/bin/env bash\nprintf "release-core %%s\\n" "$*" >> "$INIT_LOG"\n' > "$d/bin/release-core"
+  chmod +x "$d/bin/python" "$d/bin/release-core"
+fi
 exit 0
 STUB
   chmod +x stub/my-python
   PYTHON="$WORK/stub/my-python" run "$BIN"
   [ "$status" -eq 0 ]
-  [[ "$(cat "$PIP_LOG")" == "-m pip install --force-reinstall "* ]]
+  [[ "$(cat "$PY_LOG")" == *"-m venv $WORK/relcore/venv"* ]]
 }
 
 # --------------------------------------------------------------------------
