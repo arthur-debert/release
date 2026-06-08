@@ -11,16 +11,12 @@ from pathlib import Path
 from . import state, watch
 from .session import run_session
 
-_DEFAULT_PROPAGATE_BRANCH = "chore/release-sync-update"
-
 
 def _guard_billing() -> None:
     """Hard-fail if ANTHROPIC_API_KEY is set; subscription billing is the intent.
 
     Called by the SDK-backed commands (run/resume/probe), not by the
-    mechanical commands (propagate, sessions). `propagate` shells out to
-    git + gh only — no LLM calls, no billing risk — and shouldn't be
-    blocked by API-key presence.
+    mechanical commands (sessions), which don't touch the SDK.
     """
     if os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit(
@@ -39,69 +35,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
     _guard_billing()
     asyncio.run(run_session(args.repo, args.prompt, resume=True, verbose=args.verbose))
     return 0
-
-
-def cmd_propagate(args: argparse.Namespace) -> int:
-    """Run release-sync across multiple consumer repos and open PRs.
-
-    Each repo is treated independently — a failure in one does not
-    abort the rest. The summary at the end reports per-repo outcomes
-    (ok / no-changes / dry-run / error). Exit 1 if any repo errored.
-    """
-    from .propagate import PropagateResult, propagate_many, render_summary
-
-    paths = [Path(p).expanduser().resolve() for p in args.repos]
-    release_home = Path(args.release_home).expanduser().resolve()
-
-    # Resolve the ref to a short SHA up-front and append to the branch
-    # name (unless the user supplied --branch explicitly). Makes the
-    # default branch unique per ref, so re-running propagate against the
-    # same ref won't collide with a prior partial run's leftover branch.
-    branch = args.branch
-    if branch == _DEFAULT_PROPAGATE_BRANCH:
-        try:
-            short_sha = subprocess.run(
-                ["git", "-C", str(release_home), "rev-parse", "--short", args.ref],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
-            branch = f"{branch}-{short_sha}"
-        except subprocess.CalledProcessError as e:
-            print(
-                f"orc propagate: could not resolve --ref '{args.ref}' in "
-                f"{release_home}: {e.stderr or e}",
-                file=sys.stderr,
-            )
-            return 1
-
-    print(f"propagating release@{args.ref} → {len(paths)} repo(s)")
-    print(f"branch in each consumer: {branch}")
-    if args.dry_run:
-        print("DRY RUN — no push, no PR")
-    print()
-
-    results: list[PropagateResult] = propagate_many(
-        paths,
-        release_home=release_home,
-        ref=args.ref,
-        branch=branch,
-        pr_title=args.pr_title,
-        pr_body=args.pr_body,
-        commit_msg=args.commit_msg,
-        base_branch=args.base_branch,
-        dry_run=args.dry_run,
-    )
-    print(render_summary(results))
-    print()
-    counts = {"ok": 0, "no-changes": 0, "dry-run": 0, "error": 0}
-    for r in results:
-        counts[r.status] = counts.get(r.status, 0) + 1
-    print(
-        f"summary: {counts['ok']} ok, {counts['no-changes']} no-changes, "
-        f"{counts['dry-run']} dry-run, {counts['error']} error"
-    )
-    return 1 if counts["error"] else 0
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
@@ -298,8 +231,8 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # No top-level _guard_billing(): mechanical commands (propagate,
-    # sessions) don't touch the SDK and shouldn't be blocked by
+    # No top-level _guard_billing(): mechanical commands (sessions) don't
+    # touch the SDK and shouldn't be blocked by
     # ANTHROPIC_API_KEY presence. Each SDK-backed cmd (run/resume/probe)
     # calls _guard_billing() itself.
     parser = argparse.ArgumentParser(prog="orc", description="release orchestrator (spike)")
@@ -320,69 +253,6 @@ def main(argv: list[str] | None = None) -> int:
     p_resume.add_argument("repo")
     p_resume.add_argument("prompt")
     p_resume.set_defaults(func=cmd_resume)
-
-    p_propagate = sub.add_parser(
-        "propagate",
-        help="run release-sync across multiple consumer repos and open PRs",
-    )
-    p_propagate.add_argument(
-        "repos",
-        nargs="+",
-        help="paths to consumer repo working trees (must be clean, on base branch)",
-    )
-    p_propagate.add_argument(
-        "--ref",
-        default="main",
-        help="release-sync ref (default: main; use take-iii while it's open)",
-    )
-    p_propagate.add_argument(
-        "--branch",
-        default=_DEFAULT_PROPAGATE_BRANCH,
-        help=(
-            "branch name to create in each consumer (default: "
-            f"{_DEFAULT_PROPAGATE_BRANCH}-<short-sha>, where short-sha "
-            "is the resolved release ref — keeps the default unique per "
-            "ref so re-runs don't collide with a prior partial run's "
-            "leftover branch)"
-        ),
-    )
-    p_propagate.add_argument(
-        "--base-branch",
-        default="main",
-        help="base branch in each consumer (default: main)",
-    )
-    p_propagate.add_argument(
-        "--release-home",
-        default=str(Path.home() / "h" / "release"),
-        help="path to local release/ clone (default: ~/h/release)",
-    )
-    p_propagate.add_argument(
-        "--pr-title",
-        default="chore: release-sync update",
-        help="PR title for each consumer's PR",
-    )
-    p_propagate.add_argument(
-        "--pr-body",
-        default=(
-            "Routine release-sync update from arthur-debert/release.\n\n"
-            "Refs arthur-debert/release#103."
-        ),
-        help="PR body for each consumer's PR",
-    )
-    p_propagate.add_argument(
-        "--commit-msg",
-        default=(
-            "chore: release-sync update from arthur-debert/release\n\n"
-            "Routine sync. Refs arthur-debert/release#103."
-        ),
-        help="commit message in each consumer",
-    )
-    p_propagate.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="don't push or open PR; report what would happen",
-    )
-    p_propagate.set_defaults(func=cmd_propagate)
 
     p_probe = sub.add_parser(
         "probe",

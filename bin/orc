@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# orc — the fleet orchestrator CLI (propagate, watch, …), resolved through the
-# uv workspace.
+# orc — the fleet orchestrator CLI (watch, probe, run/resume, …), resolved
+# through the uv workspace. (The `propagate` push command was removed — the fleet
+# updates by PULL: cut a release + advance the major; consumers self-sync.)
 #
 # Why a wrapper: orchestrator depends on `release_gh` as a uv *workspace* member
 # (resolved from the repo root, not installed into the orchestrator subdir venv).

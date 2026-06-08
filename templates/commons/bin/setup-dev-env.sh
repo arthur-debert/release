@@ -206,8 +206,9 @@ elif [ -x app-bin/pre-commit ]; then
 fi
 
 # --- 0.2. Pull-model: self-update release_core from the published wheel --
-# The north star (ADR-0003): repos AUTO-UPDATE on session start, retiring the
-# hand-run `orc propagate` treadmill. The boot resolver `install-release-core`
+# The north star (ADR-0003): repos AUTO-UPDATE on session start — this REPLACED
+# the hand-run push treadmill (`orc propagate`, since removed). The boot resolver
+# `install-release-core`
 # resolves the latest release wheel, pip-installs it (--force-reinstall — the
 # wheel version is static, so `-U` would skip it; deps resolve from PyPI), THEN runs `release-core
 # init` itself (it locates the just-installed console-script across venv/--user/
@@ -215,7 +216,7 @@ fi
 # wheel bundle (the .release/ build dir + every working-tree mirror — skills,
 # ORIENTATION, configs, the CLAUDE.md block) and auto-commits any managed change
 # (#476 cutover) — not just the config subset. So SessionStart self-syncs the full
-# tree from the pulled wheel: no `orc propagate` push needed in steady state. One
+# tree from the pulled wheel: no push needed (no push mechanism exists). One
 # command does the whole boot. Runs in BOTH local and cloud (above the cloud-only
 # gate) — auto-update is the whole point.
 #

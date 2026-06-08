@@ -11,9 +11,10 @@ constraints that apply when *working on this repo itself*.
 
 ## Working the fleet / consumer repos — start here
 
-Any task that touches consumers — re-syncing, propagating a fix, advancing the
-floating major, or diagnosing why a consumer's CI/gate is red — is governed by
-the **`release-fleet-ops` skill**. Invoke it first. It encodes the one rule
+Any task that touches consumers — shipping a fix to the fleet (cut + advance;
+pull carries it), migrating a consumer, advancing the floating major, or
+diagnosing why a consumer's CI/gate is red — is governed by the
+**`release-fleet-ops` skill**. Invoke it first. It encodes the one rule
 (*upstream-first*: a consumer failure is a `release/` bug until proven
 consumer-specific), the reproduce-once → consult-the-dogfood-oracle → route
 loop, and the traps (`lefthook-local.yml` shadows; a consumer `.gitignore`
@@ -36,22 +37,21 @@ silently dropping managed `bin/` tools).
   retired in #476 — they reach a consumer's PATH as pip console-scripts
   (`gh-task-status`, `gh-release-issue`) / `release-core cut`, not synced
   `bin/` shims.
-- **Core fleet loop (PULL is steady-state, post-#476 / v2.11.0):** cut a release
+- **Core fleet loop (PULL only — `orc propagate` was REMOVED):** cut a release
   (`release.yml` publishes the `release_core` wheel) → `release-core admin
   release advance-major` (fast-forward the floating major). That's it — consumers
   self-update at SessionStart: `install-release-core` pulls the wheel and a bare
-  `release-core init` (now the DEFAULT full materialize) re-syncs the whole
-  managed tree from the wheel bundle and auto-commits any change. **No
-  `orc propagate` is needed in steady state.** `orc propagate` is now a
-  **force-the-fleet-now override** — use it only to push a change out immediately
-  rather than waiting for each consumer's next session (e.g. an urgent fix), and
-  run `release-core admin repos verify` before it. Steady state: the wheel is the
-  carrier; pull does the rest.
-- **The load-bearing gotcha:** mechanical fleet tools run in clones *without* the
-  consumer's toolchain (no `npm install` / `cargo`), so they cannot run the
-  consumer gate faithfully — `propagate` commits `--no-verify` and the PR's CI is
-  the real gate; a `release-core admin repos verify --all-files` FAIL on an
-  npm/frontend repo is usually a missing-deps artifact, not real debt. Review
+  `release-core init` (the DEFAULT full materialize) re-syncs the whole managed
+  tree from the wheel bundle and auto-commits any change. There is **no push
+  mechanism** — the wheel is the carrier; pull does the rest. A consumer still on
+  a pre-pull seed migrates by running the (fixed) resolver once in that repo and
+  opening the resulting managed-sync PR — a one-time seed, not a fleet push.
+- **The load-bearing gotcha:** mechanical fleet tools (`release-core admin repos
+  verify`) run in clones *without* the consumer's toolchain (no `npm install` /
+  `cargo`), so they cannot run the consumer gate faithfully — a
+  `release-core admin repos verify --all-files` FAIL on an npm/frontend repo is
+  usually a missing-deps artifact, not real debt; the consumer's own PR CI is the
+  real gate. Review
   threads on synced `.release/**` are upstream concerns, not consumer-PR blockers.
 
 ## Repo shape
@@ -60,7 +60,7 @@ silently dropping managed `bin/` tools).
 - `.github/actions/<name>/` — composite actions, atomic units shared across (future) workflows
 - `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
   - Policy/setup (canonical `release-core admin policy|secrets …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin policy ruleset` (← `apply-ruleset`), `… policy sweep` (← `sweep-github-policy`), `… policy dependabot` (← `enable-dependabot-security`); `release-core admin secrets install|token` (← `install-release-{secrets,token}`); plus the kept flat alias `detect-kind`
-  - Pull-model boot: `install-release-core` (THE boot resolver, ADR-0003 — resolves the `release_core` wheel from a GitHub release, installs it via `pip install --force-reinstall` (deps resolved from PyPI — release_core declares real third-party deps now, e.g. click), then runs a bare `release-core init` in the current repo (`--no-init` to skip; init is best-effort and locates the just-installed console-script across venv/`--user`/system layouts). Post-#476, a bare `init` is the DEFAULT FULL materialize — it materializes the whole managed tree from the wheel bundle (the `.release/` build dir + every working-tree mirror: skills, ORIENTATION, configs, the CLAUDE.md block) and auto-commits managed changes, so the wheel pull carries the full tree and no `orc propagate` push is needed in steady state. `release-core init --config-only` is the escape hatch (the old config-subset behavior); `--full` is a redundant alias of the default. `--major vN` pins to the latest release in that major line, default `releases/latest` — the v3-safety filter since the wheel version is static. One command does the whole boot — NOT a pip post-install hook (wheels have none; init is repo-specific). Pure shell, runs before `release_core` is installed. Lives in the SYNCED bootstrap (`templates/commons/bin/install-release-core`, symlinked from repo-root `bin/`) so it reaches consumers — `setup-dev-env.sh` §0.2 invokes it by repo path at SessionStart (local+cloud); CI reaches it via `@vN` action_path. Tests: `tests/install-release-core/`)
+  - Pull-model boot: `install-release-core` (THE boot resolver, ADR-0003 — resolves the `release_core` wheel from a GitHub release and installs it into its OWN dedicated, isolated venv (`${XDG_DATA_HOME}/release-core/venv`, `--force-reinstall`, deps from PyPI — never the user pip / system site / a project venv), symlinks the console-scripts onto PATH (`~/.local/bin`) + persists `$GITHUB_PATH` under Actions, then runs a bare `release-core init` in the current repo (`--no-init` to skip; init is best-effort). Install from a local checkout instead with `--from-source PATH` (release's own CI). Post-#476, a bare `init` is the DEFAULT FULL materialize — it materializes the whole managed tree from the wheel bundle (the `.release/` build dir + every working-tree mirror: skills, ORIENTATION, configs, the CLAUDE.md block) and auto-commits managed changes (no `[skip ci]` — that would block a managed-only migration PR under required checks), so the wheel pull carries the full tree and no push is needed. `release-core init --config-only` is the escape hatch (the old config-subset behavior); `--full` is a redundant alias of the default. `--major vN` pins to the latest release in that major line, default `releases/latest` — the v3-safety filter since the wheel version is static. One command does the whole boot — NOT a pip post-install hook (wheels have none; init is repo-specific). Pure shell, runs before `release_core` is installed. Lives in the SYNCED bootstrap (`templates/commons/bin/install-release-core`, symlinked from repo-root `bin/`) so it reaches consumers — `setup-dev-env.sh` §0.2 invokes it by repo path at SessionStart (local+cloud); CI reaches it via `@vN` action_path. Tests: `tests/install-release-core/`)
   - Release mechanics: `release-core admin release advance-major` (← retired flat `release-advance-major`) — fast-forward the floating major branch — auto-detected highest `vN`, currently `v2` — to main after a release-side merge; one command for the old four-step `checkout vN && merge --ff-only main && push` dance
   - Sync/drift: `release-sync` (build-dir + symlinks materializer), `release-drift-check` (consumer-side drift gate — rebuilds against the revision recorded in `.release/.release-sync-source` so it separates *drift* from mere *staleness*; see ADR-0002)
   - Fleet (canonical: `release-core admin repos|inbox …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin repos list` (← `managed-repos`) — zero-logic accessor over `managed-repos.yaml`, the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`; `release-core admin repos verify` (← `release-verify-fleet`) — hermetic pre-flight lint sweep: clone fleet → `release-sync` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-core admin release advance-major`; `release-core admin inbox` (← `release-inbox`) — read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run; `release-core admin inbox notify-source` (← `release-notify-source`) — close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue. The `release-fleet-triage` skill orchestrates inbox → fix loop → notify-source. See `docs/dev/fleet-tooling.md`.

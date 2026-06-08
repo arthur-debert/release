@@ -64,8 +64,8 @@ Deeper References:
         model, release-token setup, fleet telemetry via issues.
 
     dev/:
-        Maintainer tool-base docs — fleet tooling, fleet-propagate worktrees,
-        the release-core CLI authoring pattern.
+        Maintainer tool-base docs — fleet tooling and the release-core CLI
+        authoring pattern.
 
     per-category/, per-component/, per-stack/:
         Per-artifact input shapes and adoption guides for each Kind and
