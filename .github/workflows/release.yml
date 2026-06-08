@@ -12,9 +12,9 @@ name: Release
 # What `gh-action.yml@v2` gives us here:
 # - validate semver + ensure release-time invariants
 # - tag + push HEAD
-# - GH release with auto-extracted notes (we override with
-#   changelog-path: '' since docs/breaking-changes.md is NOT
-#   Keep-a-Changelog format)
+# - GH release with notes rolled from the CHANGELOG/ fragment dir at
+#   cut (changelog-path: CHANGELOG.md → fragment-directory model; see
+#   the with: block). docs/breaking-changes.md stays a separate log.
 # - publish the `release_core` wheel as a release asset (pip-bootstrap
 #   transport, ADR-0003)
 # - advance the floating-major branch (derived from the released
