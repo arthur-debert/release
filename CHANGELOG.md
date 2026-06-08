@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 2.11.7 - 2026-06-08
+
+init: force-add managed paths in the auto-commit (`git add -f`) so a consumer .gitignore covering a managed path (e.g. `.claude/` shadowing the managed `.claude/skills/`) doesn't silently drop it from the migration commit — without this, 6 fleet consumers staged but never committed their managed tree (#416 fleet rollout)
+
 ## 2.11.6 - 2026-06-08
 
 the release_core wheel now bundles the FULL template tree (commons/, components/, every per-kind dir) plus the distributed skill catalog (PUSH_ALL + REPLACE_IF_PRESENT), excluding the package subtree and release-only skills, so a later init can materialize offline (#476)
