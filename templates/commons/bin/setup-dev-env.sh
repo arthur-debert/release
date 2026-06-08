@@ -83,13 +83,30 @@ if ! command -v yamllint >/dev/null 2>&1; then
 fi
 command -v yamllint >/dev/null 2>&1 || _warn_unarmed yamllint
 
-# System tools: shellcheck + actionlint (brew on macOS, apt on Linux). `sudo -n`
+# System tools: shellcheck + actionlint. macOS: brew ships BOTH. On Linux apt
+# carries shellcheck but has NO actionlint package, so
+# `apt-get install actionlint` fails and the gate's actionlint step then errors
+# out at commit time (release#497). actionlint therefore comes from its pinned
+# official downloader → /usr/local/bin, mirroring the CI provisioner
+# bin-internal/provision-gate-toolset.sh (keep _ACTIONLINT_VERSION in sync with
+# that script's ACTIONLINT_VERSION, same as the RUFF_VERSION pin above). `sudo -n`
 # (non-interactive) so a password prompt fails fast instead of hanging a
 # session-start hook; install stderr stays visible for diagnostics.
+_ACTIONLINT_VERSION="1.7.7"
 for _gate_tool in shellcheck actionlint; do
   command -v "${_gate_tool}" >/dev/null 2>&1 && continue
   if command -v brew >/dev/null 2>&1; then
     brew install "${_gate_tool}" >/dev/null || true
+  elif [ "${_gate_tool}" = "actionlint" ] && command -v curl >/dev/null 2>&1; then
+    # No apt package for actionlint — use the pinned rhysd downloader.
+    _actionlint_url="https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash"
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+      curl -sSfL "${_actionlint_url}" \
+        | sudo -n bash -s -- "${_ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
+    else
+      curl -sSfL "${_actionlint_url}" \
+        | bash -s -- "${_ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
+    fi
   elif command -v apt-get >/dev/null 2>&1; then
     sudo -n apt-get install -y "${_gate_tool}" >/dev/null || true
   fi
