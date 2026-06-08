@@ -219,9 +219,16 @@ echo "install-release-core: installing $source into $VENV_DIR" >&2
 # isolated from the user's pip, the system site-packages, and any project venv.
 # Reuse an existing venv (fast); recreate only if it's missing or broken (e.g. a
 # python upgrade left it dangling).
+# Fail fast on a misconfigured VENV_DIR: empty or `/` would make `rm -rf`, the
+# venv build, AND the `$VENV_DIR/bin/*` symlink glob below all act on the
+# filesystem root (e.g. symlinking /bin/* into ~/.local/bin). Validate before
+# touching anything.
+if [ -z "$VENV_DIR" ] || [ "$VENV_DIR" = "/" ]; then
+  echo "install-release-core: refusing to use invalid VENV_DIR '$VENV_DIR'" >&2
+  exit 1
+fi
 if ! "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
-  # Guard the rm -rf: never act on an empty/`/` VENV_DIR (env misconfiguration).
-  [ -n "$VENV_DIR" ] && [ "$VENV_DIR" != "/" ] && rm -rf "$VENV_DIR"
+  rm -rf "$VENV_DIR"
   "$PYTHON" -m venv "$VENV_DIR"
 fi
 # --force-reinstall: the wheel version is static (0.0.1), so `-U` would see it
