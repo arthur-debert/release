@@ -1211,6 +1211,8 @@ def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch
     assert _git(repo, "status", "--porcelain", "my-feature.txt") == "?? my-feature.txt"
 
 
+@_needs_yq
+@_needs_git
 def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monkeypatch, capsys):
     """A consumer .gitignore that covers a managed path (e.g. `.claude/` shadowing
     the managed `.claude/skills/`, here modeled with `bin/`) must NOT silently drop
