@@ -236,6 +236,7 @@ fi
 # without the tool venv itself being on PATH. Skip the venv's own internals.
 mkdir -p "$BIN_DIR"
 for _s in "$VENV_DIR"/bin/*; do
+  [ -e "$_s" ] || [ -L "$_s" ] || continue  # empty glob → literal '*'; skip it
   _name="$(basename "$_s")"
   case "$_name" in
     python*|pip*|activate*|Activate.ps1|wheel|*.py) continue ;;
