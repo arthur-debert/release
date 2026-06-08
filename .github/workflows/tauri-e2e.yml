@@ -66,11 +66,11 @@ on:
         default: 'src-tauri/Cargo.lock'
       cache-key-prefix:
         description: >-
-          Namespace for this lane''s cache. A consumer running the suite more
+          Namespace for this lane's cache. A consumer running the suite more
           than once with DIFFERENT cargo features (e.g. a second non-gating
           `--features X` lane) MUST give each lane its own prefix, or they
           collide on one key+restore-keys and the heavier lane poisons the lean
-          gate''s `target/` (release#491). Both `key` and `restore-keys` are
+          gate's `target/` (release#491). Both `key` and `restore-keys` are
           scoped to this prefix, so distinct prefixes never cross-match.
         type: string
         default: 'tauri-e2e-cargo'
