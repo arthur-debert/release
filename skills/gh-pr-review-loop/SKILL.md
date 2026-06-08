@@ -66,7 +66,8 @@ This is the canonical sequence when driving a feature branch through the loop:
 ```text
 1. branch + change + commit
 2. push
-3. open PR (gh pr create) — NEVER pass --draft unless the user explicitly asked
+3. arm the loop, THEN open PR (gh pr create) — NEVER pass --draft unless the user explicitly asked
+   → arm in a SEPARATE step first: touch "$(git rev-parse --git-dir)/pr-loop-armed"
    → ruleset enforces PR-only (no direct push to main)
    → copilot-review.yml auto-triggers Copilot review request
 4. (wait) Copilot posts review at ~7m typical
@@ -77,6 +78,22 @@ This is the canonical sequence when driving a feature branch through the loop:
    Merge only on explicit authorization ("merge it", "go ahead and merge").
 9. ALWAYS close with the structured report block (see "The final-report contract").
 ```
+
+### Arming the loop (the `pr-loop-guard`)
+
+A PreToolUse guard (`bin/pr-loop-guard`) **blocks a bare `gh pr create`** so this
+loop can't be skipped by reaching for the raw helpers under task momentum. Before
+you open the PR, arm it in its **own step**:
+
+```sh
+touch "$(git rev-parse --git-dir)/pr-loop-armed"
+```
+
+Why a separate step: the guard runs *before* the `gh pr create` command executes,
+so an arm `touch` chained in the **same** command line hasn't run yet when the
+guard checks — it'll still deny. Arm first, create second. The arm is **one-shot**
+(consumed when the guard allows), so re-arm before each PR. If you ever see the
+deny, that is the guard doing its job: arm and retry.
 
 ### Orienting with `release-core pr status`
 
@@ -279,6 +296,7 @@ release-core admin policy sweep                                # rust stack only
 git add .github/
 git commit -m "ci: add github policy files and copilot review workflow"
 git push -u origin feat/github-policy
+touch "$(git rev-parse --git-dir)/pr-loop-armed"        # arm the PR-loop guard (separate step — see note)
 gh pr create --title "..." --body "..."
 
 # 3. The first PR can't auto-trigger Copilot (workflow not on main yet); request manually:
