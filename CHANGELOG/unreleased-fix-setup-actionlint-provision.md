@@ -1,0 +1,1 @@
+Fix setup-dev-env.sh provisioning actionlint via a non-existent apt package on Linux; use the pinned rhysd downloader like the CI gate provisioner, so the SessionStart gate toolset is actually armed (#497)
