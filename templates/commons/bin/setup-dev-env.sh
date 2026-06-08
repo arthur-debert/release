@@ -41,6 +41,16 @@ _warn_unarmed() {
   echo "warning: '$1' not installed and could not be auto-installed — the lefthook gate will FAIL until it is present. Install it, then re-run." >&2
 }
 
+# Pinned gate-toolset versions — single source of truth (release#498 follow-up),
+# shared with the CI provisioner bin-internal/provision-gate-toolset.sh so the
+# two can't drift. It is synced alongside this script (same managed sync), so it
+# is normally always present; the `:=` fallbacks are a last-resort safety net so
+# a (broken) missing-file state can't abort the SessionStart hook mid-session.
+# shellcheck source=/dev/null
+[ -f "${REPO_ROOT}/bin/gate-tool-versions.sh" ] && . "${REPO_ROOT}/bin/gate-tool-versions.sh"
+: "${RUFF_VERSION:=0.15.12}"
+: "${ACTIONLINT_VERSION:=1.7.7}"
+
 # npm globals: lefthook + prettier + markdownlint. Installed before the hook
 # wiring below so `lefthook install` finds the binary.
 if ! command -v lefthook >/dev/null 2>&1 \
@@ -59,11 +69,10 @@ command -v markdownlint >/dev/null 2>&1 || _warn_unarmed markdownlint
 # --break-system-packages; try that first, fall back to a plain install (older
 # distros / venvs reject the flag). Install stderr is left visible — a failure
 # reason should surface, not be swallowed.
-_RUFF_VERSION="0.15.12"
 if ! command -v ruff >/dev/null 2>&1; then
   if command -v pip3 >/dev/null 2>&1; then
-    pip3 install --quiet --break-system-packages "ruff==${_RUFF_VERSION}" >/dev/null \
-      || pip3 install --quiet "ruff==${_RUFF_VERSION}" >/dev/null || true
+    pip3 install --quiet --break-system-packages "ruff==${RUFF_VERSION}" >/dev/null \
+      || pip3 install --quiet "ruff==${RUFF_VERSION}" >/dev/null || true
   elif command -v brew >/dev/null 2>&1; then
     brew install ruff >/dev/null || true
   fi
@@ -88,11 +97,10 @@ command -v yamllint >/dev/null 2>&1 || _warn_unarmed yamllint
 # `apt-get install actionlint` fails and the gate's actionlint step then errors
 # out at commit time (release#497). actionlint therefore comes from its pinned
 # official downloader → /usr/local/bin, mirroring the CI provisioner
-# bin-internal/provision-gate-toolset.sh (keep _ACTIONLINT_VERSION in sync with
-# that script's ACTIONLINT_VERSION, same as the RUFF_VERSION pin above). `sudo -n`
-# (non-interactive) so a password prompt fails fast instead of hanging a
-# session-start hook; install stderr stays visible for diagnostics.
-_ACTIONLINT_VERSION="1.7.7"
+# bin-internal/provision-gate-toolset.sh. ACTIONLINT_VERSION is sourced from the
+# shared gate-tool-versions.sh above (single source of truth — no per-script
+# pin to drift). `sudo -n` (non-interactive) so a password prompt fails fast
+# instead of hanging a session-start hook; install stderr stays visible.
 for _gate_tool in shellcheck actionlint; do
   command -v "${_gate_tool}" >/dev/null 2>&1 && continue
   if command -v brew >/dev/null 2>&1; then
@@ -102,10 +110,10 @@ for _gate_tool in shellcheck actionlint; do
     _actionlint_url="https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash"
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
       curl -sSfL "${_actionlint_url}" \
-        | sudo -n bash -s -- "${_ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
+        | sudo -n bash -s -- "${ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
     else
       curl -sSfL "${_actionlint_url}" \
-        | bash -s -- "${_ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
+        | bash -s -- "${ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
     fi
   elif command -v apt-get >/dev/null 2>&1; then
     sudo -n apt-get install -y "${_gate_tool}" >/dev/null || true

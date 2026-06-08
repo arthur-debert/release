@@ -11,12 +11,18 @@ on:
     branches: ["**"]
     paths:
       - "bin-internal/provision-gate-toolset.sh"
+      - "templates/commons/bin/gate-tool-versions.sh"
+      - "templates/commons/bin/setup-dev-env.sh"
       - "tests/provision-gate-toolset/**"
+      - "tests/gate-tool-versions/**"
       - ".github/workflows/provision-gate-toolset-tests.yml"
   pull_request:
     paths:
       - "bin-internal/provision-gate-toolset.sh"
+      - "templates/commons/bin/gate-tool-versions.sh"
+      - "templates/commons/bin/setup-dev-env.sh"
       - "tests/provision-gate-toolset/**"
+      - "tests/gate-tool-versions/**"
       - ".github/workflows/provision-gate-toolset-tests.yml"
 
 permissions:
@@ -30,4 +36,4 @@ jobs:
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
       - name: Run BATS suite
-        run: bats tests/provision-gate-toolset/
+        run: bats tests/provision-gate-toolset/ tests/gate-tool-versions/

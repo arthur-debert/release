@@ -1,0 +1,1 @@
+../templates/commons/bin/gate-tool-versions.sh
