@@ -1,0 +1,34 @@
+name: release-core shim tests
+
+# BATS regression suite for bin/release-core — the local-checkout CLI entry
+# (release#497). Locks the dependency-provisioning contract: a bare python3
+# lacking `click` re-execs under the isolated release-core venv (pinning the
+# checkout lib on PYTHONPATH), and degrades to an actionable hint when no venv
+# exists. Fully offline — the "no click" interpreter is `python3 -S` and the
+# venv is a recording bash stub.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin/release-core"
+      - "tests/release-core-shim/**"
+      - ".github/workflows/release-core-shim-tests.yml"
+  pull_request:
+    paths:
+      - "bin/release-core"
+      - "tests/release-core-shim/**"
+      - ".github/workflows/release-core-shim-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/release-core-shim/

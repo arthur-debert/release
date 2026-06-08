@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
 # release-core — the top-level release tooling CLI (pip-bootstrap PoC §2).
 #
-# Thin shim (shell→Python): put the
-# stdlib-only release_core package on sys.path and dispatch into the CLI entry.
-# release-core is a release-owned tool (a real file in bin/, the contract's
-# variant (b)), so realpath lands in bin/ and the package sits at
+# Thin shim (shell→Python): run the IN-CHECKOUT release_core package (so a dev
+# editing it sees changes immediately) by putting it on sys.path and dispatching
+# into the CLI entry. release-core is a release-owned tool (a real file in bin/,
+# the contract's variant (b)), so realpath lands in bin/ and the package sits at
 # ../templates/commons/lib/release_core. The installed console-script
 # (pyproject [project.scripts] release-core = release_core.cli_entry:main, owned
 # by PR-B) runs the SAME main(); this shim is the local-checkout entry.
+#
+# Dependency provisioning (release#497): release_core grew a real third-party dep
+# — `click` (#457). A bare `python3` has no click, and since #487 the boot
+# resolver installs click into an ISOLATED venv
+# (${XDG_DATA_HOME}/release-core/venv), NOT the --user site — so click is no
+# longer importable by this shim's bare interpreter (pre-#487 it was, which is
+# why this used to work). When click is missing here we re-exec under that venv's
+# python (which carries click), with PYTHONPATH pinned to the checkout lib so we
+# still run the IN-CHECKOUT code, not the wheel installed in the venv. This
+# restores the working behavior without undoing the deliberate venv isolation. If
+# no venv exists to borrow click from, we print an actionable hint instead of a
+# raw ModuleNotFoundError traceback.
 import os
 import sys
 
 _HERE = os.path.dirname(os.path.realpath(__file__))
+_LIB = os.path.join(_HERE, "..", "templates", "commons", "lib", "release_core")
 # Fleet verbs reached via `release-core admin repos|release …` resolve their
 # default manifest / RELEASE_HOME from a *_SCRIPT_DIR env var pointing at this
 # bin/ dir (so resolution is cwd-independent):
@@ -25,12 +38,70 @@ _HERE = os.path.dirname(os.path.realpath(__file__))
 os.environ.setdefault("MANAGED_REPOS_SCRIPT_DIR", _HERE)
 os.environ.setdefault("AUDIT_PORTFOLIO_SCRIPT_DIR", _HERE)
 os.environ.setdefault("VERIFY_FLEET_SCRIPT_DIR", _HERE)
-sys.path.insert(
-    0,
-    os.path.join(_HERE, "..", "templates", "commons", "lib", "release_core"),
-)
 
-from release_core.cli_entry import main  # noqa: E402 — sys.path set above
+
+def _release_core_venv_python():
+    """Path to the isolated release-core venv's python, mirroring the resolver's
+    VENV_DIR computation (install-release-core): ``$RELEASE_CORE_HOME/venv`` when
+    set, else ``${XDG_DATA_HOME:-~/.local/share}/release-core/venv``."""
+    home = os.environ.get("RELEASE_CORE_HOME") or os.path.join(
+        os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share"),
+        "release-core",
+    )
+    return os.path.join(home, "venv", "bin", "python")
+
+
+def _ensure_click():
+    """Guarantee `click` is importable, re-exec'ing under the isolated venv's
+    python if this interpreter lacks it. No-op (returns) when click is already
+    importable — so release-dev / CI pythons that carry click run unchanged."""
+    try:
+        import click  # noqa: F401
+
+        return
+    except ModuleNotFoundError:
+        pass
+    # One-shot guard: if we already re-exec'd and click is STILL missing, don't
+    # loop — let the import below surface the actionable error.
+    if os.environ.get("_RELEASE_CORE_REEXEC") == "1":
+        return
+    venv_py = _release_core_venv_python()
+    if not os.access(venv_py, os.X_OK):
+        return  # no venv to borrow click from — fall through to the hint below
+    # Are we ALREADY running inside that venv? Compare sys.prefix to the venv dir
+    # — NOT realpath(venv_py) vs sys.executable: a venv's bin/python is a symlink
+    # to the SAME base interpreter binary, so a realpath compare is always equal
+    # and would wrongly skip the re-exec (the venv differs by site-packages, not
+    # by binary). sys.prefix is the venv dir only when running under it.
+    venv_dir = os.path.dirname(os.path.dirname(venv_py))  # …/release-core/venv
+    if os.path.realpath(sys.prefix) == os.path.realpath(venv_dir):
+        return  # already inside the target venv (yet lacking click) — don't loop
+    env = dict(os.environ)
+    env["_RELEASE_CORE_REEXEC"] = "1"
+    # Pin the checkout lib first so the venv python imports the IN-CHECKOUT
+    # release_core, not the wheel installed inside the venv.
+    env["PYTHONPATH"] = os.pathsep.join(
+        [_LIB] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])
+    )
+    os.execve(venv_py, [venv_py, os.path.realpath(__file__), *sys.argv[1:]], env)
+
+
+_ensure_click()
+
+sys.path.insert(0, _LIB)
+
+try:
+    from release_core.cli_entry import main  # noqa: E402 — sys.path set above
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised via bats
+    if exc.name == "click":
+        sys.stderr.write(
+            "release-core: missing dependency 'click'. The CLI's runtime deps "
+            "live in an isolated venv provisioned by the boot resolver. Run "
+            "`bin/install-release-core` (or let your repo's SessionStart setup "
+            "run it) to provision them, then retry.\n"
+        )
+        sys.exit(1)
+    raise
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

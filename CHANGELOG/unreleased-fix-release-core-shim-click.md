@@ -1,0 +1,1 @@
+Fix release-core CLI crash (ModuleNotFoundError: click): the bin/release-core shim now re-execs under the isolated release_core venv to provision click, restoring the entry broken when #487 moved deps out of the user site (#497)
