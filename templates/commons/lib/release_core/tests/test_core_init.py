@@ -1213,6 +1213,29 @@ def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch
 
 @_needs_yq
 @_needs_git
+def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monkeypatch, capsys):
+    """A consumer .gitignore that covers a managed path (e.g. `.claude/` shadowing
+    the managed `.claude/skills/`, here modeled with `bin/`) must NOT silently drop
+    it from the migration commit — managed paths are release-owned and force-added.
+    Regression: 6 fleet consumers gitignored `.claude/`, so their migration staged
+    but never committed (`git add` errors on an ignored path)."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # Consumer ignores a directory the managed tree writes into.
+    (repo / ".gitignore").write_text("/bin/\n")
+    _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-q", "-m", "ignore bin")
+
+    rc = init.main(["--full"])
+    assert rc == 0
+    committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
+    # The managed bin/check is committed despite the .gitignore covering bin/.
+    assert "bin/check" in committed
+    assert _git(repo, "status", "--porcelain") == ""  # clean tree, nothing stranded
+
+
+@_needs_yq
+@_needs_git
 def test_full_is_idempotent_no_commit_second_run(tmp_path, monkeypatch, capsys):
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)

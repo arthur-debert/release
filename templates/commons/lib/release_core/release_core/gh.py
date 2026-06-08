@@ -350,12 +350,17 @@ def git_is_clean(*, cwd: str, except_paths: list[str] | None = None) -> bool:
     return True
 
 
-def git_add(paths: list[str], *, cwd: str) -> None:
-    """`git -C <cwd> add -- <paths>` — stage ONLY the given pathspecs. Never -A.
-    Raises ProcError on failure."""
+def git_add(paths: list[str], *, cwd: str, force: bool = False) -> None:
+    """`git -C <cwd> add [-f] -- <paths>` — stage ONLY the given pathspecs. Never -A.
+    Raises ProcError on failure.
+
+    force=True passes `-f`: the managed paths are release-owned and MUST be
+    tracked (they're the distributed tree), so a consumer `.gitignore` that
+    happens to cover one — e.g. `.claude/` shadowing the managed `.claude/skills/`
+    — must not silently drop it (plain `git add` errors on an ignored path)."""
     if not paths:
         return
-    git(["-C", cwd, "add", "--", *paths])
+    git(["-C", cwd, "add", *(["-f"] if force else []), "--", *paths])
 
 
 def git_commit_paths(paths: list[str], message: str, *, cwd: str) -> None:

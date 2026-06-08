@@ -1,0 +1,1 @@
+init: force-add managed paths in the auto-commit (`git add -f`) so a consumer .gitignore covering a managed path (e.g. `.claude/` shadowing the managed `.claude/skills/`) doesn't silently drop it from the migration commit — without this, 6 fleet consumers staged but never committed their managed tree (#416 fleet rollout)
