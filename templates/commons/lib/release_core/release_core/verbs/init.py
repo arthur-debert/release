@@ -8,7 +8,7 @@ Usage:
 `release-core init` is the pull-model seam: the SessionStart boot
 (`install-release-core`) pulls the `release_core` wheel and runs `init`, so a
 consumer self-updates its entire managed tree from the wheel bundle — no
-`orc propagate` push in steady state (#476).
+push step — there is no push mechanism (#476).
 
 DEFAULT (full materialize): a bare `release-core init` runs the COMPLETE
 release-sync pipeline (build_plan + materialize + compute_mirror + apply) sourced

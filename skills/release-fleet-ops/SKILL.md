@@ -1,6 +1,6 @@
 ---
 name: release-fleet-ops
-description: "Drive and diagnose release→consumer fleet changes from inside arthur-debert/release: advancing the floating major, re-syncing the fleet, propagating a fix, and — above all — diagnosing why a consumer's CI/gate is red and routing it to the right repo. Use when doing release-side work that affects consumers, or whenever you face 'is this a release bug or a consumer bug?'. Triggered by: release-verify-fleet, orc propagate, release-advance-major, a consumer CI failure after a sync, or a fleet-wide lint/gate failure."
+description: "Drive and diagnose release→consumer fleet changes from inside arthur-debert/release: shipping a fix to the fleet (cut + advance-major; consumers pull it), migrating/seeding a consumer onto the pull model, advancing the floating major, and — above all — diagnosing why a consumer's CI/gate is red and routing it to the right repo. Use when doing release-side work that affects consumers, or whenever you face 'is this a release bug or a consumer bug?'. Triggered by: release-core admin repos verify, release-core admin release advance-major, migrating a consumer, a consumer CI failure after a sync, or a fleet-wide lint/gate failure."
 ---
 
 # release-fleet-ops
@@ -41,14 +41,17 @@ consumer-side fix was wasted motion.
      upstream by definition. Red dogfood = release bug. Green dogfood + red
      consumer = consumer-specific.
 3. **Route.**
-   - **Upstream:** fix in `release/`, open a PR, **merge to main**, then re-sync
-     (`orc propagate`) the fleet from fixed main. One fix, propagated.
+   - **Upstream:** fix in `release/`, open a PR, **merge to main**, cut a release
+     (`release.yml`), and `release-core admin release advance-major`. The fix
+     reaches consumers by PULL — each self-updates at its next SessionStart. There
+     is no push step (`orc propagate` was removed); the wheel is the carrier.
    - **Consumer:** fix in the consumer repo — but first rule out a *shadow*
      (below). Genuinely-consumer-authored content debt is the only thing that
      belongs in a consumer PR.
-4. **Propagate, then verify faithfully.** After an upstream fix, re-sync and let
-   the *same* gate consumers run report green. The pre-flight must run what
-   production runs (see "faithful pre-flight").
+4. **Cut + advance, then verify faithfully.** After an upstream fix ships, a
+   consumer's own next-session pull + its PR CI is the real gate — run what
+   production runs (see "faithful pre-flight"). To migrate a consumer *now* rather
+   than wait for its next session, run the resolver once in that repo (below).
 
 ## The shadow trap (check this before any consumer fix)
 
@@ -74,9 +77,16 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   fleet, syncs each from `<ref>`, runs the gate. Use it BEFORE
   `release-core admin release advance-major`. Its clones double as your
   reproduction sandbox. (Flat alias `release-verify-fleet` still works.)
-- `orc propagate --ref main <clone>...` — re-sync N consumers and open a PR each.
-  Strict: each clone must be clean and on its base branch. Reset the clones first
-  (`git checkout -B main origin/main && git reset --hard && git clean -fd`).
+- **Migrate/seed a consumer (replaces `orc propagate`, which was removed):** in
+  the target repo on a fresh branch, run the resolver once — `bash
+  bin/install-release-core` (use release's own `bin/install-release-core` if the
+  consumer's is pre-fix and can't self-bootstrap). It pulls the latest wheel and
+  a bare `init` full-materializes + auto-commits the managed tree. Then push and
+  open the managed-sync PR; its CI is the gate. One repo at a time; after the
+  first seed the consumer self-updates natively. No fleet-wide push.
+  (Release-dev note: if `RELEASE_HOME` is set in *your* env, prefix the run with
+  `env -u RELEASE_HOME` so `init` materializes from the published wheel bundle —
+  what the consumer actually pulls — not your local release checkout.)
 - `orc probe --yes <clone> "<eval prompt>"` — spin ONE fresh agent to evaluate a
   repo's state and report. Use for a perspective check, not as a per-repo fixer.
 - `release-core admin release advance-major` — fast-forward the floating major to

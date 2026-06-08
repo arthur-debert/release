@@ -33,7 +33,7 @@
 # build dir + every working-tree mirror — skills, ORIENTATION, configs, the
 # CLAUDE.md block) and auto-commits managed changes (#476 cutover) — NOT just the
 # config subset. This is the pull-model self-sync: the wheel pull carries the whole
-# tree, so no `orc propagate` push is needed in steady state. It is NOT a pip
+# tree, so no push is needed (there is no push mechanism). It is NOT a pip
 # post-install hook (wheels have none, and init is repo-specific while pip is
 # environment-level): the resolver runs init explicitly, at the repo root, on the
 # JUST-installed console-script (resolved across venv / --user / system layouts).
@@ -275,7 +275,7 @@ fi
 # the CLAUDE.md block) and AUTO-COMMITS ONLY the managed paths it wrote, iff they
 # actually changed — never `git add -A`, never a user's other staged/unstaged
 # work, no-op when byte-identical. This is the pull-model self-sync: it carries
-# the whole tree, so no `orc propagate` push is needed in steady state. We pass NO
+# the whole tree, so no push is needed (there is no push mechanism). We pass NO
 # flags (auto-commit is the default; do NOT pass --commit — it is redundant and
 # rejected in the default full mode) and NOT --push: the commit is made locally
 # (riding the current branch, excluded from review as a managed change), and

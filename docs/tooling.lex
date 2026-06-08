@@ -23,7 +23,7 @@ release-core
           working-tree mirror — skills, ORIENTATION, configs, the CLAUDE.md
           block) and auto-commit any managed change. This is "release-sync
           sourced from the wheel"; it is what SessionStart runs, carrying the
-          full tree so no `orc propagate` push is needed in steady state.
+          full tree so consumers self-update by pull — there is no push step.
           `--config-only` is the escape hatch — materialize just the config
           subset (lefthook.yml + lint configs), where `--commit` stages and
           commits just those paths. (`--full` is a redundant alias of the
@@ -136,8 +136,8 @@ release-core
     message, iff they actually changed — byte-identical → no commit, so churn
     tracks release cadence, not session count. This is the commit-hygiene closer
     for the pull model: the engine is pulled, the whole tree it generates is
-    committed — so the wheel pull alone carries every managed change and no
-    `orc propagate` push is needed in steady state. `--no-commit` skips the
+    committed — so the wheel pull alone carries every managed change and there
+    is no push step. `--no-commit` skips the
     commit; `--push` additionally fast-forwards on a clean default branch.
     `--config-only` is the escape hatch (the old behavior): materialize just the
     config subset (`lefthook.yml` + lint configs), where `--commit`/`--force`/
@@ -150,18 +150,20 @@ release-core
     consumers; it lives in this repo's `bin/` and resolves its `uv` workspace
     (it depends on `release_core`). Its jobs:
 
-    - `orc propagate` — run `release-sync` across the fleet and open a re-sync
-      PR per consumer. Mechanical, no LLM calls. This is how an upstream fix
-      reaches every consumer. Because the clones lack each consumer's
-      toolchain, propagate commits `--no-verify` and the PR's own CI is the
-      real gate.
     - `orc run <repo> <prompt>` / `resume` — open or continue an LLM session
       against a consumer repo.
-    - `orc watch <repo>` — watch fleet / PR state.
+    - `orc probe <repo> <prompt>` — spin a fresh subordinate agent to evaluate
+      a (throwaway) consumer clone.
+    - `orc watch <pr>` — poll PR lifecycle state and act on transitions.
     - `orc sessions list|clear` — manage stored sessions.
 
-    The canonical fleet loop: `release-core admin repos verify` (hermetic
-    pre-flight) → `orc propagate` (re-sync + PR per consumer) → `release-core
-    admin release advance-major` (fast-forward the floating major). Always
-    verify before advancing. For the full doctrine and the upstream-vs-consumer
-    routing rule, see the `release-fleet-ops` skill.
+    The canonical fleet loop is now PULL-only: cut a release (`release.yml`
+    publishes the `release_core` wheel) → `release-core admin release
+    advance-major` (fast-forward the floating major). Run `release-core admin
+    repos verify` (hermetic pre-flight) before advancing. Consumers self-update
+    at their next SessionStart — `install-release-core` pulls the wheel and a
+    bare `release-core init` re-materializes the whole managed tree — so there
+    is NO push step. (Seeding a pre-pull consumer is a one-time
+    `bash bin/install-release-core` run in that repo, then open the resulting
+    managed-sync PR — one repo at a time.) For the full doctrine and
+    the upstream-vs-consumer routing rule, see the `release-fleet-ops` skill.

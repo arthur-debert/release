@@ -29,7 +29,6 @@ avoid accidentally billing API credits while iterating.
 orc run <repo-path> "<prompt>"       # open a fresh session for repo (acceptEdits)
 orc resume <repo-path> "<prompt>"    # continue the last session for repo
 orc probe <repo-path> "<prompt>"     # evaluate via fresh agent (bypassPermissions)
-orc propagate <repo-path>... --ref X # release-sync across consumers + open PRs
 orc watch <pr>... [--auto]           # poll PRs, act on lifecycle transitions
 orc sessions list                    # show {repo_path: session_id}
 orc sessions clear <repo-path>       # drop session id for repo
@@ -133,29 +132,6 @@ release/) violates the canonical markdownlint config (MD041) — then
 shipped by the `shell-quality` Component, now part of `templates/commons/`.
 That's the value loop in one example — static review missed it; the
 fresh agent's `lefthook run` surfaced it.
-
-## `orc propagate` — release-sync fan-out
-
-Runs `release-sync` against multiple consumer repos and opens a PR in
-each. Mechanical: no Claude Agent SDK involvement, just `git` + `gh`
-under the hood (unlike `orc probe` which spawns subordinate agents).
-
-```sh
-# Dry-run against three repos (verifies sync produces changes, then
-# reverts — no push, no PR).
-orc propagate --dry-run --ref take-iii ~/h/clapfig ~/h/padz ~/h/rustloc
-
-# Real rollout — opens one PR per repo, base = main.
-orc propagate --ref take-iii ~/h/clapfig ~/h/padz ~/h/rustloc
-```
-
-Pre-flight: each repo must be clean and on the base branch. Per-repo
-failures are reported (`✗ <repo> (error)`); a failure in one does not
-abort the rest. Summary lists `ok` / `no-changes` / `dry-run` / `error`
-counts. Exit 1 if any repo errored.
-
-Default `--ref` is `main`. While `take-iii` is the active integration
-branch, pass `--ref take-iii` explicitly.
 
 ## Layout
 

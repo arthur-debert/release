@@ -137,8 +137,8 @@ Injected Files
       WHOLE managed tree from the wheel bundle (the `.release/` build dir + every
       working-tree mirror — skills, ORIENTATION, configs, the CLAUDE.md block)
       and auto-commits any managed change — not just the config subset. This is
-      the pull-model self-sync: the wheel pull carries the whole tree, so no
-      `orc propagate` push is needed in steady state. (`release-core
+      the pull-model self-sync: the wheel pull carries the whole tree, and
+      there is no push step — consumers self-update at SessionStart. (`release-core
       init --config-only` refreshes just the lint/gate config subset — the
       escape hatch.)
     - §1+ (cloud only) — submodule/tag restore, dependency cache warm-up, venv
