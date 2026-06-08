@@ -81,11 +81,9 @@ _VERBS: dict[str, dict[str, str]] = {
         "build": "(none — interpreted)",
         "run": "open Neovim with the plugin on the runtimepath",
     },
-    "python-pkg": {
-        "test": "pytest",
-        "build": "python -m build",
-        "run": "python -m <package> <args>",
-    },
+    # Keys must stay aligned to what manifest.detect_kind can actually produce —
+    # an entry for an undetectable Kind only renders via an explicit `how-to
+    # <kind>` arg and misleads about auto-detection (e.g. python-pkg, removed).
 }
 
 # Shown when a Kind has no specific entry — the verbs an agent should discover.
@@ -129,7 +127,7 @@ def _render(kind: str) -> str:
     lines.append("  2. Make the change.")
     lines.append(
         "  3. Add a changelog fragment (required, same PR): "
-        'changelog add <slug> "<one-line summary>"'
+        'release-core changelog add <slug> "<one-line summary>"'
     )
     lines.append(
         "       <slug> is kebab-case; it writes CHANGELOG/unreleased-<slug>.md. "
