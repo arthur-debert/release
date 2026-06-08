@@ -72,7 +72,8 @@ the PR is not the end of your job; you own it through the whole loop:
    lag — wait for them rather than declaring done early.
 5. **Flip draft→ready (`gh pr ready`) — that is the handoff** — then stop. Don't
    self-merge; the final read and merge are the human's. If they ask for changes, flip
-   back to draft, do the work, and re-flip to ready only when the new changes + checks pass.
+   back to draft (`gh pr ready --undo`), do the work, and re-flip to ready only when the
+   new changes + checks pass.
 
 That is the whole loop: open **draft** → poll the engine → clear what it names → `ready`
 flip → hand off. Drive it through `release-core pr status`; don't reinvent it with
