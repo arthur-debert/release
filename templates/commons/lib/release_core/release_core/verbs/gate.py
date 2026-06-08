@@ -54,13 +54,14 @@ def _repo_root() -> str:
 
 def _resolve_lefthook(root: str) -> str | None:
     """node-stack consumers vendor lefthook under node_modules/.bin; prefer it,
-    then a PATH-global install. None when absent (a hard gate failure)."""
-    local = os.path.join(root, "node_modules", ".bin", "lefthook")
-    if os.access(local, os.X_OK):
-        return local
+    then a PATH-global install. None when absent (a hard gate failure).
+
+    ``shutil.which`` (not ``os.access``) so Windows PATHEXT resolution finds a
+    ``lefthook.cmd`` shim under node_modules/.bin too."""
     from shutil import which
 
-    return which("lefthook")
+    local = which("lefthook", path=os.path.join(root, "node_modules", ".bin"))
+    return local or which("lefthook")
 
 
 def main(argv: list[str]) -> int:

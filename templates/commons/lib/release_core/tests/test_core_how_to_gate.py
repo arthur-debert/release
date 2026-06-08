@@ -57,6 +57,28 @@ def test_how_to_help(capsys):
     assert "how-to" in capsys.readouterr().out
 
 
+def test_how_to_detects_from_repo_root(monkeypatch, capsys):
+    # no-arg path resolves the repo root (works from a subdir) and detects there.
+    monkeypatch.setattr(how_to, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(how_to.manifest, "detect_kind", lambda d: "go-cli")
+    assert how_to.main([]) == 0
+    assert "Kind: go-cli" in capsys.readouterr().out
+
+
+def test_how_to_undetectable_kind_renders_generic_not_error(monkeypatch, capsys):
+    # Design decision: an undetectable Kind renders the GENERIC playbook (exit 0),
+    # not a hard error — orientation guidance (dev cycle + gate) is Kind-agnostic.
+    monkeypatch.setattr(how_to, "_repo_root", lambda: "/repo")
+
+    def _boom(d):
+        raise how_to.manifest.KindError("nope")
+
+    monkeypatch.setattr(how_to.manifest, "detect_kind", _boom)
+    assert how_to.main([]) == 0
+    out = capsys.readouterr().out
+    assert "release-core gate" in out and "gh pr create --draft" in out
+
+
 # --- gate is a hard gate over the whole tree ------------------------------
 
 

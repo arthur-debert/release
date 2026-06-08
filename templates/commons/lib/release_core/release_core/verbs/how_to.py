@@ -17,11 +17,27 @@ Usage:
 
 from __future__ import annotations
 
-import sys
+import subprocess
 
 from .. import manifest
 
 USAGE = __doc__ or ""
+
+
+def _repo_root() -> str:
+    """The git work-tree root, so Kind detection works from any subdirectory
+    (mirrors gate._repo_root)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return out.stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "."
+
 
 # Per-Kind verb commands. lint and release are Kind-agnostic (the gate and the
 # release-cut path are uniform), so they live in the shared template; only the
@@ -150,8 +166,12 @@ def main(argv: list[str]) -> int:
         kind = argv[0]
     else:
         try:
-            kind = manifest.detect_kind(".")
+            kind = manifest.detect_kind(_repo_root())
         except manifest.KindError:
+            # Intentional: how-to is an ORIENTATION command. When the Kind can't
+            # be detected we still render the generic playbook — the dev cycle +
+            # `release-core gate` guidance is Kind-agnostic and the most valuable
+            # part, so generic help beats a hard error for a fresh agent.
             kind = "unknown"
     print(_render(kind))
     return 0
