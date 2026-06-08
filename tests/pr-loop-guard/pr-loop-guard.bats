@@ -86,3 +86,17 @@ PY
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
+
+@test "well-formed JSON of the wrong shape (a list) fails open (allowed)" {
+    printf '%s' '[1,2,3]' > "$BATS_TEST_TMPDIR/ev.json"
+    run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "a non-string command field fails open (allowed)" {
+    printf '%s' '{"tool_name":"Bash","tool_input":{"command":["gh","pr","create"]}}' > "$BATS_TEST_TMPDIR/ev.json"
+    run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}

@@ -89,17 +89,23 @@ def git_dir(cwd):
 def main():
     try:
         data = json.load(sys.stdin)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError, OSError):
         allow()  # fail-open: malformed input is never the hand-rolling case
 
-    if data.get("tool_name") != "Bash":
+    # Defensive type checks: a hand-rolling event is always well-formed, so any
+    # shape we don't recognise fails open rather than risking a crash (which
+    # would exit non-zero and violate the fail-OPEN contract).
+    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
         allow()
 
-    command = (data.get("tool_input") or {}).get("command", "")
-    if not invokes_pr_create(command):
+    tool_input = data.get("tool_input")
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    if not isinstance(command, str) or not invokes_pr_create(command):
         allow()
 
-    cwd = data.get("cwd") or os.getcwd()
+    cwd = data.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        cwd = os.getcwd()
     gd = git_dir(cwd)
     if gd is None:
         allow()  # not a git repo here — gh pr create wouldn't work anyway
@@ -122,4 +128,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Last-resort fail-OPEN: any unexpected exception allows the command rather
+    # than crashing the hook. allow()/deny() raise SystemExit (not Exception),
+    # so normal control flow is never swallowed here.
+    try:
+        main()
+    except Exception:
+        allow()
