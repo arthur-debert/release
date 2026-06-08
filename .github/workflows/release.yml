@@ -12,9 +12,9 @@ name: Release
 # What `gh-action.yml@v2` gives us here:
 # - validate semver + ensure release-time invariants
 # - tag + push HEAD
-# - GH release with auto-extracted notes (we override with
-#   changelog-path: '' since docs/breaking-changes.md is NOT
-#   Keep-a-Changelog format)
+# - GH release with notes rolled from the CHANGELOG/ fragment dir at
+#   cut (changelog-path: CHANGELOG.md → fragment-directory model; see
+#   the with: block). docs/breaking-changes.md stays a separate log.
 # - publish the `release_core` wheel as a release asset (pip-bootstrap
 #   transport, ADR-0003)
 # - advance the floating-major branch (derived from the released
@@ -48,13 +48,16 @@ jobs:
       # .github/actions/<name>/action.yml + reusable workflows.
       # No single root action.yml — skip the manifest check.
       action-manifest: ''
-      # docs/breaking-changes.md uses per-version section headings
-      # (`## v1.X.Y (date) — desc`), not Keep-a-Changelog
-      # `## [Unreleased]`. The workflow's awk-based roll would
-      # produce wrong output against this format. Disable the
-      # changelog handling; fall back to default release-note
-      # body. Future work could add a custom format parser.
-      changelog-path: ''
+      # Roll the changelog at cut via the FRAGMENT-DIRECTORY model (#201):
+      # gh-action.yml sees the `CHANGELOG/` sibling dir and runs
+      # `changelog new-version <version>` (cut the unreleased-*.md fragments
+      # into `CHANGELOG/<version>.md`, render `CHANGELOG.md`), commits both,
+      # and uses the version body as the GH release notes. The admin
+      # RELEASE_TOKEN bypasses the main ruleset for that commit. (This is NOT
+      # the legacy single-file Keep-a-Changelog path; `docs/breaking-changes.md`
+      # stays a separate, hand-kept breaking-changes log.) Previously this was
+      # `''` (opted out), so fragments piled up unconsumed — that was the bug.
+      changelog-path: CHANGELOG.md
       advance-major: true
     secrets:
       # RELEASE_TOKEN unblocks the v1 force-push (the default branch
