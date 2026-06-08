@@ -148,6 +148,19 @@ lex-fmt/lex v0.9.1.
 
 ## Operational rules
 
+- **Every PR is driven through the `gh-pr-review-loop` skill — invoke it before
+  `gh pr create`, not after.** The skill is the *discipline* (request Copilot →
+  wait → triage A/B/C → resolve threads as you go → stop at ready); the
+  `gh-copilot-*` / `gh-pr-checks-wait` helpers are each independently on `$PATH`,
+  so hand-composing them silently skips the disciplined steps while still
+  producing a green-looking PR. This is now *enforced*: a PreToolUse guard
+  (`bin/pr-loop-guard`, wired in `.claude/settings.json`, synced to consumers via
+  `templates/commons/`) blocks a bare `gh pr create` unless the loop is armed
+  (the skill arms a one-shot `pr-loop-armed` sentinel in `.git/`). If you are
+  already in the loop and the guard blocks you, arm it and retry:
+  `touch "$(git rev-parse --git-dir)/pr-loop-armed"`. Per release#495 (epic
+  #348) — the forcing function exists because optional discipline loses to task
+  momentum (caught when an agent hand-rolled #494's loop).
 - **The gate is ONE definition, run everywhere — never reimplemented.**
   `lefthook.yml` IS the gate (the WHAT: the set of checks). Every environment
   (the WHERE) *invokes* it: session start arms it (`setup-dev-env.sh` /

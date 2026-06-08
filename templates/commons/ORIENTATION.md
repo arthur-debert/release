@@ -75,6 +75,14 @@ That is the whole loop: open → poll the engine → clear what it names → `re
 hand off. Drive it through `release-core pr status`; don't reinvent it with
 ad-hoc `gh api` calls.
 
+> **This is enforced, not advisory.** A PreToolUse guard (`bin/pr-loop-guard`)
+> blocks a bare `gh pr create` so the loop can't be skipped by reaching for the
+> raw helpers under task momentum. Engage the loop (invoke the
+> `gh-pr-review-loop` skill) before opening the PR. If you are already running
+> the loop and the guard blocks you, arm it once and retry:
+> `touch "$(git rev-parse --git-dir)/pr-loop-armed"`. The arm is one-shot
+> (consumed per PR), so it gates each PR, not just the first.
+
 **Landing a feature or fix?** Add a changelog fragment in the same PR:
 
 ```sh

@@ -1,0 +1,102 @@
+#!/usr/bin/env bats
+# Tests for bin/pr-loop-guard — the PreToolUse forcing function that routes PR
+# creation through the gh-pr-review-loop skill (release#495, epic #348).
+#
+# The guard reads a Claude Code PreToolUse JSON event on stdin and either allows
+# (exit 0, no stdout) or denies (exit 0, stdout = permissionDecision:deny JSON).
+
+GUARD="$BATS_TEST_DIRNAME/../../bin/pr-loop-guard"
+
+setup() {
+    REPO="$BATS_TEST_TMPDIR/repo"
+    mkdir -p "$REPO"
+    git -C "$REPO" init -q
+    GD="$(git -C "$REPO" rev-parse --git-dir)"
+    case "$GD" in /*) : ;; *) GD="$REPO/$GD" ;; esac
+}
+
+# Write a Bash PreToolUse event (command=$1, cwd=$2 or $REPO) to a file and run
+# the guard against it on stdin. Populates $status and $output via `run`.
+guard() {
+    local cmd="$1" cwd="${2:-$REPO}" f="$BATS_TEST_TMPDIR/ev.json"
+    python3 - "$cmd" "$cwd" > "$f" <<'PY'
+import json, sys
+print(json.dumps({"tool_name": "Bash",
+                  "tool_input": {"command": sys.argv[1]},
+                  "cwd": sys.argv[2]}))
+PY
+    run bash -c "'$GUARD' < '$f'"
+}
+
+@test "unarmed: a real gh pr create is denied" {
+    guard 'gh pr create --title x --body y'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+    [[ "$output" == *'gh-pr-review-loop'* ]]
+}
+
+@test "armed: gh pr create is allowed and the sentinel is consumed" {
+    touch "$GD/pr-loop-armed"
+    guard 'gh pr create --fill'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$GD/pr-loop-armed" ]
+}
+
+@test "a mention of the phrase in a grep pattern is NOT a create (allowed)" {
+    guard 'grep -n "gh pr create" skill.md'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "a mention inside an echo string is NOT a create (allowed)" {
+    guard 'echo "run gh pr create next"'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "env-prefixed and extra-spaced invocation is still detected" {
+    guard 'FOO=bar gh   pr   create --draft'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+}
+
+@test "an unrelated gh subcommand is allowed" {
+    guard 'gh pr view 42 --json state'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "a non-Bash tool is allowed" {
+    printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"/x"}}' > "$BATS_TEST_TMPDIR/ev.json"
+    run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "malformed stdin fails open (allowed)" {
+    printf 'not json' > "$BATS_TEST_TMPDIR/ev.json"
+    run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "gh pr create outside a git repo fails open (allowed)" {
+    guard 'gh pr create' '/'
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "well-formed JSON of the wrong shape (a list) fails open (allowed)" {
+    printf '%s' '[1,2,3]' > "$BATS_TEST_TMPDIR/ev.json"
+    run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "a non-string command field fails open (allowed)" {
+    printf '%s' '{"tool_name":"Bash","tool_input":{"command":["gh","pr","create"]}}' > "$BATS_TEST_TMPDIR/ev.json"
+    run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
