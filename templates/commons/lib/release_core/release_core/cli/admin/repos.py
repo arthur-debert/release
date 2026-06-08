@@ -23,6 +23,7 @@ from ...verbs import (
     list_repo_scripts,
     managed_repos,
     release_verify_fleet,
+    repos_migrate,
 )
 from .._helpers import wrap_verb
 
@@ -73,5 +74,12 @@ group.add_command(
         release_verify_fleet.main,
         name="verify",
         short_help="Hermetic pre-flight fleet sweep.",
+    )
+)
+group.add_command(
+    wrap_verb(
+        repos_migrate.main,
+        name="migrate",
+        short_help="Seed the fleet onto the pull model (one managed-sync PR per repo).",
     )
 )
