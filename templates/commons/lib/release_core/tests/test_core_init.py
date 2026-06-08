@@ -1199,7 +1199,9 @@ def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch
     assert "committed" in out
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
     assert subject.startswith("chore(release): sync managed tree from")
-    assert subject.endswith("[skip ci]")
+    # NO [skip ci]: it would make a managed-only migration PR un-mergeable under a
+    # required-status-checks ruleset (CI skipped → required checks never satisfied).
+    assert "[skip ci]" not in subject
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
     # Managed paths committed; the unrelated file is NOT.
     assert ".release/bin/check" in committed

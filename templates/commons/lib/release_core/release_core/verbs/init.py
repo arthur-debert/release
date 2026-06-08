@@ -524,9 +524,17 @@ def _commit_message(source_ref: dict[str, str]) -> str:
 def _full_commit_message(ref_label: str) -> str:
     """The deterministic auto-commit message for a full managed-tree sync. The
     managed tree is fully generated (no review needed), so SessionStart can
-    auto-commit it; [skip ci] keeps the managed-only commit from spinning CI."""
+    auto-commit it.
+
+    NO `[skip ci]`: when the managed commit is the head of a pushed branch — a
+    consumer's first-migration PR, or any feature branch where it lands last —
+    `[skip ci]` makes GitHub skip ALL workflows for that push, so a
+    required-status-checks ruleset can never be satisfied and the PR is BLOCKED
+    forever. Managed changes track release cadence (byte-identical → no commit),
+    so letting CI run on them is cheap and is the only way they reach a protected
+    branch."""
     label = ref_label or "release"
-    return f"chore(release): sync managed tree from {label} [skip ci]"
+    return f"chore(release): sync managed tree from {label}"
 
 
 def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool) -> None:

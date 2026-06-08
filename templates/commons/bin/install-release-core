@@ -219,6 +219,14 @@ echo "install-release-core: installing $source into $VENV_DIR" >&2
 # isolated from the user's pip, the system site-packages, and any project venv.
 # Reuse an existing venv (fast); recreate only if it's missing or broken (e.g. a
 # python upgrade left it dangling).
+# Fail fast on a misconfigured VENV_DIR: empty or `/` would make `rm -rf`, the
+# venv build, AND the `$VENV_DIR/bin/*` symlink glob below all act on the
+# filesystem root (e.g. symlinking /bin/* into ~/.local/bin). Validate before
+# touching anything.
+if [ -z "$VENV_DIR" ] || [ "$VENV_DIR" = "/" ]; then
+  echo "install-release-core: refusing to use invalid VENV_DIR '$VENV_DIR'" >&2
+  exit 1
+fi
 if ! "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
   rm -rf "$VENV_DIR"
   "$PYTHON" -m venv "$VENV_DIR"
@@ -236,7 +244,7 @@ fi
 # without the tool venv itself being on PATH. Skip the venv's own internals.
 mkdir -p "$BIN_DIR"
 for _s in "$VENV_DIR"/bin/*; do
-  [ -e "$_s" ] || [ -L "$_s" ] || continue  # empty glob → literal '*'; skip it
+  [ -f "$_s" ] || [ -L "$_s" ] || continue  # files + symlinks only (skip dirs / empty-glob '*')
   _name="$(basename "$_s")"
   case "$_name" in
     python*|pip*|activate*|Activate.ps1|wheel|*.py) continue ;;
