@@ -1,1 +1,0 @@
-remove the orc propagate fleet-push command — the fleet is now PULL-only (cut a release + advance-major; consumers self-update at SessionStart, seeding a pre-pull consumer = one resolver run + a managed-sync PR). Deletes orchestrator/propagate.py + the CLI wiring; rewires CLAUDE.md, the release-fleet-ops skill, docs, and bin/orc; orc keeps watch/probe/run/sessions (#416)

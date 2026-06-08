@@ -1,1 +1,0 @@
-init: drop [skip ci] from the managed auto-commit (it blocked managed-only migration PRs under a required-status-checks ruleset — CI was skipped so required checks never ran); harden the resolver's venv rm -rf guard + symlink glob (#476 bake, first real migration)
