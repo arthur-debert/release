@@ -19,12 +19,20 @@
 # Idempotent: only missing tools are installed. Batched: one call per package
 # manager. Pinned: ruff and actionlint versions are fixed (overridable via env)
 # so a new upstream release can't turn an unrelated PR red — same rationale as the
-# pip-bootstrap smoke's yq pin. Keep RUFF_VERSION in sync with setup-dev-env.sh.
+# pip-bootstrap smoke's yq pin. The pins are the SINGLE source of truth in
+# templates/commons/bin/gate-tool-versions.sh, shared with the SessionStart
+# provisioner setup-dev-env.sh so the two can't drift (release#498 follow-up).
 
 set -euo pipefail
 
-RUFF_VERSION="${RUFF_VERSION:-0.15.12}"
-ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.7}"
+# Pure-bash dir of this script (no external `dirname`/`pwd` — keeps working under
+# the hermetic `env -i` PATH the tests run it with). When invoked as a bare name
+# from within bin-internal/ (`bash provision-gate-toolset.sh`), BASH_SOURCE[0]
+# has no `/`, so `%/*` is a no-op and leaves the filename — fall back to `.`.
+_THIS_DIR="${BASH_SOURCE[0]%/*}"
+[ "$_THIS_DIR" = "${BASH_SOURCE[0]}" ] && _THIS_DIR="."
+# shellcheck source=/dev/null
+. "${_THIS_DIR}/../templates/commons/bin/gate-tool-versions.sh"
 
 log() { printf 'provision-gate-toolset: %s\n' "$1" >&2; }
 
