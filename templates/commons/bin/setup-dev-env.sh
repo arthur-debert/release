@@ -231,11 +231,11 @@ fi
 # If neither resolves (a consumer not yet seeded with the resolver), the block
 # no-ops — safe to land fleet-wide before the seeding propagate.
 #
-# Install target (so the console-scripts land on PATH): a repo `.venv` if one is
-# already present (its bin/ is symlinked onto PATH by §2 / dodot), else `--user`
-# → the user site (ensured on PATH below). `--break-system-packages` is tried
-# first for PEP-668 system pythons, with a plain `--user` fallback (older pip
-# rejects the flag), mirroring the ruff/yamllint blocks above.
+# Install target: the resolver self-isolates — it installs release_core into its
+# OWN dedicated venv (never the user pip / system site / a project venv) and
+# symlinks the console-scripts onto PATH (~/.local/bin). So there's nothing to
+# choose here: just invoke it. (It still tolerates a stale caller passing
+# --user/--break-system-packages, so an in-flight fleet migration can't break.)
 _resolver=""
 if [ -x "${REPO_ROOT}/bin/install-release-core" ]; then
   _resolver="${REPO_ROOT}/bin/install-release-core"
@@ -243,15 +243,8 @@ elif command -v install-release-core >/dev/null 2>&1; then
   _resolver="install-release-core"
 fi
 if [ -n "${_resolver}" ]; then
-  mkdir -p "${HOME}/.local/bin"
-  if [ -x .venv/bin/python ]; then
-    PYTHON="${REPO_ROOT}/.venv/bin/python" "${_resolver}" \
-      || echo "warning: install-release-core (.venv) failed — release_core not updated this session" >&2
-  else
-    "${_resolver}" --user --break-system-packages \
-      || "${_resolver}" --user \
-      || echo "warning: install-release-core (--user) failed — release_core not updated this session" >&2
-  fi
+  "${_resolver}" \
+    || echo "warning: install-release-core failed — release_core not updated this session" >&2
 fi
 
 # Cloud-only gate. Everything below is cloud-only — local sessions
