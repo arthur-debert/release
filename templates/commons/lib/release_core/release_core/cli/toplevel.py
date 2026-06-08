@@ -34,7 +34,9 @@ from ..verbs import (
     changelog,
     detect_kind,
     done_check,
+    gate,
     gh_release_issue,
+    how_to,
     init,
     release_cut,
     release_drift_check,
@@ -84,6 +86,20 @@ def attach(root: click.Group) -> None:
     )
 
     # --- flat per-project commands ----------------------------------------
+    root.add_command(
+        wrap_verb(
+            how_to.main,
+            name="how-to",
+            short_help="Print the task playbook for THIS repo (Kind-aware).",
+        )
+    )
+    root.add_command(
+        wrap_verb(
+            gate.main,
+            name="gate",
+            short_help="Run THE pre-commit quality gate over this repo.",
+        )
+    )
     root.add_command(
         wrap_verb(
             detect_kind.main,
