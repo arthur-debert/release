@@ -163,7 +163,7 @@ release-core
     repos verify` (hermetic pre-flight) before advancing. Consumers self-update
     at their next SessionStart — `install-release-core` pulls the wheel and a
     bare `release-core init` re-materializes the whole managed tree — so there
-    is NO push step. (Seeding a brand-new consumer is a one-time
-    `RELEASE_HOME= bash bin/install-release-core` run in that repo, then open the
-    resulting managed-sync PR — one repo at a time.) For the full doctrine and
+    is NO push step. (Seeding a pre-pull consumer is a one-time
+    `bash bin/install-release-core` run in that repo, then open the resulting
+    managed-sync PR — one repo at a time.) For the full doctrine and
     the upstream-vs-consumer routing rule, see the `release-fleet-ops` skill.

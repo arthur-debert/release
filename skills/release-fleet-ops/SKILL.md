@@ -78,12 +78,15 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   `release-core admin release advance-major`. Its clones double as your
   reproduction sandbox. (Flat alias `release-verify-fleet` still works.)
 - **Migrate/seed a consumer (replaces `orc propagate`, which was removed):** in
-  the target repo on a fresh branch, run the resolver once —
-  `RELEASE_HOME= bash bin/install-release-core` (or release's
-  `bin/install-release-core` if the consumer's is pre-fix) — it pulls the latest
-  wheel and a bare `init` full-materializes + auto-commits the managed tree. Then
-  push and open the managed-sync PR; its CI is the gate. One repo at a time;
-  after the first seed the consumer self-updates natively. No fleet-wide push.
+  the target repo on a fresh branch, run the resolver once — `bash
+  bin/install-release-core` (use release's own `bin/install-release-core` if the
+  consumer's is pre-fix and can't self-bootstrap). It pulls the latest wheel and
+  a bare `init` full-materializes + auto-commits the managed tree. Then push and
+  open the managed-sync PR; its CI is the gate. One repo at a time; after the
+  first seed the consumer self-updates natively. No fleet-wide push.
+  (Release-dev note: if `RELEASE_HOME` is set in *your* env, prefix the run with
+  `env -u RELEASE_HOME` so `init` materializes from the published wheel bundle —
+  what the consumer actually pulls — not your local release checkout.)
 - `orc probe --yes <clone> "<eval prompt>"` — spin ONE fresh agent to evaluate a
   repo's state and report. Use for a perspective check, not as a per-repo fixer.
 - `release-core admin release advance-major` — fast-forward the floating major to
