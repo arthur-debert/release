@@ -13,6 +13,10 @@ on:
       - "templates/commons/lib/release_core/**"
       - "bin-internal/roll-changelog.sh"
       - "bin-internal/check-changelog-fragments.sh"
+      # The changelog-check action installs release_core via this path — re-run
+      # the smoke when the install definition changes, not just the action.
+      - "bin-internal/install-release-core-pkg.sh"
+      - "templates/commons/bin/install-release-core"
       - "tests/changelog/**"
       - "tests/changelog-check-fixtures/**"
       - ".github/actions/changelog-check/**"
@@ -22,6 +26,10 @@ on:
       - "templates/commons/lib/release_core/**"
       - "bin-internal/roll-changelog.sh"
       - "bin-internal/check-changelog-fragments.sh"
+      # The changelog-check action installs release_core via this path — re-run
+      # the smoke when the install definition changes, not just the action.
+      - "bin-internal/install-release-core-pkg.sh"
+      - "templates/commons/bin/install-release-core"
       - "tests/changelog/**"
       - "tests/changelog-check-fixtures/**"
       - ".github/actions/changelog-check/**"
