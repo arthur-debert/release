@@ -96,9 +96,16 @@ def _node_run(pm: str, script: str, extra: list[str] | None = None) -> Cmd:
     non-interactive ``release-core test-unit`` forever (the tauri/electron
     ``check-tests`` wrappers special-cased exactly this)."""
     extra = extra or []
-    # npm only forwards args after an explicit `--`; pnpm/yarn forward directly
-    # but tolerate a `--` too, so use it uniformly when there are args.
-    argv = [pm, "run", script, "--", *extra] if extra else [pm, "run", script]
+    # Only npm needs an explicit `--` to forward args to the underlying tool.
+    # pnpm/yarn forward directly, and a literal `--` LEAKS into the tool's argv
+    # (e.g. `vitest -- --run` makes `--run` a positional filter → vitest stays in
+    # watch mode and hangs). Mirrors electron-app/bin/build's pm branching.
+    if not extra:
+        argv = [pm, "run", script]
+    elif pm == "npm":
+        argv = [pm, "run", script, "--", *extra]
+    else:
+        argv = [pm, "run", script, *extra]
     display = " ".join([pm, "run", script, *extra])
     return Cmd(argv=argv, display=display, label="node")
 

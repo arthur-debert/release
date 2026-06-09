@@ -49,6 +49,20 @@ def test_unit_surfaces_real_test_unit_not_bare_npm_test(tmp_path):
     assert [c.display for c in e2e] == ["npm run test:e2e"]
 
 
+def test_unit_pnpm_vitest_no_dashdash_leak(tmp_path):
+    # pnpm/yarn forward args directly; a literal `--` leaks into vitest's argv
+    # (`vitest -- --run` → --run becomes a positional → watch mode hangs). The
+    # --run flag must reach vitest cleanly, without the separator.
+    _pkg(tmp_path, {"test:unit": "vitest"}, pm="pnpm")
+    unit = rc.unit_commands(str(tmp_path))
+    assert unit[0].argv == ["pnpm", "run", "test:unit", "--run"]  # no `--`
+    # npm, by contrast, DOES need the separator.
+    (tmp_path / "pnpm-lock.yaml").unlink()
+    (tmp_path / "package-lock.json").write_text("")
+    npm = rc.unit_commands(str(tmp_path))
+    assert npm[0].argv == ["npm", "run", "test:unit", "--", "--run"]
+
+
 def test_unit_falls_back_to_bare_test_script(tmp_path):
     # phos-app's shape: a plain `test` (vitest run) + test:e2e.
     _pkg(tmp_path, {"test": "vitest run", "test:e2e": "playwright test"}, pm="pnpm")
