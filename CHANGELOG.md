@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 2.12.3 - 2026-06-09
+
+- fetch-deps: force UTF-8 stdout/stderr + electron-app Windows shim invokes python (not bash) — fixes win32 node builds
+
 ## 2.12.2 - 2026-06-09
 
 - how-to/test-unit: surface a CI caller check-command: as the unit suite when no manifest test exists (#507 dogfood F1); changelog add now applies the - bullet convention (F4)
