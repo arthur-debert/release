@@ -105,6 +105,44 @@ def test_unit_make_test_target(tmp_path):
     assert [c.display for c in unit] == ["make test"]
 
 
+def test_unit_nvim_app_bin_test_all_wins(tmp_path):
+    # The canonical fleet nvim runner is app-bin/test-all (NOT `make test`).
+    # It must win over a Makefile target when both exist.
+    appbin = tmp_path / "app-bin"
+    appbin.mkdir()
+    runner = appbin / "test-all"
+    runner.write_text("#!/usr/bin/env bash\n")
+    runner.chmod(0o755)
+    (tmp_path / "Makefile").write_text("test:\n\tbusted tests\n")
+    unit = rc.unit_commands(str(tmp_path))
+    assert [c.display for c in unit] == ["app-bin/test-all"]
+    assert unit[0].label == "nvim"
+
+
+def test_unit_app_bin_test_all_must_be_executable(tmp_path):
+    # A non-executable app-bin/test-all is not a runnable entry — fall through.
+    appbin = tmp_path / "app-bin"
+    appbin.mkdir()
+    (appbin / "test-all").write_text("#!/usr/bin/env bash\n")  # not chmod +x
+    assert rc.unit_commands(str(tmp_path)) == []
+
+
+def test_unit_nvim_busted_fallback_gated_to_layout(tmp_path):
+    # An nvim layout (lua/ dir) + tests/ → busted tests (the wrapper's fallback).
+    (tmp_path / "lua").mkdir()
+    (tmp_path / "tests").mkdir()
+    unit = rc.unit_commands(str(tmp_path))
+    assert [c.display for c in unit] == ["busted tests"]
+    assert unit[0].label == "nvim"
+
+
+def test_unit_generic_tests_dir_is_not_busted(tmp_path):
+    # A bare tests/ dir WITHOUT an nvim layout must NOT be guessed as busted —
+    # that would misclassify any repo with a tests/ folder.
+    (tmp_path / "tests").mkdir()
+    assert rc.unit_commands(str(tmp_path)) == []
+
+
 # --- build: single app-root command ---------------------------------------
 
 

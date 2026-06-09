@@ -148,8 +148,8 @@ def _cargo_test(cwd: str) -> Cmd:
 
 
 def _make_test_target(root: str) -> bool:
-    """True iff the ``Makefile`` declares a ``test:`` target (the nvim-plugin
-    path, but valid for any repo carrying one)."""
+    """True iff the ``Makefile`` declares a ``test:`` target (a generic
+    convention, valid for any repo carrying one)."""
     path = os.path.join(root, "Makefile")
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -159,6 +159,37 @@ def _make_test_target(root: str) -> bool:
     except OSError:
         return False
     return False
+
+
+# nvim-plugin layout markers — a `tests/` dir only means "run busted" when this
+# is actually a Neovim plugin, not a generic repo that happens to have tests/.
+_NVIM_LAYOUT_DIRS = ("lua", "plugin", "ftplugin", "ftdetect", "autoload", "queries")
+
+
+def _is_nvim_layout(root: str) -> bool:
+    return any(os.path.isdir(os.path.join(root, d)) for d in _NVIM_LAYOUT_DIRS)
+
+
+def _umbrella_test(root: str) -> Cmd | None:
+    """The script-runner umbrella test entry. ``None`` when nothing applies.
+
+    For nvim plugins this mirrors ``templates/nvim-plugin/bin/check``'s real
+    precedence — ``app-bin/test-all`` (the canonical fleet runner, bats-driven
+    Neovim) → ``busted tests/``. The busted path is gated to an actual nvim
+    layout (a ``lua``/``plugin``/… dir) so a generic ``tests/`` dir in some other
+    Kind isn't misclassified as a busted suite. A ``Makefile`` ``test:`` target
+    is an explicitly GENERIC fallback (not part of the nvim wrapper), last.
+
+    (Earlier this guessed a bare ``make test`` for nvim — copied from a stale
+    hint that no fleet plugin uses.)"""
+    test_all = os.path.join(root, "app-bin", "test-all")
+    if os.path.isfile(test_all) and os.access(test_all, os.X_OK):
+        return Cmd(argv=["app-bin/test-all"], display="app-bin/test-all", label="nvim")
+    if _is_nvim_layout(root) and os.path.isdir(os.path.join(root, "tests")):
+        return Cmd(argv=["busted", "tests"], display="busted tests", label="nvim")
+    if _make_test_target(root):
+        return Cmd(argv=["make", "test"], display="make test", label="make")
+    return None
 
 
 def _mkdocs_config(root: str) -> str | None:
@@ -188,8 +219,9 @@ def unit_commands(root: str) -> list[Cmd]:
             cmds.append(_node_run(pm, unit, _vitest_extra(scripts[unit])))
     for d in _rust_dirs(root):
         cmds.append(_cargo_test(d))
-    if _make_test_target(root):
-        cmds.append(Cmd(argv=["make", "test"], display="make test", label="make"))
+    umbrella = _umbrella_test(root)
+    if umbrella:
+        cmds.append(umbrella)
     return cmds
 
 

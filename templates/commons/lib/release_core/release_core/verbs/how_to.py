@@ -86,7 +86,7 @@ _KIND_HINT: dict[str, dict[str, str]] = {
         "run": "dev / tauri dev script",
     },
     "nvim-plugin": {
-        "test": "make test (busted/plenary)",
+        "test": "app-bin/test-all (or busted tests/)",
         "build": "(none — interpreted)",
         "run": "(open Neovim with the plugin on the runtimepath)",
     },
