@@ -75,7 +75,7 @@ on:
         default: 'test-results/native-e2e/'
     secrets:
       gh-token:
-        description: 'PAT able to read the private native git dep (e.g. phos-core) + the private wasm release. Falls back to GITHUB_TOKEN.'
+        description: 'PAT able to read the private native git dep (e.g. phos-core) + the private wasm release. REQUIRED when either is a private repo OTHER than the caller: the GITHUB_TOKEN fallback only reads the calling repo, so it will NOT fetch a private cross-repo sibling. Falls back to GITHUB_TOKEN only for public/same-repo deps.'
         required: false
 
 permissions:
