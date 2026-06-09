@@ -157,7 +157,7 @@ state file.
 Authoritative mechanism:
 [ADR-0001](../adr/0001-release-sync-build-dir-with-symlinks.md) (build dir +
 symlinks), [ADR-0002](../adr/0002-provenance-marker.md) (provenance marker),
-and `docs/distribution.lex`.
+and the distribution section of `docs/tooling.lex`.
 
 ## Initial Capabilities (locked, take-iii)
 

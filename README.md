@@ -438,7 +438,7 @@ environment. It seeds:
 - `~/.claude/skills/*` — user-level skills cloned from this repo for
   the maintainer machine/session. This is NOT the consumer
   distribution path; consumers get the official set synced into their
-  own `.claude/skills/` by `release-sync` (see docs/skills.lex).
+  own `.claude/skills/` by `release-sync` (see docs/harness.lex).
 - `~/.claude/CLAUDE.md` — user-level instructions from
   [`env/CLAUDE.md`](env/CLAUDE.md).
 - `~/release` — a shallow blobless clone of this repo, pinned to
@@ -546,11 +546,12 @@ skills/               canonical home for Claude Code skills. release
                       owns the infra + dev-cycle set and SYNCS it into
                       every consumer (symlinks into .release/);
                       consumers own only their application-domain
-                      skills. Catalog + policy: docs/skills.lex
+                      skills. Catalog + policy: docs/harness.lex
 docs/
-  per-category/       input shapes per Stack
-  per-component/      adoption guides per Component
-  per-stack/          adoption guides per Stack
+  *.lex               the four narrative docs (README, dev-cycle,
+                      tooling, harness); per-Kind how-to is now
+                      `release-core how-to <kind>` output, not a file
+  adr/                architecture decision records
   references/         design notes
 tests/
   cloud-env-check/    local Docker harness approximating cloud Ubuntu
@@ -563,9 +564,10 @@ goal — this is single-developer infrastructure.
 
 ## See also
 
-- [Per-category input shapes](docs/per-category/)
-- [Per-component adoption guides](docs/per-component/)
-- [Per-stack adoption guides](docs/per-stack/)
+- Per-Kind build/test/run shapes: `release-core how-to <kind>` (no
+  longer a hand-maintained doc — release#501)
+- [Tooling, gate, distribution, workflows](docs/tooling.lex)
+- [Agent harness: bootstrap, orientation, skills](docs/harness.lex)
 - [Breaking changes log](docs/breaking-changes.md)
 - [Artifacts schema](docs/artifacts-schema.md)
 - [Lex release cascade](docs/lex-release-cascade.md)

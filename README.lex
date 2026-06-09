@@ -2,7 +2,7 @@ Release
 
 Release is the infrastructure manager for personal projects at arthur-debert and lex-fmt, some 12 projects comprised of 20 repos. It standardizes infrastructure and agentic workflows from beginning to end.
 
-For domain vocabulary see CONTEXT.md. For project status and roadmap see docs/status.lex.
+For domain vocabulary see CONTEXT.md. For project status and roadmap see the roadmap in docs/tooling.lex.
 
 1. Offerings[1]
 

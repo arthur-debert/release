@@ -14,9 +14,9 @@
 # The fix is to scope these hooks to src-tauri/: glob matches files
 # under src-tauri/**, and the `run` block `cd`s into src-tauri/ before
 # invoking cargo. Same tool, same flags as rust-quality — just rooted
-# under the Tauri subproject. See docs/per-stack/tauri-ci.md for why
-# we don't ship a "tauri-rust-quality" Component (Stack-level
-# fragment is the right home for one-off layout variations).
+# under the Tauri subproject. We don't ship a "tauri-rust-quality"
+# Capability for this: a Kind-level fragment is the right home for a
+# one-off layout variation like the src-tauri/ subdirectory.
 
 pre-commit:
   commands:

@@ -57,7 +57,7 @@ name: Rust CI
 #         # extra-targets: 'wasm32-wasip2'   # for zed-lex-style projects
 #         # pre-test: scripts/prep-fixtures  # if you need a build hook
 #
-# See docs/per-stack/rust-ci.md for the full input reference.
+# Run `release-core how-to rust-cli` for the build/test reference.
 
 on:
   workflow_call:

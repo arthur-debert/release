@@ -526,7 +526,8 @@ without `wasm-package` see byte-identical behavior.
   `wasm-pack-target` (default `bundler`), `wasm-npm-scope`.
 - New optional secret: `NPM_TOKEN`.
 - Two new jobs (`build-wasm`, `publish-npm`) that activate when
-  `wasm-package` is set. See `docs/per-category/rust-cli.md` §WASM.
+  `wasm-package` is set. See the `rust-cli.yml` input reference (`release-core
+  how-to rust-cli`) for the WASM inputs.
 - Replaces a hand-rolled second workflow file pattern (`release-wasm.yml`)
   that was the lex-fmt/lex workaround prior to this release. That
   pattern reinstalled Rust, used a separate Cargo cache, and recompiled
