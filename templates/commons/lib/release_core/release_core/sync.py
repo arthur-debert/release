@@ -168,13 +168,17 @@ class BundleSource(Source):
 MANAGED_MARKER = "# Managed by release-sync — do not edit. Regenerate via release-sync."
 SOURCE_MARKER = ".release-sync-source"
 GITIGNORE_FILE = ".gitignore"
+# WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
+# and recomposed every session/CI from the pinned wheel, never committed. A
+# `.gitignore` of `*` inside the dir makes it self-ignoring: git sees nothing
+# under `.release/` (including this file), so drift of the build dir is
+# impossible by construction (ADR-0005 supersedes the committed-tree model of
+# ADR-0001/0002). This subsumes the old `__pycache__`-only ignore (release#450).
 GITIGNORE_BODY = (
     f"{MANAGED_MARKER}\n"
-    "# Keeps host/Python-version-specific bytecode out of the committed .release/\n"
-    "# even if a local regeneration writes it on disk (release#450).\n"
-    "__pycache__/\n"
-    "*.pyc\n"
-    "*.pyo\n"
+    "# This .release/ build dir is ephemeral: composed on demand from the pinned\n"
+    "# release_core wheel (release-core init) and never committed (release#521).\n"
+    "*\n"
 )
 
 CLAUDE_FILE = "CLAUDE.md"
@@ -538,9 +542,10 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
     marker = os.path.join(tmp_release, SOURCE_MARKER)
     with open(marker, "w", encoding="utf-8") as fh:
         fh.write(
-            "# release-sync provenance — the arthur-debert/release commit that\n"
-            "# generated this .release/. Informational, not operational state (ADR-0002).\n"
-            "# Regenerated on every sync. release-drift-check reads the SHA below.\n"
+            "# release provenance — the arthur-debert/release commit that generated\n"
+            "# this .release/. Purely informational (ADR-0002). Since WS4 (release#521)\n"
+            "# the whole .release/ tree is gitignored + recomposed every session, so\n"
+            "# this marker is transient and has no reader — drift-check was retired.\n"
             f"{ref_sha}\n"
         )
 

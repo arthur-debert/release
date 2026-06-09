@@ -395,15 +395,18 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
 
 
 def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> list[str]:
-    """The exact, repo-relative managed pathspecs a full sync produced or removed
-    — the ONLY paths --commit stages (never `git add -A`).
+    """The exact, repo-relative managed MIRROR pathspecs a full sync produced or
+    removed — the ONLY paths --commit stages (never `git add -A`).
 
-    Covers: the whole .release/ build dir (one pathspec — git expands it to every
-    materialized file and prunes removed ones); each symlink created or removed;
-    each real-file copy written or removed; and CLAUDE.md when the orientation
-    block was created/injected/refreshed. Deterministic order, de-duplicated.
+    Covers: each symlink created or removed; each real-file copy written or
+    removed; and CLAUDE.md when the orientation block was created/injected/
+    refreshed. Deterministic order, de-duplicated.
+
+    Notably NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
+    ephemeral, never committed. A previously-committed `.release/` is untracked
+    separately in :func:`_auto_commit` (the one-time consumer migration).
     """
-    paths: list[str] = [".release"]
+    paths: list[str] = []
     for s in mirror.symlinks_to_create:
         link, _, _ = s.partition(" -> ")
         paths.append(link)
@@ -559,17 +562,26 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
         return
 
     try:
-        # force=True: managed paths are release-owned and must be tracked even if
-        # the consumer's .gitignore covers one (e.g. `.claude/` shadowing the
-        # managed `.claude/skills/`) — otherwise the migration commit silently
-        # fails on the ignored path.
+        # WS4 migration (release#521): untrack a previously-committed `.release/`.
+        # The build dir is now gitignored + ephemeral, so any tracked `.release/**`
+        # must leave the index (working-tree files stay — --cached). No-op via
+        # --ignore-unmatch on a fresh consumer / steady state, so this is safe to
+        # run unconditionally.
+        gh.git_rm_cached([".release"], cwd=repo_root)
+        # force=True: managed MIRROR paths are release-owned and must be tracked
+        # even if the consumer's .gitignore covers one (e.g. `.claude/` shadowing
+        # the managed `.claude/skills/`) — otherwise the migration commit silently
+        # fails on the ignored path. NEVER `.release/`: it is gitignored on purpose
+        # and is NOT in `written`, so force-add can't resurrect it.
         gh.git_add(written, cwd=repo_root, force=True)
-        # Commit ONLY the managed pathspecs. A pathspec-scoped commit ignores any
-        # other staged changes, so a user's in-progress staging is never folded
-        # in. If staging produced nothing to commit (e.g. the managed bytes were
-        # already identical in the index/HEAD), git commit exits non-zero — caught
-        # below as a benign skip, not a failure.
-        gh.git_commit_paths(written, message, cwd=repo_root)
+        # Commit the managed mirror pathspecs PLUS `.release` — the latter carries
+        # only the staged index-removals from the rm --cached above (force-add
+        # never re-added it), so this commits the untracking too. A pathspec-scoped
+        # commit ignores any other staged changes, so a user's in-progress staging
+        # is never folded in. If nothing was staged for any pathspec (managed bytes
+        # already identical, nothing to untrack), git commit exits non-zero —
+        # caught below as a benign skip, not a failure.
+        gh.git_commit_paths([*written, ".release"], message, cwd=repo_root)
     except Exception as exc:  # ProcError or anything git surfaces
         print(
             f"release-core init: --commit skipped (could not commit managed config: {exc})",
@@ -656,6 +668,11 @@ def _main_full(
         )
         return 0
 
+    # WS4 one-time migration (release#521): a previously-committed `.release/` must
+    # be untracked even when the composed tree is byte-identical (changes == 0) —
+    # detect it independently so the migration commit still fires.
+    release_was_tracked = gh.git_path_tracked(".release", cwd=repo_root)
+
     if changes:
         suffix = f", {len(conflicts)} conflict(s)" if conflicts else ""
         print(
@@ -664,14 +681,17 @@ def _main_full(
         )
     elif conflicts:
         print(f"summary: 0 changes but {len(conflicts)} unresolved conflict(s) — see stderr.")
+    elif release_was_tracked:
+        print("summary: managed tree already current; untracking committed .release/ (WS4).")
     else:
         print("summary: managed tree already current (no changes).")
 
-    # AUTO-COMMIT ON CHANGE: commit only the managed paths, only when something
-    # changed. --no-commit skips the commit (for tests/inspection). Conservative
-    # and never-fail (see _auto_commit). On any branch — the managed tree is
-    # generated, needs no review.
-    if changes and not no_commit:
+    # AUTO-COMMIT: commit the managed mirror paths when something changed, OR when
+    # a previously-committed `.release/` still needs untracking (the WS4 migration,
+    # which is commit-worthy even at changes == 0). --no-commit skips the commit
+    # (for tests/inspection). Conservative and never-fail (see _auto_commit). On
+    # any branch — the managed tree is generated, needs no review.
+    if (changes or release_was_tracked) and not no_commit:
         _auto_commit(repo_root, managed, _full_commit_message(ref_label), push=push)
     return 0
 

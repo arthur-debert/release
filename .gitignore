@@ -34,3 +34,10 @@ dev_shell/
 
 # Staged template bundle (build artifact for the self-contained release_core wheel)
 templates/commons/lib/release_core/release_core/_bundled_templates/
+
+# Ephemeral composed build dir (WS4, release#521): `.release/` is gitignored and
+# recomposed on demand from the pinned wheel (release-core init), never committed.
+# In consumers a self-ignoring `.release/.gitignore` (`*`) handles this; release
+# is the source repo and doesn't always materialize the tree, so ignore it here
+# explicitly too.
+.release/
