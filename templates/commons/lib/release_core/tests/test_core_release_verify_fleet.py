@@ -73,7 +73,10 @@ class _Driver:
         if cmd[:2] == ["release-core", "init"]:
             cwd = kw.get("cwd")
             return _cp(self.sync_rc.get(cwd, 0), stdout="sync-out\n", stderr="sync-err\n")
-        if tool == "lefthook":
+        if cmd[:2] == ["release-core", "gate"]:
+            # WS3 (release#524): the gate runs via `release-core gate` (it points
+            # lefthook at the materialized .release/lefthook.yml), not a bare
+            # `lefthook run` against a now-absent root config.
             cwd = kw.get("cwd")
             return _cp(self.gate_rc.get(cwd, 0), stdout="gate-out\n", stderr="gate-err\n")
         raise AssertionError(f"unexpected proc.run: {cmd}")

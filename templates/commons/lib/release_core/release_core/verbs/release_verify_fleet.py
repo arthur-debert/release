@@ -6,9 +6,11 @@ managed consumer, still passes the canonical lint gate. Run this BEFORE
 tree instead of discovering it one consumer at a time after @v1 moves.
 
 It is HERMETIC: it clones the fleet into a throwaway root (NOT your ~/h
-checkouts), syncs each from the candidate ref, and runs
-`lefthook run pre-commit --all-files`. It never mutates your working
-repos. Re-runs reuse the clones (pass --refresh to update them).
+checkouts), syncs each from the candidate ref, and runs the canonical gate via
+`release-core gate` (which points lefthook at the materialized
+`.release/lefthook.yml` — there is no tracked root lefthook.yml since WS3
+release#524). It never mutates your working repos. Re-runs reuse the clones
+(pass --refresh to update them).
 
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.
@@ -254,10 +256,18 @@ def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
 def _run_gate(abspath: str) -> bool:
     """Run the canonical lint gate in the consumer clone.
 
+    Invokes ``release-core gate`` (NOT a bare ``lefthook run``): since WS3
+    (release#524) the consumer no longer tracks a root lefthook.yml for lefthook
+    to discover — the gate definition lives in the just-materialized
+    ``.release/lefthook.yml``, and ``release-core gate`` is what points lefthook at
+    it (LEFTHOOK_CONFIG) the same way the local hook + CI do. ``release-core`` is a
+    required preflight tool (the dependency guard in ``main()`` exits 2 if it is
+    not on PATH), so it resolves here.
+
     Combined stdout+stderr is written to <abspath>/.verify-gate.log. Returns
     True on a zero exit (the gate passed / skipped missing tools cleanly)."""
     result = proc.run(
-        ["lefthook", "run", "pre-commit", "--all-files"],
+        ["release-core", "gate"],
         cwd=abspath,
         check=False,
     )
