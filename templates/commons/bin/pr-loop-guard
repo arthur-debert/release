@@ -35,6 +35,31 @@ import sys
 SENTINEL_NAME = "pr-loop-armed"
 
 
+def cd_targets(command):
+    """Leading ``cd <dir>`` targets in the command, so the guard can resolve the
+    repo the command actually operates IN — not just the hook payload's cwd.
+
+    Why this matters (release#507 dogfood, hit 5/5 by subagents): the PreToolUse
+    payload ``cwd`` is the session's working dir (e.g. the agent's home repo),
+    which the Bash tool resets to between calls. An agent opening a PR in another
+    repo runs ``cd <repo> && gh pr create``, so the sentinel it armed lives in
+    ``<repo>/.git`` — but the guard previously only checked the payload cwd, so
+    it kept denying. We collect every ``cd`` target token and check the sentinel
+    in each candidate repo too."""
+    try:
+        tokens = shlex.split(command, comments=False, posix=True)
+    except ValueError:
+        tokens = command.split()
+    targets = []
+    for i in range(len(tokens) - 1):
+        if tokens[i] == "cd":
+            tgt = tokens[i + 1]
+            # skip option-like tokens (`cd -`, `cd --`) — not a repo path
+            if tgt and not tgt.startswith("-"):
+                targets.append(tgt)
+    return targets
+
+
 def invokes_pr_create(command):
     """True only when the command actually INVOKES `gh pr create` — not when it
     merely mentions the phrase inside a quoted string (a grep pattern, an echo,
@@ -106,24 +131,50 @@ def main():
     cwd = data.get("cwd")
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
-    gd = git_dir(cwd)
-    if gd is None:
-        allow()  # not a git repo here — gh pr create wouldn't work anyway
 
-    sentinel = os.path.join(gd, SENTINEL_NAME)
-    if os.path.exists(sentinel):
-        with contextlib.suppress(OSError):
-            os.unlink(sentinel)  # one-shot: consume the arm
-        allow()
+    # Candidate repos: the payload cwd PLUS any `cd <dir>` the command changes
+    # into before `gh pr create` (resolved relative to the payload cwd, with ~
+    # expansion). The sentinel armed in ANY of them counts — so a subagent that
+    # armed the target repo's .git is honoured even though the payload cwd is the
+    # session root.
+    candidate_cwds = [cwd]
+    for tgt in cd_targets(command):
+        expanded = os.path.expanduser(tgt)
+        if not os.path.isabs(expanded):
+            expanded = os.path.join(cwd, expanded)
+        candidate_cwds.append(expanded)
 
+    # Collect each candidate's sentinel path; allow (consuming) on the first that
+    # exists. The absolute paths feed the deny reason so the agent arms the right
+    # one instead of guessing under the cwd-reset model.
+    checked = []
+    for cand in candidate_cwds:
+        gd = git_dir(cand)
+        if gd is None:
+            continue
+        sentinel = os.path.join(gd, SENTINEL_NAME)
+        if sentinel in checked:
+            continue
+        checked.append(sentinel)
+        if os.path.exists(sentinel):
+            with contextlib.suppress(OSError):
+                os.unlink(sentinel)  # one-shot: consume the arm
+            allow()
+
+    if not checked:
+        allow()  # no git repo among the candidates — gh pr create wouldn't work
+
+    arm_lines = "\n".join(f"    touch {os.path.join(p)}" for p in checked)
     deny(
         "PRs in this repo are driven through the `gh-pr-review-loop` skill "
         "(request Copilot review → wait → triage comments → resolve threads as "
         "you go → stop at ready), NOT by hand-composing gh-copilot-* / "
         "gh-pr-checks-wait. Invoke the gh-pr-review-loop skill before opening "
         "the PR.\n\n"
-        "If you are ALREADY running the loop, arm it once and retry:\n"
-        '    touch "$(git rev-parse --git-dir)/' + SENTINEL_NAME + '"'
+        "If you are ALREADY running the loop, arm it once (a SEPARATE step, "
+        "before the gh pr create call) and retry. Arm any of these exact paths "
+        "(the cwd is reset between calls, so don't rely on `git rev-parse` in the "
+        "same line):\n" + arm_lines
     )
 
 

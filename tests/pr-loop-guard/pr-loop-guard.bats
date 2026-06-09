@@ -43,6 +43,41 @@ PY
     [ ! -e "$GD/pr-loop-armed" ]
 }
 
+@test "armed in the cd-TARGET repo (payload cwd elsewhere) is allowed + consumed" {
+    # The 5/5 subagent bug: payload cwd = session root, command cd's into the PR
+    # repo and arms THAT .git. The guard must honour the cd target's sentinel.
+    TARGET="$BATS_TEST_TMPDIR/target"
+    mkdir -p "$TARGET"
+    git -C "$TARGET" init -q
+    TGD="$(git -C "$TARGET" rev-parse --git-dir)"
+    case "$TGD" in /*) : ;; *) TGD="$TARGET/$TGD" ;; esac
+    touch "$TGD/pr-loop-armed"
+    guard "cd $TARGET && gh pr create --fill" "$REPO"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$TGD/pr-loop-armed" ]
+}
+
+@test "a relative cd target resolves against the payload cwd" {
+    parent="$(dirname "$REPO")"
+    name="$(basename "$REPO")"
+    touch "$GD/pr-loop-armed"
+    guard "cd $name && gh pr create --fill" "$parent"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$GD/pr-loop-armed" ]
+}
+
+@test "deny reason lists the absolute sentinel paths checked (payload + cd target)" {
+    TARGET="$BATS_TEST_TMPDIR/target"
+    mkdir -p "$TARGET"
+    git -C "$TARGET" init -q
+    guard "cd $TARGET && gh pr create --fill" "$REPO"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+    [[ "$output" == *"$TARGET"*"pr-loop-armed"* ]]
+}
+
 @test "a mention of the phrase in a grep pattern is NOT a create (allowed)" {
     guard 'grep -n "gh pr create" skill.md'
     [ "$status" -eq 0 ]
