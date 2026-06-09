@@ -120,7 +120,7 @@ jobs:
         run: bash "${{ inputs.pre-check }}"
 
       - name: Set up Python (gate linters ruff/yamllint)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Arm the gate toolset

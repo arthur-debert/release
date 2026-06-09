@@ -101,7 +101,7 @@ jobs:
       # package + its scripts here, not a config re-materialization. --major v2
       # is the v3-safety pin (this workflow ships in the v2 line).
       - name: Set up Python for release_core console-scripts
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Install release_core console-scripts (semver, changelog)
@@ -328,7 +328,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Upload release notes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-notes
           path: release-notes.md
@@ -348,7 +348,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .
@@ -385,7 +385,7 @@ jobs:
       # regex `^release_core-.*\.whl$`.
       - name: Set up Python for wheel build
         if: hashFiles('templates/commons/lib/release_core/pyproject.toml') != ''
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 

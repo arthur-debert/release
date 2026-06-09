@@ -263,7 +263,7 @@ jobs:
       release-sha: ${{ steps.prep.outputs.release-sha }}
       prerelease: ${{ steps.prep.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -280,11 +280,11 @@ jobs:
       # first missing linter (markdownlint) the moment a consumer's synced
       # gate reaches it. Mirrors rust-ci.yml's arming block.
       - name: Set up Node (gate linters lefthook/prettier/markdownlint)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
       - name: Set up Python (gate linters ruff/yamllint)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Arm the gate toolset
@@ -305,7 +305,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release notes from prepare job
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
 
@@ -329,7 +329,7 @@ jobs:
         include: ${{ fromJSON(needs.setup-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
@@ -507,7 +507,7 @@ jobs:
           done
 
       - name: Upload binaries as workflow artifacts (for brew job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bins-${{ matrix.target }}
           path: |
@@ -538,7 +538,7 @@ jobs:
     if: always() && !failure() && !cancelled() && inputs.publish-crates
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
@@ -572,7 +572,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: steps.guard.outputs.skip != 'true'
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
@@ -583,7 +583,7 @@ jobs:
 
       - name: Download tarballs
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: bins-*
           merge-multiple: true
@@ -725,7 +725,7 @@ jobs:
       matrix:
         pkg: ${{ fromJSON(needs.wasm-setup.outputs.packages) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
@@ -793,7 +793,7 @@ jobs:
           gh release upload "v$VERSION" "${WASM_PACKAGE}-wasm.tar.gz" --clobber
 
       - name: Upload wasm pkg as workflow artifact (consumed by publish-npm)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           # Per-package artifact name. publish-npm's matrix downloads
           # by the same name so each member gets its own pkg/ tree.
@@ -828,7 +828,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         if: steps.guard.outputs.skip != 'true'
         with:
           node-version: '20'
@@ -836,7 +836,7 @@ jobs:
 
       - name: Download wasm pkg
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: wasm-pkg-${{ matrix.pkg }}
           path: pkg

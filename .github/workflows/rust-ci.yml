@@ -182,11 +182,11 @@ jobs:
         run: bash "${{ inputs.pre-test }}"
 
       - name: Set up Node (gate linters lefthook/prettier/markdownlint)
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
       - name: Set up Python (gate linters ruff/yamllint)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Arm the gate toolset
@@ -206,7 +206,7 @@ jobs:
 
       - name: Upload binary
         if: inputs.binary-name != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ inputs.binary-name }}-linux
           path: target/release/${{ inputs.binary-name }}
@@ -243,7 +243,7 @@ jobs:
 
       - name: Download binary
         if: inputs.binary-name != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.binary-name }}-linux
 

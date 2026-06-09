@@ -31,11 +31,11 @@ jobs:
     # here. If you find yourself writing the check-list a second time, stop.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '20'
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Arm the gate toolset
@@ -57,8 +57,8 @@ jobs:
     # from release_core's pyproject so the list is never a second definition.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Install pytest + release_core runtime deps
@@ -77,7 +77,7 @@ jobs:
     # Structural invariants that have bitten us before.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: bin/fetch-deps must be a real file, not a symlink
         # Consumers + electron-app.yml fetch it via raw.githubusercontent.com,
         # which serves a symlink blob as its target string rather than the

@@ -231,7 +231,7 @@ jobs:
         run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.pm.outputs.cache }}
@@ -502,7 +502,7 @@ jobs:
       # timeout (warning, not failure) still publishes the signed DMG.
       - name: Upload mac artifacts
         if: always() && !cancelled()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: electron-app-mac-${{ matrix.arch }}
           path: |
@@ -553,7 +553,7 @@ jobs:
         run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.pm.outputs.cache }}
@@ -607,7 +607,7 @@ jobs:
       # review on #65: warn would let the release job collect a
       # half-built linux artifact set).
       - name: Upload linux .AppImage (required)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: electron-app-linux-${{ matrix.arch }}-appimage
           path: ${{ inputs.output-dir }}/*.AppImage
@@ -615,7 +615,7 @@ jobs:
           retention-days: 7
 
       - name: Upload linux .deb (optional)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: electron-app-linux-${{ matrix.arch }}-deb
           path: ${{ inputs.output-dir }}/*.deb
@@ -665,7 +665,7 @@ jobs:
         run: corepack enable
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.pm.outputs.cache }}
@@ -718,7 +718,7 @@ jobs:
         run: bash app-bin/smoke-hook.sh
 
       - name: Upload windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: electron-app-win-${{ matrix.arch }}
           path: |
@@ -746,16 +746,16 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: collected
-          # actions/download-artifact@v4 with `pattern` collects matching
+          # actions/download-artifact with `pattern` collects matching
           # artifact names into subdirs under `path`. We flatten in the
           # release step below.
           pattern: electron-app-*
