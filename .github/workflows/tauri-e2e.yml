@@ -90,12 +90,12 @@ jobs:
       full: ${{ steps.decide.outputs.full }}
     steps:
       - name: Checkout consumer (full history for base..head diff)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Fetch the managed scope script
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
           ref: v2
@@ -119,7 +119,7 @@ jobs:
       image: ${{ inputs.container-image }}
     steps:
       - name: Checkout consumer
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Weekly cache rotation bounds growth (release#491). Raw `actions/cache`
       # of `target/` has no pruning: each new Cargo.lock hash restores the prior
@@ -134,7 +134,7 @@ jobs:
         run: echo "week=$(date -u +%G%V)" >> "$GITHUB_OUTPUT"
 
       - name: Cache cargo registry + Tauri target
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ inputs.cache-paths }}
           key: ${{ inputs.cache-key-prefix }}-${{ steps.cache_stamp.outputs.week }}-${{ hashFiles(inputs.cache-key-file) }}
@@ -155,7 +155,7 @@ jobs:
       # screenshot) so investigation starts from the report, not a re-run.
       - name: Upload native-e2e failure bundle
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: native-e2e-failure-bundle
           path: ${{ inputs.failure-artifact-path }}

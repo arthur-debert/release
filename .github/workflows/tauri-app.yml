@@ -261,7 +261,7 @@ jobs:
           gh-token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - name: Upload release notes
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: release-notes
           path: release-notes.md
@@ -426,7 +426,7 @@ jobs:
           fi
 
       - name: Upload platform bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bundle-${{ matrix.t.platform }}
           path: ${{ steps.bundles.outputs.dir }}/*
@@ -449,13 +449,13 @@ jobs:
           sparse-checkout: bin-internal
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .
 
       - name: Download all bundles
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: bundles
           pattern: bundle-*

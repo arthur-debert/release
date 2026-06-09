@@ -233,7 +233,7 @@ jobs:
       release-sha: ${{ steps.prep.outputs.release-sha }}
       prerelease: ${{ steps.prep.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -255,7 +255,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download release notes from prepare job
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
 
@@ -279,7 +279,7 @@ jobs:
         include: ${{ fromJSON(needs.setup-matrix.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
@@ -505,7 +505,7 @@ jobs:
           done
 
       - name: Upload binaries as workflow artifacts (for brew job)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: bins-${{ matrix.target }}
           path: |
@@ -540,7 +540,7 @@ jobs:
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         if: steps.guard.outputs.skip != 'true'
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
@@ -548,7 +548,7 @@ jobs:
 
       - name: Download tarballs
         if: steps.guard.outputs.skip != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: bins-*
           merge-multiple: true

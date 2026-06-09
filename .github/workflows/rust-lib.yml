@@ -73,7 +73,7 @@ jobs:
       release-sha: ${{ steps.prep.outputs.release-sha }}
       prerelease: ${{ steps.prep.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -100,7 +100,7 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
@@ -126,12 +126,12 @@ jobs:
     needs: [prepare, publish-crates]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.release-sha }}
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .

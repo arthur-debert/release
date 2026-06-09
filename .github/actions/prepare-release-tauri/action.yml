@@ -42,7 +42,7 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Python for release_core console-scripts
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.13'
     - name: Install release_core console-scripts (changelog, semver)
@@ -59,7 +59,7 @@ runs:
     # missed nvim + tauri; this closes that gap.
     - name: Set up Node.js (gate linters markdownlint/prettier)
       if: env.SKIP_PRECOMMIT_GATE != 'true'
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v6
       with:
         node-version: '20'
     # Python is already set up above (for the release_core console-scripts).

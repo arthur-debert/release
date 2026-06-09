@@ -320,7 +320,7 @@ jobs:
           echo "vsix=${out}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload VSIX
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: vsix-${{ matrix.t.target || 'universal' }}
           path: ${{ steps.pkg.outputs.vsix }}
@@ -346,7 +346,7 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           pattern: vsix-*
@@ -395,7 +395,7 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           pattern: vsix-*
@@ -450,13 +450,13 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .
 
       - name: Download all VSIXes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
           pattern: vsix-*

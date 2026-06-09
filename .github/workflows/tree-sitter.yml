@@ -347,7 +347,7 @@ jobs:
           tar -tzf "${GITHUB_WORKSPACE}/tree-sitter.tar.gz"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: tree-sitter-bundle
           path: tree-sitter.tar.gz
@@ -421,13 +421,13 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
 
       - name: Download release notes
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: release-notes
           path: .
 
       - name: Download bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: tree-sitter-bundle
           path: .
