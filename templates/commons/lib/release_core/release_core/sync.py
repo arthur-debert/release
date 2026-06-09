@@ -166,7 +166,16 @@ class BundleSource(Source):
 
 # ── Constants (mirror the bash globals verbatim) ──────────────────────────────
 
-MANAGED_MARKER = "# Managed by release-sync — do not edit. Regenerate via release-sync."
+# The header written into managed real-file workflow copies (the files GitHub
+# can't deref a symlink for). WS4 (release#521) dropped the stale "release-sync"
+# wording — the tree is composed by `release-core init` now.
+MANAGED_MARKER = "# Managed by release — do not edit. Regenerate via release-core init."
+# A stable, tool-agnostic PREFIX used to DETECT a managed copy (substring match on
+# the first line). Deliberately a substring of BOTH the new marker AND the old
+# "# Managed by release-sync …" one, so the stale-copy sweep still recognizes
+# copies a pre-WS4 consumer committed — they get rewritten to the new marker on
+# the next init rather than going unrecognized.
+MANAGED_MARKER_SIGNATURE = "# Managed by release"
 SOURCE_MARKER = ".release-sync-source"
 GITIGNORE_FILE = ".gitignore"
 # WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
@@ -883,13 +892,16 @@ def _find_stale_managed_copies(repo_root: str, copy_set: set[str]) -> list[str]:
 
 
 def _first_line_has_marker(path: str) -> bool:
-    """Mirror `head -1 <f> | grep -qF "$MANAGED_MARKER"`."""
+    """True iff the file's first line carries the managed-copy signature. Matches
+    on MANAGED_MARKER_SIGNATURE (a stable prefix), NOT the full marker, so a copy a
+    pre-WS4 consumer committed with the old "release-sync" wording is still
+    recognized as managed (and gets rewritten to the current marker)."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             first = fh.readline()
     except OSError:
         return False
-    return MANAGED_MARKER in first
+    return MANAGED_MARKER_SIGNATURE in first
 
 
 # ── CLAUDE.md orientation block (#348) ────────────────────────────────────────

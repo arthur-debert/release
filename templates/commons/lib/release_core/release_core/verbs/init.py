@@ -647,9 +647,12 @@ def _commit_untracking_release(repo_root: str, commit_paths: list[str], message:
     try:
         if os.path.exists(release_dir):
             # A leftover stash from a previously-interrupted run would block the
-            # rename; clear it first (it is never the live tree).
-            if os.path.exists(stash):
-                shutil.rmtree(stash, ignore_errors=True)
+            # rename; clear it first (it is never the live tree). _rm_f handles
+            # a file/symlink/dir alike (rm -f semantics) and lets a real removal
+            # failure surface — caught by _auto_commit as a skipped commit — rather
+            # than silently leaving a non-dir that breaks the rename.
+            if os.path.lexists(stash):
+                _rm_f(stash)
             os.rename(release_dir, stash)
             moved = True
         gh.git_commit_paths(commit_paths, message, cwd=repo_root)

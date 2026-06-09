@@ -610,6 +610,20 @@ def test_stale_managed_copy_detected(tmp_path):
     assert out == [".github/workflows/old.yml"]
 
 
+def test_stale_managed_copy_detects_pre_ws4_release_sync_marker(tmp_path):
+    # WS4 (release#521) changed MANAGED_MARKER from the "release-sync" wording to a
+    # "release-core init" one. Detection keys off the stable MANAGED_MARKER_SIGNATURE
+    # prefix, so a copy a pre-WS4 consumer committed with the OLD literal marker is
+    # still recognized as managed (→ swept/rewritten, not orphaned).
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    old_marker = "# Managed by release-sync — do not edit. Regenerate via release-sync."
+    assert sync.MANAGED_MARKER_SIGNATURE in old_marker  # the compat invariant
+    (wf / "legacy.yml").write_text(old_marker + "\non: push\n")
+    out = sync._find_stale_managed_copies(str(tmp_path), set())
+    assert out == [".github/workflows/legacy.yml"]
+
+
 def test_stale_managed_copy_skips_rewritten(tmp_path):
     wf = tmp_path / ".github" / "workflows"
     wf.mkdir(parents=True)
