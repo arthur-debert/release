@@ -2,12 +2,14 @@
 
 ## Status
 
-Accepted. Extends [ADR-0003](0003-pip-install-bootstrap-distribution.md) (pip is
-how the package arrives) and supersedes the committed-`.release/` decision of
+Accepted and **live** as of WS4 (release#521, shipped). Extends
+[ADR-0003](0003-pip-install-bootstrap-distribution.md) (pip is how the package
+arrives) and supersedes the committed-`.release/` decision of
 [ADR-0001](0001-release-sync-build-dir-with-symlinks.md): the build dir + symlink
-mechanism stays, but the build dir becomes **gitignored** (not committed) and is
-composed at bootstrap from the installed package rather than synced as committed
-content.
+mechanism stays, but the build dir is now **gitignored** (not committed) and is
+composed at bootstrap by `release-core init` from the installed package rather
+than synced as committed content. ADR-0005 carries this one step further (move
+guidance into `release-core` so even the tracked surface shrinks).
 
 Sequencing: this is the design for **after** the pull model (ADR-0003) is live
 and proven — i.e. after `release_core` is cut into a release that bundles its

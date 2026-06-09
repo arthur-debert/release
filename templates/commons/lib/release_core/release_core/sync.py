@@ -1,11 +1,12 @@
-"""sync — the release-sync engine (build-dir + symlinks, ADR-0001).
+"""sync — the managed-tree compose engine (build-dir + symlinks, ADR-0001).
 
-Pure(-ish) port of bin/release-sync: ref selection, Kind+Capability resolution,
-the materialize-into-a-fresh-.release/ plan, lefthook fragment composition,
-release-internal classification, symlink-target computation, the diff against an
-existing .release/, broken-symlink detection, and the CLAUDE.md orientation
-block. The verb (verbs/release_sync.py) wires these together with the CLI guards
-and the apply phase.
+Ref selection, Kind+Capability resolution, the materialize-into-a-fresh-.release/
+plan, lefthook fragment composition, release-internal classification,
+symlink-target computation, the diff against an existing .release/,
+broken-symlink detection, and the CLAUDE.md orientation block. ``verbs/init.py``
+drives this engine (build_plan → materialize → diff → compute_mirror →
+decide_claude → _apply_mirror); the standalone ``release-sync`` verb that used to
+wrap it was retired in WS4 (release#521).
 
 All git access goes through gh.py (the chokepoint). Filesystem reads/writes use
 the stdlib. Behavior mirrors the bash byte-for-byte — see the per-function notes
@@ -128,7 +129,7 @@ class BundleSource(Source):
         root = os.path.realpath(self.bundle_root)
         full = os.path.realpath(os.path.join(self.bundle_root, *relpath.split("/")))
         if full != root and not full.startswith(root + os.sep):
-            raise SyncError(f"release-sync: bundle path escapes the bundle root: {relpath!r}")
+            raise SyncError(f"release-core init: bundle path escapes the bundle root: {relpath!r}")
         return full
 
     def list_tree(self, subtree: str) -> list[tuple[str, str]]:
@@ -165,16 +166,29 @@ class BundleSource(Source):
 
 # ── Constants (mirror the bash globals verbatim) ──────────────────────────────
 
-MANAGED_MARKER = "# Managed by release-sync — do not edit. Regenerate via release-sync."
+# The header written into managed real-file workflow copies (the files GitHub
+# can't deref a symlink for). WS4 (release#521) dropped the stale "release-sync"
+# wording — the tree is composed by `release-core init` now.
+MANAGED_MARKER = "# Managed by release — do not edit. Regenerate via release-core init."
+# A stable, tool-agnostic PREFIX used to DETECT a managed copy (substring match on
+# the first line). Deliberately a substring of BOTH the new marker AND the old
+# "# Managed by release-sync …" one, so the stale-copy sweep still recognizes
+# copies a pre-WS4 consumer committed — they get rewritten to the new marker on
+# the next init rather than going unrecognized.
+MANAGED_MARKER_SIGNATURE = "# Managed by release"
 SOURCE_MARKER = ".release-sync-source"
 GITIGNORE_FILE = ".gitignore"
+# WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
+# and recomposed every session/CI from the pinned wheel, never committed. A
+# `.gitignore` of `*` inside the dir makes it self-ignoring: git sees nothing
+# under `.release/` (including this file), so drift of the build dir is
+# impossible by construction (ADR-0005 supersedes the committed-tree model of
+# ADR-0001/0002). This subsumes the old `__pycache__`-only ignore (release#450).
 GITIGNORE_BODY = (
     f"{MANAGED_MARKER}\n"
-    "# Keeps host/Python-version-specific bytecode out of the committed .release/\n"
-    "# even if a local regeneration writes it on disk (release#450).\n"
-    "__pycache__/\n"
-    "*.pyc\n"
-    "*.pyo\n"
+    "# This .release/ build dir is ephemeral: composed on demand from the pinned\n"
+    "# release_core wheel (release-core init) and never committed (release#521).\n"
+    "*\n"
 )
 
 CLAUDE_FILE = "CLAUDE.md"
@@ -300,14 +314,14 @@ def select_ref(release_home: str, repo_name: str, kind: str, release_ref: str | 
     """
     if release_ref:
         if not gh.git_rev_parse_verify(release_ref, cwd=release_home):
-            raise SyncError(f"release-sync: $RELEASE_REF='{release_ref}' is not a valid ref")
+            raise SyncError(f"release-core init: $RELEASE_REF='{release_ref}' is not a valid ref")
         return release_ref
 
     gh.git_fetch_prune(cwd=release_home)
     for candidate in (f"release/beta/{repo_name}", f"release/beta/{kind}", "main"):
         if gh.git_rev_parse_verify(f"refs/remotes/origin/{candidate}", cwd=release_home):
             return f"origin/{candidate}"
-    raise SyncError("release-sync: no candidate branch found in $RELEASE_HOME")
+    raise SyncError("release-core init: no candidate branch found in $RELEASE_HOME")
 
 
 # ── Capability resolution ─────────────────────────────────────────────────────
@@ -378,7 +392,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
             continue
         if not source.exists(f"templates/components/{c}"):
             raise SyncError(
-                f"release-sync: declared Capability '{c}' has no "
+                f"release-core init: declared Capability '{c}' has no "
                 f"templates/components/{c}/ tree in {source.label}"
             )
 
@@ -538,9 +552,10 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
     marker = os.path.join(tmp_release, SOURCE_MARKER)
     with open(marker, "w", encoding="utf-8") as fh:
         fh.write(
-            "# release-sync provenance — the arthur-debert/release commit that\n"
-            "# generated this .release/. Informational, not operational state (ADR-0002).\n"
-            "# Regenerated on every sync. release-drift-check reads the SHA below.\n"
+            "# release provenance — the arthur-debert/release commit that generated\n"
+            "# this .release/. Purely informational (ADR-0002). Since WS4 (release#521)\n"
+            "# the whole .release/ tree is gitignored + recomposed every session, so\n"
+            "# this marker is transient and has no reader — drift-check was retired.\n"
             f"{ref_sha}\n"
         )
 
@@ -569,8 +584,8 @@ def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release:
 
         merged = yamlio.eval_all('. as $i ireduce({}; . *+ $i) | ... comments=""', frag_files)
         header = (
-            f"# Generated by release-sync from arthur-debert/release@{ref_sha[:12]}. Do not edit.\n"
-            "# Regenerate by running release-sync.\n\n"
+            f"# Generated by release from arthur-debert/release@{ref_sha[:12]}. Do not edit.\n"
+            "# Regenerate by running release-core init.\n\n"
         )
         lefthook_out = os.path.join(tmp_release, "lefthook.yml")
         with open(lefthook_out, "w", encoding="utf-8") as fh:
@@ -649,9 +664,9 @@ def _files_equal(a: str, b: str) -> bool:
 
 
 def _expected_copy_bytes(f: str, tmp_release: str) -> bytes:
-    """The exact bytes ``_apply`` would write for the real-file copy ``f`` — the
-    materialized source under ``tmp_release``, with the managed-marker header
-    prepended for YAML (mirrors release_sync._apply's copy branch). Used to tell a
+    """The exact bytes ``_apply_mirror`` would write for the real-file copy ``f`` —
+    the materialized source under ``tmp_release``, with the managed-marker header
+    prepended for YAML (mirrors init._apply_mirror's copy branch). Used to tell a
     genuine copy change from a byte-identical re-materialize so a steady-state
     sync is a true no-op (no phantom change count, no failed auto-commit)."""
     with open(os.path.join(tmp_release, f), "rb") as fh:
@@ -877,13 +892,16 @@ def _find_stale_managed_copies(repo_root: str, copy_set: set[str]) -> list[str]:
 
 
 def _first_line_has_marker(path: str) -> bool:
-    """Mirror `head -1 <f> | grep -qF "$MANAGED_MARKER"`."""
+    """True iff the file's first line carries the managed-copy signature. Matches
+    on MANAGED_MARKER_SIGNATURE (a stable prefix), NOT the full marker, so a copy a
+    pre-WS4 consumer committed with the old "release-sync" wording is still
+    recognized as managed (and gets rewritten to the current marker)."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             first = fh.readline()
     except OSError:
         return False
-    return MANAGED_MARKER in first
+    return MANAGED_MARKER_SIGNATURE in first
 
 
 # ── CLAUDE.md orientation block (#348) ────────────────────────────────────────
@@ -961,4 +979,4 @@ def _read_text(path: str) -> str:
 
 
 # A few constants other modules / tests may want.
-_LEFTHOOK_HEADER_RE = re.compile(r"^# Generated by release-sync")
+_LEFTHOOK_HEADER_RE = re.compile(r"^# Generated by release")

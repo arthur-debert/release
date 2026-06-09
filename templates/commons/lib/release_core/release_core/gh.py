@@ -363,6 +363,17 @@ def git_add(paths: list[str], *, cwd: str, force: bool = False) -> None:
     git(["-C", cwd, "add", *(["-f"] if force else []), "--", *paths])
 
 
+def git_path_tracked(path: str, *, cwd: str) -> bool:
+    """True iff ``path`` (a file or directory) currently has tracked entries in the
+    index — `git -C <cwd> ls-files -- <path>` prints at least one line. Used to
+    detect a committed `.release/` that the WS4 migration must untrack."""
+    try:
+        out = git(["-C", cwd, "ls-files", "--", path], check=False)
+    except Exception:
+        return False
+    return bool(out.strip())
+
+
 def git_commit_paths(paths: list[str], message: str, *, cwd: str) -> None:
     """`git -C <cwd> commit -m <message> -- <paths>` — commit ONLY the given
     pathspecs, leaving any other staged/unstaged changes untouched. Raises

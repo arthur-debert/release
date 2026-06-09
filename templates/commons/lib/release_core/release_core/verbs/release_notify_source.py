@@ -106,7 +106,7 @@ def notification_body(issue: int, issue_url: str, issue_title: str, fix: str) ->
         f"**Fix:** {fix}\n"
         f"\n"
         f"To pick it up: bump your `arthur-debert/release` pin to the advanced "
-        f"major (e.g. `@v2`) or re-run `release-sync`, then re-run the check "
+        f"major (e.g. `@v2`) or re-run `release-core init`, then re-run the check "
         f"that originally failed. Nothing to change in this repo.\n"
         f"\n"
         f"_Automated close-the-loop from the release fleet-triage run "

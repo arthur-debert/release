@@ -22,6 +22,40 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
+## Unreleased — WS4: `.release/` ephemeral + drift/sync subsystem removed (#521)
+
+**Type:** removed commands (breaking for any consumer/script that invoked them
+directly) + behavior change (`.release/` no longer committed).
+
+Epic #501 ("invoke, don't discover"). The composed `.release/` build dir is now
+**gitignored and ephemeral** — recomposed on demand by `release-core init`
+(SessionStart + CI), never committed. With the tree rebuilt from the pinned wheel
+every session, drift of the build dir is impossible by construction, so the
+drift/sync policing subsystem was retired.
+
+**Removed (no longer on PATH / in the CLI):**
+
+- the `release-sync` and `release-drift-check` console-scripts (and their
+  `bin/` shims);
+- the `release-core sync [run|drift-check]` CLI group.
+
+**Replacement:** `release-core init` composes the managed tree (the SAME engine
+the retired `release-sync` verb wrapped). Consumers self-sync at SessionStart and
+in CI — nothing to invoke by hand. A consumer's CI gate materializes `.release/`
+via the `arm-gate` composite (new `materialize` input, default on) before running
+`bin/check`.
+
+**Consumer migration (automatic, one-time):** the first `release-core init` after
+this release untracks a previously-committed `.release/` (`git rm -r --cached`) and
+commits the removal alongside the managed mirrors; the self-ignoring
+`.release/.gitignore` (`*`) keeps it out thereafter. No manual steps. The
+committed surface shrinks to the symlinks + the real-file workflow copies + the
+CLAUDE.md managed block.
+
+**Deferred:** dropping the root `lefthook.yml` discovery symlink (routing the gate
+entirely via `LEFTHOOK_CONFIG`) is a separate follow-up; the root symlink stays
+for now.
+
 ## v1.7.6 (2026-05-19) — feat: shared pre-commit gate before bot commits
 
 **Type:** PATCH (additive; no required-input changes; existing

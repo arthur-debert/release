@@ -3,25 +3,25 @@
 load helper
 
 # ---------------------------------------------------------------------
-# Bytecode never lands in a consumer's .release/ (release#450)
+# The ephemeral .release/ is self-ignoring; bytecode never materializes
+# (release#450 + WS4, release#521)
 #
-# Python bytecode (__pycache__/, *.pyc, *.pyo) is host- and Python-version-
-# specific and must never be committed into a consumer. Two layers defend it:
-#   1. the materializer skips bytecode sources (defense-in-depth)
-#   2. a managed .release/.gitignore keeps a local regeneration from tracking it
+# WS4 makes the whole .release/ build dir ephemeral: a managed .release/.gitignore
+# of `*` keeps git from seeing ANY of it (bytecode included), so it is never
+# committed and drift is impossible by construction. Defense-in-depth: the
+# materializer still skips Python bytecode sources outright.
 # ---------------------------------------------------------------------
 
-@test "sync ships a managed .release/.gitignore covering bytecode" {
-  run "$BIN/release-sync"
+@test "init ships a self-ignoring managed .release/.gitignore" {
+  run release_sync
   [ "$status" -eq 0 ]
   [ -f .release/.gitignore ]
-  grep -qx '__pycache__/' .release/.gitignore
-  grep -qx '\*.pyc' .release/.gitignore
-  grep -qx '\*.pyo' .release/.gitignore
+  # `*` on its own line ignores the entire build dir (the .gitignore included).
+  grep -qx '\*' .release/.gitignore
 }
 
 @test "the managed .gitignore is release-internal — not mirrored out to repo root" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ -f .release/.gitignore ]
   # Nothing at the repo root links to or copies the managed .gitignore.
   [ ! -e ./.gitignore ]
@@ -55,7 +55,7 @@ load helper
   # fail loudly if the materializer ever stopped filtering).
   git -C "$clone" ls-tree -r --name-only "$poison_commit" | grep -qx "$poison_rel"
 
-  RELEASE_HOME="$clone" RELEASE_REF="$poison_commit" run "$BIN/release-sync"
+  RELEASE_HOME="$clone" RELEASE_REF="$poison_commit" run release_sync
   [ "$status" -eq 0 ]
   # The poison bytecode must not appear anywhere under .release/.
   run bash -c 'find .release \( -name "*.pyc" -o -name "__pycache__" \) -print'

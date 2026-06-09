@@ -124,6 +124,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
@@ -314,9 +315,9 @@ def _materialize_config_sources(
         # the managed config was composed from.
         source_ref["ref"] = ref_sha[:12] if ref_sha else ref
 
-    # Honor a consumer .release-sync.yaml capability override, exactly as
-    # release-sync does (verbs/release_sync.py) — so init composes the SAME
-    # config set the consumer would get from a sync.
+    # Honor a consumer .release-sync.yaml capability override (the same override
+    # the retired release-sync verb honored) — so init composes the SAME config
+    # set for the detected Kind + capabilities.
     sync_yaml_text = None
     sync_yaml = os.path.join(repo_root, ".release-sync.yaml")
     if os.path.isfile(sync_yaml):
@@ -340,9 +341,10 @@ def _materialize_config_sources(
 
 # ── Full materialize (the DEFAULT init): the whole managed tree, from the bundle ─
 #
-# This is "release-sync sourced from the wheel bundle": the SAME engine pipeline
-# the release_sync verb runs (build_plan + materialize + diff + compute_mirror +
-# decide_claude + apply), driven by BundleSource by default, or GitSource when a
+# The full materialize is the SAME engine pipeline the retired release-sync verb
+# ran (build_plan + materialize + diff + compute_mirror + decide_claude + apply),
+# now sourced from the wheel bundle and driven by init: BundleSource by default,
+# or GitSource when a
 # real $RELEASE_HOME clone is present (release-dev override, mirroring how the
 # config path prefers $RELEASE_HOME over the bundle). It materializes the full
 # .release/ build dir plus all working-tree mirrors (symlinks, real-file copies,
@@ -395,15 +397,18 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
 
 
 def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> list[str]:
-    """The exact, repo-relative managed pathspecs a full sync produced or removed
-    — the ONLY paths --commit stages (never `git add -A`).
+    """The exact, repo-relative managed MIRROR pathspecs a full sync produced or
+    removed — the ONLY paths --commit stages (never `git add -A`).
 
-    Covers: the whole .release/ build dir (one pathspec — git expands it to every
-    materialized file and prunes removed ones); each symlink created or removed;
-    each real-file copy written or removed; and CLAUDE.md when the orientation
-    block was created/injected/refreshed. Deterministic order, de-duplicated.
+    Covers: each symlink created or removed; each real-file copy written or
+    removed; and CLAUDE.md when the orientation block was created/injected/
+    refreshed. Deterministic order, de-duplicated.
+
+    Notably NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
+    ephemeral, never committed. A previously-committed `.release/` is untracked
+    separately in :func:`_auto_commit` (the one-time consumer migration).
     """
-    paths: list[str] = [".release"]
+    paths: list[str] = []
     for s in mirror.symlinks_to_create:
         link, _, _ = s.partition(" -> ")
         paths.append(link)
@@ -438,12 +443,10 @@ def _run_full_sync(
                        that still has unresolved conflicts isn't reported clean.
 
     In --dry-run nothing is written/applied; the plan is still computed so the
-    change count + paths + conflicts are reported. Mirrors release_sync.main's
-    apply phase (atomic .release/ swap + release_sync._apply) so the result is
-    byte-identical to a `release-sync` run for the same Kind.
+    change count + paths + conflicts are reported. The apply phase (atomic
+    .release/ swap + :func:`_apply_mirror`) composes the same managed tree the
+    retired ``release-sync`` verb produced for the same Kind.
     """
-    from . import release_sync as _rs
-
     source, kind, caps_names = _resolve_full_source(repo_root, repo_name)
     plan = sync.build_plan(source, kind, caps_names, repo_root=repo_root)
 
@@ -473,18 +476,104 @@ def _run_full_sync(
             return changes, managed, source.ref_sha, list(mirror.conflicts)
 
         # Apply: atomic .release/ swap, then the mirror/CLAUDE.md apply phase.
-        # _apply runs relative to cwd; init has already chdir'd into repo_root.
+        # _apply_mirror runs relative to cwd; init has already chdir'd into repo_root.
         release_dir = os.path.join(repo_root, ".release")
         if os.path.isdir(release_dir):
             shutil.rmtree(release_dir)
         os.rename(tmp_release, release_dir)
         swapped = True
-        _rs._apply(mirror, claude)
+        _apply_mirror(mirror, claude)
     finally:
         if not swapped:
             shutil.rmtree(tmp_release, ignore_errors=True)
 
     return changes, managed, source.ref_sha, list(mirror.conflicts)
+
+
+def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
+    """The apply phase: --migrate removals, symlink create/remove, managed-copy
+    write/remove, and the CLAUDE.md write. Runs relative to cwd (init has chdir'd
+    into the repo root). Formerly ``release_sync._apply`` — relocated here when the
+    standalone sync verb was retired (WS4, release#521); init is its sole caller."""
+    # If --migrate, delete real files at managed locations first.
+    for f in mirror.migrated:
+        _rm_f(f)
+
+    # Create / update symlinks.
+    for s in mirror.symlinks_to_create:
+        link, _, target = s.partition(" -> ")
+        d = os.path.dirname(link)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        if os.path.islink(link):
+            os.remove(link)
+        os.symlink(target, link)
+
+    # Remove broken symlinks (paths are './…' relative to repo root).
+    for link in mirror.symlinks_to_remove:
+        os.remove(link)
+
+    # Write managed copies (real files for paths GH can't dereference).
+    for f in mirror.copies_to_write:
+        d = os.path.dirname(f)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        if os.path.islink(f):
+            os.remove(f)
+        src = os.path.join(".release", f)
+        if f.endswith((".yml", ".yaml")):
+            with open(src, "rb") as sfh:
+                body = sfh.read()
+            with open(f, "wb") as dfh:
+                dfh.write((sync.MANAGED_MARKER + "\n").encode("utf-8"))
+                dfh.write(body)
+        else:
+            shutil.copyfile(src, f)
+        # Preserve the executable bit from the source.
+        if os.access(src, os.X_OK):
+            st = os.stat(f)
+            os.chmod(f, st.st_mode | 0o111)
+
+    # Remove stale managed copies.
+    for f in mirror.copies_to_remove:
+        os.remove(f)
+
+    # Write the consumer CLAUDE.md orientation block.
+    if claude.action in ("create", "inject", "refresh"):
+        # Atomic same-filesystem replace via a sibling temp file.
+        assert claude.desired is not None
+        fd, tmp = tempfile.mkstemp(prefix=sync.CLAUDE_FILE + ".tmp.", dir=".")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(claude.desired)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, sync.CLAUDE_FILE)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+
+def _rm_f(path: str) -> None:
+    """`rm -rf` — remove if present (file, symlink, or directory), ignore absence
+    but surface real errors (permission/IO), like `rm -f` does for a file.
+
+    A pre-existing managed dest is usually a real file (e.g. a stale hand-copied
+    .claude/skills/<name>/SKILL.md). It can also be a real directory; remove that
+    too so the managed symlink can take its place.
+
+    Absence (FileNotFoundError) is ignored — matching `rm -f` — including the
+    TOCTOU window where the dir vanishes between the isdir() check and the
+    rmtree (a concurrent/CI race). But a real failure (permission/IO) must
+    propagate rather than be silently swallowed (which would leave the path in
+    place and make the later os.symlink fail with a confusing FileExistsError),
+    so we do NOT pass ignore_errors=True; instead we suppress ONLY
+    FileNotFoundError."""
+    with contextlib.suppress(FileNotFoundError):
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
 
 
 def _write_file(dest: str, src: str, *, exists: bool) -> None:
@@ -537,6 +626,41 @@ def _full_commit_message(ref_label: str) -> str:
     return f"chore(release): sync managed tree from {label}"
 
 
+def _commit_untracking_release(repo_root: str, commit_paths: list[str], message: str) -> None:
+    """Pathspec-commit the mirrors AND untrack a previously-committed `.release/`
+    (the WS4 one-time migration, release#521).
+
+    The wrinkle: a pathspec commit (`git commit -- <paths>`) does a PARTIAL commit
+    that re-reads the WORKING TREE for the listed paths. The recomposed `.release/`
+    is still on disk (gitignored), so a naive `git commit -- .release` would
+    *resurrect* every tracked `.release/` file that survives recomposition instead
+    of recording its removal. So we move the ephemeral build dir aside for the
+    duration of the commit: with `.release/` absent from the work tree, the partial
+    commit records all its tracked paths as deletions, while the mirrors (present)
+    commit normally. The dir is restored in `finally` so the ephemeral tree — and
+    the committed symlinks into it — stay live. `os.rename` of the dir entry is
+    O(1) (same filesystem), so this is cheap regardless of tree size.
+    """
+    release_dir = os.path.join(repo_root, ".release")
+    stash = os.path.join(repo_root, ".release.untrack-commit.tmp")
+    moved = False
+    try:
+        if os.path.exists(release_dir):
+            # A leftover stash from a previously-interrupted run would block the
+            # rename; clear it first (it is never the live tree). _rm_f handles
+            # a file/symlink/dir alike (rm -f semantics) and lets a real removal
+            # failure surface — caught by _auto_commit as a skipped commit — rather
+            # than silently leaving a non-dir that breaks the rename.
+            if os.path.lexists(stash):
+                _rm_f(stash)
+            os.rename(release_dir, stash)
+            moved = True
+        gh.git_commit_paths(commit_paths, message, cwd=repo_root)
+    finally:
+        if moved:
+            os.rename(stash, release_dir)
+
+
 def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool) -> None:
     """Stage + commit ONLY ``written`` (paths relative to repo_root that init
     just created/overwrote/repaired), then optionally fast-forward push.
@@ -559,17 +683,32 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
         return
 
     try:
-        # force=True: managed paths are release-owned and must be tracked even if
-        # the consumer's .gitignore covers one (e.g. `.claude/` shadowing the
-        # managed `.claude/skills/`) — otherwise the migration commit silently
-        # fails on the ignored path.
+        # WS4 migration (release#521): untrack a previously-committed `.release/`.
+        # The build dir is now gitignored + ephemeral. Include `.release` in the
+        # commit pathspec ONLY when it was actually tracked — a bare
+        # `git commit -- .release` errors with "pathspec did not match" on a fresh
+        # consumer where nothing under it is tracked.
+        release_tracked = gh.git_path_tracked(".release", cwd=repo_root)
+        commit_paths = list(written)
+        if release_tracked:
+            commit_paths.append(".release")
+        if not commit_paths:
+            # Nothing managed to commit — e.g. the only delta was inside the now
+            # gitignored .release/ tree (ephemeral, never committable). Skip rather
+            # than run a pathspec-less `git commit` that would fold in unrelated work.
+            return
+        # force=True: managed MIRROR paths are release-owned and must be tracked
+        # even if the consumer's .gitignore covers one (e.g. `.claude/` shadowing
+        # the managed `.claude/skills/`) — otherwise the migration commit silently
+        # fails on the ignored path. NEVER `.release/`: it is gitignored on purpose
+        # and is NOT in `written`, so force-add can't resurrect it.
         gh.git_add(written, cwd=repo_root, force=True)
         # Commit ONLY the managed pathspecs. A pathspec-scoped commit ignores any
-        # other staged changes, so a user's in-progress staging is never folded
-        # in. If staging produced nothing to commit (e.g. the managed bytes were
-        # already identical in the index/HEAD), git commit exits non-zero — caught
-        # below as a benign skip, not a failure.
-        gh.git_commit_paths(written, message, cwd=repo_root)
+        # other staged changes, so a user's in-progress staging is never folded in.
+        if release_tracked:
+            _commit_untracking_release(repo_root, commit_paths, message)
+        else:
+            gh.git_commit_paths(commit_paths, message, cwd=repo_root)
     except Exception as exc:  # ProcError or anything git surfaces
         print(
             f"release-core init: --commit skipped (could not commit managed config: {exc})",
@@ -656,6 +795,11 @@ def _main_full(
         )
         return 0
 
+    # WS4 one-time migration (release#521): a previously-committed `.release/` must
+    # be untracked even when the composed tree is byte-identical (changes == 0) —
+    # detect it independently so the migration commit still fires.
+    release_was_tracked = gh.git_path_tracked(".release", cwd=repo_root)
+
     if changes:
         suffix = f", {len(conflicts)} conflict(s)" if conflicts else ""
         print(
@@ -664,14 +808,17 @@ def _main_full(
         )
     elif conflicts:
         print(f"summary: 0 changes but {len(conflicts)} unresolved conflict(s) — see stderr.")
+    elif release_was_tracked:
+        print("summary: managed tree already current; untracking committed .release/ (WS4).")
     else:
         print("summary: managed tree already current (no changes).")
 
-    # AUTO-COMMIT ON CHANGE: commit only the managed paths, only when something
-    # changed. --no-commit skips the commit (for tests/inspection). Conservative
-    # and never-fail (see _auto_commit). On any branch — the managed tree is
-    # generated, needs no review.
-    if changes and not no_commit:
+    # AUTO-COMMIT: commit the managed mirror paths when something changed, OR when
+    # a previously-committed `.release/` still needs untracking (the WS4 migration,
+    # which is commit-worthy even at changes == 0). --no-commit skips the commit
+    # (for tests/inspection). Conservative and never-fail (see _auto_commit). On
+    # any branch — the managed tree is generated, needs no review.
+    if (changes or release_was_tracked) and not no_commit:
         _auto_commit(repo_root, managed, _full_commit_message(ref_label), push=push)
     return 0
 
@@ -785,8 +932,7 @@ def main(argv: list[str] | None = None) -> int:
     except yamlio.YamlError as exc:
         # Missing yq, a malformed manifest/.release-sync.yaml, or a
         # lefthook-fragment merge failure — caught at the CLI boundary and
-        # mapped to a clean exit 1, exactly as release_sync does, never a
-        # traceback escaping.
+        # mapped to a clean exit 1, never a traceback escaping.
         print(f"release-core init: {exc}", file=sys.stderr)
         return 1
 

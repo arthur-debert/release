@@ -5,7 +5,6 @@ Covers the surface this group's agent filled in:
   * flat verb-wraps: ``detect-kind``, ``audit``, ``semver`` (semver self-dispatches
     its own validate/get, so it is a single passthrough leaf, NOT a group);
   * the ``changelog`` group (bare → orchestrator; ``add``/``cut``/``render`` leaves);
-  * the ``sync`` group (bare/``run`` → release-sync; ``drift-check`` → drift gate);
   * the ``issue`` group (``issue file`` → gh-release-issue);
   * the ``ci`` group (``fetch-deps`` / ``fetch-artifact`` script-wraps).
 
@@ -45,12 +44,6 @@ def test_changelog_group_has_add_cut_render():
     grp = _attached_root().commands["changelog"]
     assert isinstance(grp, click.Group)
     assert set(grp.commands) >= {"add", "cut", "render"}
-
-
-def test_sync_group_has_run_and_drift_check():
-    grp = _attached_root().commands["sync"]
-    assert isinstance(grp, click.Group)
-    assert set(grp.commands) >= {"run", "drift-check"}
 
 
 def test_issue_group_has_file():
@@ -130,12 +123,11 @@ def test_changelog_help_lists_subcommands(capsys):
     assert "add" in out and "cut" in out and "render" in out
 
 
-def test_sync_drift_check_dispatches_to_drift_verb(capsys):
-    rc = cli_entry.main(["sync", "drift-check", "--help"])
-    text = "".join(capsys.readouterr())
-    assert rc == 0
-    # release_drift_check.main prints its own drift help/usage.
-    assert "drift" in text.lower()
+def test_sync_group_is_gone(capsys):
+    """WS4 (release#521) retired the ``sync`` group with the drift/sync subsystem;
+    consumers self-sync via ``release-core init``. The group must not resolve."""
+    rc = cli_entry.main(["sync", "--help"])
+    assert rc != 0
 
 
 def test_issue_file_dispatches_to_gh_release_issue_help(capsys):
@@ -151,4 +143,5 @@ def test_issue_file_dispatches_to_gh_release_issue_help(capsys):
 def test_attach_includes_filled_surface():
     fresh = click.Group(name="x")
     toplevel.attach(fresh)
-    assert {"detect-kind", "audit", "semver", "changelog", "sync", "issue"} <= set(fresh.commands)
+    assert {"detect-kind", "audit", "semver", "changelog", "issue"} <= set(fresh.commands)
+    assert "sync" not in fresh.commands  # retired in WS4 (release#521)

@@ -24,7 +24,6 @@ dependencies = ["click>=8,<9"]
 #                               and every `<group> <command>` land from one wheel.
 #   changelog (+add/cut/render) — consumer changelog tooling.
 #   semver, detect-kind         — consumer-facing primitives.
-#   release-sync, release-drift-check — the consumer sync/drift gate.
 #   gh-task-status              — the PR state engine (folded in; release#459).
 #   gh-release-issue            — the consumer escalation entry point.
 # Bash tools (fetch-deps, fetch-artifact, gh-*, clone-*, migrate-*) are
@@ -38,8 +37,6 @@ changelog-render = "release_core.entrypoints:changelog_render_main"
 detect-kind = "release_core.entrypoints:detect_kind_main"
 gh-release-issue = "release_core.entrypoints:gh_release_issue_main"
 gh-task-status = "release_core.entrypoints:gh_task_status_main"
-release-drift-check = "release_core.entrypoints:release_drift_check_main"
-release-sync = "release_core.entrypoints:release_sync_main"
 semver = "release_core.entrypoints:semver_main"
 
 [dependency-groups]

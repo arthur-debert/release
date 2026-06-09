@@ -2,7 +2,15 @@
 
 ## Status
 
-Accepted
+Accepted, then **superseded by [ADR-0005](0005-minimal-footprint-invoke-dont-discover.md)**
+as of WS4 (release#521, shipped). The marker existed to let `release-drift-check`
+tell *drift* from *staleness* by rebuilding against the recorded revision. WS4
+makes the whole `.release/` tree gitignored + recomposed from the pinned wheel
+every session, so drift of the build dir is impossible by construction — the
+drift-check was retired along with the rest of the drift/sync subsystem. The
+`.release/.release-sync-source` marker is **still written** by `release-core init`
+(identical bytes), but it is now **transient and purely informational** — it has
+no reader. The rationale below is preserved for history.
 
 ## Context
 

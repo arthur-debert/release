@@ -29,8 +29,9 @@ def test_toplevel_groups_registered():
     assert {"pr", "ci", "admin"} <= names
     # per-project flat verbs + folded-in init/selfcheck
     assert {"init", "selfcheck", "cut", "status"} <= names
-    # per-project stub groups/commands
-    assert {"changelog", "semver", "sync", "detect-kind", "audit", "issue"} <= names
+    # per-project stub groups/commands (the `sync` group was retired in WS4, #521)
+    assert {"changelog", "semver", "detect-kind", "audit", "issue"} <= names
+    assert "sync" not in names
 
 
 def test_pr_group_is_fully_wired():

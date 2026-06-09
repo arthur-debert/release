@@ -6,7 +6,7 @@ load helper
 # Infra/dev-cycle skill distribution (release#348)
 #
 # release/ is the single source of truth for infra + general-dev skills.
-# release-sync distributes the OFFICIAL set (PUSH_ALL_SKILLS) into every
+# `release-core init` distributes the OFFICIAL set (PUSH_ALL_SKILLS) into every
 # consumer at .claude/skills/ — the path Claude Code auto-discovers project
 # skills from — sourced DIRECTLY from skills/, whole-directory, so there is one
 # copy and no drift. A second, upgrade-only set (REPLACE_IF_PRESENT_SKILLS) is
@@ -16,13 +16,13 @@ load helper
 # ---------------------------------------------------------------------
 
 @test "sync materializes the PR-loop skill into .release/.claude/skills/" {
-  run "$BIN/release-sync"
+  run release_sync
   [ "$status" -eq 0 ]
   [ -f .release/.claude/skills/gh-pr-review-loop/SKILL.md ]
 }
 
 @test "the skill is mirrored out as a symlink Claude Code can discover" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ -L .claude/skills/gh-pr-review-loop/SKILL.md ]
   [ "$(readlink .claude/skills/gh-pr-review-loop/SKILL.md)" = \
     "../../../.release/.claude/skills/gh-pr-review-loop/SKILL.md" ]
@@ -31,14 +31,14 @@ load helper
 }
 
 @test "the synced skill is consumer-facing (leads with release-core pr status, no auto-merge)" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   desc=$(sed -n '/^description:/p' .claude/skills/gh-pr-review-loop/SKILL.md)
   [[ "$desc" == *"release-core pr status"* ]]
   [[ "$desc" == *"ready-for-human-merge"* ]]
 }
 
 @test "sync distributes the full official PUSH_ALL set as discoverable symlinks" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   for s in gh-pr-review-loop pr-review-respond release-issue-relay diagnose \
            tdd review triage to-issues handoff qa grill-me grill-with-docs \
            improve-codebase-architecture request-refactor-plan \
@@ -51,7 +51,7 @@ load helper
 }
 
 @test "a multi-file skill (tdd) distributes EVERY source file, not just SKILL.md" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   # Derive the expected file set from the source tree at the synced ref, so this
   # catches a regression that drops ANY file (not just a hardcoded subset). tdd
   # is multi-file (asserted below); each source blob must land materialized +
@@ -67,7 +67,7 @@ load helper
 }
 
 @test "release-only skills are NEVER distributed" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   for s in release-fleet-ops release-fleet-triage gh-repo-setup \
            migrate-consumer-to-build-dir setup-matt-pocock-skills; do
     [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked $s"; false; }
@@ -77,13 +77,13 @@ load helper
 
 @test "REPLACE_IF_PRESENT skill is synced only when the consumer already has it" {
   # Not present → not distributed.
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ ! -e .claude/skills/lex-primer/SKILL.md ]
 
   # Pre-seed a (stale) real lex-primer, then re-sync → it gets upgraded to a symlink.
   mkdir -p .claude/skills/lex-primer
   printf '# stale lex-primer\n' > .claude/skills/lex-primer/SKILL.md
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ -L .claude/skills/lex-primer/SKILL.md ]
   [ -f .release/.claude/skills/lex-primer/SKILL.md ]
 }
@@ -94,7 +94,7 @@ load helper
   printf '# stale 157-line hand-copy\n' > .claude/skills/pr-review-respond/SKILL.md
   [ ! -L .claude/skills/pr-review-respond/SKILL.md ]  # real file now
 
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   # After sync it is a symlink into .release/ (the official copy), no --migrate.
   [ -L .claude/skills/pr-review-respond/SKILL.md ]
   [ "$(readlink .claude/skills/pr-review-respond/SKILL.md)" = \

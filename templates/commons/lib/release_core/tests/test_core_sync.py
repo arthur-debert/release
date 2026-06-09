@@ -483,8 +483,9 @@ def test_build_plan_skips_skip_sources(monkeypatch):
 
 
 def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
-    """materialize() always writes a managed .release/.gitignore covering
-    bytecode, alongside the planned blobs (release#450)."""
+    """materialize() always writes a self-ignoring .release/.gitignore (`*`) so the
+    whole ephemeral build dir is invisible to git — drift impossible by
+    construction (WS4, release#521; supersedes the bytecode-only ignore of #450)."""
     plan = sync.Plan()
     plan.order = ["bin/real"]
     plan.mode = {"bin/real": "100644"}
@@ -496,9 +497,8 @@ def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
     gi = tmp_path / ".gitignore"
     assert gi.is_file()
     body = gi.read_text()
-    assert "__pycache__/" in body
-    assert "*.pyc" in body
-    assert "*.pyo" in body
+    # `*` on its own line ignores everything in the dir (including .gitignore itself).
+    assert any(line.strip() == "*" for line in body.splitlines())
 
 
 # ── find-style traversal order (the report-ordering contract) ─────────────────
@@ -608,6 +608,20 @@ def test_stale_managed_copy_detected(tmp_path):
     (wf / "hand.yml").write_text("on: push\n")  # no marker → left alone
     out = sync._find_stale_managed_copies(str(tmp_path), set())
     assert out == [".github/workflows/old.yml"]
+
+
+def test_stale_managed_copy_detects_pre_ws4_release_sync_marker(tmp_path):
+    # WS4 (release#521) changed MANAGED_MARKER from the "release-sync" wording to a
+    # "release-core init" one. Detection keys off the stable MANAGED_MARKER_SIGNATURE
+    # prefix, so a copy a pre-WS4 consumer committed with the OLD literal marker is
+    # still recognized as managed (→ swept/rewritten, not orphaned).
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    old_marker = "# Managed by release-sync — do not edit. Regenerate via release-sync."
+    assert sync.MANAGED_MARKER_SIGNATURE in old_marker  # the compat invariant
+    (wf / "legacy.yml").write_text(old_marker + "\non: push\n")
+    out = sync._find_stale_managed_copies(str(tmp_path), set())
+    assert out == [".github/workflows/legacy.yml"]
 
 
 def test_stale_managed_copy_skips_rewritten(tmp_path):

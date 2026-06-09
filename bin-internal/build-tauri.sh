@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build entry resolution for Tauri apps (in preference order):
-#   1. bin/build — canonical take-iii entry, release-sync managed
+#   1. bin/build — canonical take-iii entry, release-core init managed
 #   2. app-bin/build-tauri.sh in the CONSUMER repo — legacy hook
 #   3. npx tauri build — minimal fallback
 #

@@ -9,7 +9,7 @@ load helper
 # propagation).
 #
 # The trigger: a consumer committed a bin/ symlink (e.g. bin/check-shell)
-# but never committed its .release/ target — a dangling link. release-sync
+# but never committed its .release/ target — a dangling link. `release-core init`
 # materializes the target this run, but the sweep checked only the OLD
 # .release/, saw a dangling link, and removed it; the create loop didn't
 # re-add it (the link already pointed correctly). Net: the tool vanished.
@@ -21,7 +21,7 @@ load helper
   ln -s ../.release/bin/check-shell bin/check-shell
   [ ! -e bin/check-shell ]   # dangling before sync
 
-  run "$BIN/release-sync"
+  run release_sync
   [ "$status" -eq 0 ]
 
   # check-shell is a commons tool, so this sync materializes the target —
@@ -33,7 +33,7 @@ load helper
 @test "a genuinely stale link (target absent from the new tree too) is still removed" {
   mkdir -p bin
   ln -s ../.release/bin/does-not-exist bin/stale-tool
-  run "$BIN/release-sync"
+  run release_sync
   [ "$status" -eq 0 ]
   [ ! -L bin/stale-tool ]   # nothing materializes it → correctly swept
 }
@@ -55,7 +55,7 @@ load helper
   ln -s ../.release/bin/retired-tool bin/retired-tool
   [ -e bin/retired-tool ]   # NOT broken-live (the old false precondition)
 
-  run "$BIN/release-sync"
+  run release_sync
   [ "$status" -eq 0 ]
 
   # retired-tool is not a managed tool → absent from the new tree → the

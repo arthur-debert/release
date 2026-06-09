@@ -125,7 +125,12 @@ regenerated ⇒ drift is impossible by construction.
 4. WS3 — gate configs into `.release/`; the gate runs from the binary so
    `lefthook.yml` leaves the consumer.
 5. WS4 — `.release/` gitignored + regenerated; delete the drift/sync subsystem.
-   This is the flip that supersedes ADR-0001 and ADR-0002.
+   This is the flip that supersedes ADR-0001 and ADR-0002. (Shipped:
+   [#521](https://github.com/arthur-debert/release/issues/521) — `.release/` is
+   self-ignoring + composed by `release-core init`; the standalone `release-sync`
+   / `release-drift-check` verbs, console-scripts, and `sync` CLI group were
+   removed; CI materializes via `arm-gate`. The root `lefthook.yml` discovery
+   symlink drop was deferred to a follow-up.)
 6. WS5–WS8 — lock the irreducible footprint, migrate the fleet via pull,
    re-evaluate the self-improving machinery, and validate with fresh agents on
    real tasks.
