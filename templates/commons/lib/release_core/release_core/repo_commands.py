@@ -148,8 +148,8 @@ def _cargo_test(cwd: str) -> Cmd:
 
 
 def _make_test_target(root: str) -> bool:
-    """True iff the ``Makefile`` declares a ``test:`` target (the nvim-plugin
-    path, but valid for any repo carrying one)."""
+    """True iff the ``Makefile`` declares a ``test:`` target (a generic
+    convention, valid for any repo carrying one)."""
     path = os.path.join(root, "Makefile")
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -159,6 +159,22 @@ def _make_test_target(root: str) -> bool:
     except OSError:
         return False
     return False
+
+
+def _umbrella_test(root: str) -> Cmd | None:
+    """The script-runner umbrella test entry, mirroring the precedence in
+    ``templates/nvim-plugin/bin/check``: the consumer's ``app-bin/test-all``
+    (the canonical fleet nvim runner — bats-driven Neovim) wins; else a
+    ``Makefile`` ``test:`` target. ``None`` when neither exists.
+
+    This is the nvim-plugin Kind's real test command — earlier this guessed a
+    bare ``make test`` (copied from a stale hint), which no fleet plugin uses."""
+    test_all = os.path.join(root, "app-bin", "test-all")
+    if os.path.isfile(test_all) and os.access(test_all, os.X_OK):
+        return Cmd(argv=["app-bin/test-all"], display="app-bin/test-all", label="nvim")
+    if _make_test_target(root):
+        return Cmd(argv=["make", "test"], display="make test", label="make")
+    return None
 
 
 def _mkdocs_config(root: str) -> str | None:
@@ -188,8 +204,9 @@ def unit_commands(root: str) -> list[Cmd]:
             cmds.append(_node_run(pm, unit, _vitest_extra(scripts[unit])))
     for d in _rust_dirs(root):
         cmds.append(_cargo_test(d))
-    if _make_test_target(root):
-        cmds.append(Cmd(argv=["make", "test"], display="make test", label="make"))
+    umbrella = _umbrella_test(root)
+    if umbrella:
+        cmds.append(umbrella)
     return cmds
 
 
