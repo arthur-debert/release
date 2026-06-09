@@ -15,6 +15,7 @@ ROOT="$BATS_TEST_DIRNAME/../.."
 VERSIONS="$ROOT/templates/commons/bin/gate-tool-versions.sh"
 SETUP="$ROOT/templates/commons/bin/setup-dev-env.sh"
 PROVISION="$ROOT/bin-internal/provision-gate-toolset.sh"
+ENV_SETUP="$ROOT/env/setup.sh"
 
 # Every pinned var the shared file MUST set.
 PINS="RUFF_VERSION ACTIONLINT_VERSION YAMLLINT_VERSION LEFTHOOK_VERSION \
@@ -59,6 +60,16 @@ PRETTIER_VERSION MARKDOWNLINT_CLI_VERSION SHELLCHECK_VERSION SHELLCHECK_PY_VERSI
     [ -n "$fb" ]
     [ "$fb" = "$want" ]
   done
+}
+
+@test "env/setup.sh lefthook fallback matches the shared file (cannot drift)" {
+  # The cloud-snapshot builder sources the shared file but keeps a last-resort
+  # `: "${LEFTHOOK_VERSION:=x}"` fallback — guard it against the stale-2.1.6
+  # drift this PR fixed.
+  want="$(bash -c ". '$VERSIONS' && printf '%s' \"\$LEFTHOOK_VERSION\"")"
+  fb="$(sed -n 's/.*LEFTHOOK_VERSION:=\([0-9.]*\).*/\1/p' "$ENV_SETUP" | head -1)"
+  [ -n "$fb" ]
+  [ "$fb" = "$want" ]
 }
 
 @test "gate_version_matches: true when the binary reports the pin" {

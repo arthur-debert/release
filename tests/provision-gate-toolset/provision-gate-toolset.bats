@@ -2,7 +2,7 @@
 # provision-gate-toolset.sh — the gate-toolset provisioning unit called by the
 # arm-gate composite. Exercised fully OFFLINE: stub package managers (npm/pip/
 # curl), a transparent `sudo`, and the curated real utils the script + the shared
-# gate_version_matches helper need (id/bash/tr/grep/head). Every install logs its
+# gate_version_matches helper need (id/bash/grep/head). Every install logs its
 # argv so we assert the WHAT (pinned, reconciled, OS-identical) without touching
 # the network or the system.
 #

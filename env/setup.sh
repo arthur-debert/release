@@ -359,8 +359,10 @@ else
 fi
 
 # Install lefthook at the SHARED pin (single source of truth — same version the
-# gate provisioners reconcile to, release#531). Sourced from the clone so there
-# is no separate literal here to drift from gate-tool-versions.sh.
+# gate provisioners reconcile to, release#531). Sourced from the clone so the pin
+# is authoritative, not re-declared here. The `:=` fallback is a last-resort
+# safety net (mirrors setup-dev-env.sh): it only applies if the clone somehow
+# lacks the shared file, and is kept matching it by tests/gate-tool-versions/.
 if [ -f "$CLONE_DIR/templates/commons/bin/gate-tool-versions.sh" ]; then
   # shellcheck source=/dev/null
   . "$CLONE_DIR/templates/commons/bin/gate-tool-versions.sh"
