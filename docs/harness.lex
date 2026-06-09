@@ -57,27 +57,29 @@ The Agent Harness
     the dev-cycle text — kept in lockstep with `dev-cycle.lex` and the
     `gh-pr-review-loop` skill.
 
-    Orientation reaches the consumer agent through a small managed block injected
-    at the top of the consumer's `CLAUDE.md`:
+    Orientation reaches the consumer agent through a small managed STUB injected
+    at the top of the consumer's `CLAUDE.md` (WS2, release#523):
 
         <!-- BEGIN release-managed orientation -->
-        @.release/ORIENTATION.md
+        This repo's quality gate, build, release, and PR/dev flow are provided by
+        `release-core` (installed at session start; not stored in this repo).
+        - Start here: run `release-core how-to` — the task playbook for this repo.
+        - Reference: `release-core --help`, `release-core <cmd> --help`.
+        - Quality gate (run every loop, after `git add`): `release-core gate`.
         <!-- END release-managed orientation -->
     :: text ::
 
     It is a block, not a whole file, because half the fleet already owns a
     `CLAUDE.md` with its own project content; sync injects or refreshes the block
     and leaves the rest untouched. If `CLAUDE.md` is itself a symlink, sync
-    leaves it alone. The block `@`-imports `.release/ORIENTATION.md`, which is
-    the orientation text (what's managed, how to open an issue, where to
-    escalate) and lives only inside `.release/`.
+    leaves it alone.
 
-    :: note :: Direction (epic #501, WS2): the synced `ORIENTATION.md` + the
-    injected block collapse to a stable 2-line stub pointing at `release-core
-    how-to`, so the procedural truth lives in exactly one place — the binary.
-    This doc describes the orientation surface as it ships today (the managed
-    block + `.release/ORIENTATION.md`); `release-core how-to` is already the
-    canonical text both defer to.
+    The procedural truth lives in exactly ONE place — the binary's `release-core
+    how-to` (kind-aware; renders the dev cycle). The old synced `ORIENTATION.md`
+    (and the block's `@.release/ORIENTATION.md` import) were RETIRED in WS2: the
+    stub points at `how-to` instead. An existing consumer's old import block is
+    refreshed in place to this stub on the next `init` (the BEGIN/END markers are
+    unchanged, so it's recognized, not duplicated).
 
 3. Skills
 
@@ -115,17 +117,18 @@ The Agent Harness
 
     3.2. Ownership policy
 
-        release/ is the single source of truth for infrastructure and general
-        development-cycle skills. Every consumer repo carries release's official
-        set, synced (never hand-copied) as symlinks into its `.release/` build
-        tree. A consumer owns ONLY its own application-domain skills — anything
-        specific to that project's subject matter.
+        release/ is the single source of truth for the skills it distributes.
+        WS2 (release#523, "invoke don't discover") cut that distributed set to the
+        TWO skills the harness needs a file on disk for — `gh-pr-review-loop` (the
+        `/`-triggered PR-loop driver) and `release-issue-relay` (escalation). The
+        general development-cycle guidance no longer ships as skill files; it lives
+        in `release-core how-to`, rendered from the binary. A consumer owns its own
+        application-domain skills; general dev-cycle skills are the agent's own
+        (global) skills, not release's to push.
 
-        Why: a hand-copied infra skill drifts. We found a consumer running a
-        stale, much-shortened `pr-review-respond` against release's official copy
-        because nothing kept the local copy in step. The distribution mechanism
-        ([#3.4]) closes that gap — the consumer's copy is a symlink to the synced
-        official blob, so it cannot fall behind.
+        The two distributed skills are still synced (never hand-copied) as symlinks
+        into the `.release/` build tree, so a consumer's copy cannot drift from
+        release's official blob.
 
     3.3. The three distribution tiers
 
@@ -135,13 +138,15 @@ The Agent Harness
         the authority; the names below are a convenience snapshot.
 
         Push-all (synced to EVERY consumer, unconditionally):
-            The PR loop, review-response, upstream escalation, and the general
-            development-cycle skills an agent needs anywhere. Currently:
-            `gh-pr-review-loop`, `pr-review-respond`, `release-issue-relay`,
-            `diagnose`, `tdd`, `review`, `triage`, `to-issues`, `handoff`, `qa`,
-            `grill-me`, `grill-with-docs`, `improve-codebase-architecture`,
-            `request-refactor-plan`, `ubiquitous-language`, `zoom-out`, `teach`,
-            `padz-for-agents`.
+            The two skills the harness needs a file on disk for. Currently:
+            `gh-pr-review-loop` (PR-loop driver), `release-issue-relay`
+            (escalation). WS2 (release#523) dropped `pr-review-respond` + the 15
+            dev-cycle skills (diagnose, tdd, review, triage, to-issues, handoff,
+            qa, grill-me, grill-with-docs, improve-codebase-architecture,
+            request-refactor-plan, ubiquitous-language, zoom-out, teach,
+            padz-for-agents) — their guidance is in `release-core how-to`, and a
+            consumer's now-dangling symlink to a dropped skill is swept on the
+            next `init`.
 
         Replace-if-present (upgrade-only):
             Synced into a consumer ONLY when that consumer already carries

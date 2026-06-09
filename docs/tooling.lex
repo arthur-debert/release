@@ -266,7 +266,6 @@ release-core, the gate, distribution, and workflows
             | .editorconfig | .editorconfig | symlink |
             | .claude/settings.json | .claude/settings.json | symlink |
             | lefthook.fragment.yaml | merged into .release/lefthook.yml | fragment |
-            | ORIENTATION.md | .release/ORIENTATION.md | internal |
             | lib/release_core/** | (not synced) | wheel |
         :: table ::
 

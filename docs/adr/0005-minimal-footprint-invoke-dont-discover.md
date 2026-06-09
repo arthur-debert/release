@@ -121,7 +121,11 @@ regenerated ⇒ drift is impossible by construction.
    strings. (Shipped: [#502](https://github.com/arthur-debert/release/pull/502),
    [#504](https://github.com/arthur-debert/release/pull/504).)
 3. WS2 — CLAUDE.md → 2-line stub; stop syncing ORIENTATION.md and the infra
-   skill set as files.
+   skill set as files. (Shipped:
+   [#523](https://github.com/arthur-debert/release/issues/523) — the CLAUDE.md
+   block is a stub pointing at `release-core how-to`; ORIENTATION.md retired;
+   PUSH_ALL_SKILLS trimmed to `gh-pr-review-loop` + `release-issue-relay`, the
+   rest auto-swept on next init. One delegating skill kept per the open question.)
 4. WS3 — gate configs into `.release/`; the gate runs from the binary so
    `lefthook.yml` leaves the consumer.
 5. WS4 — `.release/` gitignored + regenerated; delete the drift/sync subsystem.
