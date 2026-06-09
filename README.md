@@ -4,7 +4,7 @@ Shared infrastructure for operating ~22 small projects (rust libs/CLIs,
 electron + tauri apps, editor extensions, tree-sitter grammars, Python
 packages, GH Actions, a Homebrew tap) the same way, both **locally and
 on CI**. One canonical implementation per concern; consumers call into
-it with a thin caller or sync canonical files via `release-sync`.
+it with a thin caller or compose the canonical files via `release-core init`.
 
 The short version:
 
@@ -15,7 +15,7 @@ The short version:
 - **After:** one canonical `bin/<verb>` per task (per Stack), one
   canonical reusable workflow per Flow. Fix once in `release/`,
   propagates to every consumer on their next CI run (workflows) or next
-  session start (in-tree files via `release-sync`).
+  session start (managed files composed by `release-core init`).
 
 ## Vocabulary
 
@@ -298,7 +298,7 @@ Same baseline regardless of Stack:
   [Claude GitHub App](https://github.com/apps/claude) is installed.
 - **Policy files** — CODEOWNERS, `pull_request_template.md`,
   `copilot-instructions.md`, `dependabot.yml`,
-  `.github/workflows/copilot-review.yml`. Synced via `release-sync`.
+  `.github/workflows/copilot-review.yml`. Composed via `release-core init`.
 - **Pre-commit hooks** — `lefthook.yml` generated from Component
   fragments, shells out to `bin/check-fmt` / `bin/check-lint` /
   `bin/check-tests`. **Local hooks ARE the canonical interface;** CI
@@ -374,18 +374,23 @@ jobs:
 non-breaking tag. Fix-once-propagate is automatic: patch a workflow
 here, every consumer picks it up on their next CI run.
 
-### Files in the consumer — session-start `release-sync`
+### Files in the consumer — session-start `release-core init`
 
 Some files have to live in the consumer's tree because GitHub or
 local tooling reads them there: CODEOWNERS, `dependabot.yml`,
 `copilot-review.yml`, lefthook fragments, `bin/check-*` helpers,
 `setup-dev-env.sh`.
 
-`bin/setup-dev-env.sh` runs `release-sync` early in every
-session-start. It pulls the canonical files from `~/release` into the
-consumer's working tree. CI's `pr-checks` Flow runs
-`release-sync --check`; if the working tree diverges, the build fails
-— drift becomes a normal CI failure the agent fixes in passing.
+`bin/setup-dev-env.sh` boots `install-release-core` (which pulls the pinned
+`release_core` wheel and runs `release-core init`) early in every session-start.
+`release-core init` composes the managed tree into a **gitignored, ephemeral
+`.release/`** and repairs the committed mirrors (symlinks + real-file workflow
+copies + the CLAUDE.md block) — recomposed from the pinned wheel every session,
+never committed (WS4, release#521). Because `.release/` is rebuilt each session,
+drift of the build dir is impossible by construction, so the old
+`release-sync --check` drift gate was retired. CI re-runs `release-core init`
+(via the `arm-gate` composite) before the gate, so the same composed tree is in
+place there too.
 
 Beta-branch dial for testing changes without coordinated fleet
 rollout:
@@ -437,12 +442,12 @@ environment. It seeds:
   Tauri's GTK system libs.
 - `~/.claude/skills/*` — user-level skills cloned from this repo for
   the maintainer machine/session. This is NOT the consumer
-  distribution path; consumers get the official set synced into their
-  own `.claude/skills/` by `release-sync` (see docs/harness.lex).
+  distribution path; consumers get the official set composed into their
+  own `.claude/skills/` by `release-core init` (see docs/harness.lex).
 - `~/.claude/CLAUDE.md` — user-level instructions from
   [`env/CLAUDE.md`](env/CLAUDE.md).
 - `~/release` — a shallow blobless clone of this repo, pinned to
-  `main`. Re-fetched on each session start by `release-sync`.
+  `main`. Refreshed on each session start by the bootstrap.
 
 Pasted once per Claude environment; touched only when env-level deps
 change.
@@ -454,7 +459,7 @@ Every onboarded repo carries `bin/setup-dev-env.sh` +
 [`templates/commons/`](templates/commons/). The settings file
 registers a SessionStart hook that runs the script. The script:
 
-- Runs `release-sync` (target model).
+- Runs `release-core init` (composes the managed tree).
 - Restores submodules, fetches tags.
 - Installs project deps via the right tool for the Stack.
 - Imports the sandbox-egress CA into `~/.pki/nssdb`.
@@ -518,10 +523,11 @@ bin/                  human-runnable tooling, on $PATH via dodot.
                       commands, `release-cut`, `release-lex`,
                       `apply-ruleset`, etc. are reachable only via the
                       tree now. The flat names kept as consumer-facing
-                      aliases: detect-kind, release-sync,
-                      release-drift-check, changelog, semver,
-                      gh-task-status, gh-release-issue, the `release`
-                      shim, the gh-pr-* loop helpers, fetch-artifact
+                      aliases: detect-kind, changelog, semver,
+                      gh-task-status, gh-release-issue, the gh-pr-* loop
+                      helpers, fetch-artifact (release-sync /
+                      release-drift-check were removed in WS4 #521 —
+                      `.release/` is composed by `release-core init`)
 rulesets/             branch-protection JSON templates
 bin-internal/         CI scripts exec'd by composite actions
 templates/            path-mirror layout — sync destination = source

@@ -1,0 +1,1 @@
+- Make the .release/ build dir ephemeral (gitignored, composed on demand by release-core init) and retire the drift/sync subsystem (release-sync + release-drift-check)
