@@ -46,6 +46,14 @@ def test_how_to_always_states_the_one_gate_and_draft_first_cycle():
         assert "changelog add" in body
 
 
+def test_how_to_distinguishes_gate_from_tests(capsys):
+    # The gate runs lint/format, NOT tests — how-to must say so, or a fresh agent
+    # treats a green gate as CI-green and skips tests (caught in the lex dogfood).
+    body = how_to._render("rust-cli")
+    assert "does NOT run tests" in body
+    assert "separate check" in body
+
+
 def test_how_to_main_explicit_kind(capsys):
     assert how_to.main(["go-cli"]) == 0
     out = capsys.readouterr().out
