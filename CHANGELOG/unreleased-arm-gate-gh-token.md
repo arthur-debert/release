@@ -1,0 +1,1 @@
+- arm-gate: pass GH_TOKEN to the materialize step so install-release-core's gh call doesn't exit 1 (fixes ci/check fleet-wide)
