@@ -61,6 +61,33 @@ JSON
     [[ "$(bin/mycli)" == "hello" ]]
 }
 
+@test "emits → / ✓ glyphs under a narrow (cp1252-like) stdout without crashing" {
+    # Windows runners default to cp1252 stdout; fetch-deps logs → / ✓, which the
+    # charmap codec can't encode → UnicodeEncodeError crashed the win32-x64 build
+    # of node consumers (release #507 RC-cutover). fetch-deps forces UTF-8 on its
+    # streams; this pins that. PYTHONIOENCODING=ascii simulates the narrow console
+    # — without the reconfigure, the success `✓ … →` line would raise here.
+    setup_mock_curl
+    make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli"
+    mock_release mycli v1.0.0 "mycli-aarch64-apple-darwin.tar.gz" "$HARNESS_WORKSPACE/mybin.tar.gz"
+
+    cat > deps.json <<'JSON'
+{
+    "mycli": {
+        "repo": "test/mycli",
+        "version": "v1.0.0",
+        "asset": "mycli-{{target}}.tar.gz",
+        "binary": "mycli",
+        "dest": "bin"
+    }
+}
+JSON
+
+    run env PYTHONIOENCODING=ascii LC_ALL=C "$FETCH_DEPS" --target aarch64-apple-darwin
+    [[ "$status" -eq 0 ]]
+    [[ -x bin/mycli ]]
+}
+
 @test "binary mode: fetches from nested tarball layout" {
     setup_mock_curl
     make_binary_tarball "$HARNESS_WORKSPACE/mybin.tar.gz" "mycli" "mycli-aarch64-apple-darwin"

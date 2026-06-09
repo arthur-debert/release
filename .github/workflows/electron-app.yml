@@ -337,9 +337,12 @@ jobs:
             "https://raw.githubusercontent.com/arthur-debert/release/main/bin/fetch-deps"
           chmod +x "$dir/fetch-deps"
           # Windows: npm/pnpm run scripts under cmd.exe, which can't exec a
-          # shebang script by bare name — add a .cmd shim that invokes it
-          # via bash (unused/harmless on linux + mac).
-          printf '@bash "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
+          # shebang script by bare name — add a .cmd shim. It must invoke
+          # `python` directly: fetch-deps is a Python script, and routing it
+          # through bash (Git-bash) ignores the shebang, parses the Python as
+          # shell, and dies on the first `class …(…):` (release #507 RC-cutover,
+          # lex-fmt/lexed win32-x64). Harmless/unused on linux + mac.
+          printf '@python "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
           echo "$dir" >> "$GITHUB_PATH"
 
       - name: Build (electron-builder, mac --${{ matrix.arch }})

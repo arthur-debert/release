@@ -1,0 +1,1 @@
+- fetch-deps: force UTF-8 stdout/stderr + electron-app Windows shim invokes python (not bash) — fixes win32 node builds
