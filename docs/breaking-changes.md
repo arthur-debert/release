@@ -30,7 +30,7 @@ coordinated with all consumers before cutting.
 Epic #501 ("invoke, don't discover"). Orientation moves from synced files into the
 binary's `release-core how-to`:
 
-- **CLAUDE.md managed block → 2-line stub** pointing at `release-core how-to` /
+- **CLAUDE.md managed block → short stub** pointing at `release-core how-to` /
   `--help` / `gate` (no more `@.release/ORIENTATION.md` import). An existing
   consumer's old block is refreshed in place on the next `init` (markers unchanged
   → recognized, not duplicated). Consumer content below the block is untouched.

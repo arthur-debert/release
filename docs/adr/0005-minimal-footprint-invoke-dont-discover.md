@@ -79,7 +79,7 @@ regenerated ⇒ drift is impossible by construction.
 - `release-core how-to` — the kind-aware procedural source of truth (lint /
   test / build / release / run + the draft-first dev cycle). It replaces the
   synced ORIENTATION.md and the per-Kind reference docs: the consumer CLAUDE.md
-  becomes a 2-line stub pointing here, so there is nothing to drift.
+  becomes a short stub pointing here, so there is nothing to drift.
 - `release-core gate` — the one quality entry, run identically locally and in
   CI, configured from `.release/`-rooted paths so it survives dropping the root
   discovery symlinks.
@@ -120,7 +120,7 @@ regenerated ⇒ drift is impossible by construction.
 2. WS1 — ship `release-core how-to` and `release-core gate`; agent-tune the help
    strings. (Shipped: [#502](https://github.com/arthur-debert/release/pull/502),
    [#504](https://github.com/arthur-debert/release/pull/504).)
-3. WS2 — CLAUDE.md → 2-line stub; stop syncing ORIENTATION.md and the infra
+3. WS2 — CLAUDE.md → short stub; stop syncing ORIENTATION.md and the infra
    skill set as files. (Shipped:
    [#523](https://github.com/arthur-debert/release/issues/523) — the CLAUDE.md
    block is a stub pointing at `release-core how-to`; ORIENTATION.md retired;
