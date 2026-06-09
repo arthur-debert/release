@@ -127,7 +127,18 @@ regenerated ⇒ drift is impossible by construction.
    PUSH_ALL_SKILLS trimmed to `gh-pr-review-loop` + `release-issue-relay`, the
    rest auto-swept on next init. One delegating skill kept per the open question.)
 4. WS3 — gate configs into `.release/`; the gate runs from the binary so
-   `lefthook.yml` leaves the consumer.
+   `lefthook.yml` leaves the consumer. (Shipped:
+   [#524](https://github.com/arthur-debert/release/issues/524) — `lefthook.yml`
+   + the lint/format configs are release-internal (materialized into `.release/`,
+   no longer mirrored to the root; each tool is handed its config explicitly via
+   `--config`/`-c`/`--rcfile`/`--ignore-path`). `.editorconfig` stays mirrored
+   (editor-facing). The git hook runs through the binary — `release-core gate
+   --install-hook` writes `.git/hooks/pre-commit` → `release-core gate --hook`
+   (staged, `--no-auto-install` so lefthook can't reclaim the hook). The
+   broken-symlink sweep generalized to a mirrored-dest rule, so a migrated
+   consumer's old root gate symlinks are swept on next init. Folds in the
+   WS4-deferred root-`lefthook.yml` symlink drop. Rider: npm `typecheck` fails
+   loud when TS is staged with no `typecheck` script — no more hollow green.)
 5. WS4 — `.release/` gitignored + regenerated; delete the drift/sync subsystem.
    This is the flip that supersedes ADR-0001 and ADR-0002. (Shipped:
    [#521](https://github.com/arthur-debert/release/issues/521) — `.release/` is

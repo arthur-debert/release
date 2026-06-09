@@ -32,8 +32,11 @@ Path-mirror semantics: the destination in each consumer repo is the source
 path with the `templates/commons/`, `templates/components/<c>/`, or
 `templates/<kind>/` prefix stripped.
 
-Example: `templates/commons/.markdownlint.json` lands at
-`.markdownlint.json` in the consumer.
+Example: `templates/commons/.editorconfig` lands at `.editorconfig` in the
+consumer. (The gate definition + tool configs — `lefthook.yml`,
+`.markdownlint.json`, `.yamllint`, `.shellcheckrc`, … — are an exception since
+WS3 (#524): they materialize into `.release/` only and are NOT mirrored to the
+root — see "release-internal files" below.)
 
 Files outside those three subtrees (`templates/fragments/`,
 `templates/render/`) are not synced — they are author-facing reference
@@ -106,7 +109,7 @@ paths win on collision with commons. (Highest specificity wins.)
 `lefthook.yml` in every consumer is *generated* by `release-core init` (not
 stored in templates/, recomposed each session into the ephemeral `.release/`):
 
-### `lefthook.yml` at consumer repo root
+### `lefthook.yml` (release-internal — `.release/` only, since WS3 #524)
 
 Composed from:
 
@@ -127,6 +130,15 @@ The generated file carries a header marker:
 # templates/components/<cap>/lefthook.fragment.yaml.
 ```
 
+Since WS3 (#524) the composed `lefthook.yml` and the lint/format tool configs
+(`.markdownlint.json`, `.markdownlintignore`, `.yamllint`, `.shellcheckrc`,
+`.prettierignore`) are **release-internal**: they live only in `.release/` and
+are NOT mirrored to the consumer root. The gate runs through the binary
+(`release-core gate` points lefthook at `.release/lefthook.yml` via
+`LEFTHOOK_CONFIG`; each tool is handed its config explicitly), and the git hook
+is `release-core gate --install-hook` → `release-core gate --hook`. `.editorconfig`
+is the one config that stays mirrored (editor-facing, not a gate flag).
+
 ## How sync materializes the managed tree (no state file)
 
 Sync is **stateless**. It does not track a per-consumer manifest of what
@@ -137,8 +149,9 @@ on every run (ADR-0001):
 2. Rebuild `.release/` from the current templates (commons + declared
    Capabilities + Kind) — a self-contained build directory of real file
    content.
-3. Create working-tree symlinks (`bin/check`, `lefthook.yml`,
-   `.claude/skills/*`, …) pointing into `.release/`.
+3. Create working-tree symlinks (`bin/check`, `.editorconfig`,
+   `.claude/skills/*`, …) pointing into `.release/`. (`lefthook.yml` + the gate
+   tool configs are NOT mirrored out since WS3 — they stay `.release/`-internal.)
 4. Sweep the repo for symlinks into `.release/` that are now broken (their
    target vanished from the rebuilt tree) and delete them — this is how
    **removals** propagate, with no removal manifest and no bookkeeping.

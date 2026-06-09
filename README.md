@@ -465,8 +465,10 @@ registers a SessionStart hook that runs the script. The script:
 - Imports the sandbox-egress CA into `~/.pki/nssdb`.
 - Symlinks `.venv/bin/*` into `~/.local/bin/` so non-interactive Bash
   sessions resolve venv-installed CLIs.
-- Wires `lefthook install` (or falls back to symlinking
-  `app-bin/pre-commit`).
+- Wires the pre-commit hook through the binary
+  (`release-core gate --install-hook` → `release-core gate --hook`, which runs
+  the gate from `.release/lefthook.yml`); falls back to symlinking
+  `app-bin/pre-commit`.
 
 ### SDK orchestrator harness 🚧
 
