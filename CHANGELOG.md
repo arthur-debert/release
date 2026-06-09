@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 2.12.4 - 2026-06-09
+
+- Bump Node-20-pinned GitHub Actions to Node-24-capable majors (checkout@v6, setup-node@v6, setup-python@v6, upload-artifact@v6, download-artifact@v7, cache@v5, setup-go@v6, deploy-pages@v5) ahead of the 2026-06-16 runner cutoff (#518)
+
 ## 2.12.3 - 2026-06-09
 
 - fetch-deps: force UTF-8 stdout/stderr + electron-app Windows shim invokes python (not bash) — fixes win32 node builds
