@@ -29,13 +29,43 @@ def test_how_to_and_gate_registered():
 # --- how-to is Kind-aware, single-source ----------------------------------
 
 
-def test_how_to_renders_kind_specific_verbs():
+def test_how_to_abstract_kind_describes_where_commands_live():
+    # `how-to <kind>` is the abstract doc path (no repo to read): it names the
+    # uniform verbs and hints where the real command lives — never a per-repo
+    # hardcode. rust hints cargo; node stacks get a deps line.
     rust = how_to._render("rust-cli")
     assert "cargo test" in rust and "cargo build" in rust
-    npm = how_to._render("vscode-ext")
-    assert "npm test" in npm and "npm install" in npm  # deps line for node stacks
+    assert "release-core test-unit" in rust
+    node = how_to._render("vscode-ext")
+    assert "npm install" in node  # deps line for node stacks
+    assert "release-core test-unit" in node
     # rust has no npm deps line
     assert "npm install" not in rust
+
+
+def test_how_to_repo_path_surfaces_real_commands_not_npm_test(monkeypatch, tmp_path):
+    # The no-arg path reads THIS repo: lexed's shape (test:unit + test:e2e, NO
+    # bare `test`) must surface the real scripts, never a guessed `npm test`.
+    import json
+
+    (tmp_path / "package.json").write_text(
+        json.dumps({"scripts": {"test:unit": "vitest", "test:e2e": "playwright test"}})
+    )
+    (tmp_path / "package-lock.json").write_text("")
+    body = how_to._render_repo(str(tmp_path), "electron-app")
+    assert "release-core test-unit" in body
+    assert "npm run test:unit" in body
+    assert "npm run test:e2e" in body
+    assert "npm test" not in body
+
+
+def test_how_to_repo_path_surfaces_docs_facet_on_any_kind(tmp_path):
+    # mkdocs is orthogonal: a rust repo that also carries docs surfaces it.
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n")
+    (tmp_path / "mkdocs.yml").write_text("site_name: x\n")
+    body = how_to._render_repo(str(tmp_path), "rust-cli")
+    assert "mkdocs build --strict" in body
+    assert "cargo test" in body
 
 
 def test_how_to_always_states_the_one_gate_and_draft_first_cycle():

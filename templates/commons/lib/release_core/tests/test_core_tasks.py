@@ -1,0 +1,181 @@
+"""``release-core test-unit|test-e2e|test-all|build|run`` — the runnable task
+verbs (release#507). They detect THIS repo's real command and exec it,
+propagating the exit code; test-* skip-with-notice when nothing is wired,
+build/run error when no command exists.
+"""
+
+from __future__ import annotations
+
+import click
+from release_core import cli_entry
+from release_core.repo_commands import Cmd
+from release_core.verbs import tasks
+
+
+def _root() -> click.Group:
+    return cli_entry.root
+
+
+def test_verbs_registered():
+    names = set(_root().commands)
+    assert {"test-unit", "test-e2e", "test-all", "build", "run"} <= names
+    for n in ("test-unit", "test-e2e", "test-all", "build", "run"):
+        assert (_root().commands[n].short_help or "").strip()
+
+
+# --- skip-with-notice vs propagate ---------------------------------------
+
+
+def test_test_unit_skips_with_notice_when_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "unit_commands", lambda r: [])
+    assert tasks.test_unit([]) == 0  # not a failure — nothing to run
+    assert "nothing to run" in capsys.readouterr().out
+
+
+def test_test_unit_fans_out_and_propagates_failure(monkeypatch):
+    calls: list[list[str]] = []
+
+    def _fake_exec(cmd, root):
+        calls.append(cmd.argv)
+        return 0 if cmd.label == "node" else 2  # rust fails
+
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "_exec", _fake_exec)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "unit_commands",
+        lambda r: [
+            Cmd(["npm", "run", "test:unit"], "npm run test:unit", label="node"),
+            Cmd(["cargo", "test"], "cargo test", label="rust", cwd="src-tauri"),
+        ],
+    )
+    assert tasks.test_unit([]) == 2
+    assert len(calls) == 2  # ran node then rust, stopped at the failure
+
+
+def test_test_all_runs_unit_then_e2e(monkeypatch):
+    order: list[str] = []
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(
+        tasks.repo_commands, "unit_commands", lambda r: [Cmd(["u"], "u", label="node")]
+    )
+    monkeypatch.setattr(
+        tasks.repo_commands, "e2e_commands", lambda r: [Cmd(["e"], "e", label="node")]
+    )
+
+    def _fake_exec(cmd, root):
+        order.append(cmd.display)
+        return 0
+
+    monkeypatch.setattr(tasks, "_exec", _fake_exec)
+    assert tasks.test_all([]) == 0
+    assert order == ["u", "e"]
+
+
+def test_test_all_stops_if_unit_fails(monkeypatch):
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "unit_commands", lambda r: [Cmd(["u"], "u")])
+    e2e_ran = {"v": False}
+
+    def _e2e(r):
+        e2e_ran["v"] = True
+        return [Cmd(["e"], "e")]
+
+    monkeypatch.setattr(tasks.repo_commands, "e2e_commands", _e2e)
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: 3)
+    assert tasks.test_all([]) == 3
+    # e2e_commands is queried up front, but the e2e command must NOT exec.
+
+
+# --- build / run: error when no command ----------------------------------
+
+
+def test_build_errors_when_no_command(monkeypatch, capsys):
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "build_command", lambda r: None)
+    assert tasks.build([]) == 1
+    assert "no build command" in capsys.readouterr().err
+
+
+def test_run_errors_when_no_command(monkeypatch, capsys):
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "run_command", lambda r: None)
+    assert tasks.run([]) == 1
+    assert "no run command" in capsys.readouterr().err
+
+
+def test_build_execs_and_propagates(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "build_command",
+        lambda r: Cmd(["cargo", "build", "--release"], "cargo build --release", label="rust"),
+    )
+
+    def _fake_exec(cmd, root):
+        captured["argv"] = cmd.argv
+        return 0
+
+    monkeypatch.setattr(tasks, "_exec", _fake_exec)
+    assert tasks.build([]) == 0
+    assert captured["argv"] == ["cargo", "build", "--release"]
+
+
+# --- arg forwarding (single-command verbs) -------------------------------
+
+
+def test_build_forwards_args_npm_needs_dashdash(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "detect_pm", lambda r: "npm")
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "build_command",
+        lambda r: Cmd(["npm", "run", "build"], "npm run build", label="node"),
+    )
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: captured.update(argv=cmd.argv) or 0)
+    assert tasks.build(["--linux"]) == 0
+    assert captured["argv"] == ["npm", "run", "build", "--", "--linux"]
+
+
+def test_build_forwards_args_cargo_direct(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "detect_pm", lambda r: "npm")
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "build_command",
+        lambda r: Cmd(["cargo", "build", "--release"], "cargo build --release", label="rust"),
+    )
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: captured.update(argv=cmd.argv) or 0)
+    assert tasks.build(["--features", "x"]) == 0
+    assert captured["argv"] == ["cargo", "build", "--release", "--features", "x"]
+
+
+# --- nextest upgrade in _resolve_argv ------------------------------------
+
+
+def test_cargo_test_upgrades_to_nextest_when_present(monkeypatch):
+    monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-nextest")
+    cmd = Cmd(["cargo", "test", "--all-features"], "cargo test", label="rust")
+    assert tasks._resolve_argv(cmd, "/repo") == [
+        "cargo",
+        "nextest",
+        "run",
+        "--all-features",
+        "--no-tests=pass",
+    ]
+
+
+def test_cargo_test_stays_plain_without_nextest(monkeypatch):
+    monkeypatch.setattr(tasks, "which", lambda name: None)
+    cmd = Cmd(["cargo", "test", "--all-features"], "cargo test", label="rust")
+    assert tasks._resolve_argv(cmd, "/repo") == ["cargo", "test", "--all-features"]
+
+
+def test_help(capsys):
+    for fn in (tasks.test_unit, tasks.test_e2e, tasks.test_all, tasks.build, tasks.run):
+        assert fn(["--help"]) == 0
+    assert capsys.readouterr().out
