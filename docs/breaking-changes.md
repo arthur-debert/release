@@ -22,6 +22,48 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
+## Unreleased — WS3: gate configs into `.release/`; the gate runs from the binary (#524)
+
+**Type:** behavior change + reduced synced footprint. Not a caller-breaking change
+(no workflow edits), but consumers' tracked files shrink on next `init` and the
+git pre-commit hook changes shape.
+
+Epic #501 ("invoke, don't discover"). The gate definition and its tool configs
+leave the consumer root and live only in the ephemeral `.release/` build dir:
+
+- **`lefthook.yml` + most lint/format configs** (`.markdownlint.json`,
+  `.markdownlintignore`, `.yamllint`, `.prettierignore`) are now
+  **release-internal**: materialized into `.release/` but no longer mirrored to the
+  consumer root. Each tool is handed its config explicitly — `markdownlint
+  --config/--ignore-path`, `yamllint -c`, `prettier --ignore-path` — all pointed at
+  `.release/`. **`.editorconfig` and `.shellcheckrc` stay mirrored to the root**:
+  `.editorconfig` is editor-facing, and shellcheck finds its rc only by walking up
+  from each checked file's dir (no version-portable `--rcfile` — that flag is
+  shellcheck ≥ 0.10.0, but the fleet's CI installs 0.9.0 via apt), so it must stay a
+  root-discovered dotfile until a fleet-wide shellcheck bump.
+- **The git hook runs through the binary.** `release-core gate --install-hook`
+  writes `.git/hooks/pre-commit` → `release-core gate --hook` (staged-set lefthook
+  run, `--no-auto-install` so lefthook can't reclaim the hook). `setup-dev-env.sh`
+  installs it when `.release/lefthook.yml` is present. There is no tracked root
+  `lefthook.yml` for a stock `lefthook install` to discover (the WS4-deferred
+  symlink drop, folded in here).
+- **Migration is automatic.** A pre-WS3 consumer's committed root `lefthook.yml` +
+  config symlinks still *resolve* (their `.release/` targets exist), so the
+  broken-symlink sweep was generalized to a **mirrored-dest** rule: any
+  `.release/`-pointing symlink whose dest is no longer mirrored is swept on next
+  `init` and committed — no hand-editing.
+- **Gate-hardening rider:** npm `typecheck` dropped `--if-present` — when TS files
+  are staged but the project has no `typecheck` script, the gate **fails loud**
+  (was a hollow green).
+
+**Consumer impact:** automatic on next `init`. `release-core gate` (full,
+`--all-files`) and the commit-time hook both resolve the gate from `.release/`.
+The release-cut bot gate (`run-precommit-gate.sh`, rust `prepare-release`) prefers
+`.release/lefthook.yml` via `LEFTHOOK_CONFIG`. Note: `release-core init
+--config-only` (the legacy escape hatch) still writes the gate files to the root
+and is now inconsistent with the gate's `.release/` config paths — slated for
+removal in a follow-up.
+
 ## Unreleased — WS2: CLAUDE.md → stub; ORIENTATION + most skills no longer synced (#523)
 
 **Type:** behavior change + reduced synced footprint. Not a caller-breaking change

@@ -32,8 +32,13 @@ Path-mirror semantics: the destination in each consumer repo is the source
 path with the `templates/commons/`, `templates/components/<c>/`, or
 `templates/<kind>/` prefix stripped.
 
-Example: `templates/commons/.markdownlint.json` lands at
-`.markdownlint.json` in the consumer.
+Example: `templates/commons/.editorconfig` lands at `.editorconfig` in the
+consumer. (The gate definition + most tool configs — `lefthook.yml`,
+`.markdownlint.json`, `.yamllint`, `.prettierignore`, … — are an exception since
+WS3 (#524): they materialize into `.release/` only and are NOT mirrored to the
+root — see "release-internal files" below. `.editorconfig` and `.shellcheckrc`
+stay mirrored — they have no portable way to point their tool at a `.release/`
+copy.)
 
 Files outside those three subtrees (`templates/fragments/`,
 `templates/render/`) are not synced — they are author-facing reference
@@ -106,7 +111,7 @@ paths win on collision with commons. (Highest specificity wins.)
 `lefthook.yml` in every consumer is *generated* by `release-core init` (not
 stored in templates/, recomposed each session into the ephemeral `.release/`):
 
-### `lefthook.yml` at consumer repo root
+### `lefthook.yml` (release-internal — `.release/` only, since WS3 #524)
 
 Composed from:
 
@@ -127,6 +132,18 @@ The generated file carries a header marker:
 # templates/components/<cap>/lefthook.fragment.yaml.
 ```
 
+Since WS3 (#524) the composed `lefthook.yml` and most lint/format tool configs
+(`.markdownlint.json`, `.markdownlintignore`, `.yamllint`, `.prettierignore`) are
+**release-internal**: they live only in `.release/` and are NOT mirrored to the
+consumer root. The gate runs through the binary (`release-core gate` points
+lefthook at `.release/lefthook.yml` via `LEFTHOOK_CONFIG`; each tool is handed its
+config explicitly — `markdownlint --config/--ignore-path`, `yamllint -c`,
+`prettier --ignore-path`), and the git hook is `release-core gate --install-hook` →
+`release-core gate --hook`. **`.editorconfig` and `.shellcheckrc` stay mirrored** to
+the root: `.editorconfig` is editor-facing, and shellcheck has no
+version-portable explicit-config flag (`--rcfile` is ≥ 0.10.0; the fleet's CI runs
+0.9.0), so its rc must be found by shellcheck's upward walk from the repo root.
+
 ## How sync materializes the managed tree (no state file)
 
 Sync is **stateless**. It does not track a per-consumer manifest of what
@@ -137,8 +154,9 @@ on every run (ADR-0001):
 2. Rebuild `.release/` from the current templates (commons + declared
    Capabilities + Kind) — a self-contained build directory of real file
    content.
-3. Create working-tree symlinks (`bin/check`, `lefthook.yml`,
-   `.claude/skills/*`, …) pointing into `.release/`.
+3. Create working-tree symlinks (`bin/check`, `.editorconfig`,
+   `.claude/skills/*`, …) pointing into `.release/`. (`lefthook.yml` + the gate
+   tool configs are NOT mirrored out since WS3 — they stay `.release/`-internal.)
 4. Sweep the repo for symlinks into `.release/` that are now broken (their
    target vanished from the rebuilt tree) and delete them — this is how
    **removals** propagate, with no removal manifest and no bookkeeping.

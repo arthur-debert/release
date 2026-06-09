@@ -285,15 +285,48 @@ def is_distributed_skill_dest(dest: str) -> bool:
     return dest.startswith(".claude/skills/")
 
 
+# The gate definition + most of its tool configs live ONLY in the ephemeral
+# .release/ build dir now (WS3, release#524): they are materialized into .release/
+# but no longer mirrored out to the consumer root. `release-core gate` points
+# lefthook at .release/lefthook.yml (LEFTHOOK_CONFIG) and each tool is handed its
+# config EXPLICITLY (markdownlint --config/--ignore-path, yamllint -c, prettier
+# --ignore-path) from .release/.
+#
+# Two configs are deliberately NOT here — they stay mirrored to the consumer root
+# because nothing can point their consumer at a .release/ copy:
+#   - `.editorconfig` — editor-facing root convention (discovered by editors), not
+#     a gate flag at all.
+#   - `.shellcheckrc` — shellcheck finds its rc only by walking UP from each
+#     checked file's dir to the repo root; there is NO version-portable
+#     explicit-config flag (`--rcfile` is shellcheck >= 0.10.0, but the fleet's CI
+#     installs 0.9.0 via apt). So it must remain a root-discovered dotfile, the
+#     same category as .editorconfig. (Vendoring it into .release/ awaits a
+#     fleet-wide shellcheck >= 0.10 bump — a separate, deliberate change.)
+GATE_INTERNAL_FILES: frozenset[str] = frozenset(
+    {
+        "lefthook.yml",
+        ".markdownlint.json",
+        ".markdownlintignore",
+        ".yamllint",
+        ".prettierignore",
+    }
+)
+
+
 def is_release_internal(dest: str) -> bool:
     """Content materialized into .release/ but NOT mirrored out as a symlink/copy:
-    the provenance marker, the managed .gitignore (release#450), and the Python
-    engine package (lib/release_core/* — the folded PR state engine ships by pip
-    wheel now, not sync; release#459). (ORIENTATION.md was retired in WS2,
-    release#523 — the CLAUDE.md block is a stub pointing at `release-core how-to`.)"""
+    the provenance marker, the managed .gitignore (release#450), the Python engine
+    package (lib/release_core/* — the folded PR state engine ships by pip wheel
+    now, not sync; release#459), and the gate definition + tool configs
+    (GATE_INTERNAL_FILES — WS3, release#524: the gate runs from .release/ via the
+    binary, so lefthook.yml + the lint/format configs no longer reach the root).
+    (ORIENTATION.md was retired in WS2, release#523 — the CLAUDE.md block is a stub
+    pointing at `release-core how-to`.)"""
     if dest == SOURCE_MARKER:
         return True
     if dest == GITIGNORE_FILE:
+        return True
+    if dest in GATE_INTERNAL_FILES:
         return True
     return dest.startswith("lib/release_core/")
 
@@ -774,7 +807,12 @@ def compute_mirror(
         else:
             mp.symlinks_to_create.append(f"{f} -> {target}")
 
-    mp.symlinks_to_remove = _find_broken_release_links(repo_root, tmp_release)
+    # The dests this sync mirrors OUT as symlinks into .release/ (everything in
+    # new_files that is neither release-internal nor a real-file copy). The sweep
+    # removes any .release/-pointing symlink whose target dest is absent from this
+    # set — a dropped target OR a de-mirrored one (WS3: root lefthook.yml + configs).
+    mirrored_dests = {f for f in new_files if not is_release_internal(f) and not needs_real_file(f)}
+    mp.symlinks_to_remove = _find_broken_release_links(repo_root, mirrored_dests)
     mp.copies_to_remove = _find_stale_managed_copies(repo_root, live_copies)
     return mp
 
@@ -812,12 +850,23 @@ def _under_any(dest: str, roots: list[str]) -> bool:
     return any(dest == r or dest.startswith(r + "/") for r in roots)
 
 
-def _find_broken_release_links(repo_root: str, tmp_release: str) -> list[str]:
+def _find_broken_release_links(repo_root: str, mirrored_dests: set[str]) -> list[str]:
     """Mirror the broken-symlink sweep: walk the repo (excluding .git/ and
-    .release/) for symlinks whose target contains `.release/`; a link is stale
-    iff its target is absent from the NEW tree (`tmp_release`) — the new tree is
-    authoritative, so a target removed THIS sync is swept even though the old
-    `.release/` is still live (the swap into `.release/` happens after this).
+    .release/) for symlinks whose target points into `.release/`; a link is stale
+    iff its post-`.release/` target dest is NOT one this sync mirrors out as a
+    symlink (``mirrored_dests`` — the planned symlink dests, i.e. ``new_files``
+    minus the release-internal + real-file-copy dests).
+
+    This single membership rule subsumes the older "target absent from the new
+    tree" test: a target removed or dropped this sync is not a mirrored dest, so
+    it is swept (the lex/#476 case — a retired shim whose old `.release/` copy is
+    still live). It ALSO sweeps a de-mirrored-but-still-resolving link: WS3
+    (release#524) made the root `lefthook.yml` + lint/format configs
+    release-internal (materialized into `.release/` but no longer mirrored out),
+    so their `.release/` targets still EXIST — a filesystem-presence test would
+    leave the stale root symlinks behind, but they are no longer mirrored dests,
+    so they are swept. A hand-tampered `..` target is likewise not a clean
+    mirrored dest → swept (the old explicit containment guard is now subsumed).
 
     Paths are returned relative to repo_root, prefixed `./` exactly as the bash
     `find . -type l` emitted them (e.g. './bin/stale-tool'), in find traversal
@@ -838,24 +887,7 @@ def _find_broken_release_links(repo_root: str, tmp_release: str) -> list[str]:
                     continue
                 # rel-after-marker = "${target##*.release/}" (text after the LAST).
                 tgt_rel = target.rsplit(".release/", 1)[1]
-                # Stale iff the target is absent from the NEW tree. The new tree
-                # is authoritative: a target removed this sync (present in the
-                # still-live old .release/, gone from tmp_release) is swept here,
-                # before the swap, so it never dangles afterward. (The old
-                # also-broken-live requirement left removed-target links behind.)
-                #
-                # Containment guard: a managed target is always a plain path
-                # directly under .release/, so the probe must stay inside
-                # tmp_release. A crafted tgt_rel with `..` (e.g. from a
-                # hand-tampered symlink) would escape and probe an unrelated
-                # path; resolve and require containment, else treat as absent
-                # (→ swept) rather than probing outside the build dir.
-                probe = os.path.normpath(os.path.join(tmp_release, tgt_rel))
-                real_tmp = os.path.realpath(tmp_release)
-                contained = os.path.realpath(probe) == real_tmp or os.path.realpath(
-                    probe
-                ).startswith(real_tmp + os.sep)
-                if not (contained and os.path.exists(probe)):
+                if tgt_rel not in mirrored_dests:
                     out.append(child_rel)
             elif entry.is_dir(follow_symlinks=False):
                 # Prune .git and .release at the top level (find -not -path).

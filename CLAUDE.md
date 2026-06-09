@@ -166,9 +166,15 @@ lex-fmt/lex v0.9.1.
 - **The gate is ONE definition, run everywhere — never reimplemented.**
   `lefthook.yml` IS the gate (the WHAT: the set of checks). Every environment
   (the WHERE) *invokes* it: session start arms it (`setup-dev-env.sh` /
-  `release-core init` installs the toolset + `lefthook install`), local commits
+  `release-core init` installs the toolset + wires the hook), local commits
   run it, and CI runs the SAME `lefthook run pre-commit --all-files` as a
-  required check. It is a HARD gate — a missing tool exits non-zero (never
+  required check. **WS3 (#524):** in a *consumer* the gate definition + most tool
+  configs live only in the ephemeral `.release/` (no tracked root `lefthook.yml`);
+  the binary is the carrier — `release-core gate` points lefthook at
+  `.release/lefthook.yml` and the git hook is `release-core gate --install-hook` →
+  `release-core gate --hook`. (`.editorconfig` + `.shellcheckrc` stay root-mirrored
+  — shellcheck has no portable `--rcfile` on the fleet's 0.9.0.) (Release's OWN repo keeps a hand-authored root
+  `lefthook.yml` with release-only checks — it is the source, not a consumer.) It is a HARD gate — a missing tool exits non-zero (never
   skips), and `--no-verify` is never an acceptable workaround (CI re-runs the
   gate on a clean runner where the tools are guaranteed). **To add or change a
   check, edit `lefthook.yml` only; never hand-copy a check into a CI job.** "CI

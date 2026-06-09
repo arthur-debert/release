@@ -526,29 +526,25 @@ def test_broken_link_swept_when_target_absent_everywhere(tmp_path):
     binp = tmp_path / "bin"
     binp.mkdir()
     os.symlink("../.release/bin/gone", str(binp / "stale"))
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    # bin/gone is not a mirrored dest → swept.
+    out = sync._find_broken_release_links(str(tmp_path), set())
     assert out == ["./bin/stale"]
 
 
-def test_broken_link_kept_when_materialized_this_sync(tmp_path):
+def test_broken_link_kept_when_still_a_mirrored_dest(tmp_path):
     binp = tmp_path / "bin"
     binp.mkdir()
-    os.symlink("../.release/bin/check-shell", str(binp / "check-shell"))  # dangling now
-    tmp_release = tmp_path / "tmpbuild"
-    (tmp_release / "bin").mkdir(parents=True)
-    (tmp_release / "bin" / "check-shell").write_text("#!/bin/sh\n")  # materialized this sync
-    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    os.symlink("../.release/bin/check-shell", str(binp / "check-shell"))
+    # bin/check-shell is still mirrored this sync → kept.
+    out = sync._find_broken_release_links(str(tmp_path), {"bin/check-shell"})
     assert out == []
 
 
 def test_link_swept_when_target_removed_this_sync(tmp_path):
     """Regression for #476 (the lex dogfood): a symlink whose target STILL EXISTS
-    in the live .release/ (so it is NOT broken-live) but is ABSENT from the new
-    tree must be swept. The old condition required broken-live AND absent-new, so
-    a removed-this-sync target dangled after the .release/ swap. New rule: stale
-    iff absent from the NEW tree (authoritative)."""
+    in the live .release/ (so it is NOT broken-live) but is no longer a mirrored
+    dest must be swept. The old condition required broken-live AND absent-new, so
+    a removed-this-sync target dangled after the .release/ swap."""
     binp = tmp_path / "bin"
     binp.mkdir()
     # Live target present (link resolves fine right now) — the OLD .release/.
@@ -557,37 +553,42 @@ def test_link_swept_when_target_removed_this_sync(tmp_path):
     (live_release / "changelog").write_text("#!/bin/sh\n")
     os.symlink("../.release/bin/changelog", str(binp / "changelog"))
     assert os.path.exists(str(binp / "changelog"))  # NOT broken-live
-    # New tree no longer carries it (the shim was retired this sync).
-    tmp_release = tmp_path / "tmpbuild"
-    (tmp_release / "bin").mkdir(parents=True)
-    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    # The shim was retired this sync → bin/changelog is not a mirrored dest.
+    out = sync._find_broken_release_links(str(tmp_path), set())
     assert out == ["./bin/changelog"]
 
 
-def test_broken_link_target_escaping_tmp_release_is_swept(tmp_path):
-    """Containment guard: a tampered target whose post-marker path escapes
-    tmp_release via `..` must NOT probe outside the build dir — it is treated as
-    absent (→ swept), never kept by hitting an unrelated path that happens to
-    exist. Here the escape would resolve to a real sibling file outside the
-    build dir; the link must still be swept."""
+def test_demirrored_link_swept_even_when_target_present(tmp_path):
+    """WS3 (release#524): the root lefthook.yml + lint/format configs became
+    release-internal — still materialized into .release/ (target RESOLVES) but no
+    longer mirrored out. A filesystem-presence test would leave these stale root
+    symlinks behind; the mirrored-dest rule sweeps them."""
+    # Seed a pre-WS3 consumer: root lefthook.yml symlink whose .release/ target
+    # still exists, and a couple config symlinks.
+    live = tmp_path / ".release"
+    live.mkdir()
+    for name in ("lefthook.yml", ".markdownlint.json", ".yamllint"):
+        (live / name).write_text("x\n")
+        os.symlink(f".release/{name}", str(tmp_path / name))
+    # None of these dests is mirrored anymore (they are release-internal now).
+    out = sync._find_broken_release_links(str(tmp_path), set())
+    assert sorted(out) == ["./.markdownlint.json", "./.yamllint", "./lefthook.yml"]
+
+
+def test_broken_link_tampered_escape_is_swept(tmp_path):
+    """A tampered target whose post-marker path escapes via `..` is not a clean
+    mirrored dest, so it is swept (the old explicit containment guard is subsumed
+    by the membership rule)."""
     binp = tmp_path / "bin"
     binp.mkdir()
-    # Create a real file OUTSIDE the build dir that the escape would resolve to.
-    outside = tmp_path / "outside"
-    outside.write_text("not a managed target\n")
-    # target post-".release/" = "../outside" → escapes tmp_release.
-    os.symlink("../.release/../outside", str(binp / "evil"))
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    out = sync._find_broken_release_links(str(tmp_path), str(tmp_release))
+    os.symlink("../.release/../outside", str(binp / "evil"))  # tgt_rel = ../outside
+    out = sync._find_broken_release_links(str(tmp_path), {"bin/check-shell"})
     assert out == ["./bin/evil"]
 
 
 def test_broken_link_ignores_non_release_targets(tmp_path):
     os.symlink("/nowhere/else", str(tmp_path / "other"))
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    assert sync._find_broken_release_links(str(tmp_path), str(tmp_release)) == []
+    assert sync._find_broken_release_links(str(tmp_path), set()) == []
 
 
 def test_broken_link_prunes_release_and_git(tmp_path):
@@ -595,9 +596,7 @@ def test_broken_link_prunes_release_and_git(tmp_path):
     rel = tmp_path / ".release" / "bin"
     rel.mkdir(parents=True)
     os.symlink("../.release/bin/gone", str(rel / "inside"))
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    assert sync._find_broken_release_links(str(tmp_path), str(tmp_release)) == []
+    assert sync._find_broken_release_links(str(tmp_path), set()) == []
 
 
 # ── stale managed-copy sweep ──────────────────────────────────────────────────
@@ -803,9 +802,11 @@ def test_skill_root_of():
 
 def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
     """A real file at a NON-skill managed dest keeps the conflict guard (only
-    --migrate replaces it) — the skill auto-replace is scoped to skills."""
-    dest = "lefthook.yml"
-    (tmp_path / dest).write_text("on: push\n")
+    --migrate replaces it) — the skill auto-replace is scoped to skills.
+    (.editorconfig stays mirrored — unlike lefthook.yml/configs, which WS3 made
+    release-internal.)"""
+    dest = ".editorconfig"
+    (tmp_path / dest).write_text("root = true\n")
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)

@@ -182,7 +182,19 @@ elif command -v lefthook >/dev/null 2>&1; then
   _lefthook="lefthook"
 fi
 
-if [ -f lefthook.yml ] && [ -n "${_lefthook}" ]; then
+if [ -f .release/lefthook.yml ] && command -v release-core >/dev/null 2>&1; then
+  # WS3 (release#524): the gate definition lives ONLY in the ephemeral .release/
+  # build dir — there is no tracked root lefthook.yml for a stock `lefthook
+  # install` shim to discover. Wire the git hook through the binary instead:
+  # `release-core gate --install-hook` writes .git/hooks/pre-commit (→ `release-core
+  # gate --hook`, which points lefthook at .release/lefthook.yml) and unsets any
+  # stale core.hooksPath redirect itself. This is the path every migrated consumer
+  # takes; the root-lefthook.yml branch below is for release's own repo (which
+  # keeps a hand-authored root gate) and not-yet-migrated consumers.
+  if ! release-core gate --install-hook >/dev/null; then
+    echo "warning: release-core gate --install-hook failed — pre-commit hook NOT wired" >&2
+  fi
+elif [ -f lefthook.yml ] && [ -n "${_lefthook}" ]; then
   # `git config --get` returns 1 when unset. Command substitution exit
   # codes don't propagate `set -e` from a conditional context, but the
   # explicit `|| true` makes the empty-when-unset intent unambiguous.

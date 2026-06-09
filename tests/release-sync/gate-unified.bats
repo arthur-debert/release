@@ -64,3 +64,73 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   run bash -c 'shopt -s nullglob; "'"$CHECK_SHELL"'" bin/* .release/bin/*'
   [ "$status" -eq 0 ]
 }
+
+# --- WS3 (release#524): the gate lives ONLY in .release/, not at the root ----
+
+@test "the gate config + tool configs land in .release/ but NOT at the consumer root" {
+  release_sync >/dev/null
+  # Materialized into the ephemeral build dir...
+  [ -f .release/lefthook.yml ]
+  for c in .markdownlint.json .markdownlintignore .yamllint .prettierignore; do
+    [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }
+  done
+  # ...and NOT mirrored out to the consumer root (no tracked gate files). These
+  # tools take an explicit --config/-c/--ignore-path pointed at .release/.
+  [ ! -e lefthook.yml ] && [ ! -L lefthook.yml ]
+  for c in .markdownlint.json .markdownlintignore .yamllint .prettierignore; do
+    { [ ! -e "$c" ] && [ ! -L "$c" ]; } || { echo "leaked root $c"; false; }
+  done
+}
+
+@test ".editorconfig + .shellcheckrc stay mirrored to root (root-discovered, no portable --config)" {
+  release_sync >/dev/null
+  # .editorconfig is editor-facing; .shellcheckrc must be found by shellcheck's
+  # upward walk from each file (no version-portable --rcfile on the fleet's
+  # shellcheck 0.9.0). Both stay root-mirrored symlinks into .release/.
+  for c in .editorconfig .shellcheckrc; do
+    [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }
+    [ -L "$c" ] || { echo "$c not mirrored to root"; false; }
+    [ "$(readlink "$c")" = ".release/$c" ] || { echo "$c wrong target"; false; }
+  done
+}
+
+@test "a pre-WS3 consumer's tracked root gate symlinks are swept on re-sync (migration)" {
+  # Seed a pre-WS3 layout: a live .release/ carrying the gate files, plus
+  # committed root symlinks into it (so they RESOLVE now — a presence test would
+  # leave them behind; the mirrored-dest sweep removes them).
+  mkdir -p .release
+  for f in lefthook.yml .markdownlint.json .yamllint; do
+    printf 'seed\n' > ".release/$f"
+    ln -s ".release/$f" "$f"
+    [ -e "$f" ]   # resolves before the sync
+  done
+  run release_sync
+  [ "$status" -eq 0 ]
+  # The stale root symlinks are gone; the managed copies remain in .release/.
+  for f in lefthook.yml .markdownlint.json .yamllint; do
+    [ ! -L "$f" ] || { echo "stale root $f not swept"; false; }
+    [ -f ".release/$f" ] || { echo "missing .release/$f"; false; }
+  done
+}
+
+@test "release-core gate --install-hook wires .git/hooks/pre-commit through the binary" {
+  release_sync >/dev/null
+  run release-core gate --install-hook
+  [ "$status" -eq 0 ]
+  hook="$(git rev-parse --git-path hooks)/pre-commit"
+  [ -f "$hook" ]
+  [ -x "$hook" ]
+  grep -qF 'release-core gate --hook' "$hook"
+}
+
+@test "a release-core gate run does NOT let lefthook clobber the binary hook (--no-auto-install)" {
+  command -v lefthook >/dev/null || skip "lefthook not installed"
+  release_sync >/dev/null
+  release-core gate --install-hook >/dev/null
+  hook="$(git rev-parse --git-path hooks)/pre-commit"
+  # Running the gate must NOT trigger lefthook's hook auto-sync (which would back
+  # up our hook to .old and reinstall lefthook's own root-discovering shim).
+  release-core gate >/dev/null 2>&1 || true
+  grep -qF 'release-core gate --hook' "$hook"
+  [ ! -e "${hook}.old" ]
+}

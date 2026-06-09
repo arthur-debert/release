@@ -215,7 +215,14 @@ runs:
           # → exit 128. The deletion still commits via the staged index.
           mapfile -t staged_arr < <(git diff --cached --name-only --diff-filter=d)
           if [ "${#staged_arr[@]}" -gt 0 ]; then
-            if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+            # WS3 (release#524): the gate config lives in the ephemeral .release/
+            # build dir (materialized by arm-gate before this step); the root
+            # lefthook.yml symlink is no longer tracked. Point lefthook at the
+            # managed config via LEFTHOOK_CONFIG, falling back to a root config.
+            if [ -f .release/lefthook.yml ]; then
+              export LEFTHOOK_CONFIG=.release/lefthook.yml
+            fi
+            if [ -n "${LEFTHOOK_CONFIG:-}" ] || [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
               echo "Pre-commit gate: lefthook"
               lefthook_file_args=()
               for f in "${staged_arr[@]}"; do

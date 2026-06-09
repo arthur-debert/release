@@ -66,4 +66,11 @@ for f in "$@"; do
 done
 
 [ ${#shell_files[@]} -eq 0 ] && exit 0
+
+# The rc file (`.shellcheckrc`) is found by walking UP from each checked file's
+# directory to the repo root — there is no version-portable explicit-config flag
+# (`--rcfile` only landed in shellcheck 0.10.0, and the fleet's CI installs 0.9.0
+# via apt). So unlike markdownlint/yamllint/prettier, the rc is NOT vendored into
+# .release/ in WS3 (release#524): it stays a root-discovered dotfile, the same
+# category as .editorconfig. No explicit-config flag needed here.
 shellcheck --severity=info -- "${shell_files[@]}"

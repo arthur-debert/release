@@ -78,8 +78,18 @@ run_husky() {
   bash .husky/pre-commit
 }
 
+# WS3 (release#524): the gate config lives in the ephemeral .release/ build dir;
+# the root lefthook.yml symlink is no longer tracked. Prefer the managed config via
+# LEFTHOOK_CONFIG so lefthook finds it without a root file, falling back to a root
+# config for a not-yet-migrated consumer (or release's own repo). .release/lefthook.yml
+# exists only when the caller materialized it (e.g. rust-cli's arm-gate before
+# prepare-release); when it is absent this is a no-op and detection falls through.
+if [ -f .release/lefthook.yml ]; then
+  export LEFTHOOK_CONFIG=.release/lefthook.yml
+fi
+
 gate_ran=0
-if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+if [ -n "${LEFTHOOK_CONFIG:-}" ] || [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
   echo "Detected lefthook config — running gate."
   run_lefthook
   gate_ran=1
