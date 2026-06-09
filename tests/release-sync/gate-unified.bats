@@ -64,3 +64,55 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   run bash -c 'shopt -s nullglob; "'"$CHECK_SHELL"'" bin/* .release/bin/*'
   [ "$status" -eq 0 ]
 }
+
+# --- WS3 (release#524): the gate lives ONLY in .release/, not at the root ----
+
+@test "the gate config + tool configs land in .release/ but NOT at the consumer root" {
+  release_sync >/dev/null
+  # Materialized into the ephemeral build dir...
+  [ -f .release/lefthook.yml ]
+  for c in .markdownlint.json .markdownlintignore .yamllint .shellcheckrc .prettierignore; do
+    [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }
+  done
+  # ...and NOT mirrored out to the consumer root (no tracked gate files).
+  [ ! -e lefthook.yml ] && [ ! -L lefthook.yml ]
+  for c in .markdownlint.json .markdownlintignore .yamllint .shellcheckrc .prettierignore; do
+    { [ ! -e "$c" ] && [ ! -L "$c" ]; } || { echo "leaked root $c"; false; }
+  done
+}
+
+@test ".editorconfig stays mirrored to the consumer root (editor-facing, not a gate flag)" {
+  release_sync >/dev/null
+  [ -f .release/.editorconfig ]
+  [ -L .editorconfig ]
+  [ "$(readlink .editorconfig)" = ".release/.editorconfig" ]
+}
+
+@test "a pre-WS3 consumer's tracked root gate symlinks are swept on re-sync (migration)" {
+  # Seed a pre-WS3 layout: a live .release/ carrying the gate files, plus
+  # committed root symlinks into it (so they RESOLVE now — a presence test would
+  # leave them behind; the mirrored-dest sweep removes them).
+  mkdir -p .release
+  for f in lefthook.yml .markdownlint.json .yamllint; do
+    printf 'seed\n' > ".release/$f"
+    ln -s ".release/$f" "$f"
+    [ -e "$f" ]   # resolves before the sync
+  done
+  run release_sync
+  [ "$status" -eq 0 ]
+  # The stale root symlinks are gone; the managed copies remain in .release/.
+  for f in lefthook.yml .markdownlint.json .yamllint; do
+    [ ! -L "$f" ] || { echo "stale root $f not swept"; false; }
+    [ -f ".release/$f" ] || { echo "missing .release/$f"; false; }
+  done
+}
+
+@test "release-core gate --install-hook wires .git/hooks/pre-commit through the binary" {
+  release_sync >/dev/null
+  run release-core gate --install-hook
+  [ "$status" -eq 0 ]
+  hook="$(git rev-parse --git-path hooks)/pre-commit"
+  [ -f "$hook" ]
+  [ -x "$hook" ]
+  grep -qF 'release-core gate --hook' "$hook"
+}

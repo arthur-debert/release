@@ -7,6 +7,8 @@ lefthook gate over the whole tree (no false-green on unstaged files).
 
 from __future__ import annotations
 
+import os
+
 import click
 from release_core import cli_entry
 from release_core.verbs import gate, how_to
@@ -145,6 +147,104 @@ def test_gate_runs_all_files_over_the_repo(monkeypatch):
     cmd = captured["cmd"]
     assert cmd[:5] == ["lefthook", "run", "pre-commit", "--all-files", "--no-tty"]
     assert captured["cwd"] == "/repo"
+
+
+def test_gate_hook_mode_runs_staged_not_all_files(monkeypatch):
+    """--hook (the git pre-commit entry) runs lefthook over the STAGED set — NO
+    --all-files — so stage_fixed auto-fix+restage stays correct at commit time."""
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd, cwd, env):
+        captured["cmd"] = cmd
+        return _Result()
+
+    monkeypatch.setattr(gate, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda root: "lefthook")
+    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    assert gate.main(["--hook"]) == 0
+    cmd = captured["cmd"]
+    assert cmd == ["lefthook", "run", "pre-commit", "--no-tty"]
+    assert "--all-files" not in cmd
+
+
+def test_gate_points_lefthook_at_managed_config(monkeypatch, tmp_path):
+    """When .release/lefthook.yml exists, LEFTHOOK_CONFIG points lefthook at it —
+    the root discovery symlink is gone (WS3, release#524)."""
+    (tmp_path / ".release").mkdir()
+    (tmp_path / ".release" / "lefthook.yml").write_text("pre-commit:\n")
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd, cwd, env):
+        captured["env"] = env
+        return _Result()
+
+    monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda root: "lefthook")
+    monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
+    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    assert gate.main([]) == 0
+    assert captured["env"]["LEFTHOOK_CONFIG"] == str(tmp_path / ".release" / "lefthook.yml")
+
+
+def _git_init(path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init", "-q"], cwd=str(path), check=True)
+
+
+def test_install_hook_writes_pre_commit(tmp_path, capsys):
+    """--install-hook wires .git/hooks/pre-commit to run the gate through the
+    binary; the hook is executable and idempotent."""
+    _git_init(tmp_path)
+    monkeypatch_repo = tmp_path
+
+    import release_core.verbs.gate as g
+
+    rc = g._install_hook(str(monkeypatch_repo))
+    assert rc == 0
+    hook = tmp_path / ".git" / "hooks" / "pre-commit"
+    assert hook.is_file()
+    assert os.access(str(hook), os.X_OK)
+    body = hook.read_text()
+    assert "release-core gate --hook" in body
+    assert "Managed by release" in body
+    # Idempotent: a second install is a clean no-op-equivalent (same content).
+    assert g._install_hook(str(tmp_path)) == 0
+    assert hook.read_text() == body
+
+
+def test_install_hook_unsets_custom_hooks_path(tmp_path):
+    """A husky-style core.hooksPath redirect is cleared so the shim takes effect."""
+    import subprocess
+
+    _git_init(tmp_path)
+    subprocess.run(["git", "config", "core.hooksPath", ".husky"], cwd=str(tmp_path), check=True)
+    import release_core.verbs.gate as g
+
+    assert g._install_hook(str(tmp_path)) == 0
+    got = subprocess.run(
+        ["git", "config", "--get", "core.hooksPath"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+    )
+    assert got.stdout.strip() == ""  # unset
+    assert (tmp_path / ".git" / "hooks" / "pre-commit").is_file()
+
+
+def test_install_hook_outside_worktree_is_noop(tmp_path, capsys):
+    import release_core.verbs.gate as g
+
+    rc = g._install_hook(str(tmp_path))  # not a git repo
+    assert rc == 0
+    assert "not inside a git work tree" in capsys.readouterr().out
+    assert not (tmp_path / ".git").exists()
 
 
 def test_gate_help(capsys):

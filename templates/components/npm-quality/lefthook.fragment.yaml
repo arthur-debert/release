@@ -73,24 +73,43 @@ pre-commit:
       # set when changed, and still get formatted.
       glob:
         - "**/*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
+      #
+      # --ignore-path REPLACES prettier's default [.gitignore, .prettierignore]
+      # discovery, so we re-pass both (when present) PLUS the managed
+      # .release/.prettierignore (WS3, release#524 — the managed ignore, which
+      # skips the generated CHANGELOG, no longer mirrors to the consumer root).
+      # Multiple --ignore-path values are accepted and merged.
       run: >-
         set --;
         for f in {staged_files}; do
           [ -L "$f" ] || set -- "$@" "$f";
         done;
-        if [ $# -gt 0 ]; then
-          npx --no-install prettier --write -- "$@";
-        fi
+        [ $# -eq 0 ] && exit 0;
+        ig="";
+        [ -f .gitignore ] && ig="$ig --ignore-path .gitignore";
+        [ -f .prettierignore ] && ig="$ig --ignore-path .prettierignore";
+        [ -f .release/.prettierignore ] && ig="$ig --ignore-path .release/.prettierignore";
+        npx --no-install prettier --write $ig -- "$@";
       stage_fixed: true
       priority: 2
     typecheck:
       # tsc operates on the project as a whole — no per-file invocation.
       # The glob exists so the hook only fires when TS files are staged;
       # editing only a README.md shouldn't trigger a full typecheck.
-      # --if-present so a consumer that hasn't wired `typecheck`
-      # silently no-ops (acceptable — projects without TS exist).
+      #
+      # HARD gate (WS3, release#524): TS files are staged (the glob fired), so a
+      # `typecheck` script MUST exist — an absent runner FAILS LOUD, it does not
+      # silently no-op. The old `--if-present` let a misconfigured TS project
+      # (staging .ts with no typecheck script) show a hollow green — exactly the
+      # absent-runner class WS8-round-1 flagged. `npm pkg get scripts.typecheck`
+      # prints `{}` when the script is absent.
       glob:
         - "**/*.{ts,tsx}"
         - "**/tsconfig*.json"
-      run: npm run --silent typecheck --if-present
+      run: >-
+        if [ "$(npm pkg get scripts.typecheck 2>/dev/null)" = "{}" ]; then
+          echo "ERROR: TS files staged but no 'typecheck' npm script — the gate does not skip. Add a 'typecheck' script (e.g. \"tsc --noEmit\") or remove the TS files." >&2;
+          exit 1;
+        fi;
+        npm run --silent typecheck
       priority: 2

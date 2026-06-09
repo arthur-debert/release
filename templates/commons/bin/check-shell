@@ -66,4 +66,17 @@ for f in "$@"; do
 done
 
 [ ${#shell_files[@]} -eq 0 ] && exit 0
-shellcheck --severity=info -- "${shell_files[@]}"
+
+# Prefer the managed shellcheck config in the ephemeral .release/ build dir
+# (WS3, release#524): it no longer mirrors to the repo root, so shellcheck's own
+# upward search from each file's directory won't find it. Pass it explicitly with
+# --rcfile when present; otherwise fall back to shellcheck's default discovery —
+# release's own repo keeps a real root .shellcheckrc, and a not-yet-migrated
+# consumer may still have one. (Mirrors the gate's "prefer .release/, else
+# default" config resolution.)
+_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "${_root}" ] && [ -f "${_root}/.release/.shellcheckrc" ]; then
+  shellcheck --rcfile "${_root}/.release/.shellcheckrc" --severity=info -- "${shell_files[@]}"
+else
+  shellcheck --severity=info -- "${shell_files[@]}"
+fi

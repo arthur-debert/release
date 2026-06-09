@@ -23,9 +23,12 @@ pre-commit:
       # (MD041 first-line-heading, unbalanced refs) still fail the
       # commit when they can't be auto-fixed — that's the right gate.
       glob: "**/*.md"
+      # --config / --ignore-path point at the managed copies in the ephemeral
+      # .release/ build dir (WS3, release#524): the gate configs no longer mirror
+      # to the consumer root, so the tool can't auto-discover them from cwd.
       run: >-
         if command -v markdownlint >/dev/null 2>&1; then
-          markdownlint --fix -- {staged_files};
+          markdownlint --fix --config .release/.markdownlint.json --ignore-path .release/.markdownlintignore -- {staged_files};
         else
           echo "ERROR: markdownlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2;
           exit 1;
@@ -34,9 +37,11 @@ pre-commit:
       priority: 2
     yamllint:
       glob: "**/*.{yml,yaml}"
+      # -c points at the managed config in .release/ (WS3, release#524) — no
+      # longer mirrored to the consumer root for cwd auto-discovery.
       run: >-
         if command -v yamllint >/dev/null 2>&1; then
-          yamllint -- {staged_files};
+          yamllint -c .release/.yamllint -- {staged_files};
         else
           echo "ERROR: yamllint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2;
           exit 1;
