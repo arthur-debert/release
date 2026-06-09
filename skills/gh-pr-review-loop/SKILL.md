@@ -68,13 +68,13 @@ This is the canonical sequence when driving a feature branch through the loop:
 2. push
 3. arm the loop, THEN open the PR AS A DRAFT (gh pr create --draft), linking the issue
    → draft = WIP, the agent owns it; ready = the signal the human can come in
-     (the canonical lifecycle — see docs/dev-cycle-task.lex / ORIENTATION.md)
+     (the canonical lifecycle — see "Draft vs ready" below)
    → arm in a SEPARATE step first: touch "$(git rev-parse --git-dir)/pr-loop-armed"
    → ruleset enforces PR-only (no direct push to main)
    → copilot-review.yml fires Copilot at `opened` even on drafts — drafts get Copilot
 4. (wait) Copilot posts review at ~7m typical
 5. triage Copilot comments
-6. push fixups (CI re-runs; re-request review only for substantial rounds — see re-review note)
+6. push fixups (CI re-runs; re-request review only for substantial rounds — see "Step 6: pushing fixups" below)
 7. wait for checks
 8. when reviewed + CI green + mergeable: flip draft→ready (gh pr ready) — THIS is the
    handoff signal to the human. Then STOP; the human does the final read + merge.
@@ -129,7 +129,7 @@ Why: a detached auto-fix agent (`orc watch --auto`, release#338) addresses revie
 
 ### Draft vs ready = whose turn it is
 
-This is the canonical lifecycle (`docs/dev-cycle-task.lex`, mirrored in `ORIENTATION.md`). The draft/ready flag is the **turn-signal**:
+This is the canonical lifecycle — stated upstream in [`arthur-debert/release` docs/dev-cycle-task.lex](https://github.com/arthur-debert/release/blob/main/docs/dev-cycle-task.lex) and mirrored into each managed repo's `ORIENTATION` (`.release/ORIENTATION.md`). The draft/ready flag is the **turn-signal**:
 
 - **draft = WIP = the agent owns it.** You open the PR **as a draft** (`gh pr create --draft`) and keep it draft for the entire dev cycle: implementing, waiting on and addressing reviews, getting CI green, making it mergeable.
 - **ready = the human's turn.** Flipping draft→ready (`gh pr ready`) is the *one signal* that says "I'm done iterating — come validate and merge." Don't flip until reviews are addressed, CI is green, and it's mergeable.
@@ -196,7 +196,7 @@ The end state of a healthy PR: only contested threads (and the original review s
 
 ### Step 6: pushing fixups
 
-Push to the same branch. CI re-runs automatically. **Do NOT** re-request Copilot on minor rounds — the workflow fires once at `opened` (including on drafts) and the draft→ready flip does **not** re-trigger it, so one review per PR is the convention. Re-request explicitly only if the round of changes is substantial enough to warrant a fresh look (the re-review nuance from `docs/dev-cycle-task.lex`).
+Push to the same branch. CI re-runs automatically. **Do NOT** re-request Copilot on minor rounds — the workflow fires once at `opened` (including on drafts) and the draft→ready flip does **not** re-trigger it, so one review per PR is the convention. Re-request explicitly only if the round of changes is substantial enough to warrant a fresh look (the re-review nuance from the canonical dev cycle).
 
 Before opening *another* fixup cycle, run `release-core pr status <PR>`. If it returns `BLOCKED` with a `breaker:` line, the loop is diverging — stop, don't iterate, and surface the breaker to the user (see "Orienting with release-core pr status").
 

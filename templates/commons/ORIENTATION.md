@@ -77,7 +77,7 @@ the PR is not the end of your job; you own it through the whole loop:
 
 That is the whole loop: open **draft** → poll the engine → clear what it names → `ready`
 flip → hand off. Drive it through `release-core pr status`; don't reinvent it with
-ad-hoc `gh api` calls. The canonical statement of this cycle is `docs/dev-cycle-task.lex`.
+ad-hoc `gh api` calls. (Source of record: [the dev-cycle model upstream](https://github.com/arthur-debert/release/blob/main/docs/dev-cycle-task.lex) — you don't need to fetch it; the cycle above is the operating copy.)
 
 > **This is enforced, not advisory.** A PreToolUse guard (`bin/pr-loop-guard`)
 > blocks a bare `gh pr create` so the loop can't be skipped by reaching for the
