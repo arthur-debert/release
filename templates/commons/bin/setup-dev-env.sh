@@ -41,85 +41,84 @@ _warn_unarmed() {
   echo "warning: '$1' not installed and could not be auto-installed — the lefthook gate will FAIL until it is present. Install it, then re-run." >&2
 }
 
-# Pinned gate-toolset versions — single source of truth (release#498 follow-up),
-# shared with the CI provisioner bin-internal/provision-gate-toolset.sh so the
-# two can't drift. It is synced alongside this script (same managed sync), so it
-# is normally always present; the `:=` fallbacks are a last-resort safety net so
-# a (broken) missing-file state can't abort the SessionStart hook mid-session.
+# Pinned gate-toolset versions + the gate_version_matches reconcile helper —
+# single source of truth, shared with the CI provisioner
+# bin-internal/provision-gate-toolset.sh so the two can't drift (release#498,
+# release#531). Synced alongside this script (same managed sync) so it is
+# normally always present; the `:=` fallbacks + the gate_version_matches fallback
+# are a last-resort safety net so a (broken) missing-file state can't abort the
+# SessionStart hook before install-release-core can self-heal. The `:=` fallbacks
+# are kept matching the shared file by tests/gate-tool-versions/.
 # shellcheck source=/dev/null
 [ -f "${REPO_ROOT}/bin/gate-tool-versions.sh" ] && . "${REPO_ROOT}/bin/gate-tool-versions.sh"
 : "${RUFF_VERSION:=0.15.12}"
 : "${ACTIONLINT_VERSION:=1.7.7}"
+: "${YAMLLINT_VERSION:=1.38.0}"
+: "${LEFTHOOK_VERSION:=2.1.9}"
+: "${PRETTIER_VERSION:=3.8.4}"
+: "${MARKDOWNLINT_CLI_VERSION:=0.48.0}"
+: "${SHELLCHECK_VERSION:=0.11.0}"
+: "${SHELLCHECK_PY_VERSION:=0.11.0.1}"
+command -v gate_version_matches >/dev/null 2>&1 || gate_version_matches() {
+  command -v "$1" >/dev/null 2>&1 || return 1
+  _gvm_have="$("$1" --version 2>/dev/null \
+    | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+  [ "$_gvm_have" = "$2" ]
+}
 
-# npm globals: lefthook + prettier + markdownlint. Installed before the hook
-# wiring below so `lefthook install` finds the binary.
-if ! command -v lefthook >/dev/null 2>&1 \
-  || ! command -v prettier >/dev/null 2>&1 \
-  || ! command -v markdownlint >/dev/null 2>&1; then
-  if command -v npm >/dev/null 2>&1; then
-    npm install -g lefthook prettier markdownlint-cli >/dev/null 2>&1 || true
-  fi
+# RECONCILE every tool to its pin (release#531), NOT install-if-missing: a
+# pre-existing floating brew/apt/npm binary reports a different version and gets
+# reinstalled at the pin instead of silently winning — the bug that let a dev box
+# run actionlint 1.7.12 while CI ran 1.7.7, so the same gate gave different
+# verdicts. Best-effort installs (a transient failure shouldn't abort the hook);
+# a loud re-check warning surfaces any still-unpinned tool HERE, not at commit.
+
+# npm globals: lefthook + prettier + markdownlint, each at its pin. Installed
+# before the hook wiring below so `lefthook install` finds the binary. The
+# markdownlint-cli package's binary is `markdownlint`.
+npm_pkgs=()
+gate_version_matches lefthook     "$LEFTHOOK_VERSION"          || npm_pkgs+=("lefthook@${LEFTHOOK_VERSION}")
+gate_version_matches prettier     "$PRETTIER_VERSION"          || npm_pkgs+=("prettier@${PRETTIER_VERSION}")
+gate_version_matches markdownlint "$MARKDOWNLINT_CLI_VERSION"  || npm_pkgs+=("markdownlint-cli@${MARKDOWNLINT_CLI_VERSION}")
+if [ "${#npm_pkgs[@]}" -gt 0 ] && command -v npm >/dev/null 2>&1; then
+  npm install -g "${npm_pkgs[@]}" >/dev/null 2>&1 || true
 fi
-command -v lefthook >/dev/null 2>&1 || _warn_unarmed lefthook
-command -v prettier >/dev/null 2>&1 || _warn_unarmed prettier
-command -v markdownlint >/dev/null 2>&1 || _warn_unarmed markdownlint
+gate_version_matches lefthook     "$LEFTHOOK_VERSION"          || _warn_unarmed "lefthook@${LEFTHOOK_VERSION}"
+gate_version_matches prettier     "$PRETTIER_VERSION"          || _warn_unarmed "prettier@${PRETTIER_VERSION}"
+gate_version_matches markdownlint "$MARKDOWNLINT_CLI_VERSION"  || _warn_unarmed "markdownlint@${MARKDOWNLINT_CLI_VERSION}"
 
-# ruff, pinned to the CI version so local and CI never disagree on findings.
-# Modern Debian/Ubuntu (PEP 668) reject a global pip install without
-# --break-system-packages; try that first, fall back to a plain install (older
-# distros / venvs reject the flag). Install stderr is left visible — a failure
-# reason should surface, not be swallowed.
-if ! command -v ruff >/dev/null 2>&1; then
+# pip tools: ruff + yamllint + shellcheck (via the shellcheck-py wheel — bundles
+# the binary, so shellcheck is pinned identically to ruff/yamllint with no
+# apt-0.9.0-vs-brew-0.11 split). Pinned to the CI versions so local and CI never
+# disagree on findings. Modern Debian/Ubuntu (PEP 668) reject a global pip
+# install without --break-system-packages; try that first, fall back to a plain
+# install (older distros / venvs reject the flag). Install stderr stays visible.
+if ! gate_version_matches ruff "$RUFF_VERSION" \
+  || ! gate_version_matches yamllint "$YAMLLINT_VERSION" \
+  || ! gate_version_matches shellcheck "$SHELLCHECK_VERSION"; then
   if command -v pip3 >/dev/null 2>&1; then
-    pip3 install --quiet --break-system-packages "ruff==${RUFF_VERSION}" >/dev/null \
-      || pip3 install --quiet "ruff==${RUFF_VERSION}" >/dev/null || true
-  elif command -v brew >/dev/null 2>&1; then
-    brew install ruff >/dev/null || true
+    pip3 install --quiet --break-system-packages \
+      "ruff==${RUFF_VERSION}" "yamllint==${YAMLLINT_VERSION}" "shellcheck-py==${SHELLCHECK_PY_VERSION}" >/dev/null \
+      || pip3 install --quiet \
+      "ruff==${RUFF_VERSION}" "yamllint==${YAMLLINT_VERSION}" "shellcheck-py==${SHELLCHECK_PY_VERSION}" >/dev/null || true
   fi
 fi
-command -v ruff >/dev/null 2>&1 || _warn_unarmed ruff
+gate_version_matches ruff       "$RUFF_VERSION"       || _warn_unarmed "ruff==${RUFF_VERSION}"
+gate_version_matches yamllint   "$YAMLLINT_VERSION"   || _warn_unarmed "yamllint==${YAMLLINT_VERSION}"
+gate_version_matches shellcheck "$SHELLCHECK_VERSION" || _warn_unarmed "shellcheck==${SHELLCHECK_VERSION}"
 
-# yamllint — the consumer gate's YAML check (commons lefthook fragment). Like
-# ruff it's a pip tool: --break-system-packages first (PEP 668), plain pip
-# fallback, then brew. Install stderr stays visible for diagnostics.
-if ! command -v yamllint >/dev/null 2>&1; then
-  if command -v pip3 >/dev/null 2>&1; then
-    pip3 install --quiet --break-system-packages yamllint >/dev/null \
-      || pip3 install --quiet yamllint >/dev/null || true
-  elif command -v brew >/dev/null 2>&1; then
-    brew install yamllint >/dev/null || true
-  fi
+# actionlint: pinned official downloader → ~/.local/bin. apt has no actionlint
+# package and brew floats, so the downloader is the one cross-OS pinned source.
+# ~/.local/bin (not /usr/local/bin) needs no sudo and is first on PATH, so the
+# pinned binary deterministically shadows any floating brew/apt actionlint — the
+# install-if-missing hole that let a brew-installed actionlint outvote the pin.
+if ! gate_version_matches actionlint "$ACTIONLINT_VERSION" && command -v curl >/dev/null 2>&1; then
+  mkdir -p "${HOME}/.local/bin"
+  _actionlint_url="https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash"
+  curl -sSfL "${_actionlint_url}" \
+    | bash -s -- "${ACTIONLINT_VERSION}" "${HOME}/.local/bin" >/dev/null || true
 fi
-command -v yamllint >/dev/null 2>&1 || _warn_unarmed yamllint
-
-# System tools: shellcheck + actionlint. macOS: brew ships BOTH. On Linux apt
-# carries shellcheck but has NO actionlint package, so
-# `apt-get install actionlint` fails and the gate's actionlint step then errors
-# out at commit time (release#497). actionlint therefore comes from its pinned
-# official downloader → /usr/local/bin, mirroring the CI provisioner
-# bin-internal/provision-gate-toolset.sh. ACTIONLINT_VERSION is sourced from the
-# shared gate-tool-versions.sh above (single source of truth — no per-script
-# pin to drift). `sudo -n` (non-interactive) so a password prompt fails fast
-# instead of hanging a session-start hook; install stderr stays visible.
-for _gate_tool in shellcheck actionlint; do
-  command -v "${_gate_tool}" >/dev/null 2>&1 && continue
-  if command -v brew >/dev/null 2>&1; then
-    brew install "${_gate_tool}" >/dev/null || true
-  elif [ "${_gate_tool}" = "actionlint" ] && command -v curl >/dev/null 2>&1; then
-    # No apt package for actionlint — use the pinned rhysd downloader.
-    _actionlint_url="https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash"
-    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-      curl -sSfL "${_actionlint_url}" \
-        | sudo -n bash -s -- "${ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
-    else
-      curl -sSfL "${_actionlint_url}" \
-        | bash -s -- "${ACTIONLINT_VERSION}" /usr/local/bin >/dev/null || true
-    fi
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo -n apt-get install -y "${_gate_tool}" >/dev/null || true
-  fi
-  command -v "${_gate_tool}" >/dev/null 2>&1 || _warn_unarmed "${_gate_tool}"
-done
+gate_version_matches actionlint "$ACTIONLINT_VERSION" || _warn_unarmed "actionlint==${ACTIONLINT_VERSION}"
 
 # golangci-lint — the go-quality gate's linter. Only Go repos run that hook, so
 # gate the install on a root go.mod existing (we cd'd to REPO_ROOT above; the

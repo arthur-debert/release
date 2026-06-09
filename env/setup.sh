@@ -91,22 +91,13 @@ else
   gh --version | head -1
 fi
 
-# Install lefthook globally. The binary is filesystem-root state, so it
-# belongs in env setup (cached in the snapshot, not re-installed per
-# session). `lefthook install` — which writes .git/hooks/pre-commit inside
-# the cloned repo — is per-session and belongs in a SessionStart hook in
-# each consumer repo.
-#
-# Pinned to a specific version so the env is reproducible across snapshot
-# rebuilds. Bump deliberately when there's a reason; otherwise the same
-# version ships everywhere.
-LEFTHOOK_VERSION="2.1.6"
-if command -v lefthook >/dev/null 2>&1; then
-  echo "lefthook already installed: $(lefthook version)"
-else
-  npm install -g "lefthook@${LEFTHOOK_VERSION}"
-  echo "installed lefthook: $(lefthook version)"
-fi
+# NOTE: lefthook is installed below in §2, AFTER the arthur-debert/release
+# clone — it pins to LEFTHOOK_VERSION from the clone's shared
+# templates/commons/bin/gate-tool-versions.sh so the snapshot bakes the SAME
+# version the gate provisioners reconcile to (no separate literal to drift,
+# release#531). The binary is filesystem-root state cached in the snapshot;
+# `lefthook install` (writing .git/hooks/pre-commit) stays per-session in each
+# consumer's SessionStart hook.
 
 # --- Stack-specific OS-level tools ---------------------------------------
 #
@@ -365,6 +356,24 @@ if [ -f "$CLONE_DIR/bin/clone-lex-stack" ]; then
   echo "installed clone-lex-stack ($(command -v clone-lex-stack))"
 else
   echo "warning: bin/clone-lex-stack not found in clone — the lex-multirepo skill will fall back to a manual gh clone loop" >&2
+fi
+
+# Install lefthook at the SHARED pin (single source of truth — same version the
+# gate provisioners reconcile to, release#531). Sourced from the clone so the pin
+# is authoritative, not re-declared here. The `:=` fallback is a last-resort
+# safety net (mirrors setup-dev-env.sh): it only applies if the clone somehow
+# lacks the shared file, and is kept matching it by tests/gate-tool-versions/.
+if [ -f "$CLONE_DIR/templates/commons/bin/gate-tool-versions.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$CLONE_DIR/templates/commons/bin/gate-tool-versions.sh"
+fi
+: "${LEFTHOOK_VERSION:=2.1.9}"
+if command -v gate_version_matches >/dev/null 2>&1 \
+  && gate_version_matches lefthook "$LEFTHOOK_VERSION"; then
+  echo "lefthook already at pin: $(lefthook version)"
+else
+  npm install -g "lefthook@${LEFTHOOK_VERSION}"
+  echo "installed lefthook: $(lefthook version)"
 fi
 
 # Cleanup the clone scratch dir so it doesn't end up in the snapshot.

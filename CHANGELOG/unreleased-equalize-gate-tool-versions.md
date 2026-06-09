@@ -1,0 +1,1 @@
+- Pin and reconcile every gate tool to one version across dev and CI (no more install-if-missing drift)

@@ -12,16 +12,18 @@
 #
 # The gate is HARD — a missing tool FAILS the gate, it does not skip (release#412)
 # — so this installs the UNION across release's own gate and the consumer gate
-# (extra tools are harmless): lefthook + prettier + markdownlint (npm), ruff
-# (pinned) + yamllint (pip), shellcheck + actionlint (OS package manager, or
-# actionlint's pinned installer on Linux).
+# (extra tools are harmless): lefthook + prettier + markdownlint (npm), ruff +
+# yamllint + shellcheck (pip — shellcheck via the shellcheck-py wheel), and
+# actionlint (pinned official downloader).
 #
-# Idempotent: only missing tools are installed. Batched: one call per package
-# manager. Pinned: ruff and actionlint versions are fixed (overridable via env)
-# so a new upstream release can't turn an unrelated PR red — same rationale as the
-# pip-bootstrap smoke's yq pin. The pins are the SINGLE source of truth in
-# templates/commons/bin/gate-tool-versions.sh, shared with the SessionStart
-# provisioner setup-dev-env.sh so the two can't drift (release#498 follow-up).
+# RECONCILE, not install-if-missing (release#531): EVERY tool is pinned and
+# (re)installed at its pin whenever the present binary reports a different
+# version — a pre-existing floating brew/apt/npm binary is reconciled DOWN/UP to
+# the pin, not silently accepted. install-if-missing was the bug: it let a dev
+# box keep actionlint 1.7.12 while CI ran the pinned 1.7.7, so the same gate gave
+# different verdicts. The pins + the gate_version_matches helper are the SINGLE
+# source of truth in templates/commons/bin/gate-tool-versions.sh, shared with the
+# SessionStart provisioner setup-dev-env.sh so the two can't drift (release#498).
 
 set -euo pipefail
 
@@ -36,97 +38,53 @@ _THIS_DIR="${BASH_SOURCE[0]%/*}"
 
 log() { printf 'provision-gate-toolset: %s\n' "$1" >&2; }
 
-# Run with sudo when not already root and sudo is available (CI runners install
-# system packages as a non-root user with passwordless sudo; containers run as
-# root with no sudo).
-_maybe_sudo() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-  elif command -v sudo >/dev/null 2>&1; then
-    sudo "$@"
-  else
-    "$@"
-  fi
-}
-
-# --- npm globals: lefthook + the markdown/format linters (batched) -----------
-npm_missing=()
-for tool in lefthook prettier markdownlint; do
-  command -v "$tool" >/dev/null 2>&1 || npm_missing+=("$tool")
-done
-if [ "${#npm_missing[@]}" -gt 0 ]; then
-  # markdownlint's package is markdownlint-cli; map it.
-  pkgs=()
-  for t in "${npm_missing[@]}"; do
-    case "$t" in
-      markdownlint) pkgs+=("markdownlint-cli") ;;
-      *) pkgs+=("$t") ;;
-    esac
-  done
-  log "npm install -g ${pkgs[*]}"
-  npm install -g "${pkgs[@]}"
+# --- npm globals: lefthook + prettier + markdownlint, each at its pin ---------
+# Reconcile to the pin, NOT install-if-missing: gate_version_matches reports a
+# floating/absent binary as a miss, so it gets (re)installed at the exact pin.
+# markdownlint's package is markdownlint-cli; the binary is `markdownlint`.
+npm_pkgs=()
+gate_version_matches lefthook     "$LEFTHOOK_VERSION"          || npm_pkgs+=("lefthook@${LEFTHOOK_VERSION}")
+gate_version_matches prettier     "$PRETTIER_VERSION"          || npm_pkgs+=("prettier@${PRETTIER_VERSION}")
+gate_version_matches markdownlint "$MARKDOWNLINT_CLI_VERSION"  || npm_pkgs+=("markdownlint-cli@${MARKDOWNLINT_CLI_VERSION}")
+if [ "${#npm_pkgs[@]}" -gt 0 ]; then
+  command -v npm >/dev/null 2>&1 || { log "ERROR: npm not found — cannot install ${npm_pkgs[*]}"; exit 1; }
+  log "npm install -g ${npm_pkgs[*]}"
+  npm install -g "${npm_pkgs[@]}"
 fi
 
-# --- pip tools: ruff (pinned) + yamllint (batched) ---------------------------
-# Always (re)install ruff at the pin so a drifted local/runner ruff can't change
-# findings; yamllint alongside it in one call.
-log "pip install ruff==${RUFF_VERSION} yamllint"
-pip install "ruff==${RUFF_VERSION}" yamllint
+# --- pip tools: ruff + yamllint + shellcheck (via shellcheck-py), all pinned --
+# Note: shellcheck rides the pip path — the shellcheck-py wheel bundles the real
+# binary (mac + manylinux x86_64) — so it is pinned identically to ruff/yamllint, no
+# apt-0.9.0-vs-brew-0.11 split. One pinned install reconciles all three whenever
+# any drifts from its pin.
+if ! gate_version_matches ruff "$RUFF_VERSION" \
+  || ! gate_version_matches yamllint "$YAMLLINT_VERSION" \
+  || ! gate_version_matches shellcheck "$SHELLCHECK_VERSION"; then
+  command -v pip >/dev/null 2>&1 || { log "ERROR: pip not found — cannot install ruff/yamllint/shellcheck"; exit 1; }
+  log "pip install ruff==${RUFF_VERSION} yamllint==${YAMLLINT_VERSION} shellcheck-py==${SHELLCHECK_PY_VERSION}"
+  pip install "ruff==${RUFF_VERSION}" "yamllint==${YAMLLINT_VERSION}" "shellcheck-py==${SHELLCHECK_PY_VERSION}"
+fi
 
-# --- system tools: shellcheck + actionlint, branched by OS -------------------
-need_shellcheck=0; command -v shellcheck >/dev/null 2>&1 || need_shellcheck=1
-need_actionlint=0; command -v actionlint >/dev/null 2>&1 || need_actionlint=1
-
-os="$(uname -s)"
-case "$os" in
-  Darwin)
-    # Homebrew ships both — batch whatever is missing into one call.
-    brew_pkgs=()
-    [ "$need_shellcheck" -eq 1 ] && brew_pkgs+=("shellcheck")
-    [ "$need_actionlint" -eq 1 ] && brew_pkgs+=("actionlint")
-    if [ "${#brew_pkgs[@]}" -gt 0 ]; then
-      command -v brew >/dev/null 2>&1 || { log "ERROR: brew not found on macOS"; exit 1; }
-      log "brew install ${brew_pkgs[*]}"
-      brew install "${brew_pkgs[@]}"
-    fi
-    ;;
-  Linux)
-    # Both Linux installs need root (apt; writing actionlint to /usr/local/bin).
-    # If anything is actually missing and we can neither be root nor escalate,
-    # fail FAST with an actionable message rather than letting apt / the
-    # /usr/local/bin write die later on a cryptic permission error.
-    if { [ "$need_shellcheck" -eq 1 ] || [ "$need_actionlint" -eq 1 ]; } \
-       && [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
-      log "ERROR: need to install shellcheck/actionlint but running as non-root without sudo."
-      log "       Re-run as root (or with sudo available), or pre-install them."
-      exit 1
-    fi
-    # apt has shellcheck but NOT actionlint; install shellcheck via apt (one
-    # update + install), actionlint via its pinned official installer.
-    if [ "$need_shellcheck" -eq 1 ]; then
-      command -v apt-get >/dev/null 2>&1 || { log "ERROR: apt-get not found on Linux"; exit 1; }
-      log "apt-get install shellcheck"
-      _maybe_sudo apt-get update -qq
-      _maybe_sudo apt-get install -y shellcheck
-    fi
-    if [ "$need_actionlint" -eq 1 ]; then
-      log "download actionlint ${ACTIONLINT_VERSION} -> /usr/local/bin"
-      url='https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash'
-      # /usr/local/bin is root-owned on standard runners; install via sudo when
-      # available. Pipe curl|bash (process substitution under sudo can fail on FDs).
-      if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-        curl -sSfL "$url" | sudo bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
-      else
-        curl -sSfL "$url" | bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
-      fi
-    fi
-    ;;
-  *)
-    if [ "$need_shellcheck" -eq 1 ] || [ "$need_actionlint" -eq 1 ]; then
-      log "ERROR: unsupported OS '$os' — cannot provision shellcheck/actionlint"
-      exit 1
-    fi
-    ;;
-esac
+# --- actionlint: pinned official downloader, identical on every OS -----------
+# No standard pip/apt package (apt has none; brew floats), so use rhysd's pinned
+# installer → /usr/local/bin on BOTH macOS and Linux. Reconcile to the pin.
+if ! gate_version_matches actionlint "$ACTIONLINT_VERSION"; then
+  # /usr/local/bin is root-owned on standard runners; fail FAST if we can neither
+  # be root nor escalate, instead of dying later on a cryptic permission error.
+  if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+    log "ERROR: need to install actionlint ${ACTIONLINT_VERSION} but running as non-root without sudo."
+    log "       Re-run as root (or with sudo available), or pre-install it at the pin."
+    exit 1
+  fi
+  command -v curl >/dev/null 2>&1 || { log "ERROR: curl not found — cannot download actionlint"; exit 1; }
+  log "download actionlint ${ACTIONLINT_VERSION} -> /usr/local/bin"
+  url='https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash'
+  # Pipe curl|bash (process substitution under sudo can fail on FDs).
+  if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+    curl -sSfL "$url" | sudo bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
+  else
+    curl -sSfL "$url" | bash -s -- "$ACTIONLINT_VERSION" /usr/local/bin
+  fi
+fi
 
 log "done."
