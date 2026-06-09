@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 2.12.1 - 2026-06-09
+
+how-to/test-unit: detect the nvim app-bin/test-all runner (not a stale make test guess)
+
 ## 2.12.0 - 2026-06-09
 
 align gh-pr-review-loop skill + ORIENTATION to the canonical draft-first dev cycle (draft=WIP, ready=human signal); drop the stale never-draft rule (Copilot reviews drafts)
