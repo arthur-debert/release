@@ -159,14 +159,20 @@ def add_main(argv: list[str]) -> int:
 
 
 def _ensure_bullet(body: bytes) -> bytes:
-    """Prepend a `- ` markdown bullet to ``body`` unless its first non-blank
-    content already starts with `-` (the CHANGELOG fragment convention). An empty
+    """Prepend a `- ` markdown bullet to the first non-blank line of ``body``
+    unless it already starts with `-` (the CHANGELOG fragment convention).
+
+    Any leading blank lines are preserved (the bullet attaches to the first
+    content line, never to a blank), so a body like ``b"\\ntext"`` becomes
+    ``b"\\n- text"`` rather than a dangling ``b"- \\ntext"``. An all-blank/empty
     body is left untouched."""
-    if not body.strip():
+    stripped = body.lstrip()
+    if not stripped or stripped.startswith(b"-"):
         return body
-    if body.lstrip().startswith(b"-"):
-        return body
-    return b"- " + body
+    # Re-attach the leading whitespace the lstrip removed, then bullet the
+    # first content line.
+    lead = body[: len(body) - len(stripped)]
+    return lead + b"- " + stripped
 
 
 # --- changelog-cut ----------------------------------------------------------

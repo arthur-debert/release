@@ -10,6 +10,7 @@ missing/garbled manifest.
 from __future__ import annotations
 
 import json
+import os
 
 from release_core import repo_commands as rc
 
@@ -144,29 +145,47 @@ def test_unit_generic_tests_dir_is_not_busted(tmp_path):
 
 
 # --- CI check-command fallback (manifest-empty repos) ---------------------
+#
+# These tests monkeypatch rc.yamlio.load (the suite has no `yq`), mirroring the
+# hermetic pattern in test_core_apply_ruleset.py — the workflow file's bytes are
+# placeholders; the parsed dict is supplied directly.
 
 
-def _ci_caller_wf(root, check_command, *, wf="ci.yml", uses=None):
-    """Write a .github/workflows/<wf> CI caller invoking a release reusable
-    workflow with a `check-command:` input."""
-    wf_dir = root / ".github" / "workflows"
-    wf_dir.mkdir(parents=True, exist_ok=True)
+def _wf_caller_doc(check_command, *, uses=None):
+    """A parsed CI-caller workflow doc invoking a release reusable workflow with
+    a `check-command:` input."""
     uses = uses or "arthur-debert/release/.github/workflows/nvim-plugin.yml@v2"
-    (wf_dir / wf).write_text(
-        "name: CI\n"
-        "on: push\n"
-        "jobs:\n"
-        "  test:\n"
-        f"    uses: {uses}\n"
-        "    with:\n"
-        f"      check-command: '{check_command}'\n"
-    )
+    return {
+        "name": "CI",
+        "on": "push",
+        "jobs": {"test": {"uses": uses, "with": {"check-command": check_command}}},
+    }
 
 
-def test_unit_falls_back_to_ci_check_command(tmp_path):
+def _stub_workflows(tmp_path, monkeypatch, docs):
+    """Create placeholder .github/workflows/<name> files and monkeypatch
+    yamlio.load to return docs[basename]. A doc value may be an Exception type/
+    instance to simulate a parse failure."""
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True, exist_ok=True)
+    for name in docs:
+        (wf / name).write_text("placeholder")
+
+    def fake_load(path):
+        doc = docs[os.path.basename(path)]
+        if isinstance(doc, BaseException):
+            raise doc
+        return doc
+
+    monkeypatch.setattr(rc.yamlio, "load", fake_load)
+
+
+def test_unit_falls_back_to_ci_check_command(tmp_path, monkeypatch):
     # lex-fmt/nvim's shape: NO manifest test, real suite wired via the canonical
     # caller's check-command:. The fallback must surface it (label "ci").
-    _ci_caller_wf(tmp_path, "cd test && bash run_tests.sh")
+    _stub_workflows(
+        tmp_path, monkeypatch, {"ci.yml": _wf_caller_doc("cd test && bash run_tests.sh")}
+    )
     unit = rc.unit_commands(str(tmp_path))
     assert len(unit) == 1
     assert unit[0].display == "cd test && bash run_tests.sh"
@@ -174,32 +193,43 @@ def test_unit_falls_back_to_ci_check_command(tmp_path):
     assert unit[0].label == "ci"
 
 
-def test_unit_check_command_is_fallback_only_not_when_manifest_present(tmp_path):
+def test_unit_check_command_is_fallback_only_not_when_manifest_present(tmp_path, monkeypatch):
     # A real manifest test (Cargo.toml) AND a check-command workflow: the manifest
     # wins; the check-command is NEVER added (no double-run).
     (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n")
-    _ci_caller_wf(tmp_path, "cd test && bash run_tests.sh")
+    _stub_workflows(
+        tmp_path, monkeypatch, {"ci.yml": _wf_caller_doc("cd test && bash run_tests.sh")}
+    )
     unit = rc.unit_commands(str(tmp_path))
     assert [c.display for c in unit] == ["cargo test --all-features"]
     assert all(c.label != "ci" for c in unit)
 
 
-def test_unit_check_command_ignores_non_release_caller(tmp_path):
+def test_unit_check_command_ignores_non_release_caller(tmp_path, monkeypatch):
     # A workflow that uses some OTHER reusable workflow must not be mined.
-    _ci_caller_wf(tmp_path, "echo nope", uses="actions/some-other/.github/workflows/x.yml@v1")
+    doc = _wf_caller_doc("echo nope", uses="actions/some-other/.github/workflows/x.yml@v1")
+    _stub_workflows(tmp_path, monkeypatch, {"ci.yml": doc})
     assert rc.unit_commands(str(tmp_path)) == []
 
 
-def test_unit_check_command_garbled_workflow_no_crash(tmp_path):
-    # Garbled / non-dict workflow YAML must not crash → empty.
-    wf_dir = tmp_path / ".github" / "workflows"
-    wf_dir.mkdir(parents=True)
-    (wf_dir / "broken.yml").write_text("jobs: [this, is, : not valid: mapping\n")
-    (wf_dir / "scalar.yml").write_text("just-a-string\n")
+def test_unit_check_command_garbled_workflow_no_crash(tmp_path, monkeypatch):
+    # yamlio.load raising (yq parse failure) or a non-dict doc must not crash →
+    # the fallback contributes nothing.
+    from release_core import yamlio
+
+    _stub_workflows(
+        tmp_path,
+        monkeypatch,
+        {
+            "broken.yml": yamlio.YamlError("yq parse failure"),
+            "scalar.yml": "just-a-string",  # non-dict doc
+        },
+    )
     assert rc.unit_commands(str(tmp_path)) == []
 
 
 def test_ci_check_command_missing_dir_returns_none(tmp_path):
+    # No .github/workflows/ at all — never touches yamlio.
     assert rc._ci_check_command(str(tmp_path)) is None
 
 

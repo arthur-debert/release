@@ -33,8 +33,10 @@ The dispatch shape is deliberately ASYMMETRIC (release#507, confirmed design):
 
 Package-manager resolution mirrors the per-Kind ``bin/`` wrappers it graduates:
 the lockfile is the canonical signal (``pnpm-lock.yaml``→pnpm, ``yarn.lock``→yarn,
-else npm). Everything here is filesystem-only — no network, no subprocess beyond
-what the caller runs.
+else npm). Detection is network-free; the one subprocess is the CI
+``check-command`` fallback (:func:`_ci_check_command`), which reads the
+consumer's workflow YAML through ``release_core.yamlio`` (a ``yq`` shell-out)
+only when the manifest probes find no unit suite — never on the common path.
 """
 
 from __future__ import annotations
@@ -230,7 +232,10 @@ def _ci_check_command(root: str) -> str | None:
     for path in paths:
         try:
             doc = yamlio.load(path)
-        except yamlio.YamlError:
+        except (yamlio.YamlError, ValueError, OSError):
+            # YamlError: yq missing/parse-failed. ValueError: yq emitted
+            # non-JSON stdout (json.loads). OSError: the file vanished. In every
+            # case skip this workflow — the fallback must never raise.
             continue
         if not isinstance(doc, dict):
             continue

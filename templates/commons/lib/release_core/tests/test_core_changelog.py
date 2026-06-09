@@ -90,6 +90,25 @@ def test_add_stdin_unbulleted_gets_bullet(repo, monkeypatch):
     assert (repo / "CHANGELOG" / "unreleased-plain.md").read_bytes() == b"- plain line\n"
 
 
+def test_add_stdin_leading_blank_lines_bullets_first_content(repo, monkeypatch):
+    import io
+
+    # A body with leading blank lines must bullet the FIRST CONTENT line, not
+    # produce a dangling "- \n" — the leading blanks are preserved.
+    payload = b"\n\ntext body\n"
+    monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
+    changelog.add_main(["blanks"])
+    assert (repo / "CHANGELOG" / "unreleased-blanks.md").read_bytes() == b"\n\n- text body\n"
+
+
+def test_ensure_bullet_unit():
+    assert changelog._ensure_bullet(b"text\n") == b"- text\n"
+    assert changelog._ensure_bullet(b"- text\n") == b"- text\n"  # already bulleted
+    assert changelog._ensure_bullet(b"\n\ntext\n") == b"\n\n- text\n"  # leading blanks
+    assert changelog._ensure_bullet(b"") == b""  # empty untouched
+    assert changelog._ensure_bullet(b"\n\n") == b"\n\n"  # all-blank untouched
+
+
 def test_add_collision_fails_without_force(repo, capsys):
     changelog.add_main(["142", "first"])
     rc = changelog.add_main(["142", "second"])
