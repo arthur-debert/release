@@ -1,0 +1,1 @@
+- how-to/test-unit: surface a CI caller check-command: as the unit suite when no manifest test exists (#507 dogfood F1); changelog add now applies the - bullet convention (F4)

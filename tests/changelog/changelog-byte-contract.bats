@@ -32,7 +32,8 @@ load helper
 
 @test "add inline body joins args with single space + one newline" {
   "$BIN/changelog-add" frag a b "c  d"
-  # printf '%s\n' "$*" → "a b c  d\n"
-  [ "$(cat CHANGELOG/unreleased-frag.md)" = "a b c  d" ]
+  # Args joined by a single space (printf '%s\n' "$*" → "a b c  d\n"), then the
+  # `- ` bullet convention prepended (the body lacks a leading bullet).
+  [ "$(cat CHANGELOG/unreleased-frag.md)" = "- a b c  d" ]
   [ "$(wc -l < CHANGELOG/unreleased-frag.md | tr -d ' ')" -eq 1 ]
 }

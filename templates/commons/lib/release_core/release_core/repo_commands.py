@@ -33,15 +33,20 @@ The dispatch shape is deliberately ASYMMETRIC (release#507, confirmed design):
 
 Package-manager resolution mirrors the per-Kind ``bin/`` wrappers it graduates:
 the lockfile is the canonical signal (``pnpm-lock.yaml``→pnpm, ``yarn.lock``→yarn,
-else npm). Everything here is filesystem-only — no network, no subprocess beyond
-what the caller runs.
+else npm). Detection is network-free; the one subprocess is the CI
+``check-command`` fallback (:func:`_ci_check_command`), which reads the
+consumer's workflow YAML through ``release_core.yamlio`` (a ``yq`` shell-out)
+only when the manifest probes find no unit suite — never on the common path.
 """
 
 from __future__ import annotations
 
+import glob
 import json
 import os
 from dataclasses import dataclass, field
+
+from . import yamlio
 
 
 @dataclass
@@ -201,6 +206,57 @@ def _mkdocs_config(root: str) -> str | None:
     return None
 
 
+# --- CI caller fallback ---------------------------------------------------
+
+# The reusable-workflow path prefix a consumer's CI caller `uses:` to invoke
+# one of release's canonical category workflows (e.g.
+# `arthur-debert/release/.github/workflows/nvim-plugin.yml@v2`). When a consumer
+# wires its real suite through that caller's `check-command:` input (rather than
+# a manifest script), the manifest probes find nothing — this fallback recovers
+# the command from the workflow so how-to/test-unit don't report "(none wired)".
+_RELEASE_WF_PREFIX = "arthur-debert/release/.github/workflows/"
+
+
+def _ci_check_command(root: str) -> str | None:
+    """The first non-empty ``with.check-command`` from a release reusable-workflow
+    caller in ``.github/workflows/*.yml``, or ``None``.
+
+    A pure FALLBACK for repos that wire their suite through the canonical caller's
+    ``check-command:`` input instead of a manifest script. Robust to a missing
+    dir / non-dict workflow / garbled YAML / no matching job — never raises."""
+    wf_dir = os.path.join(root, ".github", "workflows")
+    if not os.path.isdir(wf_dir):
+        return None
+    paths = sorted(glob.glob(os.path.join(wf_dir, "*.yml")))
+    paths += sorted(glob.glob(os.path.join(wf_dir, "*.yaml")))
+    for path in paths:
+        try:
+            doc = yamlio.load(path)
+        except (yamlio.YamlError, ValueError, OSError):
+            # YamlError: yq missing/parse-failed. ValueError: yq emitted
+            # non-JSON stdout (json.loads). OSError: the file vanished. In every
+            # case skip this workflow — the fallback must never raise.
+            continue
+        if not isinstance(doc, dict):
+            continue
+        jobs = doc.get("jobs")
+        if not isinstance(jobs, dict):
+            continue
+        for job in jobs.values():
+            if not isinstance(job, dict):
+                continue
+            uses = job.get("uses")
+            if not isinstance(uses, str) or _RELEASE_WF_PREFIX not in uses:
+                continue
+            with_block = job.get("with")
+            if not isinstance(with_block, dict):
+                continue
+            cc = with_block.get("check-command")
+            if isinstance(cc, str) and cc.strip():
+                return cc
+    return None
+
+
 # --- the verb-facing resolvers --------------------------------------------
 
 
@@ -222,6 +278,14 @@ def unit_commands(root: str) -> list[Cmd]:
     umbrella = _umbrella_test(root)
     if umbrella:
         cmds.append(umbrella)
+    # Fallback ONLY when no manifest/script probe found a suite: a consumer may
+    # wire its real, CI-green suite through the canonical reusable-workflow
+    # caller's `check-command:` input (e.g. lex-fmt/nvim's test/run_tests.sh).
+    # Never added alongside a manifest command — that would double-run.
+    if not cmds:
+        cc = _ci_check_command(root)
+        if cc:
+            cmds.append(Cmd(argv=["bash", "-c", cc], display=cc, label="ci"))
     return cmds
 
 
