@@ -148,13 +148,14 @@ jobs:
           # rust-cli ships its bin/ build tooling + .github content.
           present "templates/rust-cli/bin/build"
           present "templates/rust-cli/.github/workflows/copilot-review.yml"
-          # distributed skills: a PUSH_ALL skill (single-file) AND a vendored
-          # multi-file PUSH_ALL skill (tdd) — proves whole-dir skill copy.
+          # distributed skills: WS2 (#523) trimmed PUSH_ALL to the two the harness
+          # needs a file on disk for — the bundle ships exactly those.
           present "skills/gh-pr-review-loop/SKILL.md"
-          present "skills/tdd/SKILL.md"
-          present "skills/tdd/refactoring.md"
+          present "skills/release-issue-relay/SKILL.md"
           # NEGATIVE: release-only skills must NOT ship to consumers.
           absent "skills/release-fleet-ops"
+          # NEGATIVE: dev-cycle skills dropped in WS2 are no longer bundled.
+          absent "skills/tdd"
           # NEGATIVE: render-side material (Homebrew formula template, consumed
           # at release-cut, not a managed Kind) must NOT ship.
           absent "templates/render"
