@@ -65,8 +65,9 @@ def test_needs_real_file(dest, real):
         # the PR state engine folded into release_core (release#459); its files
         # are now under lib/release_core/ and covered by the branch above.
         ("lib/release_core/release_core/prstate/state.py", True),
-        ("ORIENTATION.md", True),
-        # NOT internal — consumer-facing lib/ + everything else.
+        # NOT internal — consumer-facing lib/ + everything else. ORIENTATION.md was
+        # retired in WS2 (#523); it's no longer composed, so not a special case.
+        ("ORIENTATION.md", False),
         ("lib/bats-harness.bash", False),
         ("bin/check-shell", False),
         ("lib/release_other/x.py", False),
@@ -359,20 +360,21 @@ def test_build_plan_distributes_push_all_skills(monkeypatch):
 
 
 def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
-    """A multi-file skill (tdd ships several .md alongside SKILL.md) reaches the
-    consumer in full, not just its SKILL.md."""
+    """A multi-file skill (extra .md alongside SKILL.md) reaches the consumer in
+    full, not just its SKILL.md. Uses a kept PUSH_ALL skill (gh-pr-review-loop)."""
+    multi = "gh-pr-review-loop"
     files = {
-        "tdd": ["SKILL.md", "mocking.md", "tests.md", "refactoring.md"],
+        multi: ["SKILL.md", "mocking.md", "tests.md", "refactoring.md"],
         # the rest exist with just SKILL.md so the loop is well-formed
-        **{name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS if name != "tdd"},
+        **{name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS if name != multi},
     }
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
     plan = sync.build_plan(_git_source(), "tree-sitter", [])
     for sub in ("SKILL.md", "mocking.md", "tests.md", "refactoring.md"):
-        dest = f".claude/skills/tdd/{sub}"
+        dest = f".claude/skills/{multi}/{sub}"
         assert dest in plan.order
-        assert plan.source[dest] == f"skills/tdd/{sub}"
+        assert plan.source[dest] == f"skills/{multi}/{sub}"
 
 
 def test_build_plan_tolerates_missing_skill_dir(monkeypatch):
@@ -816,7 +818,10 @@ def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
 
 def test_claude_desired_creates_block_only_when_no_file(tmp_path):
     desired = sync.claude_desired(str(tmp_path))
-    assert desired == (f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n")
+    # WS2 (#523): the block is the stub pointing at the binary, not an ORIENTATION import.
+    assert desired == (f"{sync.CLAUDE_BEGIN}\n{sync.CLAUDE_STUB_BODY}\n{sync.CLAUDE_END}\n")
+    assert "release-core how-to" in desired
+    assert "@.release/ORIENTATION.md" not in desired
 
 
 def test_claude_desired_preserves_existing_content(tmp_path):
@@ -839,31 +844,34 @@ def test_claude_desired_strips_prior_block_idempotent(tmp_path):
 
 def test_claude_desired_strips_stale_block_and_refreshes(tmp_path):
     p = tmp_path / "CLAUDE.md"
-    p.write_text(f"{sync.CLAUDE_BEGIN}\n@.release/STALE.md\n{sync.CLAUDE_END}\n\n# Proj\n\nmine\n")
+    # An old consumer's block imported @.release/ORIENTATION.md — it must be
+    # stripped (markers kept byte-identical) and refreshed to the stub, not duplicated.
+    old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
+    p.write_text(f"{old}\n# Proj\n\nmine\n")
     desired = sync.claude_desired(str(tmp_path))
-    assert "@.release/ORIENTATION.md" in desired
-    assert "STALE" not in desired
+    assert "release-core how-to" in desired
+    assert "@.release/ORIENTATION.md" not in desired
     assert "# Proj" in desired
     assert desired.count(sync.CLAUDE_BEGIN) == 1
 
 
-def test_decide_claude_no_orientation_in_tree(tmp_path):
+def test_decide_claude_unconditional_no_orientation_gate(tmp_path):
+    # WS2 (#523): the stub block is unconditional — no ORIENTATION.md needs to be
+    # composed in the tree for the block to be created (the old gate is gone).
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()  # no ORIENTATION.md
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
+    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "create"
 
 
 def test_decide_claude_create(tmp_path):
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
-    (tmp_release / "ORIENTATION.md").write_text("welcome\n")
     assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "create"
 
 
 def test_decide_claude_skip_symlink(tmp_path):
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
-    (tmp_release / "ORIENTATION.md").write_text("welcome\n")
     (tmp_path / "real.md").write_text("x\n")
     os.symlink("real.md", str(tmp_path / "CLAUDE.md"))
     assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "skip-symlink"
@@ -872,7 +880,6 @@ def test_decide_claude_skip_symlink(tmp_path):
 def test_decide_claude_inject_vs_refresh(tmp_path):
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
-    (tmp_release / "ORIENTATION.md").write_text("welcome\n")
     claude = tmp_path / "CLAUDE.md"
     # No managed marker → inject.
     claude.write_text("# Proj\n")
@@ -885,7 +892,6 @@ def test_decide_claude_inject_vs_refresh(tmp_path):
 def test_decide_claude_none_when_already_synced(tmp_path):
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
-    (tmp_release / "ORIENTATION.md").write_text("welcome\n")
     claude = tmp_path / "CLAUDE.md"
     claude.write_text(sync.claude_desired(str(tmp_path)))
     assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"

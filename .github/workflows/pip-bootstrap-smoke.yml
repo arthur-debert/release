@@ -141,8 +141,8 @@ jobs:
             fi
             echo "ok absent: $1"
           }
-          # commons/ carries MORE than configs now: bin/ content + ORIENTATION.md.
-          present "templates/commons/ORIENTATION.md"
+          # commons/ carries MORE than configs: bin/ content (ORIENTATION.md was
+          # retired in WS2 #523 — orientation is `release-core how-to`).
           present "templates/commons/bin/install-release-core"
           # at least one per-kind dir with more than the fragment/manifest:
           # rust-cli ships its bin/ build tooling + .github content.
@@ -329,12 +329,15 @@ jobs:
           cd "$full"
           release-core init
           # The FULL managed tree must be materialized on disk: the .release/ build
-          # dir, working-tree symlink mirrors, and the CLAUDE.md orientation block.
+          # dir, working-tree symlink mirrors, and the CLAUDE.md stub block.
           test -d .release || { echo "ERROR: no .release/ build dir materialized" >&2; exit 1; }
-          test -f .release/ORIENTATION.md \
-            || { echo "ERROR: .release/ORIENTATION.md missing" >&2; exit 1; }
-          grep -qF '@.release/ORIENTATION.md' CLAUDE.md \
-            || { echo "ERROR: CLAUDE.md orientation block not injected" >&2; exit 1; }
+          # WS2 (#523): the CLAUDE.md block is a stub pointing at `release-core
+          # how-to` — no synced ORIENTATION.md anymore.
+          grep -qF 'release-core how-to' CLAUDE.md \
+            || { echo "ERROR: CLAUDE.md stub block not injected" >&2; exit 1; }
+          if [ -e .release/ORIENTATION.md ]; then
+            echo "ERROR: .release/ORIENTATION.md should be retired (WS2)" >&2; exit 1
+          fi
           # WS4 (#521): the ephemeral .release/ build dir is gitignored + never
           # committed — the self-ignoring .release/.gitignore (`*`) keeps it out.
           if git ls-files --error-unmatch .release >/dev/null 2>&1; then
