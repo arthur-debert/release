@@ -127,6 +127,22 @@ def test_unit_app_bin_test_all_must_be_executable(tmp_path):
     assert rc.unit_commands(str(tmp_path)) == []
 
 
+def test_unit_nvim_busted_fallback_gated_to_layout(tmp_path):
+    # An nvim layout (lua/ dir) + tests/ → busted tests (the wrapper's fallback).
+    (tmp_path / "lua").mkdir()
+    (tmp_path / "tests").mkdir()
+    unit = rc.unit_commands(str(tmp_path))
+    assert [c.display for c in unit] == ["busted tests"]
+    assert unit[0].label == "nvim"
+
+
+def test_unit_generic_tests_dir_is_not_busted(tmp_path):
+    # A bare tests/ dir WITHOUT an nvim layout must NOT be guessed as busted —
+    # that would misclassify any repo with a tests/ folder.
+    (tmp_path / "tests").mkdir()
+    assert rc.unit_commands(str(tmp_path)) == []
+
+
 # --- build: single app-root command ---------------------------------------
 
 
