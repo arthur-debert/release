@@ -43,15 +43,25 @@ load helper
   run "$BIN/changelog-add" 142 "second"
   [ "$status" -ne 0 ]
   [[ "$output" == *"already exists"* ]]
-  # Original content untouched.
-  [ "$(cat CHANGELOG/unreleased-pr-142.md)" = "first" ]
+  # Original content untouched (the `- ` bullet convention is applied on add).
+  [ "$(cat CHANGELOG/unreleased-pr-142.md)" = "- first" ]
 }
 
 @test "--force overrides an existing slug" {
   "$BIN/changelog-add" 142 "first"
   run "$BIN/changelog-add" --force 142 "second"
   [ "$status" -eq 0 ]
-  [ "$(cat CHANGELOG/unreleased-pr-142.md)" = "second" ]
+  [ "$(cat CHANGELOG/unreleased-pr-142.md)" = "- second" ]
+}
+
+@test "prepends the - bullet when the body lacks one" {
+  "$BIN/changelog-add" fix "Fix the thing (#9)"
+  [ "$(cat CHANGELOG/unreleased-fix.md)" = "- Fix the thing (#9)" ]
+}
+
+@test "already-bulleted body is not double-bulleted" {
+  "$BIN/changelog-add" fix "- already a bullet"
+  [ "$(cat CHANGELOG/unreleased-fix.md)" = "- already a bullet" ]
 }
 
 @test "slug with slash is rejected (path traversal)" {
