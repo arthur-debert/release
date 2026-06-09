@@ -86,6 +86,11 @@ JSON
     run env PYTHONIOENCODING=ascii LC_ALL=C "$FETCH_DEPS" --target aarch64-apple-darwin
     [[ "$status" -eq 0 ]]
     [[ -x bin/mycli ]]
+    # Assert the glyph actually reached stdout — proves the → / ✓ output path ran
+    # and was emitted (not swallowed), which is the behavior the UTF-8 reconfigure
+    # protects. Without it this raises UnicodeEncodeError before printing.
+    [[ "$output" == *"✓"* ]]
+    [[ "$output" == *"→"* ]]
 }
 
 @test "binary mode: fetches from nested tarball layout" {

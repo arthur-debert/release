@@ -571,7 +571,7 @@ jobs:
           curl -fsSL -o "$dir/fetch-deps" \
             "https://raw.githubusercontent.com/arthur-debert/release/main/bin/fetch-deps"
           chmod +x "$dir/fetch-deps"
-          printf '@bash "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
+          printf '@python "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
           echo "$dir" >> "$GITHUB_PATH"
 
       - name: Build (electron-builder, linux --${{ matrix.arch }})
@@ -685,7 +685,7 @@ jobs:
           curl -fsSL -o "$dir/fetch-deps" \
             "https://raw.githubusercontent.com/arthur-debert/release/main/bin/fetch-deps"
           chmod +x "$dir/fetch-deps"
-          printf '@bash "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
+          printf '@python "%%~dp0fetch-deps" %%*\r\n' > "$dir/fetch-deps.cmd"
           echo "$dir" >> "$GITHUB_PATH"
 
       - name: Build (electron-builder, win --${{ matrix.arch }})
