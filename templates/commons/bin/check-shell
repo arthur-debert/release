@@ -67,16 +67,10 @@ done
 
 [ ${#shell_files[@]} -eq 0 ] && exit 0
 
-# Prefer the managed shellcheck config in the ephemeral .release/ build dir
-# (WS3, release#524): it no longer mirrors to the repo root, so shellcheck's own
-# upward search from each file's directory won't find it. Pass it explicitly with
-# --rcfile when present; otherwise fall back to shellcheck's default discovery —
-# release's own repo keeps a real root .shellcheckrc, and a not-yet-migrated
-# consumer may still have one. (Mirrors the gate's "prefer .release/, else
-# default" config resolution.)
-_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-if [ -n "${_root}" ] && [ -f "${_root}/.release/.shellcheckrc" ]; then
-  shellcheck --rcfile "${_root}/.release/.shellcheckrc" --severity=info -- "${shell_files[@]}"
-else
-  shellcheck --severity=info -- "${shell_files[@]}"
-fi
+# The rc file (`.shellcheckrc`) is found by walking UP from each checked file's
+# directory to the repo root — there is no version-portable explicit-config flag
+# (`--rcfile` only landed in shellcheck 0.10.0, and the fleet's CI installs 0.9.0
+# via apt). So unlike markdownlint/yamllint/prettier, the rc is NOT vendored into
+# .release/ in WS3 (release#524): it stays a root-discovered dotfile, the same
+# category as .editorconfig. No explicit-config flag needed here.
+shellcheck --severity=info -- "${shell_files[@]}"

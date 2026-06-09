@@ -33,10 +33,12 @@ path with the `templates/commons/`, `templates/components/<c>/`, or
 `templates/<kind>/` prefix stripped.
 
 Example: `templates/commons/.editorconfig` lands at `.editorconfig` in the
-consumer. (The gate definition + tool configs — `lefthook.yml`,
-`.markdownlint.json`, `.yamllint`, `.shellcheckrc`, … — are an exception since
+consumer. (The gate definition + most tool configs — `lefthook.yml`,
+`.markdownlint.json`, `.yamllint`, `.prettierignore`, … — are an exception since
 WS3 (#524): they materialize into `.release/` only and are NOT mirrored to the
-root — see "release-internal files" below.)
+root — see "release-internal files" below. `.editorconfig` and `.shellcheckrc`
+stay mirrored — they have no portable way to point their tool at a `.release/`
+copy.)
 
 Files outside those three subtrees (`templates/fragments/`,
 `templates/render/`) are not synced — they are author-facing reference
@@ -130,14 +132,17 @@ The generated file carries a header marker:
 # templates/components/<cap>/lefthook.fragment.yaml.
 ```
 
-Since WS3 (#524) the composed `lefthook.yml` and the lint/format tool configs
-(`.markdownlint.json`, `.markdownlintignore`, `.yamllint`, `.shellcheckrc`,
-`.prettierignore`) are **release-internal**: they live only in `.release/` and
-are NOT mirrored to the consumer root. The gate runs through the binary
-(`release-core gate` points lefthook at `.release/lefthook.yml` via
-`LEFTHOOK_CONFIG`; each tool is handed its config explicitly), and the git hook
-is `release-core gate --install-hook` → `release-core gate --hook`. `.editorconfig`
-is the one config that stays mirrored (editor-facing, not a gate flag).
+Since WS3 (#524) the composed `lefthook.yml` and most lint/format tool configs
+(`.markdownlint.json`, `.markdownlintignore`, `.yamllint`, `.prettierignore`) are
+**release-internal**: they live only in `.release/` and are NOT mirrored to the
+consumer root. The gate runs through the binary (`release-core gate` points
+lefthook at `.release/lefthook.yml` via `LEFTHOOK_CONFIG`; each tool is handed its
+config explicitly — `markdownlint --config/--ignore-path`, `yamllint -c`,
+`prettier --ignore-path`), and the git hook is `release-core gate --install-hook` →
+`release-core gate --hook`. **`.editorconfig` and `.shellcheckrc` stay mirrored** to
+the root: `.editorconfig` is editor-facing, and shellcheck has no
+version-portable explicit-config flag (`--rcfile` is ≥ 0.10.0; the fleet's CI runs
+0.9.0), so its rc must be found by shellcheck's upward walk from the repo root.
 
 ## How sync materializes the managed tree (no state file)
 

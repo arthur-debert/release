@@ -31,13 +31,16 @@ git pre-commit hook changes shape.
 Epic #501 ("invoke, don't discover"). The gate definition and its tool configs
 leave the consumer root and live only in the ephemeral `.release/` build dir:
 
-- **`lefthook.yml` + the lint/format configs** (`.markdownlint.json`,
-  `.markdownlintignore`, `.yamllint`, `.shellcheckrc`, `.prettierignore`) are now
+- **`lefthook.yml` + most lint/format configs** (`.markdownlint.json`,
+  `.markdownlintignore`, `.yamllint`, `.prettierignore`) are now
   **release-internal**: materialized into `.release/` but no longer mirrored to the
   consumer root. Each tool is handed its config explicitly — `markdownlint
-  --config/--ignore-path`, `yamllint -c`, `shellcheck --rcfile`, `prettier
-  --ignore-path` — all pointed at `.release/`. **`.editorconfig` stays mirrored**
-  (editor-facing root convention, not a gate flag).
+  --config/--ignore-path`, `yamllint -c`, `prettier --ignore-path` — all pointed at
+  `.release/`. **`.editorconfig` and `.shellcheckrc` stay mirrored to the root**:
+  `.editorconfig` is editor-facing, and shellcheck finds its rc only by walking up
+  from each checked file's dir (no version-portable `--rcfile` — that flag is
+  shellcheck ≥ 0.10.0, but the fleet's CI installs 0.9.0 via apt), so it must stay a
+  root-discovered dotfile until a fleet-wide shellcheck bump.
 - **The git hook runs through the binary.** `release-core gate --install-hook`
   writes `.git/hooks/pre-commit` → `release-core gate --hook` (staged-set lefthook
   run, `--no-auto-install` so lefthook can't reclaim the hook). `setup-dev-env.sh`

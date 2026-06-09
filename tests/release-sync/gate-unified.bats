@@ -71,21 +71,27 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   release_sync >/dev/null
   # Materialized into the ephemeral build dir...
   [ -f .release/lefthook.yml ]
-  for c in .markdownlint.json .markdownlintignore .yamllint .shellcheckrc .prettierignore; do
+  for c in .markdownlint.json .markdownlintignore .yamllint .prettierignore; do
     [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }
   done
-  # ...and NOT mirrored out to the consumer root (no tracked gate files).
+  # ...and NOT mirrored out to the consumer root (no tracked gate files). These
+  # tools take an explicit --config/-c/--ignore-path pointed at .release/.
   [ ! -e lefthook.yml ] && [ ! -L lefthook.yml ]
-  for c in .markdownlint.json .markdownlintignore .yamllint .shellcheckrc .prettierignore; do
+  for c in .markdownlint.json .markdownlintignore .yamllint .prettierignore; do
     { [ ! -e "$c" ] && [ ! -L "$c" ]; } || { echo "leaked root $c"; false; }
   done
 }
 
-@test ".editorconfig stays mirrored to the consumer root (editor-facing, not a gate flag)" {
+@test ".editorconfig + .shellcheckrc stay mirrored to root (root-discovered, no portable --config)" {
   release_sync >/dev/null
-  [ -f .release/.editorconfig ]
-  [ -L .editorconfig ]
-  [ "$(readlink .editorconfig)" = ".release/.editorconfig" ]
+  # .editorconfig is editor-facing; .shellcheckrc must be found by shellcheck's
+  # upward walk from each file (no version-portable --rcfile on the fleet's
+  # shellcheck 0.9.0). Both stay root-mirrored symlinks into .release/.
+  for c in .editorconfig .shellcheckrc; do
+    [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }
+    [ -L "$c" ] || { echo "$c not mirrored to root"; false; }
+    [ "$(readlink "$c")" = ".release/$c" ] || { echo "$c wrong target"; false; }
+  done
 }
 
 @test "a pre-WS3 consumer's tracked root gate symlinks are swept on re-sync (migration)" {

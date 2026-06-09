@@ -129,10 +129,11 @@ regenerated ⇒ drift is impossible by construction.
 4. WS3 — gate configs into `.release/`; the gate runs from the binary so
    `lefthook.yml` leaves the consumer. (Shipped:
    [#524](https://github.com/arthur-debert/release/issues/524) — `lefthook.yml`
-   + the lint/format configs are release-internal (materialized into `.release/`,
+   + most lint/format configs are release-internal (materialized into `.release/`,
    no longer mirrored to the root; each tool is handed its config explicitly via
-   `--config`/`-c`/`--rcfile`/`--ignore-path`). `.editorconfig` stays mirrored
-   (editor-facing). The git hook runs through the binary — `release-core gate
+   `--config`/`-c`/`--ignore-path`). `.editorconfig` (editor-facing) and
+   `.shellcheckrc` (shellcheck has no version-portable `--rcfile` on the fleet's
+   0.9.0 — its rc must be root-discovered) stay mirrored. The git hook runs through the binary — `release-core gate
    --install-hook` writes `.git/hooks/pre-commit` → `release-core gate --hook`
    (staged, `--no-auto-install` so lefthook can't reclaim the hook). The
    broken-symlink sweep generalized to a mirrored-dest rule, so a migrated

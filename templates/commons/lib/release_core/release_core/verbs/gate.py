@@ -116,12 +116,27 @@ def _install_hook(root: str) -> int:
         return 0
 
     # A custom core.hooksPath redirects git away from .git/hooks/, where we write
-    # the shim — unset any value so the install actually takes effect.
+    # the shim — unset any value so the install actually takes effect. Use
+    # --unset-all (a misconfigured hooksPath can be multi-valued, which --unset
+    # refuses) and SURFACE a failure: if the unset fails (permissions, etc.) the
+    # hook stays shadowed and the install is effectively a no-op — reporting
+    # success would be a lie (mirrors setup-dev-env.sh's warn-don't-swallow).
     hooks_path = subprocess.run(
         ["git", "config", "--get", "core.hooksPath"], capture_output=True, text=True, cwd=root
     ).stdout.strip()
     if hooks_path:
-        subprocess.run(["git", "config", "--unset", "core.hooksPath"], cwd=root)
+        unset = subprocess.run(
+            ["git", "config", "--unset-all", "core.hooksPath"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+        )
+        if unset.returncode != 0:
+            print(
+                f"warning: failed to unset core.hooksPath (={hooks_path}) — the "
+                "pre-commit hook may be shadowed and NOT take effect.",
+                file=sys.stderr,
+            )
 
     hooks_dir = subprocess.run(
         ["git", "rev-parse", "--git-path", "hooks"], capture_output=True, text=True, cwd=root

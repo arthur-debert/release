@@ -285,22 +285,29 @@ def is_distributed_skill_dest(dest: str) -> bool:
     return dest.startswith(".claude/skills/")
 
 
-# The gate definition + its tool configs live ONLY in the ephemeral .release/
-# build dir now (WS3, release#524): they are materialized into .release/ but no
-# longer mirrored out to the consumer root. `release-core gate` points lefthook at
-# .release/lefthook.yml (LEFTHOOK_CONFIG) and each tool is handed its config
-# explicitly (markdownlint --config/--ignore-path, yamllint -c, shellcheck
-# --rcfile, prettier --ignore-path) from .release/, so a consumer tracks ZERO gate
-# files at its root. `.editorconfig` is deliberately NOT here: it is an
-# editor-facing root convention (discovered from the tree by editors), not a gate
-# flag, so it stays mirrored to the consumer root.
+# The gate definition + most of its tool configs live ONLY in the ephemeral
+# .release/ build dir now (WS3, release#524): they are materialized into .release/
+# but no longer mirrored out to the consumer root. `release-core gate` points
+# lefthook at .release/lefthook.yml (LEFTHOOK_CONFIG) and each tool is handed its
+# config EXPLICITLY (markdownlint --config/--ignore-path, yamllint -c, prettier
+# --ignore-path) from .release/.
+#
+# Two configs are deliberately NOT here — they stay mirrored to the consumer root
+# because nothing can point their consumer at a .release/ copy:
+#   - `.editorconfig` — editor-facing root convention (discovered by editors), not
+#     a gate flag at all.
+#   - `.shellcheckrc` — shellcheck finds its rc only by walking UP from each
+#     checked file's dir to the repo root; there is NO version-portable
+#     explicit-config flag (`--rcfile` is shellcheck >= 0.10.0, but the fleet's CI
+#     installs 0.9.0 via apt). So it must remain a root-discovered dotfile, the
+#     same category as .editorconfig. (Vendoring it into .release/ awaits a
+#     fleet-wide shellcheck >= 0.10 bump — a separate, deliberate change.)
 GATE_INTERNAL_FILES: frozenset[str] = frozenset(
     {
         "lefthook.yml",
         ".markdownlint.json",
         ".markdownlintignore",
         ".yamllint",
-        ".shellcheckrc",
         ".prettierignore",
     }
 )
