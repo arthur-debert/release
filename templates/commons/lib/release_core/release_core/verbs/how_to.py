@@ -108,9 +108,12 @@ def _render(kind: str) -> str:
     lines.append("The five verbs")
     lines.append("  lint / quality gate : release-core gate")
     lines.append(
-        "      The one gate — runs the SAME checks CI runs. Hard gate: a missing "
-        "tool is a setup failure, never a skip; --no-verify is never OK. It runs "
-        "over the whole tree, so it won't false-green on an unstaged change."
+        "      The fast lint/format/static gate (the same lefthook gate CI runs). "
+        "Hard gate: a missing tool is a setup failure, never a skip; --no-verify "
+        "is never OK. Runs over the whole tree, so it won't false-green on an "
+        "unstaged change. NOTE: it does NOT run tests (see `test` below) — a green "
+        "gate is necessary but not sufficient for CI green; CI runs the test suite "
+        "as a separate check, so run `test` yourself before pushing."
     )
     if "deps" in verbs:
         lines.append(f"  deps (first run)    : {verbs['deps']}")

@@ -1,10 +1,18 @@
 """gate — run THE pre-commit quality gate over this repo, once.
 
 ``release-core gate`` is the single, Kind-agnostic entry point for "run the
-checks" that an agent or human reaches for every loop. It runs the SAME gate CI
-runs (``lefthook run pre-commit --all-files``), so green here means green
-everywhere — the unified-gate doctrine (release#348, CLAUDE.md "The gate is ONE
-definition, run everywhere").
+checks" that an agent or human reaches for every loop. It runs the SAME
+``lefthook run pre-commit`` gate CI runs — the unified-gate doctrine
+(release#348, CLAUDE.md "The gate is ONE definition, run everywhere").
+
+SCOPE — the gate is the fast lint/format/static-analysis set (fmt, clippy,
+eslint, markdownlint, …). It deliberately does NOT run the test suite: tests are
+a separate, slower CI check, not a pre-commit hook. So a green gate is NECESSARY
+but not SUFFICIENT for "CI will be green" — run the Kind's test command
+(``cargo test`` / ``npm test`` / ``pytest``; see ``release-core how-to``)
+separately before pushing. (Conflating the two is the "gate over-claims its
+coverage" trap — same class as a check that silently no-ops; caught in the #501
+lex-fmt dogfood run.)
 
 Why ``--all-files`` and not the staged set: lefthook's default ``pre-commit``
 run inspects only STAGED files, so a bare run over an unstaged edit reports a
@@ -80,6 +88,11 @@ def main(argv: list[str]) -> int:
         return 1
 
     env = dict(os.environ)
+    # Strip lefthook's truecolor banner — the `\e[38;2;r;g;b` gradient is a wall
+    # of escape codes when an agent captures the output non-interactively. Honor
+    # an explicit NO_COLOR=0 / FORCE_COLOR if the caller really wants color.
+    if "FORCE_COLOR" not in env and env.get("NO_COLOR") != "0":
+        env["NO_COLOR"] = "1"
     # Point lefthook at the managed config explicitly when it lives under
     # .release/ — forward-compatible with dropping the root discovery symlink.
     managed_cfg = os.path.join(root, ".release", "lefthook.yml")
