@@ -43,6 +43,7 @@ from ..verbs import (
     release_sync,
     selfcheck,
     semver,
+    tasks,
 )
 from ._helpers import STUB_EXIT, wrap_verb
 
@@ -98,6 +99,44 @@ def attach(root: click.Group) -> None:
             gate.main,
             name="gate",
             short_help="Run THE pre-commit quality gate over this repo.",
+        )
+    )
+    # --- repo-derived task verbs (release#507) ----------------------------
+    # Each detects THIS repo's REAL command (from its manifest) and execs it.
+    # test-* fan out / skip-with-notice; build/run are the single app-root cmd.
+    root.add_command(
+        wrap_verb(
+            tasks.test_unit,
+            name="test-unit",
+            short_help="Run THIS repo's unit suites (all components, cheap-first).",
+        )
+    )
+    root.add_command(
+        wrap_verb(
+            tasks.test_e2e,
+            name="test-e2e",
+            short_help="Run THIS repo's e2e suite (separate, build-dependent).",
+        )
+    )
+    root.add_command(
+        wrap_verb(
+            tasks.test_all,
+            name="test-all",
+            short_help="Run THIS repo's unit then e2e suites.",
+        )
+    )
+    root.add_command(
+        wrap_verb(
+            tasks.build,
+            name="build",
+            short_help="Build THIS repo (the single app-root build command).",
+        )
+    )
+    root.add_command(
+        wrap_verb(
+            tasks.run,
+            name="run",
+            short_help="Run THIS repo (the single app-root dev/run command).",
         )
     )
     root.add_command(
