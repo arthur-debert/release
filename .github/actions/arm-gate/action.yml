@@ -32,10 +32,37 @@ inputs:
       rules that turn an unrelated PR red). Empty (default) → the script's own pin.
     required: false
     default: ''
+  materialize:
+    description: |
+      Materialize the consumer's gitignored `.release/` build dir before the gate
+      runs (release#521 / WS4). Since `.release/` is no longer committed, the gate
+      entry `bin/check` (a committed symlink into `.release/`) would dangle on a
+      fresh checkout — so CI installs the pinned `release_core` wheel and runs
+      `release-core init` to compose `.release/` + repair the mirrors, the same as
+      SessionStart does locally ("invoke, don't discover"; ADR-0005). Defaults to
+      'true'; the ONE caller that opts out is release's OWN repo (ci.yml): release
+      has real root configs, no detectable Kind, and never materializes `.release/`.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
   steps:
+    # Materialize FIRST: the gate's `bin/check` symlink resolves into `.release/`,
+    # which is gitignored + composed-on-demand (WS4). Install the wheel WITHOUT
+    # running its bundled init (--no-init), then run `release-core init --no-commit`
+    # explicitly — CI must never auto-commit the managed tree into a checkout.
+    # install-release-core symlinks the console-scripts into XDG_BIN_HOME and
+    # persists $GITHUB_PATH for LATER steps; within THIS step we add that dir to
+    # PATH so the very next `release-core` call resolves.
+    - name: Materialize the managed .release/ tree
+      if: inputs.materialize == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash "${{ github.action_path }}/../../../bin/install-release-core" --no-init
+        export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
+        release-core init --no-commit
     - name: Provision the gate toolset
       shell: bash
       env:
