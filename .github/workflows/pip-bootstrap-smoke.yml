@@ -181,8 +181,10 @@ jobs:
           # The surviving consumer-facing console-scripts + the top-level CLI.
           # The maintainer/fleet flat names were retired in the CLI cutover
           # (#468) — they are reachable only via `release-core <group> <cmd>`,
-          # smoke-tested as a subcommand below.
-          for cmd in changelog detect-kind release-sync release-core; do
+          # smoke-tested as a subcommand below. release-sync / release-drift-check
+          # were removed in WS4 (#521): `.release/` is composed by `release-core
+          # init`, so the drift/sync subsystem is gone.
+          for cmd in changelog detect-kind release-core; do
             path="$(command -v "$cmd")"
             case "$path" in
               "${RUNNER_TEMP}/venv/bin/"*) : ;;
@@ -326,16 +328,23 @@ jobs:
           git -C "$full" commit -qm 'fixture: go-cli marker'
           cd "$full"
           release-core init
-          # The FULL managed tree must be materialized: the .release/ build dir,
-          # working-tree symlink mirrors, and the CLAUDE.md orientation block.
+          # The FULL managed tree must be materialized on disk: the .release/ build
+          # dir, working-tree symlink mirrors, and the CLAUDE.md orientation block.
           test -d .release || { echo "ERROR: no .release/ build dir materialized" >&2; exit 1; }
           test -f .release/ORIENTATION.md \
             || { echo "ERROR: .release/ORIENTATION.md missing" >&2; exit 1; }
           grep -qF '@.release/ORIENTATION.md' CLAUDE.md \
             || { echo "ERROR: CLAUDE.md orientation block not injected" >&2; exit 1; }
-          # The full tree is FAR more than the config subset.
+          # WS4 (#521): the ephemeral .release/ build dir is gitignored + never
+          # committed — the self-ignoring .release/.gitignore (`*`) keeps it out.
+          if git ls-files --error-unmatch .release >/dev/null 2>&1; then
+            echo "ERROR: .release/ is git-tracked — it must be ephemeral (gitignored)" >&2
+            git ls-files .release >&2; exit 1
+          fi
+          # The committed MIRRORS (symlinks + workflow copies + CLAUDE.md block) are
+          # still a non-trivial managed surface — FAR more than a stray file or two.
           n="$(git ls-files | wc -l | tr -d ' ')"
-          [ "$n" -gt 20 ] || { echo "ERROR: only $n files tracked — not a full tree" >&2; exit 1; }
+          [ "$n" -gt 20 ] || { echo "ERROR: only $n files tracked — not a full mirror set" >&2; exit 1; }
           # AUTO-COMMIT ON CHANGE: the managed change must be committed (the boot
           # passes no flags; auto-commit is the default in full mode).
           subject="$(git log -1 --pretty=format:%s)"
