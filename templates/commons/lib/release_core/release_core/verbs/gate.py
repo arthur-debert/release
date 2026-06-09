@@ -178,6 +178,11 @@ def main(argv: list[str]) -> int:
     if os.path.isfile(managed_cfg) and "LEFTHOOK_CONFIG" not in env:
         env["LEFTHOOK_CONFIG"] = managed_cfg
 
+    # --no-auto-install: running `lefthook run` otherwise auto-SYNCS hooks — it
+    # would back up our binary-driven .git/hooks/pre-commit (release-core gate
+    # --install-hook) to .old and reinstall lefthook's OWN shim, which discovers
+    # config from the (now-absent) repo root and so breaks the commit hook. We own
+    # the hook now (WS3), so lefthook must never re-manage it.
     scope = [] if hook_mode else ["--all-files"]
-    cmd = [lefthook, "run", "pre-commit", *scope, "--no-tty", *argv]
+    cmd = [lefthook, "run", "pre-commit", "--no-auto-install", *scope, "--no-tty", *argv]
     return subprocess.run(cmd, cwd=root, env=env).returncode

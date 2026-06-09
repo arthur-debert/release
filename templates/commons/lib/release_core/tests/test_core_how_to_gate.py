@@ -145,7 +145,8 @@ def test_gate_runs_all_files_over_the_repo(monkeypatch):
     monkeypatch.setattr(gate.subprocess, "run", _fake_run)
     assert gate.main([]) == 0
     cmd = captured["cmd"]
-    assert cmd[:5] == ["lefthook", "run", "pre-commit", "--all-files", "--no-tty"]
+    expected = ["lefthook", "run", "pre-commit", "--no-auto-install", "--all-files", "--no-tty"]
+    assert cmd[:6] == expected
     assert captured["cwd"] == "/repo"
 
 
@@ -166,8 +167,9 @@ def test_gate_hook_mode_runs_staged_not_all_files(monkeypatch):
     monkeypatch.setattr(gate.subprocess, "run", _fake_run)
     assert gate.main(["--hook"]) == 0
     cmd = captured["cmd"]
-    assert cmd == ["lefthook", "run", "pre-commit", "--no-tty"]
-    assert "--all-files" not in cmd
+    assert cmd == ["lefthook", "run", "pre-commit", "--no-auto-install", "--no-tty"]
+    assert "--all-files" not in cmd  # staged set, so stage_fixed restage works
+    assert "--no-auto-install" in cmd  # lefthook must not re-manage our binary hook
 
 
 def test_gate_points_lefthook_at_managed_config(monkeypatch, tmp_path):

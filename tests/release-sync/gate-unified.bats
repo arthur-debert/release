@@ -116,3 +116,15 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   [ -x "$hook" ]
   grep -qF 'release-core gate --hook' "$hook"
 }
+
+@test "a release-core gate run does NOT let lefthook clobber the binary hook (--no-auto-install)" {
+  command -v lefthook >/dev/null || skip "lefthook not installed"
+  release_sync >/dev/null
+  release-core gate --install-hook >/dev/null
+  hook="$(git rev-parse --git-path hooks)/pre-commit"
+  # Running the gate must NOT trigger lefthook's hook auto-sync (which would back
+  # up our hook to .old and reinstall lefthook's own root-discovering shim).
+  release-core gate >/dev/null 2>&1 || true
+  grep -qF 'release-core gate --hook' "$hook"
+  [ ! -e "${hook}.old" ]
+}
