@@ -143,6 +143,66 @@ def test_unit_generic_tests_dir_is_not_busted(tmp_path):
     assert rc.unit_commands(str(tmp_path)) == []
 
 
+# --- CI check-command fallback (manifest-empty repos) ---------------------
+
+
+def _ci_caller_wf(root, check_command, *, wf="ci.yml", uses=None):
+    """Write a .github/workflows/<wf> CI caller invoking a release reusable
+    workflow with a `check-command:` input."""
+    wf_dir = root / ".github" / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    uses = uses or "arthur-debert/release/.github/workflows/nvim-plugin.yml@v2"
+    (wf_dir / wf).write_text(
+        "name: CI\n"
+        "on: push\n"
+        "jobs:\n"
+        "  test:\n"
+        f"    uses: {uses}\n"
+        "    with:\n"
+        f"      check-command: '{check_command}'\n"
+    )
+
+
+def test_unit_falls_back_to_ci_check_command(tmp_path):
+    # lex-fmt/nvim's shape: NO manifest test, real suite wired via the canonical
+    # caller's check-command:. The fallback must surface it (label "ci").
+    _ci_caller_wf(tmp_path, "cd test && bash run_tests.sh")
+    unit = rc.unit_commands(str(tmp_path))
+    assert len(unit) == 1
+    assert unit[0].display == "cd test && bash run_tests.sh"
+    assert unit[0].argv == ["bash", "-c", "cd test && bash run_tests.sh"]
+    assert unit[0].label == "ci"
+
+
+def test_unit_check_command_is_fallback_only_not_when_manifest_present(tmp_path):
+    # A real manifest test (Cargo.toml) AND a check-command workflow: the manifest
+    # wins; the check-command is NEVER added (no double-run).
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n")
+    _ci_caller_wf(tmp_path, "cd test && bash run_tests.sh")
+    unit = rc.unit_commands(str(tmp_path))
+    assert [c.display for c in unit] == ["cargo test --all-features"]
+    assert all(c.label != "ci" for c in unit)
+
+
+def test_unit_check_command_ignores_non_release_caller(tmp_path):
+    # A workflow that uses some OTHER reusable workflow must not be mined.
+    _ci_caller_wf(tmp_path, "echo nope", uses="actions/some-other/.github/workflows/x.yml@v1")
+    assert rc.unit_commands(str(tmp_path)) == []
+
+
+def test_unit_check_command_garbled_workflow_no_crash(tmp_path):
+    # Garbled / non-dict workflow YAML must not crash → empty.
+    wf_dir = tmp_path / ".github" / "workflows"
+    wf_dir.mkdir(parents=True)
+    (wf_dir / "broken.yml").write_text("jobs: [this, is, : not valid: mapping\n")
+    (wf_dir / "scalar.yml").write_text("just-a-string\n")
+    assert rc.unit_commands(str(tmp_path)) == []
+
+
+def test_ci_check_command_missing_dir_returns_none(tmp_path):
+    assert rc._ci_check_command(str(tmp_path)) is None
+
+
 # --- build: single app-root command ---------------------------------------
 
 

@@ -58,13 +58,36 @@ def test_add_numeric_slug_prefixed(repo):
     assert not (repo / "CHANGELOG" / "unreleased-142.md").exists()
 
 
-def test_add_stdin_bytes_verbatim(repo, monkeypatch):
+def test_add_stdin_already_bulleted_unchanged(repo, monkeypatch):
     import io
 
+    # Already-bulleted stdin passes through unchanged (no double-bullet).
     payload = b"- one\n- two\n\n"
     monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
     changelog.add_main(["multi"])
     assert (repo / "CHANGELOG" / "unreleased-multi.md").read_bytes() == payload
+
+
+def test_add_prepends_bullet_when_missing(repo):
+    # Body without a leading bullet gets the mandated `- ` convention applied.
+    rc = changelog.add_main(["fix", "Fix the thing (#9)"])
+    assert rc == 0
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
+
+
+def test_add_already_bulleted_inline_unchanged(repo):
+    # A body that already starts with `-` is never double-bulleted.
+    changelog.add_main(["fix", "- already a bullet"])
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- already a bullet\n"
+
+
+def test_add_stdin_unbulleted_gets_bullet(repo, monkeypatch):
+    import io
+
+    payload = b"plain line\n"
+    monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
+    changelog.add_main(["plain"])
+    assert (repo / "CHANGELOG" / "unreleased-plain.md").read_bytes() == b"- plain line\n"
 
 
 def test_add_collision_fails_without_force(repo, capsys):
@@ -72,14 +95,14 @@ def test_add_collision_fails_without_force(repo, capsys):
     rc = changelog.add_main(["142", "second"])
     assert rc == 1
     assert "already exists" in capsys.readouterr().err
-    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "first\n"
+    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "- first\n"
 
 
 def test_add_force_overwrites(repo):
     changelog.add_main(["142", "first"])
     rc = changelog.add_main(["--force", "142", "second"])
     assert rc == 0
-    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "second\n"
+    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "- second\n"
 
 
 @pytest.mark.parametrize("slug", ["../evil", ".hidden", "a/b"])

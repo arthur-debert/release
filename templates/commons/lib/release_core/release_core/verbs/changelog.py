@@ -144,18 +144,29 @@ def add_main(argv: list[str]) -> int:
         )
         return 1
 
-    if args:
-        # printf '%s\n' "$*": args joined by a single space, one trailing newline.
-        body = (" ".join(args) + "\n").encode()
-        with open(target, "wb") as fh:
-            fh.write(body)
-    else:
-        # `cat > target`: stream stdin bytes through verbatim.
-        data = sys.stdin.buffer.read()
-        with open(target, "wb") as fh:
-            fh.write(data)
+    # Inline args: joined by a single space + one trailing newline (printf
+    # '%s\n' "$*"). No args: stdin bytes (cat > target).
+    body = (" ".join(args) + "\n").encode() if args else sys.stdin.buffer.read()
+    # CHANGELOG/README.txt mandates a leading `- ` markdown bullet per fragment
+    # line (the renderer concatenates fragment bytes verbatim into the rendered
+    # list). Apply the convention only when the body isn't already a bullet, so
+    # an already-`- `-prefixed body is never double-bulleted.
+    body = _ensure_bullet(body)
+    with open(target, "wb") as fh:
+        fh.write(body)
     print(f"wrote {target}")
     return 0
+
+
+def _ensure_bullet(body: bytes) -> bytes:
+    """Prepend a `- ` markdown bullet to ``body`` unless its first non-blank
+    content already starts with `-` (the CHANGELOG fragment convention). An empty
+    body is left untouched."""
+    if not body.strip():
+        return body
+    if body.lstrip().startswith(b"-"):
+        return body
+    return b"- " + body
 
 
 # --- changelog-cut ----------------------------------------------------------
