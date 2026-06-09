@@ -1,1 +1,0 @@
-add `release-core admin repos migrate` — the pull-model successor to the removed `orc propagate`: for each managed repo it clones, runs a bundle-sourced `release-core init` (full materialize + managed-only auto-commit), and opens one managed-sync PR; --only/--dry-run supported. Used to roll the fleet onto the pull model (#416)
