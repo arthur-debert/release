@@ -363,18 +363,6 @@ def git_add(paths: list[str], *, cwd: str, force: bool = False) -> None:
     git(["-C", cwd, "add", *(["-f"] if force else []), "--", *paths])
 
 
-def git_rm_cached(paths: list[str], *, cwd: str) -> None:
-    """`git -C <cwd> rm -r --cached --ignore-unmatch --quiet -- <paths>` — drop the
-    given pathspecs from the INDEX only (the working-tree files stay). Used to
-    untrack a previously-committed `.release/` once it became gitignored +
-    ephemeral (WS4, release#521). ``--ignore-unmatch`` makes it a no-op when
-    nothing matches (steady state / a fresh consumer), so it never raises on the
-    common case. Raises ProcError on a real git failure."""
-    if not paths:
-        return
-    git(["-C", cwd, "rm", "-r", "--cached", "--ignore-unmatch", "--quiet", "--", *paths])
-
-
 def git_path_tracked(path: str, *, cwd: str) -> bool:
     """True iff ``path`` (a file or directory) currently has tracked entries in the
     index — `git -C <cwd> ls-files -- <path>` prints at least one line. Used to

@@ -626,6 +626,38 @@ def _full_commit_message(ref_label: str) -> str:
     return f"chore(release): sync managed tree from {label}"
 
 
+def _commit_untracking_release(repo_root: str, commit_paths: list[str], message: str) -> None:
+    """Pathspec-commit the mirrors AND untrack a previously-committed `.release/`
+    (the WS4 one-time migration, release#521).
+
+    The wrinkle: a pathspec commit (`git commit -- <paths>`) does a PARTIAL commit
+    that re-reads the WORKING TREE for the listed paths. The recomposed `.release/`
+    is still on disk (gitignored), so a naive `git commit -- .release` would
+    *resurrect* every tracked `.release/` file that survives recomposition instead
+    of recording its removal. So we move the ephemeral build dir aside for the
+    duration of the commit: with `.release/` absent from the work tree, the partial
+    commit records all its tracked paths as deletions, while the mirrors (present)
+    commit normally. The dir is restored in `finally` so the ephemeral tree — and
+    the committed symlinks into it — stay live. `os.rename` of the dir entry is
+    O(1) (same filesystem), so this is cheap regardless of tree size.
+    """
+    release_dir = os.path.join(repo_root, ".release")
+    stash = os.path.join(repo_root, ".release.untrack-commit.tmp")
+    moved = False
+    try:
+        if os.path.exists(release_dir):
+            # A leftover stash from a previously-interrupted run would block the
+            # rename; clear it first (it is never the live tree).
+            if os.path.exists(stash):
+                shutil.rmtree(stash, ignore_errors=True)
+            os.rename(release_dir, stash)
+            moved = True
+        gh.git_commit_paths(commit_paths, message, cwd=repo_root)
+    finally:
+        if moved:
+            os.rename(stash, release_dir)
+
+
 def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool) -> None:
     """Stage + commit ONLY ``written`` (paths relative to repo_root that init
     just created/overwrote/repaired), then optionally fast-forward push.
@@ -649,14 +681,13 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
 
     try:
         # WS4 migration (release#521): untrack a previously-committed `.release/`.
-        # The build dir is now gitignored + ephemeral, so any tracked `.release/**`
-        # must leave the index (working-tree files stay — --cached). Include
-        # `.release` in the commit pathspec ONLY when it was actually tracked: a
-        # bare `git commit -- .release` errors with "pathspec did not match" on a
-        # fresh consumer where nothing under it is tracked or staged.
+        # The build dir is now gitignored + ephemeral. Include `.release` in the
+        # commit pathspec ONLY when it was actually tracked — a bare
+        # `git commit -- .release` errors with "pathspec did not match" on a fresh
+        # consumer where nothing under it is tracked.
+        release_tracked = gh.git_path_tracked(".release", cwd=repo_root)
         commit_paths = list(written)
-        if gh.git_path_tracked(".release", cwd=repo_root):
-            gh.git_rm_cached([".release"], cwd=repo_root)
+        if release_tracked:
             commit_paths.append(".release")
         if not commit_paths:
             # Nothing managed to commit — e.g. the only delta was inside the now
@@ -669,12 +700,12 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
         # fails on the ignored path. NEVER `.release/`: it is gitignored on purpose
         # and is NOT in `written`, so force-add can't resurrect it.
         gh.git_add(written, cwd=repo_root, force=True)
-        # Commit ONLY the managed pathspecs (mirrors + the `.release` removal when it
-        # was tracked). A pathspec-scoped commit ignores any other staged changes, so
-        # a user's in-progress staging is never folded in. If nothing was staged for
-        # any pathspec (managed bytes already identical), git commit exits non-zero —
-        # caught below as a benign skip, not a failure.
-        gh.git_commit_paths(commit_paths, message, cwd=repo_root)
+        # Commit ONLY the managed pathspecs. A pathspec-scoped commit ignores any
+        # other staged changes, so a user's in-progress staging is never folded in.
+        if release_tracked:
+            _commit_untracking_release(repo_root, commit_paths, message)
+        else:
+            gh.git_commit_paths(commit_paths, message, cwd=repo_root)
     except Exception as exc:  # ProcError or anything git surfaces
         print(
             f"release-core init: --commit skipped (could not commit managed config: {exc})",

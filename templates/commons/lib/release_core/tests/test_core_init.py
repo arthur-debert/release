@@ -1338,6 +1338,47 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     assert _git(repo, "status", "--porcelain") == ""
 
 
+@_needs_yq
+@_needs_git
+def test_full_migration_untracks_previously_committed_release(tmp_path, monkeypatch, capsys):
+    """WS4 one-time migration (release#521): a consumer that COMMITTED its `.release/`
+    under the old model must, on the first init, have the whole tree untracked —
+    INCLUDING paths that survive recomposition (e.g. `.release/bin/check`). The
+    trap: a pathspec commit re-reads the work tree, so a naive `git commit --
+    .release` resurrects the still-present recomposed files instead of deleting
+    them. After init: zero tracked `.release/**`, a clean tree, and `.release/`
+    still materialized on disk + the symlinks resolving."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # Simulate a pre-WS4 consumer: commit a `.release/` tree, including a path the
+    # recompose will REGENERATE (bin/check) and one it will NOT (lib/foo.py).
+    (repo / ".release" / "bin").mkdir(parents=True)
+    (repo / ".release" / "lib").mkdir(parents=True)
+    (repo / ".release" / "bin" / "check").write_text("old committed check\n")
+    (repo / ".release" / "lib" / "foo.py").write_text("stale\n")
+    _git(repo, "add", "-f", ".release")
+    _git(repo, "commit", "-q", "-m", "pre-WS4: committed .release/")
+    assert len(_git(repo, "ls-files", "--", ".release").splitlines()) == 2
+
+    rc = init.main([])  # default full materialize + auto-commit
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    # No `.release/**` tracked anymore — the whole ephemeral tree is untracked.
+    assert _git(repo, "ls-files", "--", ".release") == ""
+    # The migration commit recorded the surviving path as a DELETION, not a modify.
+    names = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
+    assert "D\t.release/bin/check" in names
+    assert "D\t.release/lib/foo.py" in names
+    # Tree is clean; `.release/` is still on disk (ephemeral) and the symlink resolves.
+    assert _git(repo, "status", "--porcelain") == ""
+    assert (repo / ".release" / "bin" / "check").is_file()
+    assert (repo / "bin" / "check").is_symlink()
+    assert (repo / "bin" / "check").resolve().is_file()
+    # No untrack-commit stash left behind.
+    assert not (repo / ".release.untrack-commit.tmp").exists()
+
+
 # --------------------------------------------------------------------------
 # Flag-combo guards under the post-#476 default (full IS the default; the guards
 # key off "full mode is active" = NOT --config-only, never the literal --full).
