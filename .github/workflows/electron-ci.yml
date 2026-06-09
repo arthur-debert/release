@@ -55,7 +55,7 @@ name: Electron CI
 #         shared-build-dir: shared        # if you have one
 #         submodules: 'true'              # if you have submodules
 #
-# See docs/per-stack/electron-ci.md for the full input reference.
+# Run `release-core how-to electron-app` for the build/test reference.
 
 on:
   workflow_call:

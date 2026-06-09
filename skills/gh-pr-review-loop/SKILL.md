@@ -129,7 +129,7 @@ Why: a detached auto-fix agent (`orc watch --auto`, release#338) addresses revie
 
 ### Draft vs ready = whose turn it is
 
-This is the canonical lifecycle — stated upstream in [`arthur-debert/release` docs/dev-cycle-task.lex](https://github.com/arthur-debert/release/blob/main/docs/dev-cycle-task.lex) and mirrored into each managed repo's `ORIENTATION` (`.release/ORIENTATION.md`). The draft/ready flag is the **turn-signal**:
+This is the canonical lifecycle — stated upstream in [`arthur-debert/release` docs/dev-cycle.lex](https://github.com/arthur-debert/release/blob/main/docs/dev-cycle.lex) and mirrored into each managed repo's `ORIENTATION` (`.release/ORIENTATION.md`). The draft/ready flag is the **turn-signal**:
 
 - **draft = WIP = the agent owns it.** You open the PR **as a draft** (`gh pr create --draft`) and keep it draft for the entire dev cycle: implementing, waiting on and addressing reviews, getting CI green, making it mergeable.
 - **ready = the human's turn.** Flipping draft→ready (`gh pr ready`) is the *one signal* that says "I'm done iterating — come validate and merge." Don't flip until reviews are addressed, CI is green, and it's mergeable.

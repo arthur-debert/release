@@ -71,7 +71,7 @@ name: Tauri CI
 #         # tauri-build: true             # opt-in smoke gate
 #         # pre-test: 'pnpm fetch:wasm'   # if you need a build hook
 #
-# See docs/per-stack/tauri-ci.md for the full input reference.
+# Run `release-core how-to tauri-app` for the build/test reference.
 
 on:
   workflow_call:

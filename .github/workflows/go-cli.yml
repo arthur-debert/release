@@ -2,8 +2,8 @@ name: Go CLI release
 
 # Reusable release workflow for go-cli projects. Consumers call this from
 # their own .github/workflows/release.yml with workflow_dispatch + version
-# input. See docs/per-category/go-cli.md for the full input shape and
-# examples for a paste-ready consumer workflow.
+# input. Run `release-core how-to go-cli` for the build/test shape and see
+# examples/ for a paste-ready consumer workflow.
 #
 # Differences from rust-cli:
 #   - No manifest version bump (Go embeds version via -ldflags -X at build).

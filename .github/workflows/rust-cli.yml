@@ -2,7 +2,7 @@ name: Rust CLI release
 
 # Reusable release workflow for rust-cli projects. Consumers call this from
 # their own .github/workflows/release.yml with workflow_dispatch + version
-# input. See docs/per-category/rust-cli.md for the full input shape and
+# input. Run `release-core how-to rust-cli` for the build/test shape and see
 # examples/rust-cli-minimal.yml for a paste-ready consumer workflow.
 
 on:

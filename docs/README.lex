@@ -1,63 +1,45 @@
 release/ — Agent & Maintainer Docs
 
-    This is the rebuilt documentation set. It describes how the release
-    tooling reaches a consumer repo, what an agent working in that repo sees,
-    and how the day-to-day development cycle runs. It is written for two
-    readers: an agent doing tasks in a consumer repo, and a maintainer working
-    on `release/` itself.
+    The documentation set for the release tooling: how it reaches a consumer
+    repo, what an agent working in that repo sees, and how the day-to-day
+    development cycle runs. Written for two readers: an agent doing tasks in a
+    consumer repo, and a maintainer working on `release/` itself.
 
-The Documents:
-    dev-cycle-task.lex:
-        The development life cycle for a simple task — one that fits in a
-        single PR. Information gathering, implementation, PR shepherding,
-        user validation.
+    The procedural source of truth for "how do I work in THIS repo" is the
+    binary, not these files: `release-core how-to` renders it, version-correct,
+    kind-aware (release#501, "invoke, don't discover"). These docs are the
+    durable design/mechanism layer behind that.
 
-    dev-cycle-large-feature.lex:
-        The life cycle for a larger feature — multiple PRs under one
-        coordinating agent, branch, and umbrella PR. A composition of the
-        single-task cycle.
+The four narrative documents:
+    dev-cycle.lex:
+        The ONE development life cycle, draft-first — a simple task (one PR) and
+        a larger feature (multiple PRs under a coordinating agent). The model
+        behind `release-core how-to` and the `gh-pr-review-loop` skill.
 
     tooling.lex:
-        What `release-core` is and the handful of commands an agent runs
-        through a normal PR cycle, driven by the PR state machine. Also: how
-        `release-core` is installed, what a consumer must commit to stay
-        current, and what the maintainer-only `orc` orchestrator does.
+        The machinery: `release-core` (the CLI an agent drives), the quality
+        gate, the PR state machine, the pull-model install, the `release-sync`
+        distribution engine (build-dir + symlinks, what lands where), the
+        reusable workflows, the maintainer `orc` orchestrator, and the
+        directional roadmap.
 
-    injected-files.lex:
-        The map of every file `release/` writes into a consumer repo — where
-        it comes from, where it lands, whether it is a symlink or a real copy,
-        and which files must exist before a session starts.
+    harness.lex:
+        The agent harness: the SessionStart bootstrap, how orientation reaches
+        the agent (the CLAUDE.md managed block → `release-core how-to`), and the
+        skill set — where skills live, the distribution tiers, and linting.
 
-    skills.lex:
-        Which Claude Code skills exist, how they are stored and linted, and
-        which ones reach a consumer-repo agent versus which stay in the
-        release repo.
+    README.lex:
+        This file — the map and reading order.
 
-    workflows.lex:
-        How the reusable GitHub Actions workflows work, the one-canonical-
-        pipeline-per-category model, and the catalog of available workflows.
-
-Deeper References:
-    The documents above are the orientation layer. Below is the durable
-    reference material they sit on top of — the "why" and the deep mechanism.
-
-    status.lex:
-        The directional roadmap and current project state. Explicitly not a
-        task tracker (the GitHub issue tracker is that).
-
-    distribution.lex:
-        The deep `release-sync` mechanism — the symlink-vs-copy predicates,
-        the canonical-home pattern, and how the changelog/semver console-scripts
-        reach consumers by pip wheel (not sync). Where injected-files.lex is the
-        map, this is the internals.
+Kept references (the durable "why"):
+    adr/:
+        Architecture Decision Records — the build-dir + symlinks model (0001),
+        the provenance marker (0002), the pip-install bootstrap (0003), the
+        installed-package symlinks (0004), the minimal-footprint /
+        invoke-don't-discover decision (0005).
 
     breaking-changes.md:
         The versioning contract's breaking-changes log.
-
-    adr/:
-        Architecture Decision Records — the build-dir+symlinks model (0001),
-        the provenance marker (0002), the pip-install bootstrap (0003), the
-        installed-package symlinks (0004).
 
     references/:
         Design "why" notes — the component model, the lint-debt three-case
@@ -67,13 +49,16 @@ Deeper References:
         Maintainer tool-base docs — fleet tooling and the release-core CLI
         authoring pattern.
 
-    per-category/, per-component/, per-stack/:
-        Per-artifact input shapes and adoption guides for each Kind and
-        Capability. artifacts-schema.md and lex-release-cascade.md round these
-        out.
+Reading order:
+    - New to the repo: start with tooling.lex, then harness.lex.
+    - Doing a task in a consumer repo: run `release-core how-to`, then read
+      dev-cycle.lex.
+    - Working on `release/` itself: all four narrative docs, plus the ADRs under
+      adr/.
 
-Reading Order:
-    - New to the repo: start with tooling.lex, then injected-files.lex.
-    - Doing a task in a consumer repo: dev-cycle-task.lex + tooling.lex.
-    - Working on `release/` itself: all of the above, plus the ADRs under
-      `adr/` and the deep mechanism in distribution.lex.
+Note on per-Kind docs:
+    The former `per-category/`, `per-component/`, and `per-stack/` reference
+    docs were removed in the #501 consolidation. Per-Kind "how to build/test
+    this" content is now `release-core how-to <kind>` OUTPUT, not a
+    hand-maintained file — the same invoke-don't-discover principle applied to
+    docs.
