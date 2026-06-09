@@ -1,0 +1,1 @@
+- release-core admin repos verify runs the gate via release-core gate (finds the .release/ config); bare lefthook run broke post-WS3
