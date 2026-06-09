@@ -1,11 +1,12 @@
-"""sync — the release-sync engine (build-dir + symlinks, ADR-0001).
+"""sync — the managed-tree compose engine (build-dir + symlinks, ADR-0001).
 
-Pure(-ish) port of bin/release-sync: ref selection, Kind+Capability resolution,
-the materialize-into-a-fresh-.release/ plan, lefthook fragment composition,
-release-internal classification, symlink-target computation, the diff against an
-existing .release/, broken-symlink detection, and the CLAUDE.md orientation
-block. The verb (verbs/release_sync.py) wires these together with the CLI guards
-and the apply phase.
+Ref selection, Kind+Capability resolution, the materialize-into-a-fresh-.release/
+plan, lefthook fragment composition, release-internal classification,
+symlink-target computation, the diff against an existing .release/,
+broken-symlink detection, and the CLAUDE.md orientation block. ``verbs/init.py``
+drives this engine (build_plan → materialize → diff → compute_mirror →
+decide_claude → _apply_mirror); the standalone ``release-sync`` verb that used to
+wrap it was retired in WS4 (release#521).
 
 All git access goes through gh.py (the chokepoint). Filesystem reads/writes use
 the stdlib. Behavior mirrors the bash byte-for-byte — see the per-function notes
@@ -654,9 +655,9 @@ def _files_equal(a: str, b: str) -> bool:
 
 
 def _expected_copy_bytes(f: str, tmp_release: str) -> bytes:
-    """The exact bytes ``_apply`` would write for the real-file copy ``f`` — the
-    materialized source under ``tmp_release``, with the managed-marker header
-    prepended for YAML (mirrors release_sync._apply's copy branch). Used to tell a
+    """The exact bytes ``_apply_mirror`` would write for the real-file copy ``f`` —
+    the materialized source under ``tmp_release``, with the managed-marker header
+    prepended for YAML (mirrors init._apply_mirror's copy branch). Used to tell a
     genuine copy change from a byte-identical re-materialize so a steady-state
     sync is a true no-op (no phantom change count, no failed auto-commit)."""
     with open(os.path.join(tmp_release, f), "rb") as fh:

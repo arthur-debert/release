@@ -8,7 +8,7 @@
 #
 #   - A skill directory (one containing SKILL.md) that has an `.upstream`
 #     marker is VENDORED — skipped. The marker records its source repo +
-#     pinned commit (see bin/release-sync's skill backfill / release#321).
+#     pinned commit (see the skill backfill in sync.py / release#321).
 #   - A skill directory with NO `.upstream` is SELF-AUTHORED — linted
 #     with markdownlint, using the repo's .markdownlint.json.
 #

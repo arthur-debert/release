@@ -24,8 +24,6 @@ from release_core.verbs import (
     changelog,
     detect_kind,
     gh_release_issue,
-    release_drift_check,
-    release_sync,
     semver,
 )
 
@@ -56,14 +54,6 @@ def gh_release_issue_main() -> None:
 
 def gh_task_status_main() -> None:
     raise SystemExit(task_status.main(sys.argv[1:]))
-
-
-def release_drift_check_main() -> None:
-    raise SystemExit(release_drift_check.main(sys.argv[1:]))
-
-
-def release_sync_main() -> None:
-    raise SystemExit(release_sync.main(sys.argv[1:]))
 
 
 def semver_main() -> None:

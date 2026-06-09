@@ -124,6 +124,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import sys
@@ -314,9 +315,9 @@ def _materialize_config_sources(
         # the managed config was composed from.
         source_ref["ref"] = ref_sha[:12] if ref_sha else ref
 
-    # Honor a consumer .release-sync.yaml capability override, exactly as
-    # release-sync does (verbs/release_sync.py) — so init composes the SAME
-    # config set the consumer would get from a sync.
+    # Honor a consumer .release-sync.yaml capability override (the same override
+    # the retired release-sync verb honored) — so init composes the SAME config
+    # set for the detected Kind + capabilities.
     sync_yaml_text = None
     sync_yaml = os.path.join(repo_root, ".release-sync.yaml")
     if os.path.isfile(sync_yaml):
@@ -340,9 +341,10 @@ def _materialize_config_sources(
 
 # ── Full materialize (the DEFAULT init): the whole managed tree, from the bundle ─
 #
-# This is "release-sync sourced from the wheel bundle": the SAME engine pipeline
-# the release_sync verb runs (build_plan + materialize + diff + compute_mirror +
-# decide_claude + apply), driven by BundleSource by default, or GitSource when a
+# The full materialize is the SAME engine pipeline the retired release-sync verb
+# ran (build_plan + materialize + diff + compute_mirror + decide_claude + apply),
+# now sourced from the wheel bundle and driven by init: BundleSource by default,
+# or GitSource when a
 # real $RELEASE_HOME clone is present (release-dev override, mirroring how the
 # config path prefers $RELEASE_HOME over the bundle). It materializes the full
 # .release/ build dir plus all working-tree mirrors (symlinks, real-file copies,
@@ -441,12 +443,10 @@ def _run_full_sync(
                        that still has unresolved conflicts isn't reported clean.
 
     In --dry-run nothing is written/applied; the plan is still computed so the
-    change count + paths + conflicts are reported. Mirrors release_sync.main's
-    apply phase (atomic .release/ swap + release_sync._apply) so the result is
-    byte-identical to a `release-sync` run for the same Kind.
+    change count + paths + conflicts are reported. The apply phase (atomic
+    .release/ swap + :func:`_apply_mirror`) composes the same managed tree the
+    retired ``release-sync`` verb produced for the same Kind.
     """
-    from . import release_sync as _rs
-
     source, kind, caps_names = _resolve_full_source(repo_root, repo_name)
     plan = sync.build_plan(source, kind, caps_names, repo_root=repo_root)
 
@@ -476,18 +476,104 @@ def _run_full_sync(
             return changes, managed, source.ref_sha, list(mirror.conflicts)
 
         # Apply: atomic .release/ swap, then the mirror/CLAUDE.md apply phase.
-        # _apply runs relative to cwd; init has already chdir'd into repo_root.
+        # _apply_mirror runs relative to cwd; init has already chdir'd into repo_root.
         release_dir = os.path.join(repo_root, ".release")
         if os.path.isdir(release_dir):
             shutil.rmtree(release_dir)
         os.rename(tmp_release, release_dir)
         swapped = True
-        _rs._apply(mirror, claude)
+        _apply_mirror(mirror, claude)
     finally:
         if not swapped:
             shutil.rmtree(tmp_release, ignore_errors=True)
 
     return changes, managed, source.ref_sha, list(mirror.conflicts)
+
+
+def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
+    """The apply phase: --migrate removals, symlink create/remove, managed-copy
+    write/remove, and the CLAUDE.md write. Runs relative to cwd (init has chdir'd
+    into the repo root). Formerly ``release_sync._apply`` — relocated here when the
+    standalone sync verb was retired (WS4, release#521); init is its sole caller."""
+    # If --migrate, delete real files at managed locations first.
+    for f in mirror.migrated:
+        _rm_f(f)
+
+    # Create / update symlinks.
+    for s in mirror.symlinks_to_create:
+        link, _, target = s.partition(" -> ")
+        d = os.path.dirname(link)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        if os.path.islink(link):
+            os.remove(link)
+        os.symlink(target, link)
+
+    # Remove broken symlinks (paths are './…' relative to repo root).
+    for link in mirror.symlinks_to_remove:
+        os.remove(link)
+
+    # Write managed copies (real files for paths GH can't dereference).
+    for f in mirror.copies_to_write:
+        d = os.path.dirname(f)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        if os.path.islink(f):
+            os.remove(f)
+        src = os.path.join(".release", f)
+        if f.endswith((".yml", ".yaml")):
+            with open(src, "rb") as sfh:
+                body = sfh.read()
+            with open(f, "wb") as dfh:
+                dfh.write((sync.MANAGED_MARKER + "\n").encode("utf-8"))
+                dfh.write(body)
+        else:
+            shutil.copyfile(src, f)
+        # Preserve the executable bit from the source.
+        if os.access(src, os.X_OK):
+            st = os.stat(f)
+            os.chmod(f, st.st_mode | 0o111)
+
+    # Remove stale managed copies.
+    for f in mirror.copies_to_remove:
+        os.remove(f)
+
+    # Write the consumer CLAUDE.md orientation block.
+    if claude.action in ("create", "inject", "refresh"):
+        # Atomic same-filesystem replace via a sibling temp file.
+        assert claude.desired is not None
+        fd, tmp = tempfile.mkstemp(prefix=sync.CLAUDE_FILE + ".tmp.", dir=".")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(claude.desired)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, sync.CLAUDE_FILE)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+
+def _rm_f(path: str) -> None:
+    """`rm -rf` — remove if present (file, symlink, or directory), ignore absence
+    but surface real errors (permission/IO), like `rm -f` does for a file.
+
+    A pre-existing managed dest is usually a real file (e.g. a stale hand-copied
+    .claude/skills/<name>/SKILL.md). It can also be a real directory; remove that
+    too so the managed symlink can take its place.
+
+    Absence (FileNotFoundError) is ignored — matching `rm -f` — including the
+    TOCTOU window where the dir vanishes between the isdir() check and the
+    rmtree (a concurrent/CI race). But a real failure (permission/IO) must
+    propagate rather than be silently swallowed (which would leave the path in
+    place and make the later os.symlink fail with a confusing FileExistsError),
+    so we do NOT pass ignore_errors=True; instead we suppress ONLY
+    FileNotFoundError."""
+    with contextlib.suppress(FileNotFoundError):
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
 
 
 def _write_file(dest: str, src: str, *, exists: bool) -> None:
@@ -805,8 +891,7 @@ def main(argv: list[str] | None = None) -> int:
     except yamlio.YamlError as exc:
         # Missing yq, a malformed manifest/.release-sync.yaml, or a
         # lefthook-fragment merge failure — caught at the CLI boundary and
-        # mapped to a clean exit 1, exactly as release_sync does, never a
-        # traceback escaping.
+        # mapped to a clean exit 1, never a traceback escaping.
         print(f"release-core init: {exc}", file=sys.stderr)
         return 1
 

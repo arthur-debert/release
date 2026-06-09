@@ -16,7 +16,6 @@ The per-project surface (← old name):
   status                        ← done-check             [exemplar]
   changelog [add|cut|render]    ← changelog*             [group, bare=orchestrator]
   semver  validate|get          ← semver                 [flat: semver self-dispatches]
-  sync [run|drift-check]        ← release-sync / release-drift-check  [group, bare=sync]
   detect-kind                   ← detect-kind            [flat]
   audit                         ← audit-repo             [flat]
   issue file <component> <msg>  ← gh-release-issue       [group]
@@ -39,8 +38,6 @@ from ..verbs import (
     how_to,
     init,
     release_cut,
-    release_drift_check,
-    release_sync,
     selfcheck,
     semver,
     tasks,
@@ -59,7 +56,7 @@ def attach(root: click.Group) -> None:
         wrap_verb(
             init.main,
             name="init",
-            short_help="Materialize this repo's committed release config.",
+            short_help="Materialize this repo's ephemeral .release/ tree + mirrors.",
         )
     )
     root.add_command(
@@ -165,7 +162,6 @@ def attach(root: click.Group) -> None:
 
     # --- small per-project groups -----------------------------------------
     root.add_command(_changelog_group())
-    root.add_command(_sync_group())
     root.add_command(_issue_group())
 
 
@@ -218,55 +214,6 @@ def _changelog_group() -> click.Group:
             changelog.render_main,
             name="render",
             short_help="Regenerate CHANGELOG.md from the version files.",
-        )
-    )
-    return _grp
-
-
-def _sync_group() -> click.Group:
-    """``sync`` — bare (and ``run``) materialize the synced tree; drift-check gates.
-
-    Bare ``sync`` delegates to ``release_sync.main`` so it stays byte-identical to
-    ``bin/release-sync``; ``sync run`` is the explicit alias. ``sync drift-check``
-    wraps ``release_drift_check.main`` (the consumer-side drift gate).
-    """
-
-    @click.group(
-        name="sync",
-        short_help="Materialize / drift-check the synced .release/ tree.",
-        invoke_without_command=True,
-        # ignore_unknown_options lets bare `sync --some-release-sync-flag` collect
-        # the flag into ctx.args and forward it to release_sync.main, while click
-        # still intercepts `--help` (default help_option_names) so `sync --help`
-        # shows the group map. Power users pass flags via the explicit `sync run`.
-        context_settings={
-            "ignore_unknown_options": True,
-            "allow_extra_args": True,
-        },
-    )
-    @click.pass_context
-    def _grp(ctx: click.Context) -> None:
-        """Sync helpers.
-
-        Bare ``sync`` (or ``sync run``) rebuilds the consumer's ``.release/``
-        build dir + symlinks (release-sync); ``sync drift-check`` rebuilds against
-        the recorded source revision and fails on real drift.
-        """
-        if ctx.invoked_subcommand is None:
-            raise SystemExit(release_sync.main(list(ctx.args)))
-
-    _grp.add_command(
-        wrap_verb(
-            release_sync.main,
-            name="run",
-            short_help="Materialize the synced .release/ build dir + symlinks.",
-        )
-    )
-    _grp.add_command(
-        wrap_verb(
-            release_drift_check.main,
-            name="drift-check",
-            short_help="Fail if the synced .release/ tree has drifted from source.",
         )
     )
     return _grp

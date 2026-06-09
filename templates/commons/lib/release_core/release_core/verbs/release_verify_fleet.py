@@ -118,7 +118,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     os.environ["RELEASE_HOME"] = release_home
 
     # --- Dependency guard ------------------------------------------------
-    for tool in ("release-core", "release-sync", "detect-kind", "lefthook", "yq", "gh", "git"):
+    for tool in ("release-core", "detect-kind", "lefthook", "yq", "gh", "git"):
         if shutil.which(tool) is None:
             print(f"release-verify-fleet: {tool} not on PATH", file=sys.stderr)
             return 2
@@ -233,12 +233,16 @@ def _detect_kind(abspath: str) -> str:
 
 
 def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
-    """Run release-sync in the consumer clone, env-pinned to the candidate SHA.
+    """Materialize the consumer clone's managed tree, env-pinned to the candidate
+    SHA. Runs ``release-core init --no-commit`` (the standalone ``release-sync``
+    verb was retired in WS4, release#521); init's full materialize honors the same
+    RELEASE_HOME/RELEASE_REF pinning. --no-commit: the verify sweep only lints the
+    composed tree, it never mutates the clone's git state.
 
-    Combined stdout+stderr is written to <abspath>/.verify-sync.log (the bash
-    `>"$abspath/.verify-sync.log" 2>&1`). Returns True on a zero exit."""
+    Combined stdout+stderr is written to <abspath>/.verify-sync.log. Returns True
+    on a zero exit."""
     result = proc.run(
-        ["release-sync"],
+        ["release-core", "init", "--no-commit"],
         cwd=abspath,
         env={"RELEASE_REF": ref_sha, "RELEASE_HOME": release_home},
         check=False,

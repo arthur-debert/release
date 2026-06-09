@@ -18,7 +18,7 @@ set -euo pipefail
 CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
 
 if [ ! -d "${CHANGELOG_DIR}" ]; then
-  echo "::error::Fragment directory ${CHANGELOG_DIR} not found. Run 'release-sync' to set up the changelog structure."
+  echo "::error::Fragment directory ${CHANGELOG_DIR} not found. Run 'release-core init' to set up the changelog structure."
   exit 1
 fi
 

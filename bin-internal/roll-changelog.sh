@@ -63,7 +63,7 @@ fragment_body() {
 legacy_error() {
   echo "::error::Legacy single-file changelog mode has been retired." >&2
   echo "::error::Migration: (1) move existing entries to CHANGELOG/legacy.md," >&2
-  echo "::error::(2) run 'release-sync' to set up the CHANGELOG/ structure," >&2
+  echo "::error::(2) run 'release-core init' to set up the CHANGELOG/ structure," >&2
   echo "::error::(3) run 'changelog render' to regenerate CHANGELOG.md." >&2
   echo "::error::See CHANGELOG/README.txt for details." >&2
   exit 1
