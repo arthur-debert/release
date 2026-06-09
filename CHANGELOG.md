@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 2.12.2 - 2026-06-09
+
+- how-to/test-unit: surface a CI caller check-command: as the unit suite when no manifest test exists (#507 dogfood F1); changelog add now applies the - bullet convention (F4)
+pr-loop-guard: honor the sentinel armed in a cd-target repo (fixes the cross-repo/subagent false-deny)
+
 ## 2.12.1 - 2026-06-09
 
 how-to/test-unit: detect the nvim app-bin/test-all runner (not a stale make test guess)
