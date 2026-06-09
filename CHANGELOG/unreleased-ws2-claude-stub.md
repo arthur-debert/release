@@ -1,0 +1,1 @@
+- CLAUDE.md is now a short stub pointing at release-core how-to; ORIENTATION.md and the dev-cycle/infra skills (except gh-pr-review-loop + release-issue-relay) are no longer synced into consumers

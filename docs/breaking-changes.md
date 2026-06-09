@@ -22,6 +22,32 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
+## Unreleased — WS2: CLAUDE.md → stub; ORIENTATION + most skills no longer synced (#523)
+
+**Type:** behavior change + reduced synced footprint. Not a caller-breaking change
+(no workflow edits), but consumers' tracked files shrink on next `init`.
+
+Epic #501 ("invoke, don't discover"). Orientation moves from synced files into the
+binary's `release-core how-to`:
+
+- **CLAUDE.md managed block → short stub** pointing at `release-core how-to` /
+  `--help` / `gate` (no more `@.release/ORIENTATION.md` import). An existing
+  consumer's old block is refreshed in place on the next `init` (markers unchanged
+  → recognized, not duplicated). Consumer content below the block is untouched.
+- **`ORIENTATION.md` retired** — no longer composed into `.release/`.
+- **Synced skills trimmed** to `gh-pr-review-loop` + `release-issue-relay` (the two
+  the harness needs a file on disk for). `pr-review-respond` + the 15 dev-cycle
+  skills (tdd, review, diagnose, triage, to-issues, handoff, qa, grill-me,
+  grill-with-docs, improve-codebase-architecture, request-refactor-plan,
+  ubiquitous-language, zoom-out, teach, padz-for-agents) are no longer pushed; the
+  dev-cycle guidance lives in `release-core how-to`. A consumer's now-dangling
+  symlink to a dropped skill is **auto-swept** on the next `init` (WS4 cleanup) and
+  committed — no hand-editing.
+
+**Consumer impact:** automatic on next `init`. Agents orient via `release-core
+how-to` (validated in the WS8 round-1 dogfood). The dropped dev-cycle skills remain
+available as the agent's own global skills where installed.
+
 ## Unreleased — WS4: `.release/` ephemeral + drift/sync subsystem removed (#521)
 
 **Type:** removed commands (breaking for any consumer/script that invoked them

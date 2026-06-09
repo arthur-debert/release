@@ -194,13 +194,31 @@ GITIGNORE_BODY = (
 CLAUDE_FILE = "CLAUDE.md"
 CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
 CLAUDE_END = "<!-- END release-managed orientation -->"
+# WS2 (release#523): the managed block is a tiny STUB pointing at the binary —
+# `release-core how-to` is the single source of orientation (kind-aware, renders
+# the dev cycle), so there is no synced ORIENTATION.md to drift ("invoke, don't
+# discover"). The BEGIN/END markers are kept byte-identical so an existing
+# consumer's block (which imported @.release/ORIENTATION.md) is recognized and
+# REFRESHED to this stub, not duplicated.
+CLAUDE_STUB_BODY = (
+    "This repo's quality gate, build, release, and PR/dev flow are provided by\n"
+    "`release-core` (installed at session start; not stored in this repo).\n"
+    "\n"
+    "- **Start here:** run `release-core how-to` — the task playbook for *this* repo.\n"
+    "- Reference: `release-core --help`, `release-core <cmd> --help`, `release-core detect-kind`.\n"
+    "- Quality gate (run every loop, after `git add`): `release-core gate`."
+)
 
-# ── Skill distribution catalogs (release owns infra/dev-cycle skills) ─────────
+# ── Skill distribution catalogs ──────────────────────────────────────────────
 #
-# release/ is the single source of truth for infra + general-dev skills. Every
-# consumer carries release's official set (synced whole-directory as symlinks
-# into .release/, never hand-copied); a consumer owns ONLY its own
-# application-domain skills. Two catalogs drive distribution:
+# WS2 (release#523, "invoke don't discover"): the dev cycle + general-dev guidance
+# now lives in `release-core how-to` (rendered from the binary), NOT synced as
+# skill files. So PUSH_ALL_SKILLS is trimmed to the TWO skills the harness needs a
+# file on disk for — the `/`-triggered PR-loop driver and the escalation entry. The
+# 15 general dev-cycle skills (tdd, review, diagnose, …) and pr-review-respond are
+# no longer pushed; on a consumer's next `init` their now-dangling committed
+# symlinks are swept by the broken-symlink cleanup (WS4) — automatic de-vendoring.
+# A consumer owns ONLY its own application-domain skills. Two catalogs drive it:
 #
 #   PUSH_ALL_SKILLS         — pushed to EVERY consumer, unconditionally.
 #   REPLACE_IF_PRESENT_SKILLS — upgrade-only: synced into a consumer ONLY when
@@ -212,24 +230,8 @@ CLAUDE_END = "<!-- END release-managed orientation -->"
 # setup-matt-pocock-skills, gh-repo-setup, migrate-consumer-to-build-dir) is
 # release-only and NEVER distributed.
 PUSH_ALL_SKILLS = [
-    "gh-pr-review-loop",
-    "pr-review-respond",
-    "release-issue-relay",
-    "diagnose",
-    "tdd",
-    "review",
-    "triage",
-    "to-issues",
-    "handoff",
-    "qa",
-    "grill-me",
-    "grill-with-docs",
-    "improve-codebase-architecture",
-    "request-refactor-plan",
-    "ubiquitous-language",
-    "zoom-out",
-    "teach",
-    "padz-for-agents",
+    "gh-pr-review-loop",  # the `/`-triggered PR-loop driver (arms the guard)
+    "release-issue-relay",  # escalate infra friction upstream to arthur-debert/release
 ]
 
 REPLACE_IF_PRESENT_SKILLS = [
@@ -284,18 +286,16 @@ def is_distributed_skill_dest(dest: str) -> bool:
 
 
 def is_release_internal(dest: str) -> bool:
-    """Mirror is_release_internal(): content materialized into .release/ but NOT
-    mirrored out as a symlink/copy. The provenance marker, the managed .gitignore
-    (release#450), the Python engine package (lib/release_core/* — note the
-    folded PR state engine ships by pip wheel now, not sync; release#459), and
-    ORIENTATION.md."""
+    """Content materialized into .release/ but NOT mirrored out as a symlink/copy:
+    the provenance marker, the managed .gitignore (release#450), and the Python
+    engine package (lib/release_core/* — the folded PR state engine ships by pip
+    wheel now, not sync; release#459). (ORIENTATION.md was retired in WS2,
+    release#523 — the CLAUDE.md block is a stub pointing at `release-core how-to`.)"""
     if dest == SOURCE_MARKER:
         return True
     if dest == GITIGNORE_FILE:
         return True
-    if dest.startswith("lib/release_core/"):
-        return True
-    return dest == "ORIENTATION.md"
+    return dest.startswith("lib/release_core/")
 
 
 # ── Ref selection ─────────────────────────────────────────────────────────────
@@ -916,7 +916,7 @@ def claude_desired(repo_root: str) -> str:
     if os.path.isfile(claude_path) and not os.path.islink(claude_path):
         rest = _strip_managed_block(claude_path)
 
-    out = f"{CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{CLAUDE_END}\n"
+    out = f"{CLAUDE_BEGIN}\n{CLAUDE_STUB_BODY}\n{CLAUDE_END}\n"
     if rest:
         out += f"\n{rest}\n"
     return out
@@ -953,11 +953,10 @@ class ClaudeDecision:
 
 
 def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
-    """Mirror the `--- CLAUDE.md orientation block ---` decision. Only acts when
-    the synced tree carries ORIENTATION.md (always, via commons)."""
-    if not os.path.isfile(os.path.join(tmp_release, "ORIENTATION.md")):
-        return ClaudeDecision("none")
-
+    """The `--- CLAUDE.md orientation block ---` decision. The managed block is the
+    unconditional stub (WS2, release#523) — it points at `release-core how-to` and
+    no longer depends on a composed ORIENTATION.md, so there is no tree-content
+    gate. ``tmp_release`` is unused now (kept for signature stability)."""
     claude_path = os.path.join(repo_root, CLAUDE_FILE)
     if os.path.islink(claude_path):
         return ClaudeDecision("skip-symlink")

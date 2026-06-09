@@ -81,11 +81,12 @@ teardown() {
   [ -L bin/check-docs ]
 }
 
-@test "the commons gate + orientation block land on a docs-site repo" {
+@test "the commons gate + orientation stub land on a docs-site repo" {
   release_sync >/dev/null
   [ -f .release/lefthook.yml ]
   [ -f CLAUDE.md ]
-  grep -qF '@.release/ORIENTATION.md' CLAUDE.md
+  # WS2 (#523): the CLAUDE.md block is the stub pointing at the binary.
+  grep -qF 'release-core how-to' CLAUDE.md
 }
 
 @test "a second init is idempotent — reports already current" {

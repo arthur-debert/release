@@ -984,10 +984,11 @@ def test_main_end_to_end_through_bundle_path(tmp_path, monkeypatch, capsys):
 
 def _full_source_tree(root) -> str:
     """Build a synthetic release-source tree under ``root``: templates/commons
-    (a lint config + a real bin tool + a lefthook fragment + ORIENTATION.md),
-    a manifest-less kind (tree-sitter) with its own fragment, and one PUSH_ALL
-    skill (gh-pr-review-loop). Returns the abs path to ``root`` (the layout root,
-    mirroring the repo: <root>/templates/… and <root>/skills/…)."""
+    (a lint config + a real bin tool + a lefthook fragment), a manifest-less kind
+    (tree-sitter) with its own fragment, and one PUSH_ALL skill (gh-pr-review-loop).
+    Returns the abs path to ``root`` (the layout root, mirroring the repo:
+    <root>/templates/… and <root>/skills/…). No ORIENTATION.md — retired in WS2
+    (#523); the CLAUDE.md block is the stub pointing at `release-core how-to`."""
     tpl = root / "templates"
     (tpl / "commons" / "bin").mkdir(parents=True)
     (tpl / "components").mkdir(parents=True)
@@ -998,7 +999,6 @@ def _full_source_tree(root) -> str:
     tool = tpl / "commons" / "bin" / "check"
     tool.write_text("#!/bin/sh\necho check\n")
     os.chmod(tool, 0o755)
-    (tpl / "commons" / "ORIENTATION.md").write_text("# Orientation\n")
     (tpl / "commons" / "lefthook.fragment.yaml").write_text(
         "pre-commit:\n  commands:\n    md:\n      run: echo md\n"
     )
@@ -1113,7 +1113,10 @@ def test_bare_init_does_full_materialize_and_auto_commits(tmp_path, monkeypatch,
     # Full tree (on disk) + working-tree mirrors + CLAUDE.md block.
     assert (repo / ".release" / "bin" / "check").is_file()
     assert (repo / "bin" / "check").is_symlink()
-    assert "@.release/ORIENTATION.md" in (repo / "CLAUDE.md").read_text()
+    # WS2 (#523): the CLAUDE.md block is the stub pointing at the binary.
+    claude = (repo / "CLAUDE.md").read_text()
+    assert "release-core how-to" in claude
+    assert "@.release/ORIENTATION.md" not in claude
     # Auto-committed (the default) — only the MIRRORS, deterministic message.
     assert "committed" in out
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
@@ -1181,10 +1184,11 @@ def test_full_materializes_tree_and_symlinks(tmp_path, monkeypatch, capsys):
     # Working-tree symlinks mirrored.
     assert (repo / "bin" / "check").is_symlink()
     assert (repo / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_symlink()
-    # CLAUDE.md orientation block created.
-    assert "@.release/ORIENTATION.md" in (repo / "CLAUDE.md").read_text()
-    # ORIENTATION.md is release-internal: in .release/ but NOT mirrored to root.
-    assert (repo / ".release" / "ORIENTATION.md").is_file()
+    # CLAUDE.md stub block created (WS2, #523): points at the binary, no ORIENTATION.
+    claude = (repo / "CLAUDE.md").read_text()
+    assert "release-core how-to" in claude
+    assert "@.release/ORIENTATION.md" not in claude
+    assert not (repo / ".release" / "ORIENTATION.md").exists()
     assert not (repo / "ORIENTATION.md").exists()
 
 

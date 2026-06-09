@@ -3,7 +3,7 @@
 ``release-core how-to`` is the single entry point a fresh agent (or human) runs
 to learn how to lint / test / build / release / run *in this specific repo*,
 plus the canonical draft-first dev cycle. It is the ONE source of that guidance:
-the consumer CLAUDE.md is a 2-line stub pointing here, so there is no synced
+the consumer CLAUDE.md is a short stub pointing here, so there is no synced
 ORIENTATION.md or per-Kind doc to drift (release#501, "invoke, don't discover").
 
 It does NOT guess commands by Kind. The no-arg path reads THIS repo's real

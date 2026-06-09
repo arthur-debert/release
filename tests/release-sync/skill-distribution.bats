@@ -3,16 +3,17 @@
 load helper
 
 # ---------------------------------------------------------------------
-# Infra/dev-cycle skill distribution (release#348)
+# Infra skill distribution (release#348 → trimmed in WS2 release#523)
 #
-# release/ is the single source of truth for infra + general-dev skills.
-# `release-core init` distributes the OFFICIAL set (PUSH_ALL_SKILLS) into every
-# consumer at .claude/skills/ — the path Claude Code auto-discovers project
-# skills from — sourced DIRECTLY from skills/, whole-directory, so there is one
-# copy and no drift. A second, upgrade-only set (REPLACE_IF_PRESENT_SKILLS) is
-# synced only when the consumer already carries the skill. A stale REAL local
-# copy at a managed dest is replaced by the managed symlink. .claude/skills/**
-# is excluded from the consumer markdownlint gate.
+# WS2 cut PUSH_ALL_SKILLS to the TWO skills the harness needs a file on disk for:
+# gh-pr-review-loop (the `/`-triggered PR-loop driver) + release-issue-relay
+# (escalation). The dev cycle + general-dev guidance now lives in `release-core
+# how-to`, not synced skill files. `release-core init` distributes the kept set
+# into .claude/skills/ (the path Claude Code auto-discovers from), sourced from
+# skills/, whole-directory. A second upgrade-only set (REPLACE_IF_PRESENT_SKILLS)
+# syncs only when the consumer already carries the skill. A stale REAL local copy
+# at a managed dest is replaced by the managed symlink; a previously-distributed
+# skill that's been dropped has its now-dangling symlink swept on re-sync.
 # ---------------------------------------------------------------------
 
 @test "sync materializes the PR-loop skill into .release/.claude/skills/" {
@@ -37,12 +38,9 @@ load helper
   [[ "$desc" == *"ready-for-human-merge"* ]]
 }
 
-@test "sync distributes the full official PUSH_ALL set as discoverable symlinks" {
+@test "init distributes the trimmed PUSH_ALL set (gh-pr-review-loop + release-issue-relay)" {
   release_sync >/dev/null
-  for s in gh-pr-review-loop pr-review-respond release-issue-relay diagnose \
-           tdd review triage to-issues handoff qa grill-me grill-with-docs \
-           improve-codebase-architecture request-refactor-plan \
-           ubiquitous-language zoom-out teach padz-for-agents; do
+  for s in gh-pr-review-loop release-issue-relay; do
     [ -f ".release/.claude/skills/$s/SKILL.md" ] \
       || { echo "missing materialized $s"; false; }
     [ -L ".claude/skills/$s/SKILL.md" ] \
@@ -50,20 +48,27 @@ load helper
   done
 }
 
-@test "a multi-file skill (tdd) distributes EVERY source file, not just SKILL.md" {
+@test "the dev-cycle + pr-review-respond skills are NO LONGER distributed (WS2)" {
   release_sync >/dev/null
-  # Derive the expected file set from the source tree at the synced ref, so this
-  # catches a regression that drops ANY file (not just a hardcoded subset). tdd
-  # is multi-file (asserted below); each source blob must land materialized +
-  # symlinked. (.upstream is skipped by sync's should_skip_source? No — only the
-  # documented skip-list is dropped; .upstream IS distributed, so it's expected.)
-  mapfile -t src < <(git -C "$RELEASE_HOME" ls-tree -r --name-only "$RELEASE_REF" -- skills/tdd \
-                       | sed 's,^skills/tdd/,,')
-  [ "${#src[@]}" -gt 1 ]  # genuinely multi-file (guards the premise)
-  for f in "${src[@]}"; do
-    [ -f ".release/.claude/skills/tdd/$f" ] || { echo "missing materialized tdd/$f"; false; }
-    [ -L ".claude/skills/tdd/$f" ]          || { echo "no symlink tdd/$f"; false; }
+  # WS2 dropped these from PUSH_ALL — the dev cycle lives in `release-core how-to`.
+  for s in pr-review-respond diagnose tdd review triage to-issues handoff qa \
+           grill-me grill-with-docs improve-codebase-architecture \
+           request-refactor-plan ubiquitous-language zoom-out teach padz-for-agents; do
+    [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked materialized $s"; false; }
+    [ ! -e ".claude/skills/$s" ]          || { echo "leaked symlink $s"; false; }
   done
+}
+
+@test "a dropped skill's previously-committed symlink is swept on re-sync (auto de-vendor)" {
+  # Simulate a pre-WS2 consumer that carried a now-dropped skill as a managed
+  # symlink into .release/. On the next init the target is no longer composed, so
+  # the dangling managed symlink must be swept (WS4 broken-symlink cleanup).
+  release_sync >/dev/null
+  mkdir -p .claude/skills/tdd
+  ln -s ../../../.release/.claude/skills/tdd/SKILL.md .claude/skills/tdd/SKILL.md
+  release_sync >/dev/null
+  [ ! -e .claude/skills/tdd/SKILL.md ]
+  [ ! -L .claude/skills/tdd/SKILL.md ]
 }
 
 @test "release-only skills are NEVER distributed" {
@@ -89,19 +94,18 @@ load helper
 }
 
 @test "a stale REAL skill copy is replaced by the managed symlink (lex regression)" {
-  # Simulate lex's hand-copied real pr-review-respond/SKILL.md.
-  mkdir -p .claude/skills/pr-review-respond
-  printf '# stale 157-line hand-copy\n' > .claude/skills/pr-review-respond/SKILL.md
-  [ ! -L .claude/skills/pr-review-respond/SKILL.md ]  # real file now
+  # Simulate a hand-copied real gh-pr-review-loop/SKILL.md (a KEPT skill).
+  mkdir -p .claude/skills/gh-pr-review-loop
+  printf '# stale 157-line hand-copy\n' > .claude/skills/gh-pr-review-loop/SKILL.md
+  [ ! -L .claude/skills/gh-pr-review-loop/SKILL.md ]  # real file now
 
   release_sync >/dev/null
   # After sync it is a symlink into .release/ (the official copy), no --migrate.
-  [ -L .claude/skills/pr-review-respond/SKILL.md ]
-  [ "$(readlink .claude/skills/pr-review-respond/SKILL.md)" = \
-    "../../../.release/.claude/skills/pr-review-respond/SKILL.md" ]
-  # The stale text is gone (no line contains it) AND the resolved content is
-  # release's official copy (its frontmatter name) — proving a real swap, not a
-  # weak "some line differs" check.
-  ! grep -qF 'stale 157-line hand-copy' .claude/skills/pr-review-respond/SKILL.md
-  grep -qF 'name: pr-review-respond' .claude/skills/pr-review-respond/SKILL.md
+  [ -L .claude/skills/gh-pr-review-loop/SKILL.md ]
+  [ "$(readlink .claude/skills/gh-pr-review-loop/SKILL.md)" = \
+    "../../../.release/.claude/skills/gh-pr-review-loop/SKILL.md" ]
+  # The stale text is gone AND the resolved content is release's official copy
+  # (its frontmatter name) — proving a real swap, not a weak "some line differs".
+  ! grep -qF 'stale 157-line hand-copy' .claude/skills/gh-pr-review-loop/SKILL.md
+  grep -qF 'name: gh-pr-review-loop' .claude/skills/gh-pr-review-loop/SKILL.md
 }
