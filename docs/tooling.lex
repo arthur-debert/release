@@ -198,6 +198,13 @@ release-core, the gate, distribution, and workflows
     define it; it is validated against the `tests/release-sync/` suite, not just
     intent. Read this before adding anything consumers should receive.
 
+    Note (direction): this whole sync/drift subsystem — `release-sync`,
+    `release-drift-check`, and the provenance marker — is *transitional*. Per
+    ADR-0005 (and WS4 of #501), once `.release/` is gitignored and regenerated
+    each session from the pinned binary, drift is impossible by construction and
+    this subsystem is retired. What follows describes the current mechanism, not
+    an enduring design.
+
     The guiding rule: a consumer repo should contain as little mixed-ownership
     state as possible. Mixed ownership (a file half-owned by release, half by
     the consumer) is the single biggest source of confusion, so the mechanism
@@ -206,11 +213,13 @@ release-core, the gate, distribution, and workflows
     5.1. The build-directory model
 
         Every managed file a consumer receives lives in a single build
-        directory, `.release/`, checked into the consumer's git with real file
-        content. The file at its expected working-tree location (`lefthook.yml`,
-        `bin/check-shell`, …) is a *symlink* into `.release/`. Both the build
-        dir and the symlinks are committed, so the consumer is self-contained
-        and works offline.
+        directory, `.release/`, materialized by `release-core` from the wheel
+        bundle (ADR-0003). The file at its expected working-tree location
+        (`lefthook.yml`, `bin/check-shell`, …) is a *symlink* into `.release/`.
+        Today `.release/` is still committed, but the direction (ADR-0004 /
+        ADR-0005, WS4 of #501) is to gitignore it and regenerate it each session
+        from the pinned binary: the binary is the carrier, so the committed tree
+        is a transitional footprint to be removed — not a goal to preserve.
 
         `.release/` is rebuilt from scratch on every sync — there is no state
         file and no removal manifest. The filesystem is the state. A template
