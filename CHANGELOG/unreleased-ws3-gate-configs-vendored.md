@@ -1,1 +1,0 @@
-- Vendor gate configs into .release/; the git hook + CI bot gate run from the binary (lefthook.yml leaves the consumer); npm typecheck fails loud on an absent runner
