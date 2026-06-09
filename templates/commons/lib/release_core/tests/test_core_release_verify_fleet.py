@@ -1,7 +1,7 @@
 """release_verify_fleet verb — fleet iteration, result aggregation, exit policy.
 
 Fully offline. The gh ref-resolution and EVERY subprocess (`release-core admin
-repos list` clone + --paths, detect-kind, release-sync, lefthook) are mocked at
+repos list` clone + --paths, detect-kind, release-core init, lefthook) are mocked at
 the proc/gh layer —
 nothing is cloned or synced. We assert on the table rows, the per-repo
 sync/gate columns, the combined-output logs, and the exit-code policy
@@ -70,7 +70,7 @@ class _Driver:
             cwd = kw.get("cwd")
             kind = self.kinds.get(cwd, "rust-cli")
             return _cp(returncode=0 if kind != "?" else 1, stdout="" if kind == "?" else kind)
-        if tool == "release-sync":
+        if cmd[:2] == ["release-core", "init"]:
             cwd = kw.get("cwd")
             return _cp(self.sync_rc.get(cwd, 0), stdout="sync-out\n", stderr="sync-err\n")
         if tool == "lefthook":
@@ -214,7 +214,7 @@ def test_sync_pins_ref_sha_and_release_home(env, monkeypatch):
     driver = _Driver(_row("o/a", root) + "\n")
     monkeypatch.setattr(proc, "run", driver)
     rvf.main(["--root", root])
-    sync = next(c for c in driver.calls if c[0][0] == "release-sync")
+    sync = next(c for c in driver.calls if c[0][:2] == ["release-core", "init"])
     assert sync[1]["env"]["RELEASE_REF"] == "0123456789abcdef" * 2
     # RELEASE_HOME is the shim dir's parent (VERIFY_FLEET_SCRIPT_DIR/..).
     assert sync[1]["env"]["RELEASE_HOME"] == rvf._release_home()

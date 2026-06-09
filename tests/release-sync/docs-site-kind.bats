@@ -4,7 +4,7 @@
 # docs-site Kind (mkdocs) — release#353 §A (onboarding lex-fmt/comms)
 #
 # A pure-content/docs repo (an mkdocs site) has no compiled-artifact
-# signal, so detect-kind used to fail and release-sync aborted with
+# signal, so detect-kind used to fail and the compose engine aborted with
 # "could not detect kind". The docs-site Kind recognises a root
 # mkdocs.yml and ships a manifest-less Kind tree (bin/check). The repo
 # opts into the mkdocs Capability via .release-sync.yaml.
@@ -17,6 +17,14 @@ source "$BATS_TEST_DIRNAME/../../templates/components/bats/lib/bats-harness.bash
 
 BIN="$BATS_TEST_DIRNAME/../../bin"
 RELEASE_HOME_ABS="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+
+# Compose the managed tree via the current entry point (`release-core init`); the
+# standalone `release-sync` verb was retired in WS4 (release#521). --no-commit:
+# the suite asserts filesystem state, never git history. (This suite builds its
+# own docs-site fixture and does NOT load the shared helper, so it defines this.)
+release_sync() {
+  release-core init --no-commit "$@"
+}
 
 setup() {
   harness_create_workspace_notrap
@@ -51,15 +59,16 @@ teardown() {
   [ "$output" = "docs-site" ]
 }
 
-@test "release-sync succeeds on a docs-site repo (no 'could not detect kind')" {
-  run "$BIN/release-sync"
+@test "init succeeds on a docs-site repo (no 'could not detect kind')" {
+  run release_sync
   [ "$status" -eq 0 ]
-  [[ "$output" == *"kind:         docs-site"* ]]
   [[ "$output" != *"could not detect kind"* ]]
+  # The docs-site Kind tree materialized (manifest-less Kind detected from mkdocs.yml).
+  [ -f .release/bin/check ]
 }
 
 @test "the docs-site Kind ships bin/check (mkdocs build --strict)" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ -f .release/bin/check ]
   [ -L bin/check ]
   [ "$(readlink bin/check)" = "../.release/bin/check" ]
@@ -67,20 +76,21 @@ teardown() {
 }
 
 @test "the mkdocs Capability ships check-docs on top of the Kind" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ -f .release/bin/check-docs ]
   [ -L bin/check-docs ]
 }
 
 @test "the commons gate + orientation block land on a docs-site repo" {
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   [ -f .release/lefthook.yml ]
   [ -f CLAUDE.md ]
   grep -qF '@.release/ORIENTATION.md' CLAUDE.md
 }
 
-@test "a second sync is idempotent — --check reports clean" {
-  "$BIN/release-sync" >/dev/null
-  run "$BIN/release-sync" --check
+@test "a second init is idempotent — reports already current" {
+  release_sync >/dev/null
+  run release_sync
   [ "$status" -eq 0 ]
+  [[ "$output" == *"already current"* ]]
 }

@@ -650,24 +650,31 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
     try:
         # WS4 migration (release#521): untrack a previously-committed `.release/`.
         # The build dir is now gitignored + ephemeral, so any tracked `.release/**`
-        # must leave the index (working-tree files stay — --cached). No-op via
-        # --ignore-unmatch on a fresh consumer / steady state, so this is safe to
-        # run unconditionally.
-        gh.git_rm_cached([".release"], cwd=repo_root)
+        # must leave the index (working-tree files stay — --cached). Include
+        # `.release` in the commit pathspec ONLY when it was actually tracked: a
+        # bare `git commit -- .release` errors with "pathspec did not match" on a
+        # fresh consumer where nothing under it is tracked or staged.
+        commit_paths = list(written)
+        if gh.git_path_tracked(".release", cwd=repo_root):
+            gh.git_rm_cached([".release"], cwd=repo_root)
+            commit_paths.append(".release")
+        if not commit_paths:
+            # Nothing managed to commit — e.g. the only delta was inside the now
+            # gitignored .release/ tree (ephemeral, never committable). Skip rather
+            # than run a pathspec-less `git commit` that would fold in unrelated work.
+            return
         # force=True: managed MIRROR paths are release-owned and must be tracked
         # even if the consumer's .gitignore covers one (e.g. `.claude/` shadowing
         # the managed `.claude/skills/`) — otherwise the migration commit silently
         # fails on the ignored path. NEVER `.release/`: it is gitignored on purpose
         # and is NOT in `written`, so force-add can't resurrect it.
         gh.git_add(written, cwd=repo_root, force=True)
-        # Commit the managed mirror pathspecs PLUS `.release` — the latter carries
-        # only the staged index-removals from the rm --cached above (force-add
-        # never re-added it), so this commits the untracking too. A pathspec-scoped
-        # commit ignores any other staged changes, so a user's in-progress staging
-        # is never folded in. If nothing was staged for any pathspec (managed bytes
-        # already identical, nothing to untrack), git commit exits non-zero —
+        # Commit ONLY the managed pathspecs (mirrors + the `.release` removal when it
+        # was tracked). A pathspec-scoped commit ignores any other staged changes, so
+        # a user's in-progress staging is never folded in. If nothing was staged for
+        # any pathspec (managed bytes already identical), git commit exits non-zero —
         # caught below as a benign skip, not a failure.
-        gh.git_commit_paths([*written, ".release"], message, cwd=repo_root)
+        gh.git_commit_paths(commit_paths, message, cwd=repo_root)
     except Exception as exc:  # ProcError or anything git surfaces
         print(
             f"release-core init: --commit skipped (could not commit managed config: {exc})",

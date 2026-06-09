@@ -328,7 +328,7 @@ def test_init_missing_source_for_kind_is_reported_not_fatal(tmp_path, monkeypatc
 def test_init_yaml_error_exits_1_not_traceback(tmp_path, monkeypatch, capsys):
     # A yamlio.YamlError out of the sync engine (missing yq, malformed manifest,
     # or a lefthook-fragment merge failure) must be caught at the CLI boundary →
-    # clean exit 1, never a traceback, matching release_sync's contract.
+    # clean exit 1, never a traceback escaping.
     repo = tmp_path / "repo"
     repo.mkdir()
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
@@ -1110,16 +1110,19 @@ def test_bare_init_does_full_materialize_and_auto_commits(tmp_path, monkeypatch,
     out = capsys.readouterr().out
     assert rc == 0
     assert "managed-tree change(s) applied" in out
-    # Full tree + working-tree mirrors + CLAUDE.md block, like a release-sync.
+    # Full tree (on disk) + working-tree mirrors + CLAUDE.md block.
     assert (repo / ".release" / "bin" / "check").is_file()
     assert (repo / "bin" / "check").is_symlink()
     assert "@.release/ORIENTATION.md" in (repo / "CLAUDE.md").read_text()
-    # Auto-committed (the default) — only managed paths, deterministic message.
+    # Auto-committed (the default) — only the MIRRORS, deterministic message.
     assert "committed" in out
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
     assert subject.startswith("chore(release): sync managed tree from")
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
-    assert ".release/bin/check" in committed
+    # WS4 (release#521): the ephemeral .release/ tree is gitignored and never
+    # committed — only the mirrors (symlinks, real-file copies, CLAUDE.md block).
+    assert "bin/check" in committed
+    assert not any(p.startswith(".release/") for p in committed)
     assert "CLAUDE.md" in committed
     assert "my-feature.txt" not in committed
 
@@ -1203,8 +1206,9 @@ def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch
     # required-status-checks ruleset (CI skipped → required checks never satisfied).
     assert "[skip ci]" not in subject
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
-    # Managed paths committed; the unrelated file is NOT.
-    assert ".release/bin/check" in committed
+    # Managed MIRRORS committed; the unrelated file is NOT. WS4 (release#521): the
+    # ephemeral .release/ build dir is gitignored and never committed.
+    assert not any(p.startswith(".release/") for p in committed)
     assert "bin/check" in committed
     assert "CLAUDE.md" in committed
     assert "my-feature.txt" not in committed

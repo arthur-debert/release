@@ -57,7 +57,7 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
 
 @test "dogfood: synced distributed tools pass the unified gate (shim skipped)" {
   command -v shellcheck >/dev/null || skip "shellcheck not installed"
-  "$BIN/release-sync" >/dev/null
+  release_sync >/dev/null
   # The synced consumer's bin/ holds the distributed tools (install-release-core,
   # setup-dev-env.sh, vendored share/, ...). The unified gate must pass over
   # them — non-shell falls out by content.

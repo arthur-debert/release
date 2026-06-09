@@ -48,8 +48,6 @@ EXPECTED_COMMANDS = {
     "changelog-render",
     "detect-kind",
     "gh-release-issue",
-    "release-drift-check",
-    "release-sync",
     "semver",
 }
 

@@ -483,8 +483,9 @@ def test_build_plan_skips_skip_sources(monkeypatch):
 
 
 def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
-    """materialize() always writes a managed .release/.gitignore covering
-    bytecode, alongside the planned blobs (release#450)."""
+    """materialize() always writes a self-ignoring .release/.gitignore (`*`) so the
+    whole ephemeral build dir is invisible to git — drift impossible by
+    construction (WS4, release#521; supersedes the bytecode-only ignore of #450)."""
     plan = sync.Plan()
     plan.order = ["bin/real"]
     plan.mode = {"bin/real": "100644"}
@@ -496,9 +497,8 @@ def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
     gi = tmp_path / ".gitignore"
     assert gi.is_file()
     body = gi.read_text()
-    assert "__pycache__/" in body
-    assert "*.pyc" in body
-    assert "*.pyo" in body
+    # `*` on its own line ignores everything in the dir (including .gitignore itself).
+    assert any(line.strip() == "*" for line in body.splitlines())
 
 
 # ── find-style traversal order (the report-ordering contract) ─────────────────
