@@ -66,15 +66,18 @@ This is the canonical sequence when driving a feature branch through the loop:
 ```text
 1. branch + change + commit
 2. push
-3. arm the loop, THEN open PR (gh pr create) — NEVER pass --draft unless the user explicitly asked
+3. arm the loop, THEN open the PR AS A DRAFT (gh pr create --draft), linking the issue
+   → draft = WIP, the agent owns it; ready = the signal the human can come in
+     (the canonical lifecycle — see "Draft vs ready" below)
    → arm in a SEPARATE step first: touch "$(git rev-parse --git-dir)/pr-loop-armed"
    → ruleset enforces PR-only (no direct push to main)
-   → copilot-review.yml auto-triggers Copilot review request
+   → copilot-review.yml fires Copilot at `opened` even on drafts — drafts get Copilot
 4. (wait) Copilot posts review at ~7m typical
 5. triage Copilot comments
-6. push fixups (CI re-runs; do NOT re-request Copilot if the round was minor)
+6. push fixups (CI re-runs; re-request review only for substantial rounds — see "Step 6: pushing fixups" below)
 7. wait for checks
-8. STOP. PR is mergeable, agent's job is done. The user does the final read and merges.
+8. when reviewed + CI green + mergeable: flip draft→ready (gh pr ready) — THIS is the
+   handoff signal to the human. Then STOP; the human does the final read + merge.
    Merge only on explicit authorization ("merge it", "go ahead and merge").
 9. ALWAYS close with the structured report block (see "The final-report contract").
 ```
@@ -124,19 +127,17 @@ When you open a PR, drop a short handoff note capturing the **non-obvious reason
 
 Why: a detached auto-fix agent (`orc watch --auto`, release#338) addresses review comments as a **fresh** agent — it has the code but not your reasoning. The handoff note is the cheap, durable carrier of that reasoning, so the fixer respects deliberate decisions instead of undoing them to satisfy a comment. Skip it only for trivial chore/CI PRs.
 
-### A note on draft PRs
+### Draft vs ready = whose turn it is
 
-**PR drafts are user-requested only.** Never pass `--draft` to `gh pr create` unless the user used one of these exact triggers in *this* session: "open as draft", "draft PR", "WIP PR", "draft this", "for early feedback". Absent that explicit phrase, the PR is **live**. This is a hard rule.
+This is the canonical lifecycle — stated upstream in [`arthur-debert/release` docs/dev-cycle-task.lex](https://github.com/arthur-debert/release/blob/main/docs/dev-cycle-task.lex) and mirrored into each managed repo's `ORIENTATION` (`.release/ORIENTATION.md`). The draft/ready flag is the **turn-signal**:
 
-Common signals that should *not* trigger a draft:
+- **draft = WIP = the agent owns it.** You open the PR **as a draft** (`gh pr create --draft`) and keep it draft for the entire dev cycle: implementing, waiting on and addressing reviews, getting CI green, making it mergeable.
+- **ready = the human's turn.** Flipping draft→ready (`gh pr ready`) is the *one signal* that says "I'm done iterating — come validate and merge." Don't flip until reviews are addressed, CI is green, and it's mergeable.
+- **Re-work flips it back.** If the human asks for changes, flip back to draft, do the work, and re-flip to ready only when the new changes + checks pass.
 
-- **Title patterns**: `"feature(#N): ..."`, `"PR N of M"`, `"first of stacked series"`, anything containing `skeleton`, `scaffold`, `spec`, `initial`, or `WIP`.
-- **Body content**: unchecked test-plan checklist boxes, "follow-up commits planned" / "more coming" language, todo lists.
-- **Vibes**: the work feeling incomplete to you. Incompleteness is signaled in the body/title; live PR status doesn't preclude WIP discussion.
+**Drafts get Copilot.** The canonical `copilot-review.yml` fires Copilot at PR `opened` regardless of draft state, so opening as a draft does **not** suppress the review (the old "never draft" rule was built on a stale fact — it has been corrected). `ready_for_review` is intentionally not a trigger, so the draft→ready flip doesn't re-run Copilot; request a fresh pass explicitly only when a round was substantial (see below).
 
-Why it matters: the canonical `copilot-review.yml` workflow gates on `if: github.event.pull_request.draft == false`. Drafts silently suppress the auto-Copilot-review until the PR is manually flipped to ready, costing real time to un-draft and re-trigger the loop. The unchecked checklist / spec language / skeleton scope already communicate WIP to human reviewers; drafting on top is duplication that breaks the loop.
-
-When genuinely uncertain: **ask before opening** — don't assume.
+Open as a **live** PR only when the human explicitly asks for one in this session.
 
 ### A note on the `migration-in-flight` lock
 
@@ -195,7 +196,7 @@ The end state of a healthy PR: only contested threads (and the original review s
 
 ### Step 6: pushing fixups
 
-Push to the same branch. CI re-runs automatically. **Do NOT** re-request Copilot on minor rounds — the workflow only auto-triggers on `opened`/`ready_for_review`, and one review per PR is the convention. Re-request only if the round of changes is substantial enough to warrant a fresh look.
+Push to the same branch. CI re-runs automatically. **Do NOT** re-request Copilot on minor rounds — the workflow fires once at `opened` (including on drafts) and the draft→ready flip does **not** re-trigger it, so one review per PR is the convention. Re-request explicitly only if the round of changes is substantial enough to warrant a fresh look (the re-review nuance from the canonical dev cycle).
 
 Before opening *another* fixup cycle, run `release-core pr status <PR>`. If it returns `BLOCKED` with a `breaker:` line, the loop is diverging — stop, don't iterate, and surface the breaker to the user (see "Orienting with release-core pr status").
 
@@ -207,15 +208,15 @@ release-core pr checks-wait <PR>
 
 Run in background. Exits 0 when all checks pass, 1 if any fail.
 
-### Step 8: stop at "ready to merge" and notify the user
+### Step 8: flip draft→ready — the handoff signal — and stop
 
-`release-core pr status <PR>` returning `READY` is the signal that this point is reached (reviewed + CI green + mergeable). If the PR is a draft (e.g. a stacked feature-branch PR), flip it first so the human gate opens:
+`release-core pr status <PR>` returning `READY` (reviewed + CI green + mergeable) is the cue. The PR has been a **draft** the whole loop, so now flip it — this flip *is* the signal to the human that it's their turn:
 
 ```sh
-gh pr ready <PR>      # only if it was a draft
+gh pr ready <PR>      # draft→ready: "I'm done iterating, come validate + merge"
 ```
 
-**Do NOT auto-merge.** The agent's job ends when the PR is in a *mergeable* state — checks green, threads resolved, CI clean. At that point, post a short status comment summarizing where things landed (or just the assistant turn — whatever's appropriate to the session) and stop. The user does the final read and merges.
+**Do NOT auto-merge.** Flipping to ready ends the agent's job. Post a short status (or just the assistant turn — whatever fits the session) and stop. The human does the final read and merge. If the human asks for changes, flip back to draft (`gh pr ready --undo`), do the work, and re-flip to ready only when the new changes + checks pass.
 
 ```sh
 # Confirm the PR is ready and stop:

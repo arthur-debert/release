@@ -54,26 +54,30 @@ stands and act on what it reports:
 release-core pr status <pr-number>
 ```
 
-It reports the PR's lifecycle state — **requested → reviewed → ready** — and what
-is left before a human can merge. That is the entry point. Opening the PR is not
-the end of your job; you own it through the whole loop:
+It reports the PR's lifecycle state and what is left before a human can merge.
+**Draft vs ready is the turn-signal:** a **draft** PR is WIP that _you_ own; flipping
+it to **ready** is the one signal that says "I'm done — a human can come in." Opening
+the PR is not the end of your job; you own it through the whole loop:
 
-1. **Open a _live_ PR** (never a draft — a draft suppresses the automatic
-   review). The review is requested for you.
+1. **Open the PR as a _draft_** (`gh pr create --draft`), linking the issue. Draft = your
+   turn. Copilot still reviews drafts (the review workflow fires at `opened` regardless
+   of draft state), so a draft does **not** suppress the review.
 2. **Poll `release-core pr status <pr>`.** It names what is outstanding: a pending
    review, unresolved threads, or failing checks.
 3. **Clear what it names.** Fix the code or reply with a rationale, resolve each
    thread, push, and let checks go green. Never bypass the gate (`--no-verify`)
    to force a check past — fix the cause; CI re-runs the same gate on a clean
    runner.
-4. **Repeat until the state is `ready`.** Reviews can lag — wait for them rather
-   than declaring done early.
-5. **Stop at `ready`; a human merges.** Don't self-merge. The final read and the
-   merge are the human's.
+4. **Repeat until the state is `ready`** (reviewed + CI green + mergeable). Reviews can
+   lag — wait for them rather than declaring done early.
+5. **Flip draft→ready (`gh pr ready`) — that is the handoff** — then stop. Don't
+   self-merge; the final read and merge are the human's. If they ask for changes, flip
+   back to draft (`gh pr ready --undo`), do the work, and re-flip to ready only when the
+   new changes + checks pass.
 
-That is the whole loop: open → poll the engine → clear what it names → `ready` →
-hand off. Drive it through `release-core pr status`; don't reinvent it with
-ad-hoc `gh api` calls.
+That is the whole loop: open **draft** → poll the engine → clear what it names → `ready`
+flip → hand off. Drive it through `release-core pr status`; don't reinvent it with
+ad-hoc `gh api` calls. (Source of record: [the dev-cycle model upstream](https://github.com/arthur-debert/release/blob/main/docs/dev-cycle-task.lex) — you don't need to fetch it; the cycle above is the operating copy.)
 
 > **This is enforced, not advisory.** A PreToolUse guard (`bin/pr-loop-guard`)
 > blocks a bare `gh pr create` so the loop can't be skipped by reaching for the
