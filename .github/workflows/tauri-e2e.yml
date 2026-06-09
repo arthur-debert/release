@@ -16,12 +16,19 @@ name: Tauri Native E2E (reusable)
 # third-party Marketplace actions — pnpm lives inside the consumer's script, and
 # path-gating is plain `git diff` (not dorny/paths-filter).
 #
+# Private native deps (e.g. phos-core) resolve as a GIT DEP from the consumer's
+# own manifest (src-tauri/Cargo.toml) — the pin lives ONLY there, single-sourced
+# with the unit lane (release#506). The job forwards GH_TOKEN so the
+# runner-script can configure in-container git/cargo PAT auth (git-fetch-with-cli
+# + token insteadOf) and let cargo clone the private repo during the build —
+# there is no sibling checkout and no second pin to keep in sync.
+#
 # CONTRACT — the job sets these env vars for `runner-script`:
 #   NATIVE_E2E_IN_CONTAINER=1        marker: already inside the pinned image
-#   NATIVE_E2E_SIBLING_PATH=<path>   abs path of the checked-out private sibling
-#                                    (empty when no sibling-repo) — a cargo path-dep
 #   NATIVE_E2E_SCOPE=thin|full       path-gated scope (see full-scope-paths)
-#   GH_TOKEN=<gh-token|GITHUB_TOKEN> reads the private sibling + wasm release
+#   GH_TOKEN=<gh-token|GITHUB_TOKEN> auth for the private native git dep + the
+#                                    private wasm release (the runner-script wires
+#                                    cargo's git-CLI auth from it)
 
 on:
   workflow_call:
@@ -42,18 +49,6 @@ on:
         description: 'ERE regex: a changed non-doc file matching it ⇒ full scope (else thin). Doc-only PRs (*.md/*.lex) are always thin; non-PR events are always full.'
         type: string
         required: true
-      sibling-repo:
-        description: 'Optional PRIVATE sibling repo checked out as a cargo path-dep (e.g. a private engine crate the src-tauri/ build pins). Empty = skip.'
-        type: string
-        default: ''
-      sibling-ref:
-        description: 'Ref of the sibling repo to check out.'
-        type: string
-        default: ''
-      sibling-path:
-        description: 'Workspace-relative path to check the sibling out to; surfaced as NATIVE_E2E_SIBLING_PATH (absolute).'
-        type: string
-        default: 'native-e2e-sibling'
       cache-paths:
         description: 'Newline-separated paths to cache across runs (cargo registry + tauri target).'
         type: string
@@ -80,7 +75,7 @@ on:
         default: 'test-results/native-e2e/'
     secrets:
       gh-token:
-        description: 'PAT able to read the private sibling repo + the private wasm release. Falls back to GITHUB_TOKEN.'
+        description: 'PAT able to read the private native git dep (e.g. phos-core) + the private wasm release. Falls back to GITHUB_TOKEN.'
         required: false
 
 permissions:
@@ -126,18 +121,6 @@ jobs:
       - name: Checkout consumer
         uses: actions/checkout@v4
 
-      # Optional PRIVATE sibling, checked out as a cargo path-dep so the native
-      # build needs no in-container git auth (mirrors the local flow, where the
-      # wrapper mounts a local checkout).
-      - name: Checkout private sibling (cargo path-dep)
-        if: inputs.sibling-repo != ''
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.sibling-repo }}
-          ref: ${{ inputs.sibling-ref }}
-          token: ${{ secrets.gh-token || github.token }}
-          path: ${{ inputs.sibling-path }}
-
       # Weekly cache rotation bounds growth (release#491). Raw `actions/cache`
       # of `target/` has no pruning: each new Cargo.lock hash restores the prior
       # (ever-larger) target via restore-keys, builds on top, and saves a bigger
@@ -161,8 +144,10 @@ jobs:
       - name: Run native-transport E2E
         env:
           NATIVE_E2E_IN_CONTAINER: '1'
-          NATIVE_E2E_SIBLING_PATH: ${{ inputs.sibling-repo != '' && format('{0}/{1}', github.workspace, inputs.sibling-path) || '' }}
           NATIVE_E2E_SCOPE: ${{ needs.scope.outputs.full == 'true' && 'full' || 'thin' }}
+          # Auth for the private native git dep + the private wasm release. The
+          # runner-script wires cargo's git-CLI token rewrite from this (the
+          # build clones the private repo as a normal git dep — no checkout step).
           GH_TOKEN: ${{ secrets.gh-token || github.token }}
         run: bash ${{ inputs.runner-script }}
 
