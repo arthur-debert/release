@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -31,6 +32,17 @@ import tempfile
 
 VERSION = "0.2.0"
 PROG = "fetch-deps"
+
+# Force UTF-8 on stdout/stderr. The progress lines use → / ✓ / ⊘, and on a
+# Windows runner the default console encoding is cp1252, whose charmap codec
+# raises UnicodeEncodeError on those glyphs — which crashed the win32-x64
+# build of every node consumer that calls fetch-deps (caught by the release
+# #507 RC-cutover test on lex-fmt/vscode). reconfigure() is a no-op where the
+# stream is already UTF-8 (Linux/macOS); suppress on the rare stream that
+# can't be reconfigured (e.g. a non-TextIOWrapper redirect).
+for _stream in (sys.stdout, sys.stderr):
+    with contextlib.suppress(Exception):
+        _stream.reconfigure(encoding="utf-8")
 
 
 class Die(SystemExit):
