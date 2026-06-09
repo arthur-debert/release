@@ -58,6 +58,15 @@ runs:
     - name: Materialize the managed .release/ tree
       if: inputs.materialize == 'true'
       shell: bash
+      env:
+        # install-release-core resolves the release_core wheel via `gh api`
+        # (repos/<owner>/release/releases...), and `gh` REQUIRES a token even
+        # for a public repo — without one it exits non-zero and reddens
+        # ci/check fleet-wide (release#535). The job's default GITHUB_TOKEN can
+        # read arthur-debert/release's public releases and satisfies gh's auth,
+        # so expose it as GH_TOKEN for both install-release-core and any gh call
+        # `release-core init` makes.
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
         bash "${{ github.action_path }}/../../../bin/install-release-core" --no-init
