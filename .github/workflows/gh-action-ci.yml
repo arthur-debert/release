@@ -84,15 +84,14 @@ jobs:
         with:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - name: Install actionlint + shellcheck
+      - name: Provision the gate toolset (pinned actionlint + shellcheck)
         shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-          # actionlint installer per upstream README.
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) >/dev/null
-          echo "$PWD" >> "$GITHUB_PATH"
+        # ONE provisioner, invoked — not a re-listed install (release#531 F3).
+        # The old inline block installed apt shellcheck (0.9.0, years behind the
+        # pinned 0.11) and an UNPINNED actionlint (no version arg -> floating
+        # latest); both now come from bin-internal/provision-gate-toolset.sh at
+        # the gate-tool-versions.sh pins, identical to every other environment.
+        run: bash bin-internal/provision-gate-toolset.sh
 
       - name: Run actionlint
         shell: bash

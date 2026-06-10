@@ -22,6 +22,18 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
+## Unreleased — `.shellcheckrc` joins the release-internal set (#531 F3)
+
+**Type:** behavior change, not caller-breaking. On next `init` the root
+`.shellcheckrc` symlink is swept; the rc lives only in `.release/` and
+`check-shell` passes it explicitly via `--rcfile=.release/.shellcheckrc`.
+Unblocked by the gate-toolset equalization (#536): shellcheck is pinned at
+0.11 fleet-wide (the apt 0.9.0 that lacked `--rcfile` is gone), so the
+"no version-portable explicit-config flag" caveat in the WS3 entry below no
+longer holds. A consumer running bare `shellcheck` by hand (outside
+`check-shell` / the gate) no longer picks up the rc from the root — invoke the
+gate (`release-core gate`) or pass `--rcfile=.release/.shellcheckrc`.
+
 ## Unreleased — WS3: gate configs into `.release/`; the gate runs from the binary (#524)
 
 **Type:** behavior change + reduced synced footprint. Not a caller-breaking change

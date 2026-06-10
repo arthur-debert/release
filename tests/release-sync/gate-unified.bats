@@ -82,16 +82,33 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   done
 }
 
-@test ".editorconfig + .shellcheckrc stay mirrored to root (root-discovered, no portable --config)" {
+@test ".editorconfig stays root-mirrored; .shellcheckrc is .release/-internal (#531 F3)" {
   release_sync >/dev/null
-  # .editorconfig is editor-facing; .shellcheckrc must be found by shellcheck's
-  # upward walk from each file (no version-portable --rcfile on the fleet's
-  # shellcheck 0.9.0). Both stay root-mirrored symlinks into .release/.
-  for c in .editorconfig .shellcheckrc; do
-    [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }
-    [ -L "$c" ] || { echo "$c not mirrored to root"; false; }
-    [ "$(readlink "$c")" = ".release/$c" ] || { echo "$c wrong target"; false; }
-  done
+  # .editorconfig is editor-facing (discovered by editors) — the one config
+  # that still mirrors to root. .shellcheckrc moved into .release/ now that
+  # release#536 pinned shellcheck 0.11 fleet-wide and check-shell passes
+  # --rcfile=.release/.shellcheckrc explicitly.
+  [ -f ".release/.editorconfig" ] || { echo "missing .release/.editorconfig"; false; }
+  [ -L ".editorconfig" ] || { echo ".editorconfig not mirrored to root"; false; }
+  [ "$(readlink .editorconfig)" = ".release/.editorconfig" ] || { echo ".editorconfig wrong target"; false; }
+  [ -f ".release/.shellcheckrc" ] || { echo "missing .release/.shellcheckrc"; false; }
+  [ ! -e ".shellcheckrc" ] || { echo ".shellcheckrc must NOT mirror to root"; false; }
+}
+
+@test "check-shell honors the vendored .release/.shellcheckrc via --rcfile (#531 F3)" {
+  command -v shellcheck >/dev/null || skip "shellcheck not installed"
+  # The rc disables SC2086; the same file without the rc must flag it
+  # (proves the explicit --rcfile routing, and that the no-rc fallback is
+  # the STRICTER direction).
+  mkdir -p .release
+  printf 'disable=SC2086\nseverity=info\n' > .release/.shellcheckrc
+  printf '#!/usr/bin/env bash\nrm $UNQUOTED\n' > rcfile-probe.sh
+  run "$CHECK_SHELL" rcfile-probe.sh
+  [ "$status" -eq 0 ]
+  rm .release/.shellcheckrc
+  run "$CHECK_SHELL" rcfile-probe.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"SC2086"* ]]
 }
 
 @test "a pre-WS3 consumer's tracked root gate symlinks are swept on re-sync (migration)" {

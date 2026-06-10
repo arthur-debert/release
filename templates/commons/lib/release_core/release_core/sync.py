@@ -292,16 +292,17 @@ def is_distributed_skill_dest(dest: str) -> bool:
 # config EXPLICITLY (markdownlint --config/--ignore-path, yamllint -c, prettier
 # --ignore-path) from .release/.
 #
-# Two configs are deliberately NOT here — they stay mirrored to the consumer root
-# because nothing can point their consumer at a .release/ copy:
+# One config is deliberately NOT here — it stays mirrored to the consumer root
+# because nothing can point its consumer at a .release/ copy:
 #   - `.editorconfig` — editor-facing root convention (discovered by editors), not
 #     a gate flag at all.
-#   - `.shellcheckrc` — shellcheck finds its rc only by walking UP from each
-#     checked file's dir to the repo root; there is NO version-portable
-#     explicit-config flag (`--rcfile` is shellcheck >= 0.10.0, but the fleet's CI
-#     installs 0.9.0 via apt). So it must remain a root-discovered dotfile, the
-#     same category as .editorconfig. (Vendoring it into .release/ awaits a
-#     fleet-wide shellcheck >= 0.10 bump — a separate, deliberate change.)
+#
+# `.shellcheckrc` moved INTO this set (release#531 F3): the gate-toolset
+# equalization (release#536) pins shellcheck 0.11 everywhere via the
+# shellcheck-py wheel, so `--rcfile .release/.shellcheckrc` (shellcheck >= 0.10)
+# is now portable across the whole fleet and check-shell passes it explicitly —
+# the root-discovered dotfile is no longer needed. The de-mirrored root symlink
+# in already-seeded consumers is removed by the mirrored-dest sweep on re-init.
 GATE_INTERNAL_FILES: frozenset[str] = frozenset(
     {
         "lefthook.yml",
@@ -309,6 +310,7 @@ GATE_INTERNAL_FILES: frozenset[str] = frozenset(
         ".markdownlintignore",
         ".yamllint",
         ".prettierignore",
+        ".shellcheckrc",
     }
 )
 

@@ -36,9 +36,11 @@ Example: `templates/commons/.editorconfig` lands at `.editorconfig` in the
 consumer. (The gate definition + most tool configs — `lefthook.yml`,
 `.markdownlint.json`, `.yamllint`, `.prettierignore`, … — are an exception since
 WS3 (#524): they materialize into `.release/` only and are NOT mirrored to the
-root — see "release-internal files" below. `.editorconfig` and `.shellcheckrc`
-stay mirrored — they have no portable way to point their tool at a `.release/`
-copy.)
+root — see "release-internal files" below. `.editorconfig` is the one config
+still mirrored — editors discover it at the root and have no `--config` flag.
+`.shellcheckrc` joined the release-internal set in #531 F3, once #536 pinned
+shellcheck 0.11 fleet-wide and `check-shell` could pass
+`--rcfile=.release/.shellcheckrc` explicitly.)
 
 Files outside those three subtrees (`templates/fragments/`,
 `templates/render/`) are not synced — they are author-facing reference
@@ -139,10 +141,11 @@ consumer root. The gate runs through the binary (`release-core gate` points
 lefthook at `.release/lefthook.yml` via `LEFTHOOK_CONFIG`; each tool is handed its
 config explicitly — `markdownlint --config/--ignore-path`, `yamllint -c`,
 `prettier --ignore-path`), and the git hook is `release-core gate --install-hook` →
-`release-core gate --hook`. **`.editorconfig` and `.shellcheckrc` stay mirrored** to
-the root: `.editorconfig` is editor-facing, and shellcheck has no
-version-portable explicit-config flag (`--rcfile` is ≥ 0.10.0; the fleet's CI runs
-0.9.0), so its rc must be found by shellcheck's upward walk from the repo root.
+`release-core gate --hook`. **Only `.editorconfig` stays mirrored** to the root
+(editor-facing; no config flag). `.shellcheckrc` is release-internal since
+#531 F3: the gate-toolset equalization (#536) pinned shellcheck 0.11 across the
+fleet, so `check-shell` passes `--rcfile=.release/.shellcheckrc` explicitly —
+the upward-walk root dotfile is gone.
 
 ## How sync materializes the managed tree (no state file)
 
