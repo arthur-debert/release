@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 2.14.0 - 2026-06-10
+
+- gh-action.yml's prepare materialize now skips when a root lefthook.yml exists — unblocks release's own cut (init has no detectable kind on the source repo) (#544)
+- Removed release-core init --config-only and --full; bare init (full materialize) is the only mode
+- Bootstrap quartet (settings.json, install-release-core, setup-dev-env.sh, pr-loop-guard) materializes as real tracked files so a fresh clone can boot itself
+
 ## 2.13.2 - 2026-06-10
 
 - Bot gates on all stacks materialize .release/ and run the real gate via release-core (no more silent skip on post-WS3 consumers)
