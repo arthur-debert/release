@@ -148,7 +148,9 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   # The bad class: `**/*<wildcard>` — fully replaced by the bare form (`*.rs`),
   # which covers root + any depth. Literal `**/name` entries are fine ONLY as
   # the nested companion of a bare literal (checked by the next test).
-  run grep -rnE '(glob:|^\s*-)\s*"\*\*/\*' \
+  # Quote is OPTIONAL in the pattern: YAML also allows single-quoted scalars
+  # ('**/x' — unquoted is invalid YAML, `*` starts an alias), so match both.
+  run grep -rnE '(glob:|^\s*-)\s*["'"'"']?\*\*/\*' \
     "$root/lefthook.yml" \
     "$root/templates/commons/lefthook.fragment.yaml" \
     "$root"/templates/components/*/lefthook.fragment.yaml \
@@ -163,11 +165,12 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
            "$root"/templates/components/*/lefthook.fragment.yaml \
            "$root"/templates/*/lefthook.fragment.yaml; do
     [ -f "$f" ] || continue
-    # extract patterns like **/Cargo.toml (a literal name after **/)
+    # extract patterns like **/Cargo.toml (a literal name after **/) — both
+    # double- and single-quoted YAML scalar forms.
     while IFS= read -r pat; do
       name="${pat#\*\*/}"
-      grep -qF "\"$name\"" "$f" || { echo "MISSING root companion for $pat in $f"; fail=1; }
-    done < <(grep -oE '"\*\*/[^*"]+"' "$f" | tr -d '"')
+      grep -qE "[\"']${name//./\\.}[\"']" "$f" || { echo "MISSING root companion for $pat in $f"; fail=1; }
+    done < <(grep -oE '["'"'"']\*\*/[^*"'"'"']+["'"'"']' "$f" | tr -d '"'"'"'')
   done
   [ "$fail" -eq 0 ]
 }

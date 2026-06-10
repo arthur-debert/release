@@ -1,1 +1,1 @@
-- Gate globs now match repo-root files (leading **/ silently exempted root Cargo.toml/go.mod/eslint.config/*.sh from the gate)
+- Gate globs now match repo-root files (a leading `**/` silently exempted root `Cargo.toml`/`go.mod`/`eslint.config.*`/`*.sh` from the gate)
