@@ -996,3 +996,41 @@ def test_full_init_migrates_bootstrap_symlinks_and_replaces_atomically(
     capsys.readouterr()
     assert "echo setup-dev-env.sh" in p.read_text()
     assert os.stat(p).st_ino != ino_before, "repair must be an atomic rename, not in-place"
+
+
+@_needs_yq
+@_needs_git
+def test_full_removes_retired_tombstoned_files_in_managed_commit(tmp_path, monkeypatch, capsys):
+    """WS6 (release#527): a pre-pull consumer carries retired release-distributed
+    real files (the release-sync state manifest, the release-cut shim). A bare
+    init removes them — provenance-gated — and the deletions ride the managed
+    auto-commit; consumer-owned files are untouched."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    (repo / ".release-sync-state.yaml").write_text(
+        "# Managed by release-sync. Do not edit.\nsha: deadbeef\n"
+    )
+    (repo / "bin").mkdir(exist_ok=True)
+    (repo / "bin" / "release").write_text(
+        "#!/usr/bin/env bash\n"
+        "# Thin shim around the canonical release-cut CLI (arthur-debert/release).\n"
+    )
+    (repo / "bin" / "deploy").write_text("#!/usr/bin/env bash\nmy own tool\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "pre-pull seed")
+
+    assert init.main([]) == 0
+    out = capsys.readouterr().out
+    assert "committed" in out
+
+    assert not (repo / ".release-sync-state.yaml").exists()
+    assert not (repo / "bin" / "release").exists()
+    assert (repo / "bin" / "deploy").exists()
+
+    committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
+    assert ".release-sync-state.yaml" in committed
+    assert "bin/release" in committed
+    assert "bin/deploy" not in committed
+    # The removals are real deletions in the index, not stray edits.
+    assert _git(repo, "status", "--porcelain", ".release-sync-state.yaml", "bin/release") == ""
