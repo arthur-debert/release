@@ -116,13 +116,26 @@ jobs:
         # because the release run needs the scripts, not a tree materialize.
         run: bash bin/install-release-core --major v2 --no-init
 
-      - name: Arm the gate + materialize the managed .release/ tree
-        # ONE definition of CI gate-arming — the arm-gate composite (materialize
-        # .release/ from the wheel + provision the pinned gate toolset), same as
-        # rust-cli.yml. Without it this workflow's bot gate had NOTHING to run
-        # on a post-WS3 consumer (no root lefthook.yml, .release/ never
-        # materialized) and silently skipped (release#531 F1).
+      - name: Materialize the managed .release/ tree
+        # The bot gate below runs the managed gate from .release/ — which is
+        # gitignored + ephemeral (WS4) and so absent on a fresh CI checkout.
+        # Materialize it with the release-core installed ABOVE (pinned to the
+        # v2 line): `init` composes from the wheel's OFFLINE bundle, no extra
+        # install. Deliberately NOT arm-gate's materialize input — that path
+        # re-runs install-release-core at its default `releases/latest`, which
+        # would override the v2 pin (and pull a v3 wheel into this v2 workflow
+        # once v3 exists). --no-commit: CI never auto-commits the managed tree.
+        shell: bash
+        run: release-core init --no-commit
+      - name: Arm the gate toolset
+        # ONE definition of CI gate-arming (pinned toolset), same as
+        # rust-cli.yml — but provision-only (materialize: 'false'; see the
+        # step above for why). Without an armed+materialized gate this
+        # workflow's bot gate had NOTHING to run on a post-WS3 consumer (no
+        # root lefthook.yml) and silently skipped (release#531 F1).
         uses: arthur-debert/release/.github/actions/arm-gate@v2
+        with:
+          materialize: 'false'
 
       - name: Validate + detect resume
         id: prep
