@@ -1053,14 +1053,23 @@ def _find_retired_files(repo_root: str) -> list[str]:
         full = os.path.join(repo_root, dest)
         if not os.path.isfile(full) or os.path.islink(full):
             continue
-        try:
-            with open(full, encoding="utf-8", errors="replace") as fh:
-                head = fh.read(2048)
-        except OSError:
-            continue
-        if needle in head:
+        if _has_fingerprint_header(full, needle):
             out.append(dest)
     return sorted(out)
+
+
+def _has_fingerprint_header(path: str, needle: str) -> bool:
+    """True iff one of the file's first lines is a COMMENT starting with the
+    verbatim fingerprint — `# <needle>…`. Header-anchored on purpose: a loose
+    substring search could false-positive on a consumer-owned file that merely
+    mentions the phrase somewhere in its body. The shims carry it as the first
+    comment under the shebang; 10 lines is generous slack."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            head = [fh.readline() for _ in range(10)]
+    except OSError:
+        return False
+    return any(line.startswith(f"# {needle}") for line in head)
 
 
 # ── CLAUDE.md orientation block (#348) ────────────────────────────────────────

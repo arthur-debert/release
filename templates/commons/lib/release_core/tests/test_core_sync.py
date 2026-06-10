@@ -1071,3 +1071,18 @@ def test_retired_tables_inventory_locked():
             assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), (dest, sha)
     assert sync.RETIRED_MARKER_FILES == frozenset({".release-sync-state.yaml"})
     assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release"}
+
+
+def test_retired_fingerprint_requires_header_comment_line(tmp_path):
+    """The fingerprint is header-anchored: a consumer-owned bin/release that
+    merely MENTIONS the phrase mid-body is not ours and must survive."""
+    (tmp_path / "bin").mkdir()
+    shim = tmp_path / "bin" / "release"
+    body = "#!/usr/bin/env bash\n" + "echo step\n" * 12
+    shim.write_text(body + "# replaced the Thin shim around the canonical release-cut CLI\n")
+    assert "bin/release" not in sync._find_retired_files(str(tmp_path))
+
+    shim.write_text(
+        "#!/usr/bin/env bash\n# Thin shim around the canonical release-cut CLI (x/y).\n"
+    )
+    assert "bin/release" in sync._find_retired_files(str(tmp_path))
