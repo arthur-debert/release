@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 2.13.1 - 2026-06-10
+
+- arm-gate: pass GH_TOKEN to the materialize step so install-release-core's gh call doesn't exit 1 (fixes ci/check fleet-wide)
+- Pin and reconcile every gate tool to one version across dev and CI (no more install-if-missing drift)
+
 ## 2.13.0 - 2026-06-09
 
 docs: consolidate 9 narrative .lex into 4 (README, dev-cycle, tooling, harness); delete per-Kind reference docs; add ADR-0005 (minimal footprint) (epic #501, #508)
