@@ -919,3 +919,80 @@ def test_full_uses_release_home_clone_when_present(tmp_path, monkeypatch, capsys
     # Provenance marker carries the git sha (not the wheel version).
     marker = (repo / ".release" / ".release-sync-source").read_text()
     assert "release-core" not in marker
+
+
+# ── WS5 (release#526): the bootstrap quartet materializes as REAL files ───────
+
+
+def _ws5_source_tree(root) -> str:
+    """_full_source_tree + the bootstrap quartet, so a full init exercises the
+    real-copy path for the SessionStart chain."""
+    src = _full_source_tree(root)
+    tpl = root / "templates" / "commons"
+    (tpl / ".claude").mkdir(parents=True)
+    (tpl / ".claude" / "settings.json").write_text('{"hooks": {}}\n')
+    for name in ("install-release-core", "setup-dev-env.sh", "pr-loop-guard"):
+        f = tpl / "bin" / name
+        f.write_text(f"#!/usr/bin/env bash\necho {name}\n")
+        os.chmod(f, 0o755)
+    return src
+
+
+@_needs_yq
+@_needs_git
+def test_full_init_writes_bootstrap_quartet_as_real_executable_files(tmp_path, monkeypatch, capsys):
+    src = _ws5_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    assert init.main([]) == 0
+    capsys.readouterr()
+    for dest in (
+        ".claude/settings.json",
+        "bin/install-release-core",
+        "bin/setup-dev-env.sh",
+        "bin/pr-loop-guard",
+    ):
+        p = repo / dest
+        assert p.is_file(), dest
+        assert not p.is_symlink(), f"{dest} must be a REAL file (fresh-clone boot), not a symlink"
+        assert dest in _git(repo, "ls-files"), f"{dest} must be tracked"
+    # The executables carry their bit; the JSON does not.
+    for dest in ("bin/install-release-core", "bin/setup-dev-env.sh", "bin/pr-loop-guard"):
+        assert os.access(repo / dest, os.X_OK), dest
+    # No managed-marker header on a shebang script (would break the shebang) or
+    # on JSON (no comment syntax).
+    first = (repo / "bin" / "setup-dev-env.sh").read_text().splitlines()[0]
+    assert first.startswith("#!"), "shebang must stay line 1"
+    assert (repo / ".claude" / "settings.json").read_text().lstrip().startswith("{")
+
+
+@_needs_yq
+@_needs_git
+def test_full_init_migrates_bootstrap_symlinks_and_replaces_atomically(
+    tmp_path, monkeypatch, capsys
+):
+    """A pre-WS5 consumer has tracked SYMLINKS at the bootstrap paths; init must
+    replace them with real files. The replace is by RENAME (new inode), never a
+    truncate-in-place — install-release-core rewrites ITSELF while running, and
+    an in-place truncation would yank the running script out from under it."""
+    src = _ws5_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    # Seed the pre-WS5 state: a dangling symlink into the not-yet-built .release/.
+    (repo / "bin").mkdir(exist_ok=True)
+    os.symlink(
+        os.path.join("..", ".release", "bin", "setup-dev-env.sh"),
+        repo / "bin" / "setup-dev-env.sh",
+    )
+    assert init.main([]) == 0
+    capsys.readouterr()
+    p = repo / "bin" / "setup-dev-env.sh"
+    assert p.is_file() and not p.is_symlink()
+    ino_before = os.stat(p).st_ino
+
+    # Drift the file, re-init: repaired via a NEW inode (rename, not truncate).
+    p.write_text("#!/usr/bin/env bash\nhand-edited\n")
+    assert init.main([]) == 0
+    capsys.readouterr()
+    assert "echo setup-dev-env.sh" in p.read_text()
+    assert os.stat(p).st_ino != ino_before, "repair must be an atomic rename, not in-place"

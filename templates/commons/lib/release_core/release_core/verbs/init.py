@@ -282,7 +282,12 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     for link in mirror.symlinks_to_remove:
         os.remove(link)
 
-    # Write managed copies (real files for paths GH can't dereference).
+    # Write managed copies (real files for paths GH can't dereference, plus the
+    # bootstrap files that must exist on a fresh clone — sync.BOOTSTRAP_REAL_FILES).
+    # ATOMIC replace (temp + os.replace), never truncate-in-place: the bootstrap
+    # set includes RUNNING scripts — bin/install-release-core triggers this very
+    # init, so an in-place truncation would yank the script out from under its
+    # own execution; a rename leaves the running copy its old inode (WS5, #526).
     for f in mirror.copies_to_write:
         d = os.path.dirname(f)
         if d:
@@ -290,18 +295,25 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
         if os.path.islink(f):
             os.remove(f)
         src = os.path.join(".release", f)
-        if f.endswith((".yml", ".yaml")):
-            with open(src, "rb") as sfh:
-                body = sfh.read()
-            with open(f, "wb") as dfh:
-                dfh.write((sync.MANAGED_MARKER + "\n").encode("utf-8"))
-                dfh.write(body)
-        else:
-            shutil.copyfile(src, f)
-        # Preserve the executable bit from the source.
-        if os.access(src, os.X_OK):
-            st = os.stat(f)
-            os.chmod(f, st.st_mode | 0o111)
+        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(f) + ".tmp.", dir=d or ".")
+        try:
+            with os.fdopen(fd, "wb") as dfh:
+                if f.endswith((".yml", ".yaml")):
+                    with open(src, "rb") as sfh:
+                        dfh.write((sync.MANAGED_MARKER + "\n").encode("utf-8"))
+                        dfh.write(sfh.read())
+                else:
+                    with open(src, "rb") as sfh:
+                        shutil.copyfileobj(sfh, dfh)
+            # Permissions: mkstemp creates 0600 — set the normal umask-style mode,
+            # carrying the executable bit over from the source.
+            mode = 0o755 if os.access(src, os.X_OK) else 0o644
+            os.chmod(tmp, mode)
+            os.replace(tmp, f)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
 
     # Remove stale managed copies.
     for f in mirror.copies_to_remove:

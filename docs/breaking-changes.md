@@ -22,6 +22,19 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
+## Unreleased — WS5: the bootstrap quartet becomes REAL tracked files (#526)
+
+**Type:** behavior change, not caller-breaking; one managed migration commit per
+consumer on next `init`. `.claude/settings.json`, `bin/install-release-core`,
+`bin/setup-dev-env.sh`, and `bin/pr-loop-guard` were tracked SYMLINKS into the
+gitignored `.release/` — on a fresh clone all four dangled, so Claude Code could
+not read the hooks config and the SessionStart boot could not start itself (the
+chicken-and-egg). They now materialize as real tracked copies (auto-refreshed by
+`init`, atomic-rename replace), making a bare clone self-starting with zero
+network. Everything else stays an ephemeral-targeted symlink. Decisions recorded
+on #526: the PreToolUse PR-loop guard SURVIVES (as one of the real copies); the
+per-repo knob surface stays the optional `.release-sync.yaml` (no `.release.toml`).
+
 ## Unreleased — `release-core init --config-only` and `--full` removed (#532)
 
 **Type:** flag removal; not caller-breaking for the fleet (SessionStart runs a

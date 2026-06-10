@@ -928,3 +928,42 @@ def test_diff_release_no_existing(tmp_path):
     diff, _ = sync.diff_release(str(new), str(tmp_path / "nope"))
     assert diff.added == ["x"]
     assert diff.removed == []
+
+
+# ── WS5 (release#526): the irreducible bootstrap set is REAL files ────────────
+
+
+def test_bootstrap_files_are_classified_real_copies():
+    """The SessionStart chain must be readable/executable on a FRESH CLONE —
+    before the ephemeral .release/ exists — so it must never be a symlink into
+    it. Lock the exact set: the hooks config + the boot resolver + the session
+    provisioner + the PreToolUse guard."""
+    assert sync.BOOTSTRAP_REAL_FILES == frozenset(
+        {
+            ".claude/settings.json",
+            "bin/install-release-core",
+            "bin/setup-dev-env.sh",
+            "bin/pr-loop-guard",
+        }
+    )
+    for dest in sync.BOOTSTRAP_REAL_FILES:
+        assert sync.needs_real_file(dest), dest
+    # The neighbors stay symlinks (ephemeral-targeted is fine post-boot).
+    assert not sync.needs_real_file("bin/check-shell")
+    assert not sync.needs_real_file(".claude/skills/tdd/SKILL.md")
+
+
+def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
+    """A pre-WS5 consumer carries TRACKED SYMLINKS at the bootstrap paths
+    (pointing into .release/). On re-init those dests are planned as real-copy
+    writes — the symlink is replaced, never left dangling for a fresh clone."""
+    dest = "bin/setup-dev-env.sh"
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / "bin").mkdir(parents=True)
+    (tmp_release / dest).write_text("#!/usr/bin/env bash\necho boot\n")
+
+    (tmp_path / "bin").mkdir()
+    os.symlink(os.path.join(".release", dest), tmp_path / dest)  # the old mirror
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+    assert dest in mp.copies_to_write
+    assert not any(dest in s for s in mp.symlinks_to_create)

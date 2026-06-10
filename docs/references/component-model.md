@@ -160,6 +160,14 @@ on every run (ADR-0001):
 3. Create working-tree symlinks (`bin/check`, `.editorconfig`,
    `.claude/skills/*`, …) pointing into `.release/`. (`lefthook.yml` + the gate
    tool configs are NOT mirrored out since WS3 — they stay `.release/`-internal.)
+   Two classes mirror as **real tracked copies** instead of symlinks:
+   `.github/workflows/*` (GitHub won't dereference a symlink) and the
+   **bootstrap quartet** — `.claude/settings.json`, `bin/install-release-core`,
+   `bin/setup-dev-env.sh`, `bin/pr-loop-guard` (WS5, #526): the SessionStart
+   chain must be readable/executable on a FRESH CLONE, before the ephemeral
+   `.release/` exists — a symlink into it dangles there and the boot could not
+   start itself. Real copies are auto-refreshed by init (atomic rename, never
+   truncate-in-place — `install-release-core` rewrites itself while running).
 4. Sweep the repo for symlinks into `.release/` that are now broken (their
    target vanished from the rebuilt tree) and delete them — this is how
    **removals** propagate, with no removal manifest and no bookkeeping.

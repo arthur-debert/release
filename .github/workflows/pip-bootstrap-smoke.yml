@@ -303,6 +303,29 @@ jobs:
             exit 1
           fi
           echo "ok: default full release-core init is idempotent (no-op second run)"
+          # WS5 (release#526) — the fresh-clone boot proof: a NEW clone of the
+          # consumer must be able to START the SessionStart chain before any
+          # .release/ exists. The bootstrap quartet are tracked REAL files
+          # (never symlinks into the ephemeral build dir), executable, and the
+          # hooks config is readable JSON.
+          fresh="${RUNNER_TEMP}/fixture-fresh-clone"
+          rm -rf "$fresh"
+          git clone -q "$full" "$fresh"
+          cd "$fresh"
+          test ! -e .release || { echo "ERROR: fresh clone has a .release/ (must be ephemeral)" >&2; exit 1; }
+          for f in .claude/settings.json bin/install-release-core bin/setup-dev-env.sh bin/pr-loop-guard; do
+            if [ -L "$f" ]; then
+              echo "ERROR: $f is a symlink on a fresh clone — the boot cannot start itself" >&2
+              exit 1
+            fi
+            test -f "$f" || { echo "ERROR: $f missing on a fresh clone" >&2; exit 1; }
+          done
+          for f in bin/install-release-core bin/setup-dev-env.sh bin/pr-loop-guard; do
+            test -x "$f" || { echo "ERROR: $f not executable on a fresh clone" >&2; exit 1; }
+          done
+          python -c "import json; json.load(open('.claude/settings.json'))" \
+            || { echo "ERROR: .claude/settings.json is not readable JSON" >&2; exit 1; }
+          echo "ok: fresh clone carries a self-starting bootstrap (WS5)"
 
       - name: release-core init OVERRIDE — $RELEASE_HOME composes from live templates
         # release-dev's path: an explicit $RELEASE_HOME git clone OVERRIDES the
