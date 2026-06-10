@@ -1,1 +1,0 @@
-- arm-gate's materialize pins the wheel to the action's own major line (derived from github.action_ref) — a v2 workflow can no longer pull a v3 wheel once v3 exists (#541)

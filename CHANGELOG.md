@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 2.15.1 - 2026-06-10
+
+- arm-gate's materialize pins the wheel to the action's own major line (derived from github.action_ref) — a v2 workflow can no longer pull a v3 wheel once v3 exists (#541)
+- install-release-core --from-source now accepts a release checkout ROOT — descends to the nested templates/commons/lib/release_core package automatically (#516)
+- admin repos verify self-spawns nested release-core calls via sys.executable -m release_core — the local pre-flight works from the in-checkout shim again (#534)
+
 ## 2.15.0 - 2026-06-10
 
 - init now removes retired release-distributed files (check-fmt/check-lint, changelog shims, bin/release, .release-sync-state.yaml) — provenance-gated tombstones, one managed commit (#527)
