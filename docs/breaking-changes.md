@@ -22,7 +22,22 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
-## Unreleased — WS5: the bootstrap quartet becomes REAL tracked files (#526)
+## Unreleased — WS7: symlink mirrors go EPHEMERAL; relay skill undistributed (#528)
+
+**Type:** behavior change, not caller-breaking; one managed migration commit per
+consumer on next `init`. The symlink mirrors (`bin/` tools, `.editorconfig`,
+the distributed skill) are no longer TRACKED: init still materializes them every
+session, lists them in the per-clone `.git/info/exclude`, and a one-time managed
+commit untracks what a pre-WS7 seed committed (the symlinks stay live on disk).
+A consumer's tracked footprint is now exactly the epic-#501 irreducible set:
+`.github/**`, the bootstrap quartet, and the optional `.release-sync.yaml`.
+Also: `release-issue-relay` is dropped from skill distribution (WS7 keep/fold/
+drop — the escalation contract is binary-carried via the CLAUDE.md stub,
+`release-core how-to`, and `release-core issue file`); consumers' copies are
+swept on next init, and now-empty skill dirs are pruned. Decisions recorded in
+`docs/references/self-improving-machinery.md`.
+
+## v2.14.0 (2026-06-10) — WS5: the bootstrap quartet becomes REAL tracked files (#526)
 
 **Type:** behavior change, not caller-breaking; one managed migration commit per
 consumer on next `init`. `.claude/settings.json`, `bin/install-release-core`,
@@ -35,7 +50,7 @@ network. Everything else stays an ephemeral-targeted symlink. Decisions recorded
 on #526: the PreToolUse PR-loop guard SURVIVES (as one of the real copies); the
 per-repo knob surface stays the optional `.release-sync.yaml` (no `.release.toml`).
 
-## Unreleased — `release-core init --config-only` and `--full` removed (#532)
+## v2.14.0 (2026-06-10) — `release-core init --config-only` and `--full` removed (#532)
 
 **Type:** flag removal; not caller-breaking for the fleet (SessionStart runs a
 bare `init`; no managed flow passed either flag). `--config-only` materialized
@@ -46,7 +61,7 @@ unknown flags (exit 64). `--commit` / `--force` remain TOLERATED no-ops — the
 deployed pre-migration SessionStart resolver still passes `--commit` on its
 first cutover pull, and rejecting it would stall the fleet bootstrap.
 
-## Unreleased — `.shellcheckrc` joins the release-internal set (#531 F3)
+## v2.13.2 (2026-06-10) — `.shellcheckrc` joins the release-internal set (#531 F3)
 
 **Type:** behavior change, not caller-breaking. On next `init` the root
 `.shellcheckrc` symlink is swept; the rc lives only in `.release/` and
@@ -58,7 +73,7 @@ longer holds. A consumer running bare `shellcheck` by hand (outside
 `check-shell` / the gate) no longer picks up the rc from the root — invoke the
 gate (`release-core gate`) or pass `--rcfile=.release/.shellcheckrc`.
 
-## Unreleased — WS3: gate configs into `.release/`; the gate runs from the binary (#524)
+## v2.13.0 (2026-06-09) — WS3: gate configs into `.release/`; the gate runs from the binary (#524)
 
 **Type:** behavior change + reduced synced footprint. Not a caller-breaking change
 (no workflow edits), but consumers' tracked files shrink on next `init` and the
@@ -100,7 +115,7 @@ The release-cut bot gate (`run-precommit-gate.sh`, rust `prepare-release`) prefe
 inconsistent with the gate's `.release/` config paths — removed in #532 (see the
 entry above).
 
-## Unreleased — WS2: CLAUDE.md → stub; ORIENTATION + most skills no longer synced (#523)
+## v2.13.0 (2026-06-09) — WS2: CLAUDE.md → stub; ORIENTATION + most skills no longer synced (#523)
 
 **Type:** behavior change + reduced synced footprint. Not a caller-breaking change
 (no workflow edits), but consumers' tracked files shrink on next `init`.
@@ -126,7 +141,7 @@ binary's `release-core how-to`:
 how-to` (validated in the WS8 round-1 dogfood). The dropped dev-cycle skills remain
 available as the agent's own global skills where installed.
 
-## Unreleased — WS4: `.release/` ephemeral + drift/sync subsystem removed (#521)
+## v2.13.0 (2026-06-09) — WS4: `.release/` ephemeral + drift/sync subsystem removed (#521)
 
 **Type:** removed commands (breaking for any consumer/script that invoked them
 directly) + behavior change (`.release/` no longer committed).

@@ -3,12 +3,15 @@
 load helper
 
 # ---------------------------------------------------------------------
-# Infra skill distribution (release#348 → trimmed in WS2 release#523)
+# Infra skill distribution (release#348 → trimmed in WS2 release#523, then to
+# ONE in WS7 release#528)
 #
-# WS2 cut PUSH_ALL_SKILLS to the TWO skills the harness needs a file on disk for:
-# gh-pr-review-loop (the `/`-triggered PR-loop driver) + release-issue-relay
-# (escalation). The dev cycle + general-dev guidance now lives in `release-core
-# how-to`, not synced skill files. `release-core init` distributes the kept set
+# WS7 cut PUSH_ALL_SKILLS to the ONE skill the harness needs a file on disk for:
+# gh-pr-review-loop (the `/`-triggered PR-loop driver). release-issue-relay was
+# dropped — the escalation contract is binary-carried (CLAUDE.md stub +
+# `release-core how-to` + the `release-core issue file` console path). The dev
+# cycle + general-dev guidance likewise lives in `release-core how-to`, not
+# synced skill files. `release-core init` distributes the kept set
 # into .claude/skills/ (the path Claude Code auto-discovers from), sourced from
 # skills/, whole-directory. A second upgrade-only set (REPLACE_IF_PRESENT_SKILLS)
 # syncs only when the consumer already carries the skill. A stale REAL local copy
@@ -38,9 +41,9 @@ load helper
   [[ "$desc" == *"ready-for-human-merge"* ]]
 }
 
-@test "init distributes the trimmed PUSH_ALL set (gh-pr-review-loop + release-issue-relay)" {
+@test "init distributes the trimmed PUSH_ALL set (gh-pr-review-loop only, WS7)" {
   release_sync >/dev/null
-  for s in gh-pr-review-loop release-issue-relay; do
+  for s in gh-pr-review-loop; do
     [ -f ".release/.claude/skills/$s/SKILL.md" ] \
       || { echo "missing materialized $s"; false; }
     [ -L ".claude/skills/$s/SKILL.md" ] \
@@ -48,10 +51,11 @@ load helper
   done
 }
 
-@test "the dev-cycle + pr-review-respond skills are NO LONGER distributed (WS2)" {
+@test "the dev-cycle + pr-review-respond + relay skills are NO LONGER distributed (WS2/WS7)" {
   release_sync >/dev/null
-  # WS2 dropped these from PUSH_ALL — the dev cycle lives in `release-core how-to`.
-  for s in pr-review-respond diagnose tdd review triage to-issues handoff qa \
+  # WS2 dropped the dev-cycle set, WS7 dropped release-issue-relay — the dev
+  # cycle + escalation contract live in `release-core how-to`.
+  for s in pr-review-respond release-issue-relay diagnose tdd review triage to-issues handoff qa \
            grill-me grill-with-docs improve-codebase-architecture \
            request-refactor-plan ubiquitous-language zoom-out teach padz-for-agents; do
     [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked materialized $s"; false; }

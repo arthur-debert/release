@@ -1,0 +1,1 @@
+- WS7: symlink mirrors (bin tools, .editorconfig, skills) are now ephemeral — untracked, init-materialized, listed in .git/info/exclude; one-time managed commit untracks pre-WS7 seeds; release-issue-relay dropped from skill distribution (escalation is binary-carried) (#528)

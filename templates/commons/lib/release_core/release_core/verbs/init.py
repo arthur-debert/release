@@ -169,19 +169,21 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
     """The exact, repo-relative managed MIRROR pathspecs a full sync produced or
     removed — the ONLY paths --commit stages (never `git add -A`).
 
-    Covers: each symlink created or removed; each real-file copy written or
-    removed; each retired tombstoned file removed (WS6, release#527); and
-    CLAUDE.md when the orientation block was created/injected/refreshed.
-    Deterministic order, de-duplicated.
+    Covers: each symlink removed (swept from disk — the deletion must commit);
+    each real-file copy written or removed; each retired tombstoned file removed
+    (WS6, release#527); and CLAUDE.md when the orientation block was
+    created/injected/refreshed. Deterministic order, de-duplicated.
 
-    Notably NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
+    Notably NOT the created symlink mirrors: since WS7 (release#528) they are
+    EPHEMERAL — materialized every init, excluded via .git/info/exclude, never
+    tracked. Staging one (git add -f) would re-track it; a pre-WS7 seed's
+    committed mirrors are untracked separately in :func:`_auto_commit`.
+
+    And NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
     ephemeral, never committed. A previously-committed `.release/` is untracked
     separately in :func:`_auto_commit` (the one-time consumer migration).
     """
     paths: list[str] = []
-    for s in mirror.symlinks_to_create:
-        link, _, _ = s.partition(" -> ")
-        paths.append(link)
     for link in mirror.symlinks_to_remove:
         # compute_mirror returns broken links as './…'; normalize for git.
         paths.append(link[2:] if link.startswith("./") else link)
@@ -281,9 +283,19 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
             os.remove(link)
         os.symlink(target, link)
 
-    # Remove broken symlinks (paths are './…' relative to repo root).
+    # Remove broken symlinks (paths are './…' relative to repo root), then prune
+    # the now-empty parent dirs a swept skill leaves behind (.claude/skills/<name>/
+    # holds nothing but its mirrors, so a retired skill would otherwise linger as
+    # an empty husk). os.rmdir refuses a non-empty dir — that's the stop condition.
     for link in mirror.symlinks_to_remove:
         os.remove(link)
+        d = os.path.dirname(link)
+        while d and d not in (".", "./"):
+            try:
+                os.rmdir(d)
+            except OSError:
+                break
+            d = os.path.dirname(d)
 
     # Write managed copies (real files for paths GH can't dereference, plus the
     # bootstrap files that must exist on a fresh clone — sync.BOOTSTRAP_REAL_FILES).
@@ -326,6 +338,16 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     # in sync._find_retired_files, so only release's own retired copies land here.
     for f in mirror.retired_to_remove:
         _rm_f(f)
+
+    # WS7 (release#528): the symlink mirrors are EPHEMERAL — materialized above,
+    # never tracked. Keep `git status` clean by listing them in the local
+    # .git/info/exclude (NOT the consumer's .gitignore: zero tracked footprint,
+    # and info/exclude is per-clone, recomposed by every init just like the
+    # mirrors themselves). CONFLICT dests are left out: no symlink was applied
+    # there (a real file/dir blocks the managed path), and excluding the path
+    # would hide that untracked file from `git status` — masking the very
+    # conflict the user is told to resolve.
+    _write_mirror_excludes(mirror.mirror_dests - set(mirror.conflicts))
 
     # Write the consumer CLAUDE.md orientation block.
     if claude.action in ("create", "inject", "refresh"):
@@ -381,26 +403,34 @@ def _full_commit_message(ref_label: str) -> str:
     return f"chore(release): sync managed tree from {label}"
 
 
-def _commit_untracking_release(repo_root: str, commit_paths: list[str], message: str) -> None:
-    """Pathspec-commit the mirrors AND untrack a previously-committed `.release/`
-    (the WS4 one-time migration, release#521).
+def _commit_untracking(
+    repo_root: str,
+    commit_paths: list[str],
+    message: str,
+    *,
+    stash_release: bool,
+    mirror_links: list[tuple[str, str]],
+) -> None:
+    """Pathspec-commit the managed paths AND untrack the ephemeral content a
+    pre-migration seed committed: the `.release/` build dir (WS4, release#521)
+    and the symlink mirrors (WS7, release#528).
 
     The wrinkle: a pathspec commit (`git commit -- <paths>`) does a PARTIAL commit
-    that re-reads the WORKING TREE for the listed paths. The recomposed `.release/`
-    is still on disk (gitignored), so a naive `git commit -- .release` would
-    *resurrect* every tracked `.release/` file that survives recomposition instead
-    of recording its removal. So we move the ephemeral build dir aside for the
-    duration of the commit: with `.release/` absent from the work tree, the partial
-    commit records all its tracked paths as deletions, while the mirrors (present)
-    commit normally. The dir is restored in `finally` so the ephemeral tree — and
-    the committed symlinks into it — stay live. `os.rename` of the dir entry is
-    O(1) (same filesystem), so this is cheap regardless of tree size.
+    that re-reads the WORKING TREE for the listed paths. The recomposed content is
+    still on disk (gitignored / excluded), so a naive pathspec commit would
+    *resurrect* every tracked path that survives recomposition instead of
+    recording its removal. So we take the ephemeral content off-disk for the
+    duration of the commit — `.release/` via an O(1) dir rename, each tracked
+    mirror symlink via remove-and-recreate (`mirror_links` carries (path, target),
+    and a symlink is recreated byte-identically from its target) — and restore it
+    in `finally`, so the ephemeral tree stays live for the session.
     """
     release_dir = os.path.join(repo_root, ".release")
     stash = os.path.join(repo_root, ".release.untrack-commit.tmp")
     moved = False
+    removed_links: list[tuple[str, str]] = []
     try:
-        if os.path.exists(release_dir):
+        if stash_release and os.path.exists(release_dir):
             # A leftover stash from a previously-interrupted run would block the
             # rename; clear it first (it is never the live tree). _rm_f handles
             # a file/symlink/dir alike (rm -f semantics) and lets a real removal
@@ -410,10 +440,91 @@ def _commit_untracking_release(repo_root: str, commit_paths: list[str], message:
                 _rm_f(stash)
             os.rename(release_dir, stash)
             moved = True
+        for rel, target in mirror_links:
+            full = os.path.join(repo_root, rel)
+            if os.path.islink(full):
+                os.remove(full)
+                removed_links.append((full, target))
         gh.git_commit_paths(commit_paths, message, cwd=repo_root)
     finally:
         if moved:
             os.rename(stash, release_dir)
+        for full, target in removed_links:
+            if not os.path.lexists(full):
+                os.symlink(target, full)
+
+
+def _tracked_release_symlinks(repo_root: str) -> list[tuple[str, str]]:
+    """Tracked paths that on disk are symlinks pointing into `.release/` — i.e.
+    managed mirrors a pre-WS7 seed committed (only release's mirrors ever point
+    there). Returns (repo-relative path, symlink target) pairs; the target rides
+    along so :func:`_commit_untracking` can recreate the link after the
+    untracking commit. Checked on DISK rather than by index mode so a real file
+    the apply phase just migrated to a symlink (its index entry still 100644) is
+    caught too."""
+    try:
+        out = gh.git(["ls-files", "-z"], cwd=repo_root)
+    except Exception:
+        return []
+    links: list[tuple[str, str]] = []
+    for rel in out.split("\0"):
+        if not rel:
+            continue
+        full = os.path.join(repo_root, rel)
+        if os.path.islink(full) and ".release/" in os.readlink(full):
+            links.append((rel, os.readlink(full)))
+    return links
+
+
+_EXCLUDE_BEGIN = "# >>> release-core managed mirrors (rewritten by every init) >>>"
+_EXCLUDE_END = "# <<< release-core managed mirrors <<<"
+
+
+def _write_mirror_excludes(dests: set[str]) -> None:
+    """Rewrite the managed block in `.git/info/exclude` listing every ephemeral
+    mirror dest (WS7, release#528), so the untracked symlinks never show up in
+    `git status`. Runs relative to cwd (init has chdir'd into the repo root).
+    info/exclude — not the consumer's .gitignore — because the point is ZERO
+    tracked footprint; it is per-clone state recomposed by every init, exactly
+    like the mirrors it covers. Idempotent: the block is replaced wholesale.
+    Quietly a no-op outside a git work tree."""
+    try:
+        ex_path = gh.git(["rev-parse", "--git-path", "info/exclude"]).strip()
+    except Exception:
+        return
+    try:
+        with open(ex_path, encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        lines = []
+    if _EXCLUDE_BEGIN in lines and _EXCLUDE_END in lines:
+        i, j = lines.index(_EXCLUDE_BEGIN), lines.index(_EXCLUDE_END)
+        if i < j:
+            del lines[i : j + 1]
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if dests:
+        if lines:
+            lines.append("")
+        lines.append(_EXCLUDE_BEGIN)
+        # Leading "/" roots each pattern at the repo top level, matching the
+        # repo-relative dests exactly (never a same-named nested path).
+        lines.extend(f"/{d}" for d in sorted(dests))
+        lines.append(_EXCLUDE_END)
+    content = "\n".join(lines) + "\n" if lines else ""
+    d = os.path.dirname(ex_path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix="exclude.tmp.", dir=d or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, ex_path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool) -> None:
@@ -444,7 +555,18 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
         # `git commit -- .release` errors with "pathspec did not match" on a fresh
         # consumer where nothing under it is tracked.
         release_tracked = gh.git_path_tracked(".release", cwd=repo_root)
-        commit_paths = list(written)
+        # WS7 migration (release#528): untrack the symlink mirrors a pre-WS7 seed
+        # committed — they are ephemeral now (materialized + excluded every init).
+        mirror_links = _tracked_release_symlinks(repo_root)
+        # A `written` path can be a swept EPHEMERAL symlink: gone from disk and
+        # never tracked, so `git add` would error "pathspec did not match" and
+        # void the whole commit. Stage only what git can see.
+        stageable = [
+            p
+            for p in written
+            if os.path.lexists(os.path.join(repo_root, p)) or gh.git_path_tracked(p, cwd=repo_root)
+        ]
+        commit_paths = stageable + [rel for rel, _ in mirror_links]
         if release_tracked:
             commit_paths.append(".release")
         if not commit_paths:
@@ -452,16 +574,23 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
             # gitignored .release/ tree (ephemeral, never committable). Skip rather
             # than run a pathspec-less `git commit` that would fold in unrelated work.
             return
-        # force=True: managed MIRROR paths are release-owned and must be tracked
+        # force=True: managed real-file paths are release-owned and must be tracked
         # even if the consumer's .gitignore covers one (e.g. `.claude/` shadowing
         # the managed `.claude/skills/`) — otherwise the migration commit silently
-        # fails on the ignored path. NEVER `.release/`: it is gitignored on purpose
-        # and is NOT in `written`, so force-add can't resurrect it.
-        gh.git_add(written, cwd=repo_root, force=True)
+        # fails on the ignored path. NEVER `.release/` or a symlink mirror: those
+        # are ephemeral on purpose and are NOT in `written`, so force-add can't
+        # re-track them.
+        gh.git_add(stageable, cwd=repo_root, force=True)
         # Commit ONLY the managed pathspecs. A pathspec-scoped commit ignores any
         # other staged changes, so a user's in-progress staging is never folded in.
-        if release_tracked:
-            _commit_untracking_release(repo_root, commit_paths, message)
+        if release_tracked or mirror_links:
+            _commit_untracking(
+                repo_root,
+                commit_paths,
+                message,
+                stash_release=release_tracked,
+                mirror_links=mirror_links,
+            )
         else:
             gh.git_commit_paths(commit_paths, message, cwd=repo_root)
     except Exception as exc:  # ProcError or anything git surfaces
@@ -550,10 +679,13 @@ def _main_full(
         )
         return 0
 
-    # WS4 one-time migration (release#521): a previously-committed `.release/` must
-    # be untracked even when the composed tree is byte-identical (changes == 0) —
-    # detect it independently so the migration commit still fires.
+    # One-time migrations that are commit-worthy even at changes == 0 (the
+    # composed tree can be byte-identical while the INDEX still carries ephemeral
+    # content) — detect independently so the migration commit still fires:
+    # a previously-committed `.release/` (WS4, release#521) and previously-
+    # committed symlink mirrors (WS7, release#528).
     release_was_tracked = gh.git_path_tracked(".release", cwd=repo_root)
+    mirrors_were_tracked = bool(_tracked_release_symlinks(repo_root))
 
     if changes:
         suffix = f", {len(conflicts)} conflict(s)" if conflicts else ""
@@ -565,15 +697,17 @@ def _main_full(
         print(f"summary: 0 changes but {len(conflicts)} unresolved conflict(s) — see stderr.")
     elif release_was_tracked:
         print("summary: managed tree already current; untracking committed .release/ (WS4).")
+    elif mirrors_were_tracked:
+        print("summary: managed tree already current; untracking committed mirrors (WS7).")
     else:
         print("summary: managed tree already current (no changes).")
 
     # AUTO-COMMIT: commit the managed mirror paths when something changed, OR when
-    # a previously-committed `.release/` still needs untracking (the WS4 migration,
-    # which is commit-worthy even at changes == 0). --no-commit skips the commit
+    # previously-committed ephemeral content still needs untracking (the WS4/WS7
+    # migrations, commit-worthy even at changes == 0). --no-commit skips the commit
     # (for tests/inspection). Conservative and never-fail (see _auto_commit). On
     # any branch — the managed tree is generated, needs no review.
-    if (changes or release_was_tracked) and not no_commit:
+    if (changes or release_was_tracked or mirrors_were_tracked) and not no_commit:
         _auto_commit(repo_root, managed, _full_commit_message(ref_label), push=push)
     return 0
 

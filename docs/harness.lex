@@ -119,17 +119,22 @@ The Agent Harness
     3.2. Ownership policy
 
         release/ is the single source of truth for the skills it distributes.
-        WS2 (release#523, "invoke don't discover") cut that distributed set to the
-        TWO skills the harness needs a file on disk for — `gh-pr-review-loop` (the
-        `/`-triggered PR-loop driver) and `release-issue-relay` (escalation). The
-        general development-cycle guidance no longer ships as skill files; it lives
-        in `release-core how-to`, rendered from the binary. A consumer owns its own
-        application-domain skills; general dev-cycle skills are the agent's own
-        (global) skills, not release's to push.
+        WS2 (release#523, "invoke don't discover") cut that distributed set to
+        two; WS7 (release#528) cut it to the ONE skill the harness needs a file
+        on disk for — `gh-pr-review-loop` (the `/`-triggered PR-loop driver).
+        `release-issue-relay` was dropped from distribution: the escalation
+        contract is binary-carried (the CLAUDE.md stub, `release-core how-to`,
+        and the `release-core issue file` console path). The general
+        development-cycle guidance likewise lives in `release-core how-to`,
+        rendered from the binary. A consumer owns its own application-domain
+        skills; general dev-cycle skills are the agent's own (global) skills,
+        not release's to push.
 
-        The two distributed skills are still synced (never hand-copied) as symlinks
-        into the `.release/` build tree, so a consumer's copy cannot drift from
-        release's official blob.
+        The distributed skill is still synced (never hand-copied) as a symlink
+        into the `.release/` build tree — and since WS7 that mirror is EPHEMERAL
+        (untracked, listed in `.git/info/exclude`, recomposed by every init), so
+        a consumer's copy cannot drift from release's official blob and leaves
+        no tracked footprint.
 
     3.3. The three distribution tiers
 
@@ -139,9 +144,11 @@ The Agent Harness
         the authority; the names below are a convenience snapshot.
 
         Push-all (synced to EVERY consumer, unconditionally):
-            The two skills the harness needs a file on disk for. Currently:
-            `gh-pr-review-loop` (PR-loop driver), `release-issue-relay`
-            (escalation). WS2 (release#523) dropped `pr-review-respond` + the 15
+            The one skill the harness needs a file on disk for. Currently:
+            `gh-pr-review-loop` (PR-loop driver). WS7 (release#528) dropped
+            `release-issue-relay` (escalation is binary-carried via
+            `release-core how-to` + `issue file`); WS2 (release#523) dropped
+            `pr-review-respond` + the 15
             dev-cycle skills (diagnose, tdd, review, triage, to-issues, handoff,
             qa, grill-me, grill-with-docs, improve-codebase-architecture,
             request-refactor-plan, ubiquitous-language, zoom-out, teach,
