@@ -273,11 +273,16 @@ def test_python_dash_m_release_core_runs_the_cli():
     import sys as _sys
 
     pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(rvf.__file__)))
+    # PREPEND to any existing PYTHONPATH (don't clobber it) — mirrors how the
+    # in-checkout shim's pin propagates alongside whatever the env carries.
+    pythonpath = os.pathsep.join(
+        p for p in (os.path.dirname(pkg_parent), os.environ.get("PYTHONPATH")) if p
+    )
     r = subprocess.run(
         [_sys.executable, "-m", "release_core", "--help"],
         capture_output=True,
         text=True,
-        env={**os.environ, "PYTHONPATH": os.path.dirname(pkg_parent)},
+        env={**os.environ, "PYTHONPATH": pythonpath},
     )
     assert r.returncode == 0
     assert "release-core" in r.stdout
