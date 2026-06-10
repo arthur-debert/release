@@ -67,10 +67,15 @@ done
 
 [ ${#shell_files[@]} -eq 0 ] && exit 0
 
-# The rc file (`.shellcheckrc`) is found by walking UP from each checked file's
-# directory to the repo root — there is no version-portable explicit-config flag
-# (`--rcfile` only landed in shellcheck 0.10.0, and the fleet's CI installs 0.9.0
-# via apt). So unlike markdownlint/yamllint/prettier, the rc is NOT vendored into
-# .release/ in WS3 (release#524): it stays a root-discovered dotfile, the same
-# category as .editorconfig. No explicit-config flag needed here.
-shellcheck --severity=info -- "${shell_files[@]}"
+# The rc is vendored into the ephemeral .release/ and passed EXPLICITLY via
+# --rcfile (release#531 F3) — same pattern as markdownlint/yamllint/prettier.
+# Portable since release#536 pinned shellcheck 0.11 fleet-wide (--rcfile is
+# >= 0.10; the old apt 0.9.0 was the blocker). When the rc is absent (a repo
+# with no materialized .release/, e.g. release itself or a unit-test tmpdir),
+# run WITHOUT it: the rc only relaxes (disable=SC1091, external-sources), so a
+# missing rc lints STRICTER, never hollower — the safe failure direction.
+if [ -f .release/.shellcheckrc ]; then
+  shellcheck --severity=info --rcfile=.release/.shellcheckrc -- "${shell_files[@]}"
+else
+  shellcheck --severity=info -- "${shell_files[@]}"
+fi

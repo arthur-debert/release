@@ -56,10 +56,15 @@ jobs:
         # dep. Install JUST it (no wheel build) so the bare-python shim resolves;
         # read from pyproject so the list is never a second definition.
         run: pip install click
-      - name: Install bats + shellcheck
-        # shellcheck: the unified-gate dogfood (gate-unified.bats) lints the
-        # synced distributed tools with templates/commons/bin/check-shell.
-        run: sudo apt-get update && sudo apt-get install -y bats shellcheck
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Provision the gate toolset (pinned shellcheck)
+        # The unified-gate dogfood (gate-unified.bats) lints the synced
+        # distributed tools with templates/commons/bin/check-shell, which runs
+        # shellcheck. ONE provisioner at the gate-tool-versions.sh pins — the
+        # old apt shellcheck was 0.9.0, a different tool than the pinned 0.11
+        # every other environment runs (release#531 F3).
+        run: bash bin-internal/provision-gate-toolset.sh
       - name: Install yq (mikefarah v4 — pinned)
         # Pin an explicit v4 release, NOT releases/latest: the determinism
         # of the marker round-trip depends on the yq major that composes
