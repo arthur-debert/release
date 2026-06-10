@@ -10,6 +10,7 @@ sync/gate columns, the combined-output logs, and the exit-code policy
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
@@ -48,8 +49,10 @@ class _Driver:
     fail."""
 
     # The fleet accessor is now invoked as the hierarchical CLI (`managed-repos`
-    # was retired in the B2 cutover; #468). Match on the leading command vector.
-    _REPOS_LIST = ["release-core", "admin", "repos", "list"]
+    # was retired in the B2 cutover; #468), spawned via _SELF_CLI — this
+    # interpreter, `-m release_core` — never a bare-name PATH lookup (#534).
+    # Match on the leading command vector.
+    _REPOS_LIST = [*rvf._SELF_CLI, "admin", "repos", "list"]
 
     def __init__(self, paths, kinds=None, sync_rc=None, gate_rc=None, clone_rc=0):
         self.paths = paths
@@ -70,10 +73,10 @@ class _Driver:
             cwd = kw.get("cwd")
             kind = self.kinds.get(cwd, "rust-cli")
             return _cp(returncode=0 if kind != "?" else 1, stdout="" if kind == "?" else kind)
-        if cmd[:2] == ["release-core", "init"]:
+        if cmd[: len(rvf._SELF_CLI) + 1] == [*rvf._SELF_CLI, "init"]:
             cwd = kw.get("cwd")
             return _cp(self.sync_rc.get(cwd, 0), stdout="sync-out\n", stderr="sync-err\n")
-        if cmd[:2] == ["release-core", "gate"]:
+        if cmd[: len(rvf._SELF_CLI) + 1] == [*rvf._SELF_CLI, "gate"]:
             # WS3 (release#524): the gate runs via `release-core gate` (it points
             # lefthook at the materialized .release/lefthook.yml), not a bare
             # `lefthook run` against a now-absent root config.
@@ -217,7 +220,9 @@ def test_sync_pins_ref_sha_and_release_home(env, monkeypatch):
     driver = _Driver(_row("o/a", root) + "\n")
     monkeypatch.setattr(proc, "run", driver)
     rvf.main(["--root", root])
-    sync = next(c for c in driver.calls if c[0][:2] == ["release-core", "init"])
+    sync = next(
+        c for c in driver.calls if c[0][: len(rvf._SELF_CLI) + 1] == [*rvf._SELF_CLI, "init"]
+    )
     assert sync[1]["env"]["RELEASE_REF"] == "0123456789abcdef" * 2
     # RELEASE_HOME is the shim dir's parent (VERIFY_FLEET_SCRIPT_DIR/..).
     assert sync[1]["env"]["RELEASE_HOME"] == rvf._release_home()
@@ -250,3 +255,29 @@ def test_writes_combined_sync_and_gate_logs(env, monkeypatch, tmp_path):
     # _write_log concatenates stdout then stderr verbatim (bash `>LOG 2>&1`).
     assert (repo_dir / ".verify-sync.log").read_text() == "sync-out\nsync-err\n"
     assert (repo_dir / ".verify-gate.log").read_text() == "gate-out\ngate-err\n"
+
+
+def test_self_cli_is_this_interpreter_not_a_path_lookup():
+    """#534: every nested release-core call must run THIS interpreter + package
+    (`sys.executable -m release_core`), never a bare-name PATH lookup — which on
+    a dev box resolves to the in-checkout shim and dies on nested dep
+    re-resolution. And release-core must NOT be in the PATH preflight guard."""
+    import sys as _sys
+
+    assert rvf._SELF_CLI == [_sys.executable, "-m", "release_core"]
+
+
+def test_python_dash_m_release_core_runs_the_cli():
+    """`python -m release_core` (the __main__ shim) is the self-spawn target —
+    it must dispatch the same CLI as the console-script."""
+    import sys as _sys
+
+    pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(rvf.__file__)))
+    r = subprocess.run(
+        [_sys.executable, "-m", "release_core", "--help"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": os.path.dirname(pkg_parent)},
+    )
+    assert r.returncode == 0
+    assert "release-core" in r.stdout
