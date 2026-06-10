@@ -273,10 +273,20 @@ jobs:
             echo "ERROR: .release/ is git-tracked — it must be ephemeral (gitignored)" >&2
             git ls-files .release >&2; exit 1
           fi
-          # The committed MIRRORS (symlinks + workflow copies + CLAUDE.md block) are
-          # still a non-trivial managed surface — FAR more than a stray file or two.
-          n="$(git ls-files | wc -l | tr -d ' ')"
-          [ "$n" -gt 20 ] || { echo "ERROR: only $n files tracked — not a full mirror set" >&2; exit 1; }
+          # WS7 (#528): the symlink mirrors are EPHEMERAL — materialized on disk
+          # but NEVER tracked (listed in .git/info/exclude). The tracked surface
+          # is the irreducible set only: zero tracked symlinks, mirrors live on
+          # disk, exclude block present, status clean.
+          n_links="$(git ls-files -s | awk '$1 == "120000"' | wc -l | tr -d ' ')"
+          [ "$n_links" -eq 0 ] || {
+            echo "ERROR: $n_links tracked symlink(s) — mirrors must be ephemeral (WS7)" >&2
+            git ls-files -s | awk '$1 == "120000" {print $4}' >&2; exit 1
+          }
+          test -L .editorconfig || { echo "ERROR: .editorconfig mirror not materialized" >&2; exit 1; }
+          grep -q "release-core managed mirrors" "$(git rev-parse --git-path info/exclude)" \
+            || { echo "ERROR: no managed mirror block in .git/info/exclude" >&2; exit 1; }
+          [ -z "$(git status --porcelain)" ] \
+            || { echo "ERROR: tree not clean after init (mirrors leaking into status?)" >&2; git status --porcelain >&2; exit 1; }
           # AUTO-COMMIT ON CHANGE: the managed change must be committed (the boot
           # passes no flags; auto-commit is the default in full mode).
           subject="$(git log -1 --pretty=format:%s)"
