@@ -46,6 +46,12 @@ import sys
 
 from .. import gh, proc
 
+# Re-invoke THIS package's CLI in a subprocess: same interpreter, same env, same
+# code as the running process — never a bare-name PATH lookup, which on a dev
+# box resolves to the in-checkout shim and dies on nested dep re-resolution
+# (release#534: `admin repos verify` failed in phase 1 before any clone/gate).
+_SELF_CLI = [sys.executable, "-m", "release_core"]
+
 # The --help body mirrors the bash `show_help() { sed -n '2,/^$/p' "$0" | sed -E
 # 's/^# ?//'; }`: lines 2..first-blank of the header comment. That range is the
 # docstring's first paragraph (down to the blank line before "Usage:"); since
@@ -120,7 +126,9 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     os.environ["RELEASE_HOME"] = release_home
 
     # --- Dependency guard ------------------------------------------------
-    for tool in ("release-core", "detect-kind", "lefthook", "yq", "gh", "git"):
+    # NO "release-core" here: the nested CLI calls go through _SELF_CLI (this
+    # interpreter, -m release_core), never a PATH lookup (release#534).
+    for tool in ("detect-kind", "lefthook", "yq", "gh", "git"):
         if shutil.which(tool) is None:
             print(f"release-verify-fleet: {tool} not on PATH", file=sys.stderr)
             return 2
@@ -145,8 +153,9 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
 
     # The fleet accessor is now the hierarchical CLI verb (the flat
     # `managed-repos` console-script was retired in the B2 cutover; #468). Argv
-    # passes through `release-core admin repos list` straight to the verb.
-    repos_list = ["release-core", "admin", "repos", "list"]
+    # passes through `release-core admin repos list` straight to the verb —
+    # via _SELF_CLI, so the nested call runs THIS process's interpreter+code.
+    repos_list = [*_SELF_CLI, "admin", "repos", "list"]
 
     # --- Phase 1: materialize the fleet (hermetic — into $root, never ~/h) ---
     print("==> cloning/refreshing fleet", file=sys.stderr)
@@ -244,7 +253,7 @@ def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
     Combined stdout+stderr is written to <abspath>/.verify-sync.log. Returns True
     on a zero exit."""
     result = proc.run(
-        ["release-core", "init", "--no-commit"],
+        [*_SELF_CLI, "init", "--no-commit"],
         cwd=abspath,
         env={"RELEASE_REF": ref_sha, "RELEASE_HOME": release_home},
         check=False,
@@ -260,14 +269,14 @@ def _run_gate(abspath: str) -> bool:
     (release#524) the consumer no longer tracks a root lefthook.yml for lefthook
     to discover — the gate definition lives in the just-materialized
     ``.release/lefthook.yml``, and ``release-core gate`` is what points lefthook at
-    it (LEFTHOOK_CONFIG) the same way the local hook + CI do. ``release-core`` is a
-    required preflight tool (the dependency guard in ``main()`` exits 2 if it is
-    not on PATH), so it resolves here.
+    it (LEFTHOOK_CONFIG) the same way the local hook + CI do. Spawned via
+    ``_SELF_CLI`` (this interpreter, ``-m release_core``), never a PATH lookup
+    (release#534).
 
     Combined stdout+stderr is written to <abspath>/.verify-gate.log. Returns
     True on a zero exit (the gate passed / skipped missing tools cleanly)."""
     result = proc.run(
-        ["release-core", "gate"],
+        [*_SELF_CLI, "gate"],
         cwd=abspath,
         check=False,
     )

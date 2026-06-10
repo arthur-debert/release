@@ -1,0 +1,1 @@
+- admin repos verify self-spawns nested release-core calls via sys.executable -m release_core — the local pre-flight works from the in-checkout shim again (#534)
