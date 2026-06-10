@@ -264,7 +264,7 @@ def test_self_cli_is_this_interpreter_not_a_path_lookup():
     re-resolution. And release-core must NOT be in the PATH preflight guard."""
     import sys as _sys
 
-    assert rvf._SELF_CLI == [_sys.executable, "-m", "release_core"]
+    assert [_sys.executable, "-m", "release_core"] == rvf._SELF_CLI
 
 
 def test_python_dash_m_release_core_runs_the_cli():
