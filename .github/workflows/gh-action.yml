@@ -116,6 +116,14 @@ jobs:
         # because the release run needs the scripts, not a tree materialize.
         run: bash bin/install-release-core --major v2 --no-init
 
+      - name: Arm the gate + materialize the managed .release/ tree
+        # ONE definition of CI gate-arming — the arm-gate composite (materialize
+        # .release/ from the wheel + provision the pinned gate toolset), same as
+        # rust-cli.yml. Without it this workflow's bot gate had NOTHING to run
+        # on a post-WS3 consumer (no root lefthook.yml, .release/ never
+        # materialized) and silently skipped (release#531 F1).
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
+
       - name: Validate + detect resume
         id: prep
         shell: bash
@@ -248,55 +256,28 @@ jobs:
             # No manifest to bump. Composite actions are identified by
             # the tag itself. Commit the rolled changelog (when any)
             # + tag current HEAD.
-            # Pre-commit gate — hold the bot commit to the consumer's
-            # own gate. Equivalent to
-            # .github/actions/run-precommit-gate@v1 (canonical
-            # reference); inlined because this step is a single `run:`
-            # block. Set SKIP_PRECOMMIT_GATE=true to bypass.
+            # Pre-commit gate — hold the bot commit to the consumer's own
+            # gate, through the binary (release#531 F1). arm-gate above
+            # materialized .release/ + provisioned the pinned toolset;
+            # `release-core gate --hook` points lefthook at
+            # .release/lefthook.yml (falling back to discovery for a
+            # pre-migration root config). Replaces the drifted inline copy
+            # that only detected ROOT configs — on a post-WS3 consumer it
+            # silently SKIPPED the gate. SKIP_PRECOMMIT_GATE=true bypasses.
             if [ "${SKIP_PRECOMMIT_GATE:-false}" != "true" ]; then
               # --diff-filter=d excludes ONLY Deleted (lowercase = exclude
-              # that status), keeping every path that still exists —
-              # including type-changes (T, e.g. file↔symlink). The changelog
-              # roll deletes unreleased-*.md fragments, and a deleted path
-              # can't be linted/formatted. Feeding one to lefthook's prettier
-              # (stage_fixed: true) makes it `git add --force` a vanished
-              # file → exit 128. The deletion still commits via the index.
+              # that status), keeping every path that still exists. The
+              # changelog roll deletes unreleased-*.md fragments; a deleted
+              # path can't be linted (lefthook's stage_fixed would
+              # `git add --force` a vanished file → exit 128). The deletion
+              # still commits via the staged index.
               mapfile -t staged_arr < <(git diff --cached --name-only --diff-filter=d)
               if [ "${#staged_arr[@]}" -gt 0 ]; then
-                if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
-                  echo "Pre-commit gate: lefthook"
-                  lefthook_file_args=()
-                  for f in "${staged_arr[@]}"; do
-                    lefthook_file_args+=(--file "$f")
-                  done
-                  if [ -f pnpm-lock.yaml ]; then
-                    corepack enable >/dev/null 2>&1 || true
-                    pnpm install --frozen-lockfile --ignore-scripts
-                    pnpm exec lefthook run pre-commit "${lefthook_file_args[@]}"
-                  elif [ -f package-lock.json ]; then
-                    npm ci --ignore-scripts
-                    npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
-                  elif [ -f yarn.lock ]; then
-                    corepack enable >/dev/null 2>&1 || true
-                    yarn install --frozen-lockfile --ignore-scripts
-                    yarn exec lefthook run pre-commit "${lefthook_file_args[@]}"
-                  elif command -v lefthook >/dev/null 2>&1; then
-                    lefthook run pre-commit "${lefthook_file_args[@]}"
-                  else
-                    npx --yes lefthook run pre-commit "${lefthook_file_args[@]}"
-                  fi
-                elif [ -f .pre-commit-config.yaml ] || [ -f .pre-commit-config.yml ]; then
-                  echo "Pre-commit gate: pre-commit framework"
-                  if command -v pipx >/dev/null 2>&1; then
-                    pipx run pre-commit run --files "${staged_arr[@]}"
-                  else
-                    python3 -m pip install --user --quiet pre-commit
-                    "$(python3 -m site --user-base)/bin/pre-commit" run --files "${staged_arr[@]}"
-                  fi
-                elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
-                  echo "Pre-commit gate: husky"
-                  bash .husky/pre-commit
-                fi
+                lefthook_file_args=()
+                for f in "${staged_arr[@]}"; do
+                  lefthook_file_args+=(--file "$f")
+                done
+                release-core gate --hook "${lefthook_file_args[@]}"
                 if ! git diff --quiet; then
                   echo "Pre-commit gate produced auto-fixes — re-staging."
                   git add -u

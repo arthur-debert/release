@@ -101,8 +101,39 @@ elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
   echo "Detected husky pre-commit — running gate."
   run_husky
   gate_ran=1
+elif command -v release-core >/dev/null 2>&1; then
+  # The hollow-green spot (release#531 F1): a post-WS3 managed consumer has NO
+  # root gate config (the gate lives in the ephemeral .release/, WS4), and
+  # outside rust-cli's arm-gate nothing materialized .release/ — so this branch
+  # used to fall through to "skipping" and the bot commit went UNGATED. The
+  # release flows install release-core earlier (install-release-core-pkg.sh /
+  # install-release-core), so: materialize the managed tree from the wheel
+  # bundle (offline — BundleSource, no network/token), then run the real gate
+  # through the binary. `release-core gate --hook` resolves lefthook (PATH or
+  # node_modules/.bin), points it at .release/lefthook.yml via LEFTHOOK_CONFIG,
+  # and forwards the --file args; node consumers get their gate deps installed
+  # first, same as the root-config path. Failures here are LOUD (set -e; the
+  # gate verb exits 1 on a missing lefthook — it never skips).
+  echo "No root gate config but release-core is present — materializing the managed gate."
+  if [ ! -f .release/lefthook.yml ]; then
+    release-core init --no-commit
+  fi
+  if [ -f pnpm-lock.yaml ]; then
+    corepack enable >/dev/null 2>&1 || true
+    echo "→ pnpm install (frozen, no scripts) for gate deps"
+    pnpm install --frozen-lockfile --ignore-scripts
+  elif [ -f package-lock.json ]; then
+    echo "→ npm ci (no scripts) for gate deps"
+    npm ci --ignore-scripts
+  elif [ -f yarn.lock ]; then
+    corepack enable >/dev/null 2>&1 || true
+    echo "→ yarn install (frozen, no scripts) for gate deps"
+    yarn install --frozen-lockfile --ignore-scripts
+  fi
+  release-core gate --hook "${lefthook_file_args[@]}"
+  gate_ran=1
 else
-  echo "No pre-commit gate detected (no lefthook / pre-commit / husky config) — skipping."
+  echo "No pre-commit gate detected (no lefthook / pre-commit / husky config, no release-core) — skipping."
 fi
 
 if [ "${gate_ran}" = "1" ] && ! git diff --quiet; then
