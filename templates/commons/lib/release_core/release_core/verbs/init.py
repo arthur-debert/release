@@ -2,11 +2,14 @@
 
 Usage:
   release-core init [--dry-run] [--no-commit] [--push]
+  release-core init [--commit] [--force]    # tolerated legacy no-ops (see Flags)
 
 `release-core init` is the pull-model seam: the SessionStart boot
 (`install-release-core`) pulls the `release_core` wheel and runs `init`, so a
-consumer self-updates its entire managed tree from the wheel bundle — no
-push step — there is no push mechanism (#476).
+consumer self-updates its entire managed tree from the wheel bundle. Fleet
+DISTRIBUTION is pull-only — there is no push mechanism (#476; `orc propagate`
+was removed). The `--push` flag below is unrelated to distribution: it is an
+opt-in plain `git push` of the LOCAL managed auto-commit.
 
 A bare `release-core init` runs the COMPLETE release-sync pipeline (build_plan +
 materialize + compute_mirror + apply) sourced from the wheel bundle — the whole
