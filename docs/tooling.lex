@@ -41,9 +41,10 @@ release-core, the gate, distribution, and workflows
           block) and auto-commit any managed change. This is "release-sync
           sourced from the wheel"; it is what SessionStart runs, carrying the
           full tree so consumers self-update by pull — there is no push step.
-          `--config-only` is the escape hatch — materialize just the config
-          subset (lefthook.yml + lint configs). (`--full` is a redundant alias
-          of the default.)
+          The `--config-only` escape hatch (and its `--full` alias) was
+          REMOVED in #532 — post-WS3 it composed root configs whose gate
+          referenced a `.release/` it never created; the full materialize is
+          the only mode.
         - `release-core sync run` / `sync drift-check` — materialize the
           `.release/` tree ([#5]) / fail if it has drifted.
         - `release-core changelog add|cut|render` — manage the changelog.

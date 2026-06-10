@@ -26,8 +26,8 @@ The Agent Harness
       (the `.release/` build dir + every working-tree mirror — skills,
       ORIENTATION, configs, the CLAUDE.md block) and auto-commits any managed
       change. This is the pull-model self-sync: the wheel pull carries the whole
-      tree and there is no push step. (`release-core init --config-only`
-      refreshes just the lint/gate config subset — the escape hatch.)
+      tree and there is no push step. (The `--config-only` escape hatch was
+      removed in #532 — the full materialize is the only mode.)
     - §1+ (cloud only) — submodule/tag restore, dependency cache warm-up, venv
       setup, CA cert import, optional per-repo `app-bin/post-setup-hook.sh`.
 

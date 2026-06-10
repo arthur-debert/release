@@ -1,0 +1,1 @@
+- Removed release-core init --config-only and --full; bare init (full materialize) is the only mode
