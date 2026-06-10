@@ -67,9 +67,29 @@ runs:
         # so expose it as GH_TOKEN for both install-release-core and any gh call
         # `release-core init` makes.
         GH_TOKEN: ${{ github.token }}
+        # The ref THIS composite was resolved at (`v2`, an exact `v2.15.0`, a
+        # branch, or a SHA) — how the step knows its own major line below.
+        ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
-        bash "${{ github.action_path }}/../../../bin/install-release-core" --no-init
+        # Pin the wheel to THIS action's major line (release#541): the resolver's
+        # default is `releases/latest`, which would hand a consumer pinned at
+        # @v2 the v3 wheel the moment a v3 release exists. A vN/vN.x.y action
+        # ref yields `--major vN`; a branch/SHA ref (release's own repo uses
+        # `./.github/actions/arm-gate`) has no major line → default to latest,
+        # today's behavior.
+        major=""
+        case "${ACTION_REF:-}" in
+          v[0-9]*)
+            major="${ACTION_REF%%.*}"
+            # Only a pure vN survives — a branch like `v2-experiments` would
+            # otherwise leak through the glob as a bogus --major value.
+            case "$major" in
+              v*[!0-9]*) major="" ;;
+            esac ;;
+        esac
+        bash "${{ github.action_path }}/../../../bin/install-release-core" \
+          --no-init ${major:+--major "$major"}
         export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
         release-core init --no-commit
     - name: Provision the gate toolset
