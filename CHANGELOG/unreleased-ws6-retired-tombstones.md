@@ -1,1 +1,0 @@
-- init now removes retired release-distributed files (check-fmt/check-lint, changelog shims, bin/release, .release-sync-state.yaml) — provenance-gated tombstones, one managed commit (#527)

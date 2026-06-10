@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 2.15.0 - 2026-06-10
+
+- init now removes retired release-distributed files (check-fmt/check-lint, changelog shims, bin/release, .release-sync-state.yaml) — provenance-gated tombstones, one managed commit (#527)
+- WS7: symlink mirrors (bin tools, .editorconfig, skills) are now ephemeral — untracked, init-materialized, listed in .git/info/exclude; one-time managed commit untracks pre-WS7 seeds; release-issue-relay dropped from skill distribution (escalation is binary-carried) (#528)
+
 ## 2.14.0 - 2026-06-10
 
 - gh-action.yml's prepare materialize now skips when a root lefthook.yml exists — unblocks release's own cut (init has no detectable kind on the source repo) (#544)
