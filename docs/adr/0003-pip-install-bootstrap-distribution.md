@@ -70,9 +70,12 @@ followed by `release-core init`.**
   > managed tree (the `.release/` build dir + every working-tree mirror — skills,
   > ORIENTATION, configs, the CLAUDE.md block) from the wheel bundle and
   > auto-committing managed changes — "release-sync sourced from the wheel". The
-  > config-subset behavior described here is the `--config-only` escape hatch. So
-  > the wheel pull now carries the full tree, retiring `orc propagate` in steady
-  > state (see "What this changes" → propagate bullet below, now realized).
+  > config-subset behavior described here became the `--config-only` escape
+  > hatch — then was REMOVED outright in #532 (post-WS3 it composed root configs
+  > whose gate referenced a `.release/` it never created; the full materialize is
+  > the only mode). So the wheel pull now carries the full tree, retiring
+  > `orc propagate` in steady state (see "What this changes" → propagate bullet
+  > below, now realized).
 
 The canonical boot resolver — used by both the CI and local-dev contexts
 (`gh` is the GitHub CLI):

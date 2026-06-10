@@ -22,6 +22,17 @@ coordinated with all consumers before cutting.
 > entries are kept verbatim as a record of what each tag shipped at the time.
 > See `docs/lex-release-cascade.md` for the current model.
 
+## Unreleased — `release-core init --config-only` and `--full` removed (#532)
+
+**Type:** flag removal; not caller-breaking for the fleet (SessionStart runs a
+bare `init`; no managed flow passed either flag). `--config-only` materialized
+the config subset to the repo ROOT — post-WS3 that produced a root gate whose
+commands point at a `.release/` it never created, an internally inconsistent
+escape hatch nothing used. `--full` was its redundant alias. Both are now plain
+unknown flags (exit 64). `--commit` / `--force` remain TOLERATED no-ops — the
+deployed pre-migration SessionStart resolver still passes `--commit` on its
+first cutover pull, and rejecting it would stall the fleet bootstrap.
+
 ## Unreleased — `.shellcheckrc` joins the release-internal set (#531 F3)
 
 **Type:** behavior change, not caller-breaking. On next `init` the root
@@ -72,9 +83,9 @@ leave the consumer root and live only in the ephemeral `.release/` build dir:
 `--all-files`) and the commit-time hook both resolve the gate from `.release/`.
 The release-cut bot gate (`run-precommit-gate.sh`, rust `prepare-release`) prefers
 `.release/lefthook.yml` via `LEFTHOOK_CONFIG`. Note: `release-core init
---config-only` (the legacy escape hatch) still writes the gate files to the root
-and is now inconsistent with the gate's `.release/` config paths — slated for
-removal in a follow-up.
+--config-only` (the legacy escape hatch) still wrote the gate files to the root,
+inconsistent with the gate's `.release/` config paths — removed in #532 (see the
+entry above).
 
 ## Unreleased — WS2: CLAUDE.md → stub; ORIENTATION + most skills no longer synced (#523)
 

@@ -1,118 +1,60 @@
 """init — materialize the managed tree into a consumer repo (the pull-model boot).
 
 Usage:
-  release-core init [--dry-run] [--no-commit] [--push]            # DEFAULT: full
-  release-core init --config-only [--force] [--dry-run] [--commit] [--push]
-  release-core init --full ...                                    # redundant alias
+  release-core init [--dry-run] [--no-commit] [--push]
 
 `release-core init` is the pull-model seam: the SessionStart boot
 (`install-release-core`) pulls the `release_core` wheel and runs `init`, so a
 consumer self-updates its entire managed tree from the wheel bundle — no
 push step — there is no push mechanism (#476).
 
-DEFAULT (full materialize): a bare `release-core init` runs the COMPLETE
-release-sync pipeline (build_plan + materialize + compute_mirror + apply) sourced
-from the wheel bundle — the whole `.release/` build dir + every working-tree
-mirror (skills, ORIENTATION, configs, per-Kind/Capability files, real-file
-workflow copies, the CLAUDE.md managed block) — then AUTO-COMMITS ONLY the managed
-paths iff they actually changed. Byte-identical result → no commit, so churn
-tracks release cadence, not session count. This is what SessionStart runs; it is
-"release-sync sourced from the wheel". (See "Full materialize" below.)
+A bare `release-core init` runs the COMPLETE release-sync pipeline (build_plan +
+materialize + compute_mirror + apply) sourced from the wheel bundle — the whole
+`.release/` build dir + every working-tree mirror (skills, configs,
+per-Kind/Capability files, real-file workflow copies, the CLAUDE.md managed
+block) — then AUTO-COMMITS ONLY the managed paths iff they actually changed.
+Byte-identical result → no commit, so churn tracks release cadence, not session
+count. This is what SessionStart runs; it is "release-sync sourced from the
+wheel". This is the ONLY mode: the `--config-only` escape hatch (the pre-#476
+config-subset behavior) was REMOVED in release#532 — post-WS3 it materialized
+root configs whose gate referenced a `.release/` it never created, an
+internally inconsistent path nothing on the fleet used.
 
---config-only (the escape hatch — the OLD default behavior): materialize ONLY the
-CONFIG subset of what release-sync produces from templates/commons/ (see
-CONFIG_FILES below and sync.py for provenance):
+Flags:
+  --dry-run    compute + report the change count, write nothing.
+  --no-commit  materialize but skip the auto-commit (tests / CI inspection —
+               CI must never auto-commit the managed tree into a checkout).
+  --push       fast-forward push the managed commit ONLY when on the repo's
+               default branch with an otherwise-clean tree; on a feature
+               branch (or a dirty tree) the commit stays local and rides the
+               branch. Never force-pushes, never merges. Incompatible with
+               --no-commit.
 
-  lefthook.yml            (the gate — composed from fragments by sync)
-  .markdownlint.json      .markdownlintignore
-  .yamllint
-  .shellcheckrc
-  .editorconfig
-  .prettierignore
+  --commit / --force are TOLERATED no-ops (warn + proceed), NOT errors: the
+  deployed SessionStart resolver in a not-yet-migrated consumer still calls
+  `init --commit`, and that stale call performs the first cutover pull —
+  failing it would stall the fleet (the resolver can't update the tree that
+  updates the resolver). The auto-commit is automatic and the materialize
+  overwrites unconditionally, so both flags are redundant in this mode.
 
-  In --config-only, --commit/--push/--force keep their original semantics (opt-in
-  commit, create-if-absent, --force to overwrite). NOT in scope of --config-only:
-  package code (via pip), release-internal files (.release-sync-source,
-  ORIENTATION.md), the CLAUDE.md block, skills, .claude/settings.json, CHANGELOG/,
-  git-hook wiring (setup-dev-env.sh) — those ride the DEFAULT full materialize.
+Auto-commit (the pull-model commit-hygiene seam): after a materialize, if (and
+only if) managed content actually changed, init commits ONLY the exact managed
+paths it wrote (never `git add -A`, never folding in a user's other staged or
+unstaged work) with a deterministic message, on whatever branch is checked out
+(the managed tree is generated — needs no review). NO `[skip ci]` in the
+message: on a pushed branch it would block a required-checks ruleset forever.
+Conservative by construction: no changes → no commit; --dry-run → no commit; an
+unborn branch or any git error makes the commit step a quiet no-op.
 
---full is a REDUNDANT/DEPRECATED alias of the default (full IS the default now);
-it is still accepted so no caller breaks, and behaves exactly like a bare init.
-
-Behavior (--config-only):
-  - create-if-absent: an existing file is LEFT UNTOUCHED (never overwrite a
-    consumer edit in the PoC) unless --force is passed.
-  - idempotent: a second run with everything present is a clean no-op (exit 0,
-    no writes).
-  - --force: overwrite managed files even when present.
-  - --dry-run: print what WOULD happen, write nothing.
-  - exits NON-ZERO on any real failure (cannot write a file it intended to). No
-    silent best-effort swallowing for init's own writes.
-
-Auto-commit (the pull-model commit-hygiene seam):
-  - --commit: after a materialization that actually changed files, stage and
-    commit ONLY the exact managed paths init wrote (never `git add -A`, never
-    fold in a user's other staged/unstaged work) with a deterministic message.
-    The managed config tree is fully GENERATED — nothing to review — so it can
-    and should auto-commit itself instead of riding along, uncommitted, in some
-    unrelated feature PR. Conservative by construction: no changes → no commit;
-    --dry-run → no commit; an unborn branch (no HEAD) or any git error makes the
-    commit *step* a quiet no-op; if the managed paths can't be staged cleanly it
-    prints a notice and skips the commit. The commit step never fails init (init
-    itself still requires its normal git context). These --commit/--push flags
-    are the OPT-IN committing for --config-only only; a `--config-only` run
-    without --commit does not commit. (The DEFAULT full materialize auto-commits
-    managed changes on its own — see "Full materialize" below.)
-  - --push (implies --commit): fast-forward push the managed commit ONLY when
-    ALL hold — --push given, the current branch IS the repo's default branch,
-    and the working tree is otherwise clean (no non-managed changes). On a
-    feature branch (or a dirty tree) the commit stays local and just rides the
-    branch — visible, and excluded from review as a managed change. Never
-    force-pushes, never merges a PR.
-
-  Scope: --config-only's --commit/--push cover ONLY the CONFIG subset init
-  materializes (see CONFIG_FILES) — NOT the full `.release/` tree (that is the
-  default full materialize below).
-
-Full materialize (the DEFAULT — #476 cutover):
-  A bare `release-core init` runs the COMPLETE release-sync pipeline (build_plan
-  + materialize + compute_mirror + apply) sourced from the wheel bundle — the
-  whole `.release/` build dir + every working-tree mirror (skills, ORIENTATION,
-  configs, per-Kind/Capability files, real-file workflow copies, the CLAUDE.md
-  managed block). It is "release-sync sourced from the wheel", so its output is
-  byte-identical to a `release-sync` run for the same Kind (modulo the
-  provenance-marker line). A real $RELEASE_HOME git clone OVERRIDES the bundle
-  (release-dev's live-templates path), exactly as the config path does.
-
-  AUTO-COMMIT ON CHANGE (the decided commit-hygiene model): after a full
-  materialize, if (and only if) managed content actually changed, init commits
-  ONLY the managed paths with a deterministic message, on whatever branch is
-  checked out (the managed tree is generated — needs no review). Byte-identical
-  result → no commit, so churn tracks release cadence, not session count.
-  Idempotent: a second `init` with no upstream change makes no commit.
-  --no-commit skips committing (for tests/inspection); --dry-run computes the
-  change count and writes nothing.
-
-  In the default (full) mode the commit is AUTOMATIC and the materialize
-  overwrites unconditionally, so an explicit --commit is redundant and --force a
-  no-op: both are TOLERATED (warn + proceed), NOT rejected — the deployed
-  SessionStart resolver in a not-yet-migrated consumer still calls `init
-  --commit`, and that stale call performs the first cutover pull, so failing it
-  would stall the fleet (the resolver can't update the tree that updates the
-  resolver). They stay meaningful (opt-in) only with --config-only. --push
-  remains valid (fast-forward the managed commit on a clean default branch). The
-  pull-model SessionStart boot runs a bare `init`, so it gets the full self-sync
-  + auto-commit with no flags.
-
-Source resolution: the canonical config content is composed from the
-wheel-bundled templates (release_core/_bundled_templates/, staged at build time
-by hatch_build.py) so init is self-contained — no release clone, no network.
-This is the DEFAULT and the only path a pip-installed consumer ever takes.
+Source resolution: the canonical content is composed from the wheel-bundled
+templates (release_core/_bundled_templates/, staged at build time by
+hatch_build.py) so init is self-contained — no release clone, no network. This
+is the DEFAULT and the only path a pip-installed consumer ever takes.
 
 A `$RELEASE_HOME` git checkout, when explicitly present (release-dev only),
 OVERRIDES the bundle: init then composes from live templates via the full
 release-sync engine (sync.build_plan + sync.materialize) at $RELEASE_REF, the
-same git-clone contract release-sync uses. In an editable/source checkout the
+same git-clone contract release-sync used. In an editable/source checkout the
 bundle is absent (a gitignored build artifact), so $RELEASE_HOME is required
 there; a fresh wheel install needs neither.
 
@@ -134,25 +76,6 @@ from .. import cli, gh, manifest, sync, yamlio
 
 USAGE = __doc__ or ""
 
-# The CONFIG subset of what release-sync materializes from templates/commons/.
-# Derived from sync.py: build_plan() walks templates/commons (subtree_list) and
-# strips the `templates/commons/` prefix to the dest; materialize() writes each
-# blob plus the composed `lefthook.yml`. Of those dests we take only the
-# committed *config* files — excluding package code (is_release_internal:
-# lib/release_*), .release-sync-source (SOURCE_MARKER), ORIENTATION.md
-# (is_release_internal), the CLAUDE.md block, skills, .claude/settings.json, and
-# CHANGELOG/ scaffolding. The remainder is the gate + the managed lint/format
-# configs:
-CONFIG_FILES: tuple[str, ...] = (
-    "lefthook.yml",
-    ".markdownlint.json",
-    ".markdownlintignore",
-    ".yamllint",
-    ".shellcheckrc",
-    ".editorconfig",
-    ".prettierignore",
-)
-
 
 def _usage_block() -> str:
     """The --help body: the docstring (init has no bash predecessor to
@@ -167,28 +90,11 @@ def _bundle_root() -> str | None:
     This is the BundleSource root: its layout mirrors the repo —
     <root>/templates/… and <root>/skills/… — so a sync ``subtree`` like
     "templates/commons" or "skills/tdd" resolves directly. The full-tree
-    materialize (the default init) reads through this; the config-subset path uses
-    _bundle_templates_root() (the templates/ subdir) for its direct file copies.
+    materialize reads through this.
     """
     here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
     root = os.path.join(here, "_bundled_templates")
     return root if os.path.isdir(os.path.join(root, "templates")) else None
-
-
-def _bundle_templates_root() -> str | None:
-    """Absolute path to the wheel-bundled templates tree, or None if not bundled.
-
-    The wheel ships the config templates under release_core/_bundled_templates/
-    (staged at build time, see hatch_build.py) so init is self-contained — no
-    release clone needed. In an editable/source checkout the dir is absent
-    (it's a build artifact, gitignored), so this returns None and init falls
-    back to the $RELEASE_HOME git path.
-    """
-    root = _bundle_root()
-    if root is None:
-        return None
-    templates = os.path.join(root, "templates")
-    return templates if os.path.isdir(templates) else None
 
 
 def _read_sync_yaml(repo_root: str) -> str | None:
@@ -199,147 +105,7 @@ def _read_sync_yaml(repo_root: str) -> str | None:
     return None
 
 
-def _capabilities_from_bundle(tpl_root: str, kind: str) -> list[str]:
-    """Kind-default capabilities from the bundled templates/<kind>/manifest.yaml
-    (mirrors sync.resolve_capabilities' manifest branch, read from the bundle)."""
-    manifest_path = os.path.join(tpl_root, kind, "manifest.yaml")
-    if os.path.isfile(manifest_path):
-        with open(manifest_path, encoding="utf-8", errors="replace") as fh:
-            return sync._yq_list_capabilities(fh.read())
-    return []
-
-
-def _materialize_config_from_bundle(
-    tpl_root: str, repo_root: str, kind: str, capabilities: list[str]
-) -> dict[str, str]:
-    """Compose the config subset from the wheel-bundled templates (no git).
-
-    Mirrors the release-sync composition for the CONFIG subset only: copy the
-    static commons lint configs, then deep-merge the lefthook fragments (base <
-    commons < each capability < kind) via yq — the same merge sync._write_lefthook
-    does, sourced from the bundle instead of a git ref.
-    """
-    tmp = tempfile.mkdtemp(prefix=".release-core-init.")
-    sources: dict[str, str] = {}
-
-    for dest in CONFIG_FILES:
-        if dest == "lefthook.yml":
-            continue
-        src = os.path.join(tpl_root, "commons", dest)
-        if os.path.isfile(src):
-            out = os.path.join(tmp, dest)
-            shutil.copyfile(src, out)
-            sources[dest] = out
-
-    frag_rel = [
-        os.path.join("components", "_lefthook-base.yaml"),
-        os.path.join("commons", "lefthook.fragment.yaml"),
-    ]
-    frag_rel += [os.path.join("components", c, "lefthook.fragment.yaml") for c in capabilities if c]
-    frag_rel.append(os.path.join(kind, "lefthook.fragment.yaml"))
-    frags = [
-        os.path.join(tpl_root, f) for f in frag_rel if os.path.isfile(os.path.join(tpl_root, f))
-    ]
-
-    if frags:
-        frag_tmp = tempfile.mkdtemp()
-        try:
-            numbered: list[str] = []
-            for i, fp in enumerate(frags):
-                dirbase = os.path.basename(os.path.dirname(fp))
-                np = os.path.join(frag_tmp, f"{i:02d}-{dirbase}.yaml")
-                shutil.copyfile(fp, np)
-                numbered.append(np)
-            merged = yamlio.eval_all('. as $i ireduce({}; . *+ $i) | ... comments=""', numbered)
-            out = os.path.join(tmp, "lefthook.yml")
-            with open(out, "w", encoding="utf-8") as fh:
-                fh.write(
-                    "# Generated by release-core init from the bundled templates. Do not edit.\n"
-                    "# Regenerate by running release-core init.\n\n"
-                )
-                fh.write(merged)
-            sources["lefthook.yml"] = out
-        finally:
-            shutil.rmtree(frag_tmp, ignore_errors=True)
-
-    return sources
-
-
-def _materialize_config_sources(
-    repo_root: str, repo_name: str, *, source_ref: dict[str, str] | None = None
-) -> dict[str, str]:
-    """Compose the canonical config content and return {dest -> absolute path in
-    a temp tree} for every CONFIG_FILES dest produced.
-
-    DEFAULT: compose from the wheel-bundled templates (self-contained, no clone).
-    A `$RELEASE_HOME` git checkout, when explicitly present, OVERRIDES the bundle
-    (release-dev uses live templates via the full sync engine). May raise
-    manifest.KindError / sync.SyncError / yamlio.YamlError — main() maps each to
-    a clean exit 1.
-
-    ``source_ref``, when given, is populated with a ``"ref"`` key describing the
-    source the config was composed from (the resolved tip on the git-engine path;
-    the wheel version on the bundle path), for use in the --commit message.
-    """
-    release_home = os.environ.get("RELEASE_HOME")
-    have_clone = bool(release_home) and gh.is_git_worktree(release_home)
-    tpl_root = _bundle_templates_root()
-
-    kind = manifest.detect_kind(repo_root)
-
-    # Self-contained path: bundled templates, no git. Used unless a real
-    # release clone is explicitly pointed at via $RELEASE_HOME.
-    if tpl_root and not have_clone:
-        sync_yaml_text = _read_sync_yaml(repo_root)
-        if sync_yaml_text is not None:
-            caps_names = sync._yq_list_capabilities(sync_yaml_text)
-        else:
-            caps_names = _capabilities_from_bundle(tpl_root, kind)
-        if source_ref is not None:
-            from .. import __version__ as _v
-
-            source_ref["ref"] = f"release-core {_v}"
-        return _materialize_config_from_bundle(tpl_root, repo_root, kind, caps_names)
-
-    if not have_clone:
-        raise sync.SyncError(
-            "release-core init: no bundled templates and "
-            f"$RELEASE_HOME='{release_home or ''}' is not a git clone"
-        )
-
-    release_ref = os.environ.get("RELEASE_REF") or None
-    ref = sync.select_ref(release_home, repo_name, kind, release_ref)
-    ref_sha = gh.git_rev_parse(ref, cwd=release_home)
-    if source_ref is not None:
-        # The short SHA is the most precise, reproducible description of what
-        # the managed config was composed from.
-        source_ref["ref"] = ref_sha[:12] if ref_sha else ref
-
-    # Honor a consumer .release-sync.yaml capability override (the same override
-    # the retired release-sync verb honored) — so init composes the SAME config
-    # set for the detected Kind + capabilities.
-    sync_yaml_text = None
-    sync_yaml = os.path.join(repo_root, ".release-sync.yaml")
-    if os.path.isfile(sync_yaml):
-        with open(sync_yaml, encoding="utf-8", errors="replace") as fh:
-            sync_yaml_text = fh.read()
-
-    source = sync.GitSource(release_home, ref, ref_sha)
-    caps = sync.resolve_capabilities(source, kind, sync_yaml_text=sync_yaml_text)
-    plan = sync.build_plan(source, kind, caps.names, repo_root=repo_root)
-
-    tmp_root = tempfile.mkdtemp(prefix=".release-core-init.")
-    sync.materialize(source, ref_sha, plan, tmp_root)
-
-    sources: dict[str, str] = {}
-    for dest in CONFIG_FILES:
-        candidate = os.path.join(tmp_root, dest)
-        if os.path.isfile(candidate):
-            sources[dest] = candidate
-    return sources
-
-
-# ── Full materialize (the DEFAULT init): the whole managed tree, from the bundle ─
+# ── Full materialize: the whole managed tree, from the bundle ────────────────
 #
 # The full materialize is the SAME engine pipeline the retired release-sync verb
 # ran (build_plan + materialize + diff + compute_mirror + decide_claude + apply),
@@ -576,40 +342,6 @@ def _rm_f(path: str) -> None:
             os.remove(path)
 
 
-def _write_file(dest: str, src: str, *, exists: bool) -> None:
-    """Copy ``src`` to ``dest``. On overwrite, replace atomically so a failed
-    write never leaves a half-written managed file. Raises OSError on failure."""
-    parent = os.path.dirname(dest)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    if exists:
-        fd, tmp = tempfile.mkstemp(prefix=os.path.basename(dest) + ".tmp.", dir=parent or ".")
-        os.close(fd)
-        try:
-            shutil.copyfile(src, tmp)
-            # mkstemp creates the temp file 0600; an atomic replace must not
-            # silently tighten the managed file's permissions. Carry over the
-            # mode the destination already had (which was itself created
-            # umask-respecting on first materialize).
-            shutil.copymode(dest, tmp)
-            os.replace(tmp, dest)
-        except BaseException:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            raise
-    else:
-        shutil.copyfile(src, dest)
-
-
-def _commit_message(source_ref: dict[str, str]) -> str:
-    """The deterministic auto-commit message. Includes the source ref/tip when
-    init resolved one; otherwise omits the trailing ' to <ref>'."""
-    ref = source_ref.get("ref")
-    if ref:
-        return f"chore(release): sync managed config to {ref}"
-    return "chore(release): sync managed config"
-
-
 def _full_commit_message(ref_label: str) -> str:
     """The deterministic auto-commit message for a full managed-tree sync. The
     managed tree is fully generated (no review needed), so SessionStart can
@@ -828,12 +560,15 @@ def main(argv: list[str] | None = None) -> int:
         values, _ = cli.parse(
             argv if argv is not None else [],
             [
+                # --force / --commit are TOLERATED legacy no-ops (see the
+                # docstring: a stale pre-migration SessionStart resolver still
+                # passes --commit, and rejecting it would stall the fleet's
+                # first cutover pull). --config-only / --full were REMOVED in
+                # release#532 — an unknown flag is now bad usage (exit 64).
                 cli.Opt("--force"),
                 cli.Opt("--dry-run"),
                 cli.Opt("--commit"),
                 cli.Opt("--push"),
-                cli.Opt("--full"),
-                cli.Opt("--config-only"),
                 cli.Opt("--no-commit"),
             ],
             doc=_usage_block(),
@@ -844,58 +579,26 @@ def main(argv: list[str] | None = None) -> int:
     force = bool(values["force"])
     dry_run = bool(values["dry-run"])
     push = bool(values["push"])
-    config_only = bool(values["config-only"])
-    # --full is a redundant/deprecated alias of the default; it simply selects the
-    # now-default full materialize, so it is a no-op flag (never an error) and is
-    # NOT compatible with --config-only (they pick opposite modes). Warn when it
-    # is explicitly passed so stale flag usage can be cleaned up across the fleet.
-    full_flag = bool(values["full"])
-    if full_flag:
-        print(
-            "release-core init: --full is deprecated and redundant "
-            "(the full materialize is now the default)",
-            file=sys.stderr,
-        )
     no_commit = bool(values["no-commit"])
-    # "full mode is active" — the DEFAULT — is anything that is NOT --config-only.
-    # The reconciled flag guards key off THIS, not the literal --full flag.
-    full_mode = not config_only
-    # --push implies --commit (you cannot push a commit you never made).
-    commit = bool(values["commit"]) or push
 
-    # --full and --config-only select opposite modes — contradictory.
-    if full_flag and config_only:
-        print(
-            "release-core init: --full and --config-only are mutually exclusive",
-            file=sys.stderr,
-        )
-        return 64
     # --push implies a commit; --no-commit suppresses it — the two contradict.
     # Reject the combo as bad usage rather than silently making --push a no-op.
     if push and no_commit:
         print("release-core init: --push and --no-commit are mutually exclusive", file=sys.stderr)
         return 64
-    # --no-commit only governs the (default) full materialize's auto-commit; in
-    # --config-only (which doesn't commit unless --commit) it would be silently
-    # ignored — flag the contract mismatch rather than hide it.
-    if no_commit and config_only:
-        print("release-core init: --no-commit is not valid with --config-only", file=sys.stderr)
-        return 64
-    # In the default (full) mode the commit is automatic (auto-commit-on-change;
-    # --no-commit to skip) and the materialize overwrites unconditionally — so an
-    # explicit --commit is redundant and --force a no-op. We must TOLERATE them
-    # (warn, don't fail): the deployed SessionStart resolver in not-yet-migrated
-    # consumers still calls `release-core init --commit`, and that stale
-    # invocation is exactly what performs the FIRST cutover pull. Failing it would
-    # stall the whole fleet — the resolver can't materialize the new tree that
-    # would in turn update the resolver (bootstrap chicken-and-egg). After the
-    # first successful pull the managed resolver no longer passes --commit, so the
-    # warning self-clears. Keyed off full_mode (the default), NOT the literal
-    # --full flag; checks the RAW --commit value (--push IS valid in full mode).
-    if full_mode and (values["commit"] or force):
+    # The commit is automatic (auto-commit-on-change; --no-commit to skip) and
+    # the materialize overwrites unconditionally — so an explicit --commit is
+    # redundant and --force a no-op. TOLERATE them (warn, don't fail): the
+    # deployed SessionStart resolver in not-yet-migrated consumers still calls
+    # `release-core init --commit`, and that stale invocation is exactly what
+    # performs the FIRST cutover pull. Failing it would stall the whole fleet —
+    # the resolver can't materialize the new tree that would in turn update the
+    # resolver (bootstrap chicken-and-egg). After the first successful pull the
+    # managed resolver no longer passes --commit, so the warning self-clears.
+    if values["commit"] or force:
         print(
-            "release-core init: --commit/--force are redundant in the default full "
-            "materialize (it auto-commits managed changes) — ignoring",
+            "release-core init: --commit/--force are redundant "
+            "(init auto-commits managed changes) — ignoring",
             file=sys.stderr,
         )
 
@@ -913,103 +616,4 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(repo_root)
     repo_name = os.path.basename(repo_root)
 
-    # DEFAULT (full mode): materialize the WHOLE managed tree (the full
-    # release-sync pipeline sourced from the wheel bundle), then AUTO-COMMIT ON
-    # CHANGE. This is what the SessionStart boot runs (a bare `init`). The
-    # config-subset behavior is the --config-only escape hatch below.
-    if full_mode:
-        return _main_full(repo_root, repo_name, dry_run=dry_run, no_commit=no_commit, push=push)
-
-    source_ref: dict[str, str] = {}
-    try:
-        sources = _materialize_config_sources(repo_root, repo_name, source_ref=source_ref)
-    except manifest.KindError:
-        print(f"release-core init: could not detect kind of {repo_root}", file=sys.stderr)
-        return 1
-    except sync.SyncError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-    except yamlio.YamlError as exc:
-        # Missing yq, a malformed manifest/.release-sync.yaml, or a
-        # lefthook-fragment merge failure — caught at the CLI boundary and
-        # mapped to a clean exit 1, never a traceback escaping.
-        print(f"release-core init: {exc}", file=sys.stderr)
-        return 1
-
-    created: list[str] = []
-    overwritten: list[str] = []
-    repaired: list[str] = []
-    skipped: list[str] = []
-    missing_source: list[str] = []
-
-    for dest in CONFIG_FILES:
-        src = sources.get(dest)
-        if src is None:
-            # The engine produced no such file for this Kind (e.g. a Kind whose
-            # gate composes no lefthook). Report it; not a failure.
-            missing_source.append(dest)
-            continue
-        # A dangling symlink (a leftover .release/-style link whose target is
-        # gone) is broken config, not a consumer edit — lexists() reports it as
-        # present, which would silently skip it and leave the repo effectively
-        # uninitialized. Treat it as needing repair: materialize the real file
-        # over it regardless of --force.
-        is_broken_link = os.path.islink(dest) and not os.path.exists(dest)
-        present = os.path.lexists(dest) and not is_broken_link
-        if present and not force:
-            skipped.append(dest)
-            continue
-        action_list = repaired if is_broken_link else (overwritten if present else created)
-        if dry_run:
-            action_list.append(dest)
-            continue
-        try:
-            if is_broken_link:
-                # Clear the dangling link so the create path writes a real file.
-                os.unlink(dest)
-            _write_file(dest, src, exists=present)
-        except OSError as exc:
-            # init's OWN writes must hard-fail (no best-effort swallowing).
-            print(f"release-core init: failed to write {dest}: {exc}", file=sys.stderr)
-            return 1
-        action_list.append(dest)
-
-    verb = "would " if dry_run else ""
-    for f in created:
-        print(f"  {verb}create  {f}")
-    for f in overwritten:
-        print(f"  {verb}force   {f} (overwritten)")
-    for f in repaired:
-        print(f"  {verb}repair  {f} (was a broken symlink)")
-    for f in skipped:
-        print(f"  skip    {f} (exists; --force to overwrite)")
-    for f in missing_source:
-        print(f"  absent  {f} (not produced for this kind)", file=sys.stderr)
-
-    changed = len(created) + len(overwritten) + len(repaired)
-    # The repaired clause is omitted when nothing was repaired so the common
-    # summary line stays stable (created/overwritten/unchanged).
-    repaired_clause = f", {len(repaired)} repaired" if repaired else ""
-    print()
-    print(
-        f"summary: {len(created)} created, {len(overwritten)} overwritten"
-        f"{repaired_clause}, {len(skipped)} unchanged"
-        + (" (dry-run, no writes)" if dry_run else "")
-    )
-    if not dry_run:
-        if missing_source:
-            # The engine produced no source for some config files (an
-            # incomplete materialization for this Kind), so the repo is NOT
-            # fully initialized — don't claim it is.
-            print(f"done. ({len(missing_source)} config file(s) had no source — see stderr)")
-        elif not changed:
-            print("done. (no changes — already initialized)")
-        else:
-            print("done.")
-
-    # Auto-commit (opt-in). Only when changes were actually written, not in
-    # dry-run. Idempotent by construction: changed == 0 → nothing to commit.
-    if commit and not dry_run and changed:
-        written = created + overwritten + repaired
-        _auto_commit(repo_root, written, _commit_message(source_ref), push=push)
-    return 0
+    return _main_full(repo_root, repo_name, dry_run=dry_run, no_commit=no_commit, push=push)

@@ -5,9 +5,10 @@ name: pip-bootstrap smoke
 # release's own repo, no consumer:
 #
 #   build wheel -> pip install into a fresh venv -> console-scripts on PATH ->
-#   `release-core init` (DEFAULT full materialize + auto-commit, AND the
-#   `--config-only` escape hatch) in a throwaway fixture repo -> re-run is
-#   idempotent.
+#   `release-core init` (the full materialize + auto-commit — the ONLY mode
+#   since release#532 removed --config-only) in a throwaway fixture repo ->
+#   re-run is idempotent. Covered on BOTH source paths: offline from the wheel
+#   bundle (the consumer default) and the $RELEASE_HOME override (release-dev).
 #
 # A green run here IS the PoC's definition of done. This workflow is a normal PR
 # check; it is deliberately NOT in the branch-protection ruleset (a path-/event-
@@ -235,82 +236,6 @@ jobs:
           echo "detected kind:"
           ( cd "$fixture" && detect-kind )
 
-      - name: Read the documented CONFIG_FILES set from verbs/init.py
-        # Source of truth for what `init` must materialize is the CONFIG_FILES
-        # tuple in verbs/init.py — read it programmatically so this smoke can
-        # never assert a divergent hardcoded list. The wheel is already
-        # installed, so import it straight from the venv.
-        run: |
-          set -euo pipefail
-          python - <<'PY' > "${RUNNER_TEMP}/config_files.txt"
-          from release_core.verbs.init import CONFIG_FILES
-          print("\n".join(CONFIG_FILES))
-          PY
-          echo "documented CONFIG_FILES:"
-          cat "${RUNNER_TEMP}/config_files.txt"
-
-      - name: release-core init --config-only OFFLINE — compose from the wheel
-        # The config-subset escape hatch (post-#476): `init --config-only`
-        # composes ONLY the gate + lint configs from the templates BUNDLED in the
-        # wheel — NO release clone, NO network. RELEASE_HOME is explicitly unset
-        # so a leaked env can't mask a broken bundle by silently falling back to
-        # the git engine. (The DEFAULT full materialize is smoke-tested in its own
-        # step below.)
-        run: |
-          set -euo pipefail
-          unset RELEASE_HOME RELEASE_REF
-          off="${RUNNER_TEMP}/fixture-offline"
-          rm -rf "$off"; mkdir -p "$off"
-          git -C "$off" init -q
-          git -C "$off" config user.email smoke@example.com
-          git -C "$off" config user.name 'pip-bootstrap smoke'
-          printf 'module example.com/offline\n\ngo 1.22\n' > "$off/go.mod"
-          git -C "$off" add -A
-          git -C "$off" commit -qm 'fixture: go-cli marker'
-          cd "$off"
-          release-core init --config-only
-          # Every documented config file must be materialized OFFLINE.
-          missing=0
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            if [ ! -f "$f" ]; then
-              echo "ERROR: offline init did not materialize '$f'" >&2
-              missing=1
-            else
-              echo "ok: $f"
-            fi
-          done < "${RUNNER_TEMP}/config_files.txt"
-          [ "$missing" -eq 0 ] || exit 1
-          # PROVE the BUNDLE path was taken (not a silent git-engine fallback):
-          # the offline composer stamps a distinct provenance header.
-          if ! head -1 lefthook.yml | grep -qF 'bundled templates'; then
-            echo "ERROR: lefthook.yml was not composed from the bundle — header was:" >&2
-            head -1 lefthook.yml >&2
-            exit 1
-          fi
-          echo "ok: gate composed offline from the bundled templates"
-          # No stray files beyond the documented set + the fixture's go.mod.
-          git add -A
-          extra="$(git -C "$off" diff --cached --name-only \
-            | grep -vxF -f "${RUNNER_TEMP}/config_files.txt" \
-            | grep -vxF 'go.mod' || true)"
-          if [ -n "$extra" ]; then
-            echo "ERROR: offline init --config-only wrote files outside the documented set:" >&2
-            echo "$extra" >&2
-            exit 1
-          fi
-          git commit -qm 'offline init --config-only'
-          # Idempotent: a second offline run is a clean no-op — assert via
-          # `git status --porcelain` (empty == clean) so a stray UNTRACKED managed
-          # file is caught too (git diff alone misses untracked).
-          release-core init --config-only
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "ERROR: second offline 'release-core init --config-only' was not a no-op:" >&2
-            git status --porcelain >&2
-            exit 1
-          fi
-          echo "ok: offline release-core init --config-only is idempotent"
-
       - name: release-core init OFFLINE (DEFAULT full) — self-sync the whole tree
         # The #476 cutover contract: a BARE `release-core init` (what SessionStart
         # runs) materializes the WHOLE managed tree from the wheel bundle and
@@ -379,60 +304,65 @@ jobs:
           fi
           echo "ok: default full release-core init is idempotent (no-op second run)"
 
-      - name: release-core init --config-only OVERRIDE — first run materializes the set
+      - name: release-core init OVERRIDE — $RELEASE_HOME composes from live templates
         # release-dev's path: an explicit $RELEASE_HOME git clone OVERRIDES the
         # bundle, composing from LIVE templates via the full release-sync engine.
-        # Exercised here through --config-only so the documented-CONFIG_FILES
-        # contract assertion holds; the DEFAULT full materialize is covered by the
-        # offline full step above. $RELEASE_REF pins composition to the exact PR
-        # commit, so it does not depend on any remote branch existing.
+        # Exercised through the full materialize — the ONLY init mode since
+        # release#532 removed the --config-only escape hatch. $RELEASE_REF pins
+        # composition to the exact PR commit, so it does not depend on any
+        # remote branch existing.
         env:
           RELEASE_HOME: ${{ github.workspace }}
           RELEASE_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
           cd "${FIXTURE}"
-          release-core init --config-only
-          echo "--- materialized (untracked) ---"
-          missing=0
-          while IFS= read -r f; do
-            [ -n "$f" ] || continue
-            if [ ! -f "$f" ]; then
-              echo "ERROR: init did not materialize '$f'" >&2
-              missing=1
-            else
-              echo "ok: $f"
-            fi
-          done < "${RUNNER_TEMP}/config_files.txt"
-          [ "$missing" -eq 0 ] || exit 1
-          # Nothing OUTSIDE the documented set (beyond the fixture's own go.mod)
-          # should appear — init must not write stray files.
-          git add -A
-          extra="$(git -C "${FIXTURE}" diff --cached --name-only \
-            | grep -vxF -f "${RUNNER_TEMP}/config_files.txt" \
-            | grep -vxF 'go.mod' || true)"
-          if [ -n "$extra" ]; then
-            echo "ERROR: init wrote files outside the documented CONFIG_FILES set:" >&2
-            echo "$extra" >&2
-            exit 1
+          release-core init
+          # The full tree materialized: .release/ build dir + working-tree
+          # mirrors + the CLAUDE.md stub; .release/ stays untracked (WS4).
+          test -d .release || { echo "ERROR: no .release/ build dir materialized" >&2; exit 1; }
+          grep -qF 'release-core how-to' CLAUDE.md \
+            || { echo "ERROR: CLAUDE.md stub block not injected" >&2; exit 1; }
+          if git ls-files --error-unmatch .release >/dev/null 2>&1; then
+            echo "ERROR: .release/ is git-tracked — it must be ephemeral" >&2; exit 1
           fi
-          git commit -qm 'init --config-only: first run'
-
-      - name: release-core init --config-only OVERRIDE — second run is an idempotent no-op
-        env:
-          RELEASE_HOME: ${{ github.workspace }}
-          RELEASE_REF: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-          cd "${FIXTURE}"
-          release-core init --config-only
-          # Idempotent: the second run must leave the already-materialized files
-          # byte-identical — a fully clean tree. `git status --porcelain` empty
-          # catches untracked leftovers too (git diff alone would miss them).
+          # PROVE the override path was taken: the git engine stamps the resolved
+          # SHA into the managed commit subject ("sync managed tree from <sha>"),
+          # whereas the bundle path stamps "release-core <version>".
+          subject="$(git log -1 --pretty=format:%s)"
+          case "$subject" in
+            "chore(release): sync managed tree from release-core"*)
+              echo "ERROR: bundle path taken despite \$RELEASE_HOME override (HEAD: $subject)" >&2
+              exit 1 ;;
+            "chore(release): sync managed tree from"*)
+              echo "ok: composed from the \$RELEASE_HOME clone: $subject" ;;
+            *)
+              echo "ERROR: managed tree was not auto-committed (HEAD: $subject)" >&2
+              exit 1 ;;
+          esac
           if [ -n "$(git status --porcelain)" ]; then
-            echo "ERROR: second 'release-core init --config-only' was not a no-op:" >&2
+            echo "ERROR: init left an uncommitted/untracked managed diff:" >&2
             git status --porcelain >&2
-            git --no-pager diff >&2
             exit 1
           fi
-          echo "ok: release-core init --config-only is idempotent (second run = clean no-op)"
+
+      - name: release-core init OVERRIDE — second run is an idempotent no-op
+        env:
+          RELEASE_HOME: ${{ github.workspace }}
+          RELEASE_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd "${FIXTURE}"
+          head1="$(git rev-parse HEAD)"
+          release-core init
+          if [ "$(git rev-parse HEAD)" != "$head1" ]; then
+            echo "ERROR: second 'release-core init' made a commit (not a no-op)" >&2
+            git log -1 --pretty=format:%s >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "ERROR: second 'release-core init' was not a clean no-op:" >&2
+            git status --porcelain >&2
+            exit 1
+          fi
+          echo "ok: release-core init is idempotent on the override path"
