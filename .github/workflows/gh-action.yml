@@ -125,8 +125,24 @@ jobs:
         # re-runs install-release-core at its default `releases/latest`, which
         # would override the v2 pin (and pull a v3 wheel into this v2 workflow
         # once v3 exists). --no-commit: CI never auto-commits the managed tree.
+        #
+        # Skipped when a root lefthook.yml exists: then the gate definition is
+        # LOCAL (release's own repo — hand-authored root gate, no detectable
+        # Kind, `init` exits 1 there — or a pre-migration consumer whose synced
+        # tree is still tracked) and `release-core gate --hook` falls back to
+        # lefthook's default discovery, needing nothing from .release/. Same
+        # opt-out arm-gate documents for release's ci.yml, decided here from
+        # the checkout itself instead of a caller knob. Caught by the v2.14.0
+        # cut: the first release.yml run to resolve gh-action.yml@v2 past
+        # release#540 failed on `init: could not detect kind` (release#544).
         shell: bash
-        run: release-core init --no-commit
+        run: |
+          # Same root-config trio run-precommit-gate.sh detects.
+          if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+            echo "Root lefthook config present — gate definition is local; skipping .release/ materialize."
+          else
+            release-core init --no-commit
+          fi
       - name: Arm the gate toolset
         # ONE definition of CI gate-arming (pinned toolset), same as
         # rust-cli.yml — but provision-only (materialize: 'false'; see the
