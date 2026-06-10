@@ -214,12 +214,16 @@ CLAUDE_STUB_BODY = (
 #
 # WS2 (release#523, "invoke don't discover"): the dev cycle + general-dev guidance
 # now lives in `release-core how-to` (rendered from the binary), NOT synced as
-# skill files. So PUSH_ALL_SKILLS is trimmed to the TWO skills the harness needs a
-# file on disk for — the `/`-triggered PR-loop driver and the escalation entry. The
-# 15 general dev-cycle skills (tdd, review, diagnose, …) and pr-review-respond are
-# no longer pushed; on a consumer's next `init` their now-dangling committed
-# symlinks are swept by the broken-symlink cleanup (WS4) — automatic de-vendoring.
-# A consumer owns ONLY its own application-domain skills. Two catalogs drive it:
+# skill files. WS7 (release#528) trimmed PUSH_ALL_SKILLS to the ONE skill the
+# harness needs a file on disk for — the `/`-triggered PR-loop driver ("at most
+# one thin delegating skill", the WS2 exit). release-issue-relay was dropped from
+# distribution: the escalation contract lives in the CLAUDE.md stub + `release-core
+# how-to`, and the mechanism (`gh-release-issue`) is a console-script on PATH. The
+# 15 general dev-cycle skills (tdd, review, diagnose, …), pr-review-respond, and
+# now release-issue-relay are no longer pushed; on a consumer's next `init` their
+# committed symlinks are swept by the broken-symlink cleanup (WS4) — automatic
+# de-vendoring. A consumer owns ONLY its own application-domain skills. Two
+# catalogs drive it:
 #
 #   PUSH_ALL_SKILLS         — pushed to EVERY consumer, unconditionally.
 #   REPLACE_IF_PRESENT_SKILLS — upgrade-only: synced into a consumer ONLY when
@@ -232,7 +236,6 @@ CLAUDE_STUB_BODY = (
 # release-only and NEVER distributed.
 PUSH_ALL_SKILLS = [
     "gh-pr-review-loop",  # the `/`-triggered PR-loop driver (arms the guard)
-    "release-issue-relay",  # escalate infra friction upstream to arthur-debert/release
 ]
 
 REPLACE_IF_PRESENT_SKILLS = [
@@ -766,6 +769,11 @@ class MirrorPlan:
     retired_to_remove: list[str] = field(default_factory=list)  # WS6 tombstones
     conflicts: list[str] = field(default_factory=list)
     migrated: list[str] = field(default_factory=list)
+    # EVERY dest this sync mirrors out as a symlink (changed or not) — the
+    # ephemeral-mirror population (WS7, release#528): these are materialized but
+    # never tracked; init writes them into .git/info/exclude and untracks any a
+    # pre-WS7 seed committed.
+    mirror_dests: set[str] = field(default_factory=set)
 
 
 def compute_mirror(
@@ -835,6 +843,7 @@ def compute_mirror(
     # removes any .release/-pointing symlink whose target dest is absent from this
     # set — a dropped target OR a de-mirrored one (WS3: root lefthook.yml + configs).
     mirrored_dests = {f for f in new_files if not is_release_internal(f) and not needs_real_file(f)}
+    mp.mirror_dests = mirrored_dests
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, mirrored_dests)
     mp.copies_to_remove = _find_stale_managed_copies(repo_root, live_copies)
     # A dest this sync still distributes is LIVE, never a tombstone — guards a

@@ -938,13 +938,16 @@ def test_bootstrap_files_are_classified_real_copies():
     before the ephemeral .release/ exists — so it must never be a symlink into
     it. Lock the exact set: the hooks config + the boot resolver + the session
     provisioner + the PreToolUse guard."""
-    assert sync.BOOTSTRAP_REAL_FILES == frozenset(
-        {
-            ".claude/settings.json",
-            "bin/install-release-core",
-            "bin/setup-dev-env.sh",
-            "bin/pr-loop-guard",
-        }
+    assert (
+        frozenset(
+            {
+                ".claude/settings.json",
+                "bin/install-release-core",
+                "bin/setup-dev-env.sh",
+                "bin/pr-loop-guard",
+            }
+        )
+        == sync.BOOTSTRAP_REAL_FILES
     )
     for dest in sync.BOOTSTRAP_REAL_FILES:
         assert sync.needs_real_file(dest), dest
@@ -1069,7 +1072,7 @@ def test_retired_tables_inventory_locked():
         assert blobs, dest
         for sha in blobs:
             assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), (dest, sha)
-    assert sync.RETIRED_MARKER_FILES == frozenset({".release-sync-state.yaml"})
+    assert frozenset({".release-sync-state.yaml"}) == sync.RETIRED_MARKER_FILES
     assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release"}
 
 

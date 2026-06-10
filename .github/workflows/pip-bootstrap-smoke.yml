@@ -149,12 +149,15 @@ jobs:
           # rust-cli ships its bin/ build tooling + .github content.
           present "templates/rust-cli/bin/build"
           present "templates/rust-cli/.github/workflows/copilot-review.yml"
-          # distributed skills: WS2 (#523) trimmed PUSH_ALL to the two the harness
-          # needs a file on disk for — the bundle ships exactly those.
+          # distributed skills: WS2 (#523) trimmed PUSH_ALL, WS7 (#528) trimmed it
+          # to the ONE skill the harness needs a file on disk for — the bundle
+          # ships exactly that.
           present "skills/gh-pr-review-loop/SKILL.md"
-          present "skills/release-issue-relay/SKILL.md"
           # NEGATIVE: release-only skills must NOT ship to consumers.
           absent "skills/release-fleet-ops"
+          # NEGATIVE: release-issue-relay was dropped from distribution in WS7 —
+          # the escalation contract is binary-carried (how-to + `issue file`).
+          absent "skills/release-issue-relay"
           # NEGATIVE: dev-cycle skills dropped in WS2 are no longer bundled.
           absent "skills/tdd"
           # NEGATIVE: render-side material (Homebrew formula template, consumed
