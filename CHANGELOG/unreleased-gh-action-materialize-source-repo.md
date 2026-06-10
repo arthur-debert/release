@@ -1,0 +1,1 @@
+- gh-action.yml's prepare materialize now skips when a root lefthook.yml exists — unblocks release's own cut (init has no detectable kind on the source repo) (#544)
