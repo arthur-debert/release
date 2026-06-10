@@ -1166,3 +1166,27 @@ def test_full_retired_tracked_skill_swept_not_resurrected(tmp_path, monkeypatch,
     last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
     assert "D\t.claude/skills/release-issue-relay/SKILL.md" in last
     assert _git(repo, "status", "--porcelain") == ""
+
+
+@_needs_yq
+@_needs_git
+def test_full_conflict_dest_not_excluded(tmp_path, monkeypatch, capsys):
+    """A conflicted mirror dest (real file blocks the managed path — no symlink
+    applied) must NOT enter the .git/info/exclude block: excluding it would hide
+    the untracked conflicting file from `git status`, masking the conflict the
+    user is told to resolve."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    (repo / "bin").mkdir()
+    (repo / "bin" / "check").write_text("#!/bin/sh\nconsumer's own check\n")
+
+    rc = init.main([])
+    err = capsys.readouterr().err
+    assert rc == 0
+    assert "bin/check" in err  # surfaced as a conflict
+    text = (repo / ".git" / "info" / "exclude").read_text()
+    assert "/bin/check\n" not in text  # conflicted dest NOT excluded
+    assert "/.editorconfig" in text  # applied mirrors still are
+    # The conflicting file stays visible to git status (untracked; -uall so
+    # git doesn't collapse it into "?? bin/").
+    assert "?? bin/check" in _git(repo, "status", "--porcelain", "-uall")

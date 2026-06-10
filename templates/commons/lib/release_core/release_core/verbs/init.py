@@ -343,8 +343,11 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     # never tracked. Keep `git status` clean by listing them in the local
     # .git/info/exclude (NOT the consumer's .gitignore: zero tracked footprint,
     # and info/exclude is per-clone, recomposed by every init just like the
-    # mirrors themselves).
-    _write_mirror_excludes(mirror.mirror_dests)
+    # mirrors themselves). CONFLICT dests are left out: no symlink was applied
+    # there (a real file/dir blocks the managed path), and excluding the path
+    # would hide that untracked file from `git status` — masking the very
+    # conflict the user is told to resolve.
+    _write_mirror_excludes(mirror.mirror_dests - set(mirror.conflicts))
 
     # Write the consumer CLAUDE.md orientation block.
     if claude.action in ("create", "inject", "refresh"):
