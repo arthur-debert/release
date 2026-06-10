@@ -274,6 +274,18 @@ EOF
   [ "$output" = "$WORK/src" ]
 }
 
+@test "from-source: a checkout ROOT descends to the nested package dir (#516)" {
+  # The repo root carries a uv-workspace pyproject.toml pip cannot build; the
+  # resolver must descend to templates/commons/lib/release_core automatically.
+  mkdir -p "$WORK/checkout/templates/commons/lib/release_core"
+  : > "$WORK/checkout/pyproject.toml"  # the unbuildable workspace root
+  : > "$WORK/checkout/templates/commons/lib/release_core/pyproject.toml"
+  printf '#!/usr/bin/env bash\nexit 99\n' > stub/gh
+  run "$BIN" --from-source "$WORK/checkout" --print-url
+  [ "$status" -eq 0 ]
+  [ "$output" = "$WORK/checkout/templates/commons/lib/release_core" ]
+}
+
 @test "from-source: a path without pyproject.toml errors" {
   mkdir -p "$WORK/empty"
   run "$BIN" --from-source "$WORK/empty" --no-init
