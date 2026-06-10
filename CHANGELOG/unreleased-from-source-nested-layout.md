@@ -1,0 +1,1 @@
+- install-release-core --from-source now accepts a release checkout ROOT — descends to the nested templates/commons/lib/release_core package automatically (#516)

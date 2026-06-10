@@ -79,11 +79,13 @@ Options:
                     Default: the repo's releases/latest. (Published-wheel mode.)
   --repo OWNER/REPO Source repo for the release (default: arthur-debert/release).
   --from-source PATH
-                    Install release_core from a LOCAL path (a checkout's
-                    templates/commons/lib/release_core) instead of a published
+                    Install release_core from a LOCAL path instead of a published
                     wheel — for release's own CI, which must test the code in the
-                    current checkout. Skips release resolution (no gh/network).
-                    Mutually exclusive with --major/--repo.
+                    current checkout. PATH may be a release checkout ROOT (the
+                    nested templates/commons/lib/release_core package dir is
+                    located automatically) or the package dir itself. Skips
+                    release resolution (no gh/network). Mutually exclusive with
+                    --major/--repo.
   --print-url       Print the resolved wheel URL (or the --from-source path) and
                     exit (resolve only, no install, no init).
   --no-init         Install only; do NOT run `release-core init` afterwards
@@ -202,8 +204,17 @@ _resolve_url_list() {
 # resolved published-wheel URL. Everything downstream (venv, install, PATH, init)
 # is identical — only the source differs.
 if [ -n "$FROM_SOURCE" ]; then
-  [ -f "$FROM_SOURCE/pyproject.toml" ] || {
-    echo "install-release-core: --from-source '$FROM_SOURCE' has no pyproject.toml" >&2; exit 1; }
+  # The release_core package is NESTED (templates/commons/lib/release_core), and
+  # the repo ROOT carries a uv-workspace pyproject.toml that pip cannot build —
+  # so check for the nested package FIRST: a checkout root descends to it
+  # automatically (release#516); only a path without the nested layout is
+  # treated as the package dir itself.
+  if [ -f "$FROM_SOURCE/templates/commons/lib/release_core/pyproject.toml" ]; then
+    FROM_SOURCE="$FROM_SOURCE/templates/commons/lib/release_core"
+  elif [ ! -f "$FROM_SOURCE/pyproject.toml" ]; then
+    echo "install-release-core: --from-source '$FROM_SOURCE' has no pyproject.toml (and no nested templates/commons/lib/release_core)" >&2
+    exit 1
+  fi
   source="$FROM_SOURCE"
 else
   source="$(resolve_url)"
