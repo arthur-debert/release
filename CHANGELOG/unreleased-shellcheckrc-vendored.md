@@ -1,1 +1,0 @@
-- shellcheckrc vendored into .release/ via --rcfile; CI workflows use the pinned provisioner instead of apt shellcheck 0.9.0

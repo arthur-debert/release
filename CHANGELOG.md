@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 2.13.2 - 2026-06-10
+
+- Bot gates on all stacks materialize .release/ and run the real gate via release-core (no more silent skip on post-WS3 consumers)
+- Gate globs now match repo-root files (a leading `**/` silently exempted root `Cargo.toml`/`go.mod`/`eslint.config.*`/`*.sh` from the gate)
+- shellcheckrc vendored into .release/ via --rcfile; CI workflows use the pinned provisioner instead of apt shellcheck 0.9.0
+
 ## 2.13.1 - 2026-06-10
 
 - arm-gate: pass GH_TOKEN to the materialize step so install-release-core's gh call doesn't exit 1 (fixes ci/check fleet-wide)
