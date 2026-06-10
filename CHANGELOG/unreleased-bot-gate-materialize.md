@@ -1,0 +1,1 @@
+- Bot gates on all stacks materialize .release/ and run the real gate via release-core (no more silent skip on post-WS3 consumers)
