@@ -9,7 +9,10 @@ pre-commit:
       # there are unformatted files; we want the hook to fail in that
       # case. Pipe through a test that succeeds only when stdin is
       # empty. Glob matches Go sources anywhere in the tree.
-      glob: "**/*.go"
+      # Glob form per release#531 F4: leading `**/` never matches a repo-root
+      # file; bare `*.go` crosses `/` (root + any depth), and the root
+      # go.mod/go.sum need their literal entry alongside the nested form.
+      glob: "*.go"
       run: |
         # `gofmt -l` lists unformatted files but exits 0 either way —
         # the non-empty output is the signal. A real gofmt failure
@@ -32,8 +35,10 @@ pre-commit:
       # cross-package issues (a vet warning that touches a file you
       # didn't stage but lives in the same package).
       glob:
-        - "**/*.go"
+        - "*.go"
+        - "go.mod"
         - "**/go.mod"
+        - "go.sum"
         - "**/go.sum"
       run: go vet ./...
       priority: 2
@@ -42,7 +47,8 @@ pre-commit:
       # it via the canonical setup-go action; locally the bootstrap
       # (setup-dev-env.sh) installs it for Go repos.
       glob:
-        - "**/*.go"
+        - "*.go"
+        - "go.mod"
         - "**/go.mod"
       run: |
         if command -v golangci-lint >/dev/null 2>&1; then

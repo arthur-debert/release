@@ -22,7 +22,12 @@ pre-commit:
       # whitespace/style issues mechanically. Content-level rules
       # (MD041 first-line-heading, unbalanced refs) still fail the
       # commit when they can't be auto-fixed — that's the right gate.
-      glob: "**/*.md"
+      #
+      # Lefthook glob semantics (spiked on the pinned 2.1.9, release#531 F4):
+      # a leading `**/` requires ≥1 directory segment, so `**/*.md` NEVER
+      # matches a repo-root file; a bare `*` crosses `/`, so `*.md` matches
+      # root AND any depth. Hence the bare form, here and in every fragment.
+      glob: "*.md"
       # --config / --ignore-path point at the managed copies in the ephemeral
       # .release/ build dir (WS3, release#524): the gate configs no longer mirror
       # to the consumer root, so the tool can't auto-discover them from cwd.
@@ -36,7 +41,7 @@ pre-commit:
       stage_fixed: true
       priority: 2
     yamllint:
-      glob: "**/*.{yml,yaml}"
+      glob: "*.{yml,yaml}"
       # -c points at the managed config in .release/ (WS3, release#524) — no
       # longer mirrored to the consumer root for cwd auto-discovery.
       run: >-
@@ -62,7 +67,7 @@ pre-commit:
       # The glob just decides WHEN this step runs (and what {staged_files}
       # holds); the runner does the real selection, so no `exclude` is needed.
       glob:
-        - "**/*.{sh,bash}"
+        - "*.{sh,bash}"
         - "bin/**"
         - "app-bin/**"
       run: bin/check-shell {staged_files}

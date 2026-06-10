@@ -21,8 +21,13 @@
 pre-commit:
   commands:
     tauri-cargo-fmt:
+      # Glob form per release#531 F4: `dir/**/X` requires ≥1 segment between
+      # dir and X, so it MISSED src-tauri/Cargo.toml and src-tauri/build.rs.
+      # `src-tauri/*.rs` crosses `/` (direct + any depth); literal files get
+      # their exact entry.
       glob:
-        - "src-tauri/**/*.rs"
+        - "src-tauri/*.rs"
+        - "src-tauri/rustfmt.toml"
         - "src-tauri/**/rustfmt.toml"
       run: cd src-tauri && cargo fmt --all -- --check
       priority: 2
@@ -33,8 +38,10 @@ pre-commit:
       # dep versions can introduce new clippy warnings (deprecations,
       # lint upgrades).
       glob:
-        - "src-tauri/**/*.rs"
+        - "src-tauri/*.rs"
+        - "src-tauri/Cargo.toml"
         - "src-tauri/**/Cargo.toml"
+        - "src-tauri/Cargo.lock"
         - "src-tauri/**/Cargo.lock"
       # `--all-features` exercises every feature-gated path that
       # clippy could find, matching what bin/check-tests does —
