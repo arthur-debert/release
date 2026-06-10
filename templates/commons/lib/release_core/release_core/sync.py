@@ -269,10 +269,29 @@ def should_skip_source(rel: str) -> bool:
     return rel.endswith(".DS_Store")
 
 
+# The irreducible BOOTSTRAP files (WS5, release#526): the SessionStart chain
+# must be readable/executable on a FRESH CLONE, i.e. BEFORE the ephemeral
+# `.release/` exists — a symlink into `.release/` dangles there, so Claude Code
+# could not even read the hooks config, and the boot could not start itself
+# (the chicken-and-egg). These four are therefore written as REAL tracked
+# copies (auto-refreshed by init exactly like the workflow copies); everything
+# else stays an ephemeral-targeted symlink.
+BOOTSTRAP_REAL_FILES: frozenset[str] = frozenset(
+    {
+        ".claude/settings.json",
+        "bin/install-release-core",
+        "bin/setup-dev-env.sh",
+        "bin/pr-loop-guard",
+    }
+)
+
+
 def needs_real_file(dest: str) -> bool:
-    """Mirror needs_real_file(): .github/workflows/* are written as real copies
-    (GH reads workflow YAML from the tree and won't dereference a symlink)."""
-    return dest.startswith(".github/workflows/")
+    """Dests written as REAL copies, not symlinks into `.release/`:
+    .github/workflows/* (GH reads workflow YAML from the tree and won't
+    dereference a symlink) and the bootstrap files (must work on a fresh clone
+    BEFORE `.release/` exists — see BOOTSTRAP_REAL_FILES)."""
+    return dest.startswith(".github/workflows/") or dest in BOOTSTRAP_REAL_FILES
 
 
 def is_distributed_skill_dest(dest: str) -> bool:

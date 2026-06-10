@@ -1,0 +1,1 @@
+- Bootstrap quartet (settings.json, install-release-core, setup-dev-env.sh, pr-loop-guard) materializes as real tracked files so a fresh clone can boot itself
