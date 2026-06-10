@@ -170,8 +170,9 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
     removed — the ONLY paths --commit stages (never `git add -A`).
 
     Covers: each symlink created or removed; each real-file copy written or
-    removed; and CLAUDE.md when the orientation block was created/injected/
-    refreshed. Deterministic order, de-duplicated.
+    removed; each retired tombstoned file removed (WS6, release#527); and
+    CLAUDE.md when the orientation block was created/injected/refreshed.
+    Deterministic order, de-duplicated.
 
     Notably NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
     ephemeral, never committed. A previously-committed `.release/` is untracked
@@ -186,6 +187,7 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
         paths.append(link[2:] if link.startswith("./") else link)
     paths.extend(mirror.copies_to_write)
     paths.extend(mirror.copies_to_remove)
+    paths.extend(mirror.retired_to_remove)
     if claude.action in ("create", "inject", "refresh"):
         paths.append(sync.CLAUDE_FILE)
     # de-dup, preserve first-seen order
@@ -237,6 +239,7 @@ def _run_full_sync(
             + len(mirror.migrated)
             + len(mirror.copies_to_write)
             + len(mirror.copies_to_remove)
+            + len(mirror.retired_to_remove)
             + claude_change
         )
         managed = _managed_paths_for_commit(mirror, claude)
@@ -318,6 +321,11 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     # Remove stale managed copies.
     for f in mirror.copies_to_remove:
         os.remove(f)
+
+    # Remove retired tombstoned files (WS6, release#527) — provenance-verified
+    # in sync._find_retired_files, so only release's own retired copies land here.
+    for f in mirror.retired_to_remove:
+        _rm_f(f)
 
     # Write the consumer CLAUDE.md orientation block.
     if claude.action in ("create", "inject", "refresh"):

@@ -967,3 +967,107 @@ def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
     assert dest in mp.copies_to_write
     assert not any(dest in s for s in mp.symlinks_to_create)
+
+
+# ── retired-file tombstones (WS6, release#527) ────────────────────────────────
+
+
+def test_git_blob_sha1_matches_git_hash_object(tmp_path):
+    # `echo hello | git hash-object --stdin` — the classic known vector.
+    f = tmp_path / "hello.txt"
+    f.write_bytes(b"hello\n")
+    assert sync._git_blob_sha1(str(f)) == "ce013625030ba8dba906f756967f9e9ca394464a"
+
+
+def test_retired_blob_file_removed_only_on_exact_match(tmp_path, monkeypatch):
+    """Blob provenance is byte-exact: the shipped copy is swept, a
+    consumer-MODIFIED copy no longer matches and is left alone."""
+    (tmp_path / "bin").mkdir()
+    shipped = tmp_path / "bin" / "check-fmt"
+    shipped.write_text("#!/usr/bin/env bash\necho fmt\n")
+    monkeypatch.setitem(
+        sync.RETIRED_BLOB_FILES,
+        "bin/check-fmt",
+        frozenset({sync._git_blob_sha1(str(shipped))}),
+    )
+    assert sync._find_retired_files(str(tmp_path)) == ["bin/check-fmt"]
+
+    shipped.write_text("#!/usr/bin/env bash\necho fmt # consumer tweak\n")
+    assert sync._find_retired_files(str(tmp_path)) == []
+
+
+def test_retired_marker_file_swept_and_unmarked_kept(tmp_path):
+    state = tmp_path / ".release-sync-state.yaml"
+    state.write_text("# Managed by release-sync. Do not edit.\nsha: abc\n")
+    assert ".release-sync-state.yaml" in sync._find_retired_files(str(tmp_path))
+
+    state.write_text("consumer: file\n")  # no marker → not ours to delete
+    assert ".release-sync-state.yaml" not in sync._find_retired_files(str(tmp_path))
+
+
+def test_retired_fingerprint_file_swept_and_plain_kept(tmp_path):
+    """bin/release shims were per-repo tailored (no stable blob); the verbatim
+    header line is the provenance. A consumer's own bin/release stays."""
+    (tmp_path / "bin").mkdir()
+    shim = tmp_path / "bin" / "release"
+    shim.write_text(
+        "#!/usr/bin/env bash\n"
+        "# Thin shim around the canonical release-cut CLI (arthur-debert/release).\n"
+    )
+    assert "bin/release" in sync._find_retired_files(str(tmp_path))
+
+    shim.write_text("#!/usr/bin/env bash\nmy-own-release-flow\n")
+    assert "bin/release" not in sync._find_retired_files(str(tmp_path))
+
+
+def test_retired_symlink_is_skipped(tmp_path):
+    """Symlinks at tombstoned dests belong to the broken-symlink sweep, never
+    the tombstone path (which would unlink based on the TARGET's content)."""
+    (tmp_path / "bin").mkdir()
+    os.symlink("../.release/bin/release", tmp_path / "bin" / "release")
+    (tmp_path / ".release" / "bin").mkdir(parents=True)
+    (tmp_path / ".release" / "bin" / "release").write_text(
+        "# Thin shim around the canonical release-cut CLI\n"
+    )
+    assert "bin/release" not in sync._find_retired_files(str(tmp_path))
+
+
+def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
+    """A dest this sync still distributes is LIVE — if a future kind re-ships a
+    retired name, the plan wins and the tombstone is suppressed."""
+    dest = "bin/check-fmt"
+    tmp_release = tmp_path / "tmpbuild"
+    (tmp_release / "bin").mkdir(parents=True)
+    (tmp_release / dest).write_text("#!/usr/bin/env bash\necho fmt\n")
+
+    (tmp_path / "bin").mkdir()
+    consumer = tmp_path / dest
+    consumer.write_text("#!/usr/bin/env bash\necho fmt\n")
+    monkeypatch.setitem(
+        sync.RETIRED_BLOB_FILES, dest, frozenset({sync._git_blob_sha1(str(consumer))})
+    )
+    mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
+    assert mp.retired_to_remove == []
+
+    # Absent from the plan, the same file IS tombstoned.
+    mp = sync.compute_mirror([], str(tmp_path), str(tmp_release), migrate=False)
+    assert mp.retired_to_remove == [dest]
+
+
+def test_retired_tables_inventory_locked():
+    """The fleet-audit inventory (release#527): paths + variant counts. A new
+    retirement extends the tables deliberately; this guards accidental edits."""
+    assert set(sync.RETIRED_BLOB_FILES) == {
+        "bin/check-fmt",
+        "bin/check-lint",
+        "bin/changelog",
+        "bin/changelog-add",
+        "bin/changelog-cut",
+        "bin/changelog-render",
+    }
+    for dest, blobs in sync.RETIRED_BLOB_FILES.items():
+        assert blobs, dest
+        for sha in blobs:
+            assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), (dest, sha)
+    assert sync.RETIRED_MARKER_FILES == frozenset({".release-sync-state.yaml"})
+    assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release"}

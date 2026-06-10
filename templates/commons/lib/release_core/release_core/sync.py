@@ -15,6 +15,7 @@ that pin each bash construct.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from dataclasses import dataclass, field
@@ -762,6 +763,7 @@ class MirrorPlan:
     symlinks_to_remove: list[str] = field(default_factory=list)
     copies_to_write: list[str] = field(default_factory=list)
     copies_to_remove: list[str] = field(default_factory=list)
+    retired_to_remove: list[str] = field(default_factory=list)  # WS6 tombstones
     conflicts: list[str] = field(default_factory=list)
     migrated: list[str] = field(default_factory=list)
 
@@ -835,6 +837,10 @@ def compute_mirror(
     mirrored_dests = {f for f in new_files if not is_release_internal(f) and not needs_real_file(f)}
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, mirrored_dests)
     mp.copies_to_remove = _find_stale_managed_copies(repo_root, live_copies)
+    # A dest this sync still distributes is LIVE, never a tombstone — guards a
+    # future kind re-shipping a retired name against the sweep eating its mirror.
+    planned = {f for f in new_files if not is_release_internal(f)}
+    mp.retired_to_remove = [f for f in _find_retired_files(repo_root) if f not in planned]
     return mp
 
 
@@ -955,6 +961,106 @@ def _first_line_has_marker(path: str) -> bool:
     except OSError:
         return False
     return MANAGED_MARKER_SIGNATURE in first
+
+
+# ── Retired distributed files — tombstones (WS6, release#527) ─────────────────
+#
+# Files release ONCE distributed as tracked REAL files and has since retired.
+# The two mirror sweeps cannot touch them: the broken-symlink sweep only sees
+# `.release/`-pointing symlinks, and the stale managed-copy sweep only sees
+# MANAGED_MARKER-carrying files under `.github/workflows/`. A retired real copy
+# from the pre-marker era is invisible to both — it sits tracked in the consumer
+# forever unless removed here.
+#
+# Removal is provenance-gated — a tombstone must NEVER eat consumer-authored
+# work. Three tests, the strongest available per path:
+#   blob         the content's git blob SHA-1 is one release's template history
+#                actually shipped (byte-exact; a consumer-MODIFIED copy no
+#                longer matches and is deliberately left alone);
+#   marker       the first line carries the managed-marker signature (the
+#                release-sync state manifest: content varies per repo, header
+#                is stable across both marker wordings);
+#   fingerprint  a distinctive header line (the bin/release shims were tailored
+#                per repo at onboarding, so no stable blob exists — but the
+#                header comment is verbatim across every variant).
+# Inventory: the 2026-06 fleet audit for release#527 — every variant of each
+# path across all managed repos, cross-checked against release's git history.
+
+RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
+    # Pre-unified-gate lint/format entry points, superseded by the composed
+    # lefthook gate (WS3): one blob per kind template that ever shipped them.
+    "bin/check-fmt": frozenset(
+        {
+            "8c18fd5deedec10dc0e2d07c539b0c22ae8731e9",  # templates/rust
+            "a861acbedc7ec92ab1dca0fba0d99243a07583bf",  # templates/tauri-app
+            "ada3177ecd4243298774ecb1829b0cdda61d63f3",  # templates/electron-app
+        }
+    ),
+    "bin/check-lint": frozenset(
+        {
+            "78d51287c747be86eedb879559b1188830b03d3a",  # templates/rust
+            "c9d99017fb0e86517a3a7497086f58639f0969e4",  # templates/tauri-app
+            "40ba96894af8e4ad7b21386463bb8b0588cd7b2c",  # templates/electron-app
+        }
+    ),
+    # The pre-console-script changelog shims (retired with the pip cutover, #476).
+    "bin/changelog": frozenset({"a18249c94af945dd60dfeedd93471d973e12f715"}),
+    "bin/changelog-add": frozenset({"6a4b0d352565ca673f8ab3ffd54815eca99d8160"}),
+    "bin/changelog-cut": frozenset({"5396b96dc989aa9945d62348c7c70bef49cf986a"}),
+    "bin/changelog-render": frozenset({"1ae45dcf9604a9e4c961bfece9055483febb4e22"}),
+}
+
+# The retired release-sync subsystem's per-repo state manifest (WS4, #521,
+# removed the writer; the file itself stayed tracked in every pre-WS4 seed).
+RETIRED_MARKER_FILES: frozenset[str] = frozenset({".release-sync-state.yaml"})
+
+RETIRED_FINGERPRINT_FILES: dict[str, str] = {
+    # The release-cut shim (retired by the CLI cutover, #468/#476): body was
+    # tailored per repo at onboarding, header line is verbatim everywhere.
+    "bin/release": "Thin shim around the canonical release-cut CLI",
+}
+
+
+def _git_blob_sha1(path: str) -> str | None:
+    """The git blob SHA-1 of the file's content (sha1 over ``blob <len>\\0`` +
+    bytes — what ``git hash-object`` computes), so a tombstone can match the
+    consumer's tracked blob without shelling out to git."""
+    try:
+        with open(path, "rb") as fh:
+            data = fh.read()
+    except OSError:
+        return None
+    h = hashlib.sha1(b"blob %d\x00" % len(data))
+    h.update(data)
+    return h.hexdigest()
+
+
+def _find_retired_files(repo_root: str) -> list[str]:
+    """Tombstoned dests present as REAL files whose provenance confirms they are
+    release's retired copies. Symlinks are skipped (the broken-symlink sweep owns
+    those); provenance misses are skipped (consumer-authored, or consumer-modified
+    enough to no longer match — either way not ours to delete)."""
+    out: list[str] = []
+    for dest, blobs in RETIRED_BLOB_FILES.items():
+        full = os.path.join(repo_root, dest)
+        if os.path.isfile(full) and not os.path.islink(full) and _git_blob_sha1(full) in blobs:
+            out.append(dest)
+    for dest in RETIRED_MARKER_FILES:
+        full = os.path.join(repo_root, dest)
+        if os.path.isfile(full) and not os.path.islink(full) and _first_line_has_marker(full):
+            out.append(dest)
+    for dest, needle in RETIRED_FINGERPRINT_FILES.items():
+        full = os.path.join(repo_root, dest)
+        if not os.path.isfile(full) or os.path.islink(full):
+            continue
+        try:
+            with open(full, encoding="utf-8", errors="replace") as fh:
+                head = fh.read(2048)
+        except OSError:
+            continue
+        if needle in head:
+            out.append(dest)
+    return sorted(out)
 
 
 # ── CLAUDE.md orientation block (#348) ────────────────────────────────────────
