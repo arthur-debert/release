@@ -137,8 +137,9 @@ jobs:
         # release#540 failed on `init: could not detect kind` (release#544).
         shell: bash
         run: |
-          if [ -f lefthook.yml ]; then
-            echo "Root lefthook.yml present — gate definition is local; skipping .release/ materialize."
+          # Same root-config trio run-precommit-gate.sh detects.
+          if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+            echo "Root lefthook config present — gate definition is local; skipping .release/ materialize."
           else
             release-core init --no-commit
           fi
