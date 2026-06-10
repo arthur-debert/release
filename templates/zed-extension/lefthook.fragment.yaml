@@ -24,8 +24,12 @@
 pre-commit:
   commands:
     cargo-fmt:
+      # Glob form per release#531 F4: leading `**/` never matches a repo-root
+      # file; bare `*.rs` crosses `/` (root + any depth), and root manifests
+      # need their literal entry alongside the nested `**/` form.
       glob:
-        - "**/*.rs"
+        - "*.rs"
+        - "rustfmt.toml"
         - "**/rustfmt.toml"
       run: cargo fmt --all -- --check
       priority: 2
@@ -35,8 +39,10 @@ pre-commit:
       # Cargo.lock specifically because new dep versions can introduce
       # new clippy warnings (deprecations, lint upgrades).
       glob:
-        - "**/*.rs"
+        - "*.rs"
+        - "Cargo.toml"
         - "**/Cargo.toml"
+        - "Cargo.lock"
         - "**/Cargo.lock"
       # `--target wasm32-wasip2`: the canonical (and only) target for a
       # Zed extension. The host can't resolve `zed_extension_api`'s

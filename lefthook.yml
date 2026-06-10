@@ -56,7 +56,10 @@ pre-commit:
       # org/* globs → emphasis), so it needs per-file prose hardening first.
       # Tracked as a follow-up; not bundled into the gate-hardening change.
       glob:
-        - "templates/**/*.{json,md,yml,yaml}"
+        # `dir/*.ext` not `dir/**/*.ext`: mid-path `**/` requires ≥1 segment
+        # so it missed files directly under the dir; `*` crosses `/` and
+        # covers direct + any depth (release#531 F4).
+        - "templates/*.{json,md,yml,yaml}"
       run: |
         if ! command -v prettier >/dev/null 2>&1; then
           echo "ERROR: prettier not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
@@ -68,8 +71,8 @@ pre-commit:
       glob:
         - ".github/workflows/*.yml"
         - ".github/workflows/*.yaml"
-        - ".github/actions/**/*.yml"
-        - ".github/actions/**/*.yaml"
+        - ".github/actions/*.yml"
+        - ".github/actions/*.yaml"
       run: |
         if ! command -v actionlint >/dev/null 2>&1; then
           echo "ERROR: actionlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
@@ -99,8 +102,8 @@ pre-commit:
       # (release#348) and stays mode-invariant
       # across staged vs --all-files.
       glob:
-        - "templates/commons/lib/**/*.py"
-        - "orchestrator/**/*.py"
+        - "templates/commons/lib/*.py"
+        - "orchestrator/*.py"
         - "bin/**"
         - "app-bin/**"
         - "templates/commons/bin/**"
@@ -143,7 +146,7 @@ pre-commit:
       # a skill doc is touched; the script always lints the full
       # self-authored set (it's fast).
       glob:
-        - "skills/**/*.md"
+        - "skills/*.md"
       run: |
         if ! command -v markdownlint >/dev/null 2>&1; then
           echo "ERROR: markdownlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2

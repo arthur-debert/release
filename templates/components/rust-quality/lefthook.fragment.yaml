@@ -11,8 +11,14 @@ pre-commit:
     cargo-fmt:
       # rustfmt.toml in the glob so format-config changes trigger a
       # re-check of formatting against the new rules.
+      #
+      # Glob form per release#531 F4: leading `**/` never matches a repo-root
+      # file (it requires ≥1 dir segment), so the ROOT rustfmt.toml/Cargo.toml
+      # need their literal entry alongside the `**/` nested form; bare `*.rs`
+      # crosses `/` and covers root + any depth.
       glob:
-        - "**/*.rs"
+        - "*.rs"
+        - "rustfmt.toml"
         - "**/rustfmt.toml"
       run: cargo fmt --all -- --check
       priority: 2
@@ -24,8 +30,10 @@ pre-commit:
       # (clippy.toml, tooling configs) are intentionally NOT in the
       # glob — they don't affect what clippy reports.
       glob:
-        - "**/*.rs"
+        - "*.rs"
+        - "Cargo.toml"
         - "**/Cargo.toml"
+        - "Cargo.lock"
         - "**/Cargo.lock"
       # No `--workspace` flag: clippy without it lints the workspace's
       # `[workspace.default-members]` (which defaults to ALL members when

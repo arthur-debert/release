@@ -134,3 +134,43 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   grep -qF 'release-core gate --hook' "$hook"
   [ ! -e "${hook}.old" ]
 }
+
+# --- glob form: leading `**/` never matches repo-root files (release#531 F4) --
+# Spiked on the pinned lefthook 2.1.9: `**/` requires ≥1 directory segment, so
+# a leading `**/` glob silently exempts every repo-root file (root Cargo.toml,
+# go.mod, eslint.config.*, *.sh, ...). Bare `*` crosses `/` and covers root +
+# any depth, so the fragments use the bare form, with a literal entry alongside
+# the nested `**/` form for exact filenames. This locks the CLASS: no fragment
+# may reintroduce a leading-`**/` glob entry.
+
+@test "no leading **/* wildcard glob in any fragment (root-file exemption)" {
+  root="$BATS_TEST_DIRNAME/../.."
+  # The bad class: `**/*<wildcard>` — fully replaced by the bare form (`*.rs`),
+  # which covers root + any depth. Literal `**/name` entries are fine ONLY as
+  # the nested companion of a bare literal (checked by the next test).
+  # Quote is OPTIONAL in the pattern: YAML also allows single-quoted scalars
+  # ('**/x' — unquoted is invalid YAML, `*` starts an alias), so match both.
+  run grep -rnE '(glob:|^\s*-)\s*["'"'"']?\*\*/\*' \
+    "$root/lefthook.yml" \
+    "$root/templates/commons/lefthook.fragment.yaml" \
+    "$root"/templates/components/*/lefthook.fragment.yaml \
+    "$root"/templates/*/lefthook.fragment.yaml
+  [ "$status" -ne 0 ]
+}
+
+@test "every nested **/name glob has its bare root companion in the same file" {
+  root="$BATS_TEST_DIRNAME/../.."
+  fail=0
+  for f in "$root/templates/commons/lefthook.fragment.yaml" \
+           "$root"/templates/components/*/lefthook.fragment.yaml \
+           "$root"/templates/*/lefthook.fragment.yaml; do
+    [ -f "$f" ] || continue
+    # extract patterns like **/Cargo.toml (a literal name after **/) — both
+    # double- and single-quoted YAML scalar forms.
+    while IFS= read -r pat; do
+      name="${pat#\*\*/}"
+      grep -qE "[\"']${name//./\\.}[\"']" "$f" || { echo "MISSING root companion for $pat in $f"; fail=1; }
+    done < <(grep -oE '["'"'"']\*\*/[^*"'"'"']+["'"'"']' "$f" | tr -d '"'"'"'')
+  done
+  [ "$fail" -eq 0 ]
+}
