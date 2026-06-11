@@ -182,6 +182,24 @@ def test_wait_times_out_with_exit_2(monkeypatch, fakes, capsys):
     assert "alpha" in captured.err and "beta" in captured.err
 
 
+def test_wait_catches_review_landing_during_final_sleep(monkeypatch, fakes, capsys):
+    # A review that lands during the sleep that carries the clock past the
+    # deadline must NOT read as a timeout: the loop re-checks once after exit.
+    alpha, beta, _ = fakes
+    state = {"now": 0.0}
+
+    def gather(pr: int) -> PullContext:
+        if state["now"] >= review.MAX_WAIT_S:  # "landed" while the last sleep ran
+            alpha.done = beta.done = True
+        return PullContext(number=pr, head_sha="h", is_draft=True)
+
+    monkeypatch.setattr(review, "gather", gather)
+    sleep = lambda s: state.__setitem__("now", state["now"] + s)  # noqa: E731
+    clock = lambda: state["now"]  # noqa: E731
+    assert review.wait_for_reviews(5, [alpha, beta], sleep=sleep, clock=clock) == 0
+    assert "posted" in capsys.readouterr().out
+
+
 def test_wait_only_blocks_on_pending_reviewers(monkeypatch, fakes, capsys):
     # One required reviewer already done: the wait names only the pending one.
     alpha, beta, _ = fakes

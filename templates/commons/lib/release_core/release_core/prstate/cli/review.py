@@ -276,6 +276,14 @@ def wait_for_reviews(
         )
         sleep(POLL_INTERVAL_S)
 
+    # One last look before declaring timeout: a review can land during the
+    # final sleep that carries the clock past the deadline, and exiting on the
+    # stale pending set would falsely report a timeout.
+    pending = _pending_names(gather(pr), adapters)
+    if not pending:
+        elapsed = int((clock() - start) // 60)
+        print(f"review(s) posted (after {elapsed}m)")
+        return 0
     print(f"timeout: review(s) still pending after 30m: {', '.join(pending)}", file=sys.stderr)
     return 2
 
