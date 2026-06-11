@@ -57,6 +57,8 @@ POLL_BACKOFF = 1.5
 RESOLVE_POLL_S = 10.0
 RETRY_ATTEMPTS = 3  # bounded transient-error retries around gh calls (#582)
 RETRY_DELAY_S = 5.0
+JOBS_SETTLE_ATTEMPTS = 6  # jobs endpoint lags the run resource — re-poll until settled
+JOBS_SETTLE_DELAY_S = 10.0
 
 USAGE = __doc__ or ""
 
@@ -476,12 +478,32 @@ def _poll_to_completion(
     return done
 
 
-def _collect_jobs(repo: str, run_id: int) -> list[dict]:
-    data = _retry(
-        lambda: gh.rest(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"),
-        what="job collection",
-    )
-    return (data or {}).get("jobs", [])
+def _collect_jobs(repo: str, run_id: int, *, sleep=time.sleep) -> list[dict]:
+    """The completed run's jobs, re-polled until the listing settles.
+
+    The jobs endpoint is eventually consistent with the run resource: a
+    just-completed run can briefly list a job as still in_progress (caught
+    live on the first green round — an all-green cut reported one macOS
+    build job as IN_PROGRESS/INFRA). Re-poll until every job reports
+    completed, bounded; return the last snapshot if it never settles (the
+    run-conclusion backstop in main still decides pass/fail)."""
+    jobs: list[dict] = []
+    for attempt in range(JOBS_SETTLE_ATTEMPTS):
+        data = _retry(
+            lambda: gh.rest(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"),
+            what="job collection",
+        )
+        jobs = (data or {}).get("jobs", [])
+        if jobs and all(job.get("status") == "completed" for job in jobs):
+            return jobs
+        if attempt + 1 < JOBS_SETTLE_ATTEMPTS:
+            print(
+                f"canary run: jobs listing for run {run_id} not settled yet "
+                f"(attempt {attempt + 1}/{JOBS_SETTLE_ATTEMPTS}), re-polling",
+                file=sys.stderr,
+            )
+            sleep(JOBS_SETTLE_DELAY_S)
+    return jobs
 
 
 def _post_commit_status(
@@ -575,6 +597,9 @@ def _parse_args(argv: list[str]) -> dict | int:
                     opts["keep"] = int(value)
                 except ValueError:
                     return _usage_error(f"--keep wants an integer, got {value!r}")
+                if opts["keep"] < 0:
+                    # Negative slicing would prune an unexpected subset.
+                    return _usage_error(f"--keep wants a non-negative integer, got {value!r}")
         elif arg == "--json":
             opts["json"] = True
             i += 1
@@ -637,7 +662,10 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
             f"canary run: published {branch} ({rewritten} self-refs rewritten)",
             file=sys.stderr,
         )
-    except CanaryError as exc:
+    except (CanaryError, gh.GhError, proc.ProcError) as exc:
+        # GhError/ProcError too: the helpers under here (clone, _retry'd gh
+        # calls, git plumbing) raise them past the bounded retries — every
+        # phase-0/1 failure is a setup error, never an unhandled stack trace.
         print(f"canary run: {exc}", file=sys.stderr)
         return 2
 
@@ -749,7 +777,11 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
                 },
                 "pruned": deleted,
             }
-        except CanaryError as exc:
+        except (CanaryError, gh.GhError, proc.ProcError) as exc:
+            # GhError/ProcError too: _retry re-raises after the bounded
+            # attempts and the git wrappers raise directly — any of them is a
+            # family-level setup error; record it and continue to the next
+            # family rather than aborting the whole round.
             print(f"canary run: {family}: {exc}", file=sys.stderr)
             footer.append(f"{family}: SETUP ERROR — {exc}")
             payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}

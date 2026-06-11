@@ -321,6 +321,56 @@ def test_list_mode_excludes_canaries(manifest, capsys):
     assert "release-canary-rust" not in out
 
 
+# ── arg validation ───────────────────────────────────────────────────────────
+
+
+def test_negative_keep_is_usage_error(capsys):
+    rc = canary_run.main(["--ref", "main", "--keep", "-1"])
+    assert rc == 64
+    assert "non-negative" in capsys.readouterr().err
+
+
+def test_missing_ref_is_usage_error(capsys):
+    rc = canary_run.main([])
+    assert rc == 64
+    assert "--ref is required" in capsys.readouterr().err
+
+
+# ── jobs-endpoint settling ───────────────────────────────────────────────────
+
+
+def test_collect_jobs_repolls_until_listing_settles(monkeypatch):
+    # The jobs endpoint is eventually consistent with the run resource: the
+    # first snapshot after run completion can still list a job in_progress
+    # (caught live — an all-green cut reported a macOS build job as
+    # IN_PROGRESS). _collect_jobs must re-poll until every job is completed.
+    snapshots = [
+        {"jobs": [{"name": "a", "status": "completed"}, {"name": "b", "status": "in_progress"}]},
+        {"jobs": [{"name": "a", "status": "completed"}, {"name": "b", "status": "completed"}]},
+    ]
+    calls = {"n": 0}
+
+    def fake_rest(path, **kw):
+        data = snapshots[min(calls["n"], len(snapshots) - 1)]
+        calls["n"] += 1
+        return data
+
+    monkeypatch.setattr(canary_run.gh, "rest", fake_rest)
+    jobs = canary_run._collect_jobs("o/r", 1, sleep=lambda _s: None)
+    assert calls["n"] == 2
+    assert all(j["status"] == "completed" for j in jobs)
+
+
+def test_collect_jobs_gives_up_after_bounded_attempts(monkeypatch):
+    monkeypatch.setattr(
+        canary_run.gh,
+        "rest",
+        lambda path, **kw: {"jobs": [{"name": "a", "status": "in_progress"}]},
+    )
+    jobs = canary_run._collect_jobs("o/r", 1, sleep=lambda _s: None)
+    assert jobs == [{"name": "a", "status": "in_progress"}]
+
+
 # ── CLI registration ─────────────────────────────────────────────────────────
 
 
