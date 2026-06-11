@@ -1487,3 +1487,117 @@ def test_full_conflict_dest_not_excluded(tmp_path, monkeypatch, capsys):
     # The conflicting file stays visible to git status (untracked; -uall so
     # git doesn't collapse it into "?? bin/").
     assert "?? bin/check" in _git(repo, "status", "--porcelain", "-uall")
+
+
+# --------------------------------------------------------------------------
+# the seed-time workflow-reference warning (#581: the consumer-side tripwire)
+# --------------------------------------------------------------------------
+
+_BAD_WF = """\
+name: e2e
+on: [push]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run E2E tests
+        run: bin/check-e2e
+"""
+
+_MATERIALIZED_WF = """\
+name: e2e
+on: [push]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Arm the gate (materialize-only)
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
+        with:
+          toolset: 'false'
+      - name: Run E2E tests
+        run: bin/check-e2e
+"""
+
+
+def _write_consumer_wf(repo, text, name="e2e.yml"):
+    wf_dir = repo / ".github" / "workflows"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    (wf_dir / name).write_text(text)
+
+
+@_needs_yq
+def test_warn_names_file_job_step_and_the_next_action(tmp_path, capsys):
+    """The supage#163 shape: a consumer-authored job invokes a managed bin tool
+    with no materialize → LOUD stderr warning with exact coordinates + remedy."""
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    _write_consumer_wf(repo, _BAD_WF)
+    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check", "bin/check-e2e"})
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err
+    assert "bin/check-e2e" in err
+    # The one next action: materialize via arm-gate, toolset:'false'.
+    assert "arm-gate" in err
+    assert "toolset: 'false'" in err
+    assert "release-core how-to" in err
+
+
+@_needs_yq
+def test_warn_silent_when_job_materializes_first(tmp_path, capsys):
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    _write_consumer_wf(repo, _MATERIALIZED_WF)
+    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check", "bin/check-e2e"})
+    assert capsys.readouterr().err == ""
+
+
+def test_warn_silent_when_repo_has_no_workflows(tmp_path, capsys):
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check"})
+    assert capsys.readouterr().err == ""
+
+
+def test_warn_never_raises_on_scan_failure(tmp_path, monkeypatch, capsys):
+    """A WARNING, never a failure: any scanner error (missing yq, odd tree) is
+    swallowed — init's boot is never the casualty."""
+
+    def boom(*a, **k):
+        raise RuntimeError("scanner exploded")
+
+    monkeypatch.setattr(init.contract, "lint_workflow_dir", boom)
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    _write_consumer_wf(repo, _BAD_WF)
+    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check"})
+    assert capsys.readouterr().err == ""
+
+
+@_needs_yq
+@_needs_git
+def test_full_init_fires_the_workflow_warning(tmp_path, monkeypatch, capsys):
+    """End-to-end: a bare `release-core init` over a consumer carrying a bad job
+    warns on EVERY init (the tripwire is not a one-time migration message) —
+    and still exits 0 with the managed tree applied."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    # References bin/check — a mirror dest of the synthetic source tree.
+    _write_consumer_wf(
+        repo,
+        _BAD_WF.replace("run: bin/check-e2e", "run: bin/check"),
+    )
+
+    assert init.main([]) == 0
+    err = capsys.readouterr().err
+    assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err
+    assert "toolset: 'false'" in err
+    assert (repo / "bin" / "check").is_symlink()  # init still applied the tree
+
+    # Steady-state re-run: tree already current, the warning still fires.
+    assert init.main([]) == 0
+    err = capsys.readouterr().err
+    assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err

@@ -44,6 +44,19 @@ inputs:
       has real root configs, no detectable Kind, and never materializes `.release/`.
     required: false
     default: 'true'
+  toolset:
+    description: |
+      Provision the lint/format toolset (bin-internal/provision-gate-toolset.sh)
+      after the materialize. 'false' → materialize-only mode: run ONLY the
+      materialize step (wheel install + `release-core init --no-commit`) and skip
+      toolset provisioning — the building block for a CONSUMER-AUTHORED job that
+      invokes managed bin/ tools (e.g. `bin/check-e2e`) but never runs the lint
+      gate (release#581; supage#163 had to hand-copy the materialize recipe before
+      this input existed). One composite, one recipe: a separate "materialize"
+      composite would be a second definition of the same step ("invoke, don't
+      reimplement"). Defaults to 'true' — gate jobs want both.
+    required: false
+    default: 'true'
 
 runs:
   using: composite
@@ -93,6 +106,7 @@ runs:
         export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
         release-core init --no-commit
     - name: Provision the gate toolset
+      if: inputs.toolset == 'true'
       shell: bash
       env:
         RUFF_VERSION: ${{ inputs.ruff-version }}

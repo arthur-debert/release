@@ -338,6 +338,83 @@ def test_lint_scans_with_and_env_values(tmp_path):
     assert len(contract.lint_repo(root, MANIFEST)) == 1
 
 
+def test_lint_arm_gate_with_materialize_false_earns_no_credit(tmp_path):
+    """arm-gate called with materialize:'false' (release's own ci.yml shape)
+    does NOT compose the tree — a later managed-path reference still fails."""
+    root = str(tmp_path)
+    wf = COMPLIANT_WF.replace(
+        "        uses: arthur-debert/release/.github/actions/arm-gate@v2\n",
+        "        uses: arthur-debert/release/.github/actions/arm-gate@v2\n"
+        "        with:\n"
+        "          materialize: 'false'\n",
+    )
+    _write_wf(root, wf)
+    violations = contract.lint_repo(root, MANIFEST)
+    assert len(violations) == 1
+    assert violations[0].matched == "bin/check-e2e"
+
+
+def test_lint_arm_gate_toolset_false_still_materializes(tmp_path):
+    """The #581 building block: arm-gate with toolset:'false' is materialize-only
+    — it still composes the tree, so the job is compliant."""
+    root = str(tmp_path)
+    wf = COMPLIANT_WF.replace(
+        "        uses: arthur-debert/release/.github/actions/arm-gate@v2\n",
+        "        uses: arthur-debert/release/.github/actions/arm-gate@v2\n"
+        "        with:\n"
+        "          toolset: 'false'\n",
+    )
+    _write_wf(root, wf)
+    assert contract.lint_repo(root, MANIFEST) == []
+
+
+# ── The consumer-side workflow sweep (#581: init's seed-time tripwire) ────────
+
+PATTERNS = [".release/", "bin/check", "lib/release_core/"]
+
+
+def test_workflow_dir_sweep_flags_the_bad_job_with_exact_coordinates(tmp_path):
+    root = str(tmp_path)
+    _write_wf(root, VIOLATING_WF, name="e2e.yml")
+    violations = contract.lint_workflow_dir(root, PATTERNS)
+    assert len(violations) == 1
+    v = violations[0]
+    assert (v.file, v.job, v.step) == (".github/workflows/e2e.yml", "e2e", "Run E2E tests")
+    assert v.matched == "bin/check-e2e"
+
+
+def test_workflow_dir_sweep_silent_when_materialized_or_no_workflows(tmp_path):
+    # No .github/workflows at all → silent.
+    assert contract.lint_workflow_dir(str(tmp_path / "empty"), PATTERNS) == []
+    # A materialized job → silent.
+    root = str(tmp_path)
+    _write_wf(root, COMPLIANT_WF)
+    assert contract.lint_workflow_dir(root, PATTERNS) == []
+
+
+def test_workflow_dir_sweep_skips_unparseable_file_without_silencing_rest(tmp_path):
+    """One broken consumer workflow must not hide violations in the others —
+    consumer-side resilience (init must warn from whatever it CAN parse)."""
+    root = str(tmp_path)
+    _write_wf(root, "{ this is : not [ yaml", name="broken.yml")
+    _write_wf(root, VIOLATING_WF, name="e2e.yml")
+    violations = contract.lint_workflow_dir(root, PATTERNS)
+    assert [v.file for v in violations] == [".github/workflows/e2e.yml"]
+
+
+def test_workflow_dir_sweep_only_scans_workflows(tmp_path):
+    """The consumer sweep is .github/workflows/** ONLY — release-side surfaces
+    (composite actions, templates/) belong to lint_repo, not the init tripwire."""
+    root = str(tmp_path)
+    action_dir = Path(root, ".github", "actions", "my-act")
+    action_dir.mkdir(parents=True)
+    (action_dir / "action.yml").write_text(
+        "name: my-act\nruns:\n  using: composite\n  steps:\n"
+        "    - name: use the gate\n      shell: bash\n      run: bin/check-e2e\n"
+    )
+    assert contract.lint_workflow_dir(root, PATTERNS) == []
+
+
 # ── The shrink-only baseline ──────────────────────────────────────────────────
 
 

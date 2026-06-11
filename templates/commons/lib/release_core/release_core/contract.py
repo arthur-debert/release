@@ -324,10 +324,20 @@ def _step_is_materialize(step: dict) -> bool:
     materialize step runs `release-core init`; matched local-path and @ref
     forms both) or an explicit `release-core init` run line. Exactly these two
     — the standard recipe is DEMANDED, not one option among many (#583 owner
-    constraint: escape hatches shrink, not grow)."""
+    constraint: escape hatches shrink, not grow).
+
+    arm-gate called with `materialize: 'false'` (release's own ci.yml — the one
+    repo with real root configs) does NOT compose the tree, so it earns no
+    credit; `toolset: 'false'` (#581, the materialize-only building block)
+    still materializes and does."""
     uses = step.get("uses")
     if isinstance(uses, str) and uses.split("@", 1)[0].endswith("/arm-gate"):
-        return True
+        with_block = step.get("with")
+        # str().lower() catches both the GH-conventional quoted 'false' and a
+        # bare YAML `false` (parsed as a bool).
+        return not (
+            isinstance(with_block, dict) and str(with_block.get("materialize")).lower() == "false"
+        )
     run = step.get("run")
     return isinstance(run, str) and "release-core init" in _strip_shell_comments(run)
 
@@ -465,6 +475,32 @@ def lint_repo(repo_root: str, manifest: dict) -> list[Violation]:
     out: list[Violation] = []
     for relpath in ci_surface_files(repo_root):
         out.extend(lint_file(repo_root, relpath, regex))
+    return out
+
+
+def lint_workflow_dir(repo_root: str, patterns: list[str]) -> list[Violation]:
+    """The CONSUMER-side sweep (#581): scan only ``.github/workflows/**`` of a
+    consumer repo for jobs that reference a managed ephemeral path (``patterns``
+    — the init-resolved mirror dests + the managed prefixes) without a prior
+    materialize step. Same scanner as :func:`lint_repo` (one scanner, two file
+    enumerations); ``release-core init`` runs this at seed/session time as the
+    tripwire warning for consumer-authored jobs (the supage#163 class).
+
+    Resilient by design: a consumer workflow that fails to parse is SKIPPED
+    (the consumer's own CI will surface its syntax error) so one broken file
+    cannot silence the sweep over the rest."""
+    regex = _reference_regex(patterns)
+    out: list[Violation] = []
+    wf_dir = os.path.join(repo_root, ".github", "workflows")
+    if not os.path.isdir(wf_dir):
+        return out
+    for name in sorted(os.listdir(wf_dir)):
+        if not name.endswith((".yml", ".yaml")):
+            continue
+        try:
+            out.extend(lint_file(repo_root, f".github/workflows/{name}", regex))
+        except yamlio.YamlError:
+            continue
     return out
 
 
