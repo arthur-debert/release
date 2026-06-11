@@ -138,6 +138,45 @@ pre-commit:
         ruff check "$@"
         ruff format --check "$@"
 
+    consumer-contract-check:
+      # Freshness of the GENERATED consumer-contract manifest (#584, epic #583):
+      # docs/references/consumer-contract.yaml is a checked-in view of
+      # release_core/sync.py applied to templates/ — a contract-changing PR must
+      # regenerate it in the SAME PR (`release-core admin contract dump`).
+      # The wrapper runs the WORKING-TREE release_core via PYTHONPATH, never the
+      # installed wheel (the PATH `release-core` is the latest release, which
+      # would regenerate from the OLD classification code).
+      glob:
+        - "templates/**"
+        - "skills/**"
+        - "docs/references/consumer-contract.yaml"
+      run: |
+        if ! command -v python3 >/dev/null 2>&1; then
+          echo "ERROR: python3 not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
+        fi
+        bin-internal/check-consumer-contract.sh
+
+    consumer-contract-lint:
+      # The assumption lint (#584): every CI surface (.github/workflows,
+      # .github/actions, templates/ workflow copies) — any JOB referencing a
+      # managed path (per the manifest) without a prior materialize step in the
+      # same job (arm-gate / release-core init) fails. The mechanical "who still
+      # assumes the old shape" sweep that would have caught release#579.
+      # Baseline (shrink-only): docs/references/consumer-contract-lint-baseline.yaml.
+      glob:
+        - ".github/workflows/*"
+        - ".github/actions/**"
+        - "templates/**"
+        - "docs/references/consumer-contract.yaml"
+        - "docs/references/consumer-contract-lint-baseline.yaml"
+      run: |
+        if ! command -v python3 >/dev/null 2>&1; then
+          echo "ERROR: python3 not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
+        fi
+        bin-internal/lint-consumer-contract.sh
+
     lint-skills:
       # Markdownlint our OWN skill docs. Vendored skills (those carrying
       # an .upstream provenance marker) are skipped by the script — we
