@@ -211,20 +211,22 @@ def request_main(argv: list[str]) -> int:
         # the edge still verifies. Snapshotting between request and poll
         # instead would swallow exactly that consumed review.
         _, baseline_reviews = attach_state(pr)
+        # flush=True: under a pipe, stdout is block-buffered while stderr is
+        # not — without it the placement lines appear AFTER a drop report.
         placed: list[ReviewerAdapter] = []
         for adapter in adapters:
             if adapter.request(pr):
-                print(f"requested review: {adapter.name} on #{pr}")
+                print(f"requested review: {adapter.name} on #{pr}", flush=True)
                 placed.append(adapter)
             else:
-                print(f"{adapter.name}: auto-triggers, no request mechanism — no-op")
+                print(f"{adapter.name}: auto-triggers, no request mechanism — no-op", flush=True)
         dropped = _verify_attached(pr, placed, baseline_ids={rid for rid, _ in baseline_reviews})
     except ghapi.GhError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     for adapter in placed:
         if adapter not in dropped:
-            print(f"verified: {adapter.name} request attached on #{pr}")
+            print(f"verified: {adapter.name} request attached on #{pr}", flush=True)
     for adapter in dropped:
         print(
             f"{adapter.name}: request dropped by GitHub: no review_requested "
