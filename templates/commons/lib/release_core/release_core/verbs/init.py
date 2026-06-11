@@ -75,7 +75,7 @@ import shutil
 import sys
 import tempfile
 
-from .. import cli, gh, manifest, sync, yamlio
+from .. import cli, contract, gh, manifest, sync, yamlio
 
 USAGE = __doc__ or ""
 
@@ -264,6 +264,12 @@ def _run_full_sync(
         mirror = sync.compute_mirror(new_files, repo_root, tmp_release, migrate=False)
         claude = sync.decide_claude(repo_root, tmp_release)
 
+        # Consumer-side tripwire (#581): warn — never fail — when a workflow job
+        # references one of the ephemeral mirror dests this sync owns without
+        # materializing the managed tree first. Every init runs it (a consumer
+        # can add a bad job any day), dry-run included (read-only scan).
+        _warn_unmaterialized_workflow_refs(repo_root, mirror.mirror_dests)
+
         claude_change = 1 if claude.action in ("create", "inject", "refresh") else 0
         changes = (
             len(file_diff.added)
@@ -295,6 +301,54 @@ def _run_full_sync(
             shutil.rmtree(tmp_release, ignore_errors=True)
 
     return changes, managed, _source_label(source), list(mirror.conflicts)
+
+
+def _warn_unmaterialized_workflow_refs(repo_root: str, mirror_dests: set[str]) -> None:
+    """The seed-time / every-session tripwire (#581, the supage#163 class).
+
+    Post-WS7 the mirror dests (``bin/check*``, ``lib/release_core/``, …) are
+    EPHEMERAL — untracked, recomposed by every init — so a consumer-authored
+    workflow job that invokes one WITHOUT materializing the managed tree first
+    goes red on a fresh CI checkout ("No such file or directory", exit 127).
+    Scan the consumer's ``.github/workflows/**`` with the SAME assumption-lint
+    scanner the release-side contract lint uses (contract.lint_workflow_dir —
+    it ships in the wheel, one scanner everywhere) and print a LOUD stderr
+    warning naming each ``file → job → step`` plus the one next action.
+
+    A WARNING, never a failure: init must never break the boot over a
+    consumer-authored job — the consumer's own CI produces the real red. Any
+    scan error (missing yq, odd tree) is swallowed for the same reason.
+    """
+    try:
+        patterns = contract.managed_path_patterns(
+            {
+                "managed_path_prefixes": list(contract.MANAGED_PATH_PREFIXES),
+                "untracked_mirrors": sorted(mirror_dests),
+            }
+        )
+        violations = contract.lint_workflow_dir(repo_root, patterns)
+    except Exception:
+        return  # best-effort tripwire — the boot is never the casualty
+    if not violations:
+        return
+    print(
+        "WARNING: consumer workflow job(s) invoke managed ephemeral paths without\n"
+        "materializing the managed tree first. Post-WS7 these paths are untracked\n"
+        "(recomposed by `release-core init`), so they DO NOT EXIST on a fresh CI\n"
+        "checkout — each job below will fail with 'No such file or directory':",
+        file=sys.stderr,
+    )
+    for v in violations:
+        print(f"  {v.file} -> {v.job} -> {v.step}  (references {v.matched})", file=sys.stderr)
+    print(
+        "Each listed job must materialize the managed tree first — add, BEFORE the\n"
+        "referencing step:\n"
+        "  - uses: arthur-debert/release/.github/actions/arm-gate@v2\n"
+        "    with:\n"
+        "      toolset: 'false'   # materialize-only; drop to also arm the lint gate\n"
+        "See `release-core how-to`.",
+        file=sys.stderr,
+    )
 
 
 def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:

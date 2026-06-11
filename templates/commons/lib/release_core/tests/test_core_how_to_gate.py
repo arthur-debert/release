@@ -91,6 +91,17 @@ def test_how_to_dev_cycle_branches_from_origin_not_local_main():
     assert "auto-committed a managed sync" in body
 
 
+def test_how_to_documents_the_materialize_only_ci_pattern(tmp_path):
+    # release#581: a consumer-authored CI job invoking a managed bin/ tool must
+    # materialize the managed tree first — how-to is the consumer-facing home of
+    # that pattern (arm-gate with toolset:'false'), on BOTH render paths.
+    for body in (how_to._render("rust-cli"), how_to._render_repo(str(tmp_path), "unknown")):
+        assert "arthur-debert/release/.github/actions/arm-gate@v2" in body
+        assert "toolset: 'false'" in body
+        assert "DO NOT exist on a fresh CI checkout" in body
+        assert "Never hand-copy the materialize recipe" in body
+
+
 def test_how_to_distinguishes_gate_from_tests():
     # The gate runs lint/format, NOT tests — how-to must say so, or a fresh agent
     # treats a green gate as CI-green and skips tests (caught in the lex dogfood).

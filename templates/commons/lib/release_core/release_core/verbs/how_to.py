@@ -180,6 +180,30 @@ _GATE_BLURB = (
 )
 
 
+def _ci_jobs_section() -> list[str]:
+    """Consumer-authored CI jobs vs the ephemeral managed tree (release#581).
+
+    Kind-agnostic, so it renders on both the repo path and the abstract path —
+    the trap is the same everywhere: managed paths do not exist on a fresh CI
+    checkout."""
+    lines: list[str] = []
+    lines.append("Writing your own CI job that uses a managed tool?")
+    lines.append(
+        "  Managed paths (bin/check*, lib/release_core/, .release/**) are "
+        "EPHEMERAL — recomposed by `release-core init`, untracked, so they DO "
+        "NOT exist on a fresh CI checkout. Any job step that invokes one must "
+        "materialize the managed tree first:"
+    )
+    lines.append("    - uses: arthur-debert/release/.github/actions/arm-gate@v2")
+    lines.append("      with:")
+    lines.append("        toolset: 'false'   # materialize-only (skips the lint toolset)")
+    lines.append(
+        "  Drop the `toolset` input (default 'true') when the job also runs the "
+        "gate. Never hand-copy the materialize recipe — invoke the composite."
+    )
+    return lines
+
+
 def _dev_cycle_section() -> list[str]:
     lines: list[str] = []
     lines.append("The dev cycle (the ONE flow — draft-first)")
@@ -239,6 +263,8 @@ def _render_repo(root: str, kind: str) -> str:
     lines.append("")
     lines.extend(_verbs_section_repo(root))
     lines.append("")
+    lines.extend(_ci_jobs_section())
+    lines.append("")
     lines.extend(_dev_cycle_section())
     return "\n".join(lines)
 
@@ -255,6 +281,8 @@ def _render(kind: str) -> str:
     )
     lines.append("")
     lines.extend(_verbs_section_kind(kind))
+    lines.append("")
+    lines.extend(_ci_jobs_section())
     lines.append("")
     lines.extend(_dev_cycle_section())
     return "\n".join(lines)
