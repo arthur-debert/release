@@ -20,10 +20,25 @@ from .model import PullContext, Review, ReviewComment, Thread
 # produced it — that is how the circuit breakers group findings into review
 # cycles now that the REST `/pulls/{n}/comments` fetch is gone (it surfaced only
 # a subset of inline comments and missed second-bot reviews; release#515).
+#
+# `reviewRequests` lives HERE, not in `gh pr view --json reviewRequests`: the gh
+# CLI silently omits Bot-typed requested reviewers from that field (REST shows
+# `{login: "Copilot", type: "Bot"}`; gh returns `[]`), so a requested Copilot
+# could never read as REQUESTED through the adapter. The GraphQL union includes
+# Bots. Un-paginated (first: 100): no PR has 100 pending reviewer requests.
 _THREADS_QUERY = """
 query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $pr) {
+      reviewRequests(first: 100) {
+        nodes {
+          requestedReviewer {
+            ... on User { login }
+            ... on Bot { login }
+            ... on Team { slug }
+          }
+        }
+      }
       reviewThreads(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
@@ -48,21 +63,31 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
 """
 
 
-def _all_review_threads(owner: str, name: str, pr: int) -> list[dict]:
-    """Every review-thread node for the PR, following the cursor to the end.
+def _threads_and_review_requests(owner: str, name: str, pr: int) -> tuple[list[dict], list[dict]]:
+    """Every review-thread node for the PR plus its pending review requests.
 
-    Without pagination a PR with >100 threads would silently truncate, and a
-    dropped unresolved thread reads as READY when it isn't.
+    Threads follow the cursor to the end: without pagination a PR with >100
+    threads would silently truncate, and a dropped unresolved thread reads as
+    READY when it isn't. Review requests ride along on the first page only
+    (the connection is identical on every page).
     """
     nodes: list[dict] = []
+    requests: list[dict] = []
     cursor: str | None = None
     while True:
         data = ghapi.graphql(_THREADS_QUERY, owner=owner, name=name, pr=pr, cursor=cursor)
-        conn = data["repository"]["pullRequest"]["reviewThreads"]
+        pull = data["repository"]["pullRequest"]
+        if cursor is None:
+            requests = [
+                rr["requestedReviewer"]
+                for rr in pull["reviewRequests"]["nodes"]
+                if rr.get("requestedReviewer")
+            ]
+        conn = pull["reviewThreads"]
         nodes.extend(conn["nodes"])
         page = conn["pageInfo"]
         if not page["hasNextPage"]:
-            return nodes
+            return nodes, requests
         cursor = page["endCursor"]
 
 
@@ -71,7 +96,10 @@ def gather(pr: int) -> PullContext:
     owner, name = ghapi.repo_slug()
     base = f"repos/{owner}/{name}"
     meta = ghapi.pr_meta(pr)
-    thread_nodes = _all_review_threads(owner, name, pr)
+    thread_nodes, review_requests = _threads_and_review_requests(owner, name, pr)
+    # Bot-typed requests only surface through GraphQL (see _THREADS_QUERY);
+    # the node shape ({login} / {slug}) is what _requested_logins consumes.
+    meta["reviewRequests"] = review_requests
     return context_from_raw(
         meta=meta,
         reviews_json=ghapi.rest(f"{base}/pulls/{pr}/reviews", paginate=True) or [],

@@ -111,15 +111,20 @@ def repo_slug() -> tuple[str, str]:
 
 
 def pr_meta(pr: int) -> dict:
-    """PR-level metadata the engine needs in one call."""
+    """PR-level metadata the engine needs in one call.
+
+    Deliberately does NOT fetch ``reviewRequests``: ``gh pr view --json``
+    silently omits Bot-typed requested reviewers (a requested Copilot reads as
+    ``[]``), so the engine sources requested reviewers from GraphQL instead
+    (`fetch._threads_and_review_requests`).
+    """
     out = _gh(
         [
             "pr",
             "view",
             str(pr),
             "--json",
-            "number,headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,"
-            "reviewRequests,statusCheckRollup",
+            "number,headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup",
         ]
     )
     return json.loads(out)
