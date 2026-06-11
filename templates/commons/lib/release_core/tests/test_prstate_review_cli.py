@@ -59,6 +59,34 @@ def fakes(monkeypatch):
     return alpha, beta, gamma
 
 
+def _script_attach(monkeypatch, states):
+    """Wire `attach_state` to return `states` in order (last repeats); record calls."""
+    calls: list[int] = []
+
+    def _state(pr: int):
+        idx = min(len(calls), len(states) - 1)
+        calls.append(pr)
+        return states[idx]
+
+    monkeypatch.setattr(review, "attach_state", _state)
+    return calls
+
+
+@pytest.fixture
+def attach_ok(monkeypatch):
+    """attach_state reports every reviewer's request edge as present (release#614:
+    the verb verifies the attach, so dispatch tests need a healthy backend)."""
+    return _script_attach(monkeypatch, [(["alpha[bot]", "beta[bot]", "gamma[bot]", "Copilot"], [])])
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record (instead of perform) the verification poll's sleeps."""
+    rec: list[int] = []
+    monkeypatch.setattr(review.time, "sleep", rec.append)
+    return rec
+
+
 # --- argv contract (offline) ------------------------------------------------
 
 
@@ -111,7 +139,7 @@ def test_gh_failure_resolving_the_pr_is_exit_1_not_usage(monkeypatch, fakes, cap
     assert "not logged in" in capsys.readouterr().err
 
 
-def test_omitted_pr_resolves_from_current_branch(monkeypatch, fakes, capsys):
+def test_omitted_pr_resolves_from_current_branch(monkeypatch, fakes, attach_ok, capsys):
     alpha, beta, _ = fakes
     monkeypatch.setattr(ghapi, "_gh", lambda args, **kwargs: '{"number": 12}')
     assert review.request_main([]) == 0
@@ -122,7 +150,7 @@ def test_omitted_pr_resolves_from_current_branch(monkeypatch, fakes, capsys):
 # --- request / cancel dispatch ----------------------------------------------
 
 
-def test_request_defaults_to_all_required_reviewers(fakes, capsys):
+def test_request_defaults_to_all_required_reviewers(fakes, attach_ok, capsys):
     alpha, beta, gamma = fakes
     assert review.request_main(["7"]) == 0
     assert alpha.requests == [7]
@@ -132,18 +160,24 @@ def test_request_defaults_to_all_required_reviewers(fakes, capsys):
     assert "alpha" in out and "beta" in out
 
 
-def test_reviewer_flag_selects_one_adapter(fakes, capsys):
+def test_reviewer_flag_selects_one_adapter(fakes, attach_ok, capsys):
     alpha, beta, _ = fakes
     assert review.request_main(["7", "--reviewer", "beta"]) == 0
     assert beta.requests == [7]
     assert alpha.requests == []
 
 
-def test_noop_backend_reports_noop_and_succeeds(fakes, capsys):
+def test_noop_backend_reports_noop_and_succeeds(fakes, attach_ok, sleeps, capsys):
+    # No request mechanism → no request edge to verify: the no-op contract is
+    # untouched by attach verification (release#614) — no poll, no failure.
     _, _, gamma = fakes
     assert review.request_main(["7", "--reviewer", "gamma"]) == 0
     assert gamma.requests == [7]
-    assert "no-op" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "no-op" in out
+    assert "verified" not in out
+    assert sleeps == []
+    assert attach_ok == [7]  # the pre-request baseline read only — no poll
 
 
 def test_cancel_dispatches_through_the_same_interface(fakes, capsys):
@@ -153,7 +187,7 @@ def test_cancel_dispatches_through_the_same_interface(fakes, capsys):
     assert beta.cancels == [9]
 
 
-def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
+def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, attach_ok, capsys):
     # End-to-end through the REAL registry: the CLI selects the required set
     # (copilot) and the adapter places the request via ghapi.pr_edit_reviewer.
     calls: list[tuple] = []
@@ -163,6 +197,86 @@ def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
     assert review.request_main(["42"]) == 0
     assert calls == [(42, "@copilot")]
     assert "copilot" in capsys.readouterr().out
+
+
+# --- attach verification (release#614) ----------------------------------------
+#
+# GitHub can accept the request call yet silently drop the review_requested
+# edge (service stall / quota). The verb's postcondition is "the edge exists":
+# it polls after placing, and a dropped attach fails loud instead of letting
+# the loop wait on a review that was never requested.
+
+
+def test_attach_verified_on_first_check_exits_zero_without_sleeping(
+    monkeypatch, fakes, sleeps, capsys
+):
+    calls = _script_attach(monkeypatch, [([], []), (["alpha[bot]", "beta[bot]"], [])])
+    assert review.request_main(["7"]) == 0
+    assert sleeps == []  # the edge was there on the first check
+    assert calls == [7, 7]  # baseline + one verification check
+    out = capsys.readouterr().out
+    assert "verified: alpha request attached on #7" in out
+    assert "verified: beta request attached on #7" in out
+
+
+def test_dropped_attach_fails_loud(monkeypatch, fakes, sleeps, capsys):
+    # The live outage: every channel returns success, reviewRequests stays [].
+    calls = _script_attach(monkeypatch, [([], [])])
+    assert review.request_main(["7"]) == 1
+    err = capsys.readouterr().err
+    assert "alpha: request dropped by GitHub: no review_requested edge created" in err
+    assert "service stall / quota" in err and "retry later" in err
+    # The poll exhausts: baseline + ATTACH_VERIFY_CHECKS checks, sleeping between checks.
+    assert calls == [7] * (1 + review.ATTACH_VERIFY_CHECKS)
+    assert sleeps == [review.ATTACH_VERIFY_INTERVAL_SECONDS] * (review.ATTACH_VERIFY_CHECKS - 1)
+
+
+def test_attach_appearing_on_a_later_check_verifies_after_sleeping(
+    monkeypatch, fakes, sleeps, capsys
+):
+    _script_attach(monkeypatch, [([], []), ([], []), (["alpha[bot]"], [])])
+    assert review.request_main(["7", "--reviewer", "alpha"]) == 0
+    assert sleeps == [review.ATTACH_VERIFY_INTERVAL_SECONDS]
+    assert "verified: alpha request attached on #7" in capsys.readouterr().out
+
+
+def test_review_consumed_before_poll_counts_as_verified(monkeypatch, fakes, sleeps, capsys):
+    # A fast bot can consume the request before the poll sees the edge: a
+    # review NOT in the pre-request baseline counts as a verified attach.
+    _script_attach(
+        monkeypatch,
+        [
+            ([], [(1, "alpha[bot]")]),  # baseline: one old review
+            ([], [(1, "alpha[bot]"), (2, "alpha[bot]")]),  # request already consumed
+        ],
+    )
+    assert review.request_main(["7", "--reviewer", "alpha"]) == 0
+    assert "verified: alpha request attached on #7" in capsys.readouterr().out
+    assert sleeps == []
+
+
+def test_stale_baseline_review_does_not_verify(monkeypatch, fakes, sleeps, capsys):
+    # A review that predates the request must NOT count — only a fresh one can
+    # have consumed the request.
+    _script_attach(monkeypatch, [([], [(1, "alpha[bot]")])])
+    assert review.request_main(["7", "--reviewer", "alpha"]) == 1
+    assert "request dropped by GitHub" in capsys.readouterr().err
+
+
+def test_partial_drop_fails_and_names_only_the_dropped_reviewer(monkeypatch, fakes, sleeps, capsys):
+    _script_attach(monkeypatch, [([], []), (["alpha[bot]"], [])])
+    assert review.request_main(["7"]) == 1
+    out, err = capsys.readouterr()
+    assert "verified: alpha request attached on #7" in out
+    assert "beta: request dropped by GitHub" in err
+    assert "alpha: request dropped" not in err
+
+
+def test_help_documents_the_verified_contract(capsys):
+    assert review.request_main(["--help"]) == 0
+    out = capsys.readouterr().out
+    assert "verified" in out
+    assert "review_requested edge" in out
 
 
 # --- show ---------------------------------------------------------------------

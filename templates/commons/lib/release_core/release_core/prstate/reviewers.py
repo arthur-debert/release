@@ -41,6 +41,12 @@ class ReviewerAdapter:
         the state machine's never-requested vs stale-after-push distinction
         is a read-side concern (`state._has_stale_review`); the act is the
         same either way.
+
+        Placement only: True means the call was accepted, not that the
+        `review_requested` edge exists — GitHub can silently drop the attach
+        (release#614). The `pr review request` verb verifies the edge for
+        every adapter that returns True, generically; False-returning
+        (no-mechanism) adapters are never verified.
         """
         raise NotImplementedError
 
