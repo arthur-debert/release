@@ -145,3 +145,12 @@ def test_validate_repo_targets_unknown_names_the_registry(canary_fleet):
     # only the unknown entries, sorted
     assert err.endswith("o/aaa, o/zzz")
     assert "lex-fmt/lex" not in err
+
+
+def test_validate_repo_targets_unreadable_registry_is_a_message(tmp_path, monkeypatch):
+    # Missing manifest (or yq failure) → clean hard-error string, never a traceback.
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(tmp_path / "nope.yaml"))
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+    err = managed_repos.validate_repo_targets(["lex-fmt/lex"])
+    assert "cannot read the fleet registry" in err
+    assert "managed-repos.yaml" in err

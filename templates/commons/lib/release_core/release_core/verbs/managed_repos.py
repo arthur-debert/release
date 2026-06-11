@@ -134,8 +134,14 @@ def validate_repo_targets(repos: list[str], manifest: str | None = None) -> str:
     Returns the error message to print, or "" when every entry is known.
     Shared by the ``admin secrets token|install`` ``--repos`` flags: an
     unknown owner/name is a hard error naming the registry, so a typo can
-    never write a secret to an unmanaged repo."""
-    unknown = sorted(set(repos) - known_repos(manifest))
+    never write a secret to an unmanaged repo. An unreadable registry
+    (missing yq / missing or invalid manifest) is the same hard error —
+    surfaced as a message, never a traceback."""
+    try:
+        known = known_repos(manifest)
+    except yamlio.YamlError as exc:
+        return f"error: cannot read the fleet registry (managed-repos.yaml): {exc}"
+    unknown = sorted(set(repos) - known)
     if not unknown:
         return ""
     return (

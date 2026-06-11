@@ -284,7 +284,8 @@ def test_main_repos_comma_list_sets_each(registry, monkeypatch, capsys):
     set_calls = []
     monkeypatch.setattr(gh, "secret_set", lambda n, v, *, repo: set_calls.append((repo, n)))
     monkeypatch.setattr(gh, "secret_list", lambda repo: ["RELEASE_TOKEN"])
-    rc = irt.main(["--repos", "o/a,o/canary"])
+    # entries tolerate surrounding whitespace (stripped, like canary_run's lists)
+    rc = irt.main(["--repos", "o/a, o/canary"])
     assert rc == 0
     assert set_calls == [("o/a", "RELEASE_TOKEN"), ("o/canary", "RELEASE_TOKEN")]
 

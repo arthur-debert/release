@@ -213,7 +213,7 @@ def main(argv: list[str]) -> int:
         return int(exc.code or 0)
 
     owners = values["owners"]
-    explicit_repos = [r for r in values["repos"].split(",") if r]
+    explicit_repos = [r.strip() for r in values["repos"].split(",") if r.strip()]
 
     # Fail fast on a bad target list — before stdin, validation, or any write.
     if explicit_repos:
