@@ -101,6 +101,35 @@ def _pairs(manifest: str, filter_set: list[str]) -> list[tuple[str, str]]:
     return pairs
 
 
+def pairs(manifest: str | None = None) -> list[tuple[str, str]]:
+    """Every active ``projects:`` entry as (repo, path) — the public in-process
+    accessor over the fleet registry (the CLI's ``--list``/``--paths`` modes
+    print the same set). Used by verbs that resolve a repo without spawning
+    the accessor subprocess (``admin repos poke``)."""
+    return _pairs(manifest or _manifest_path(), [])
+
+
+def expect_verify_fail(manifest: str | None = None) -> dict[str, str]:
+    """The optional per-entry ``expect-verify-fail: <reason>`` annotations
+    (#594), as repo → reason.
+
+    An annotated repo's gate FAIL in the hermetic ``admin repos verify`` sweep
+    is EXPECTED for an environmental reason the sweep cannot satisfy (e.g. a
+    sibling checkout) and not mechanically inferable from the failing checks.
+    Shrink-only ratchet: verify flags the annotation as STALE the moment the
+    repo passes — remove it then. npm-deps artifacts need no annotation (they
+    classify mechanically; see release_core.classify)."""
+    data = yamlio.load(manifest or _manifest_path()) or {}
+    projects = data.get("projects") or {}
+    annotated: dict[str, str] = {}
+    for entries in projects.values():
+        for entry in entries or []:
+            reason = entry.get("expect-verify-fail")
+            if reason:
+                annotated[str(entry["repo"])] = str(reason)
+    return annotated
+
+
 def canaries(manifest: str | None = None) -> dict[str, str]:
     """The top-level ``canaries:`` block as family → owner/name (#587).
 

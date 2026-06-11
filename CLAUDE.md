@@ -50,8 +50,9 @@ silently dropping managed `bin/` tools).
   publishes the `release_core` wheel **and
   auto-advances the floating major** — it passes `advance-major: true`, so
   there is NO separate advance step and verify + canary must run BEFORE the
-  cut) → fresh-event check on a consumer (empty commit to its main, never
-  `gh run rerun`; #595 tracks the one-command verb). That's it — consumers
+  cut) → fresh-event check on a consumer (`release-core admin repos poke
+  <owner/name> --watch` — empty commit to its main + classified verdict, never
+  `gh run rerun`; #595). That's it — consumers
   self-update at SessionStart: `install-release-core` pulls the wheel and a bare
   `release-core init` (the DEFAULT full materialize) re-syncs the whole managed
   tree from the wheel bundle and auto-commits any change. There is **no push

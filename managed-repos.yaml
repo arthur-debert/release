@@ -15,6 +15,15 @@
 # defaults to ~/h on a dev machine; release-verify-fleet points it at a
 # throwaway dir for a hermetic sweep.
 #
+# An entry may carry an optional `expect-verify-fail: <reason>` annotation
+# (#594): `release-core admin repos verify` classifies that repo's gate FAIL
+# as EXPECTED — the reason is environmental (e.g. a sibling checkout the
+# hermetic clone can't have) and not mechanically inferable from the failing
+# checks. Shrink-only ratchet: the moment the annotated repo PASSES, verify
+# flags the annotation as STALE — remove it. npm-deps artifacts (eslint /
+# prettier / typecheck failing with no `npm install`) need NO annotation;
+# verify classifies those mechanically by failing check.
+#
 # Note the path is NOT derivable from `repo`: the lex project's repos are
 # `lex-fmt/*` but live under `lex-fmt/` while phos's `phos-editor/*`
 # live under `phos/` (as `phos-app`/`phos-core`), and single-repo projects collapse to a bare dir
@@ -23,7 +32,9 @@
 
 projects:
   phos:
-    - { repo: phos-editor/app,  path: phos/phos-app }
+    - repo: phos-editor/app
+      path: phos/phos-app
+      expect-verify-fail: gate needs the phos parity sibling checkouts, absent in the hermetic clone
     - { repo: phos-editor/core, path: phos/phos-core }
 
   burgertocow:
@@ -44,7 +55,9 @@ projects:
   lex:
     - { repo: lex-fmt/comms,           path: lex-fmt/comms }
     - { repo: lex-fmt/lex,             path: lex-fmt/lex }
-    - { repo: lex-fmt/lexed,           path: lex-fmt/lexed }
+    - repo: lex-fmt/lexed
+      path: lex-fmt/lexed
+      expect-verify-fail: gate needs the sibling lexed theme checkout, absent in the hermetic clone
     - { repo: lex-fmt/nvim,            path: lex-fmt/nvim }
     - { repo: lex-fmt/tree-sitter-lex, path: lex-fmt/tree-sitter-lex }
     - { repo: lex-fmt/vscode,          path: lex-fmt/vscode }
