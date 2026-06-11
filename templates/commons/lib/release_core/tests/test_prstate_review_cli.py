@@ -91,6 +91,25 @@ def test_unknown_reviewer_is_usage_error(fakes, capsys):
     assert "alpha" in err  # the known set is named
 
 
+def test_gh_failure_resolving_the_pr_is_exit_1_not_usage(monkeypatch, fakes, capsys):
+    # With <pr> omitted, a gh failure (auth, no PR for branch, missing gh)
+    # surfaces as a gh failure with its real message — never as exit 64.
+    def _gh_down(args, **kwargs):
+        raise ghapi.GhError("gh pr view failed (1): not logged in")
+
+    monkeypatch.setattr(ghapi, "_gh", _gh_down)
+    assert review.request_main([]) == 1
+    assert "not logged in" in capsys.readouterr().err
+
+
+def test_omitted_pr_resolves_from_current_branch(monkeypatch, fakes, capsys):
+    alpha, beta, _ = fakes
+    monkeypatch.setattr(ghapi, "_gh", lambda args, **kwargs: '{"number": 12}')
+    assert review.request_main([]) == 0
+    assert alpha.requests == [12]
+    assert beta.requests == [12]
+
+
 # --- request / cancel dispatch ----------------------------------------------
 
 

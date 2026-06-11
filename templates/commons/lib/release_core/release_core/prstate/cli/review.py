@@ -161,14 +161,21 @@ def _select(reviewer: str | None) -> list[ReviewerAdapter] | None:
 
 
 def _resolve_pr(pr: int | None) -> int | None:
-    """The given PR number, or the current branch's PR (None if there is none)."""
+    """The given PR number, or the current branch's PR.
+
+    Raises `ghapi.GhError` when `gh` itself fails (missing gh, auth, no PR for
+    the branch, transient API errors) — the caller reports that as a gh
+    failure (exit 1), never as a usage error: swallowing it here would mask
+    the real cause behind a misleading "no PR number given".
+    """
     if pr is not None:
         return pr
     try:
         data = json.loads(ghapi._gh(["pr", "view", "--json", "number"]))
-    except (ghapi.GhError, json.JSONDecodeError):
-        return None
-    return data.get("number")
+    except json.JSONDecodeError as exc:
+        raise ghapi.GhError(f"unparseable `gh pr view` output: {exc}") from exc
+    number = data.get("number")
+    return int(number) if number is not None else None
 
 
 def _setup(argv: list[str], usage: str) -> tuple[int, list[ReviewerAdapter]] | int:
@@ -180,10 +187,14 @@ def _setup(argv: list[str], usage: str) -> tuple[int, list[ReviewerAdapter]] | i
     adapters = _select(reviewer)
     if adapters is None:
         return 64
-    pr = _resolve_pr(pr_arg)
+    try:
+        pr = _resolve_pr(pr_arg)
+    except ghapi.GhError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     if pr is None:
-        print("error: no PR number given and no PR for the current branch", file=sys.stderr)
-        return 64
+        print("error: could not resolve a PR for the current branch", file=sys.stderr)
+        return 1
     return pr, adapters
 
 
