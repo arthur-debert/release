@@ -18,8 +18,8 @@ def _root() -> click.Group:
 
 def test_verbs_registered():
     names = set(_root().commands)
-    assert {"test-unit", "test-e2e", "test-all", "build", "run"} <= names
-    for n in ("test-unit", "test-e2e", "test-all", "build", "run"):
+    assert {"test-unit", "test-e2e", "test-all", "coverage", "build", "run"} <= names
+    for n in ("test-unit", "test-e2e", "test-all", "coverage", "build", "run"):
         assert (_root().commands[n].short_help or "").strip()
 
 
@@ -86,6 +86,88 @@ def test_test_all_stops_if_unit_fails(monkeypatch):
     monkeypatch.setattr(tasks, "_exec", lambda cmd, root: 3)
     assert tasks.test_all([]) == 3
     # e2e_commands is queried up front, but the e2e command must NOT exec.
+
+
+# --- coverage: loud-error semantics (release#568) -------------------------
+
+
+def test_coverage_errors_loudly_when_no_tool_for_kind(monkeypatch, capsys):
+    # UNLIKE the test verbs, coverage never skips-with-notice: asked-for
+    # coverage with no coverage-capable component is exit 1 + a kind-naming msg.
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "coverage_commands", lambda r: [])
+    monkeypatch.setattr(tasks.manifest, "detect_kind", lambda r: "nvim-plugin")
+    assert tasks.coverage([]) == 1
+    assert "no coverage tool for kind nvim-plugin" in capsys.readouterr().err
+
+
+def test_coverage_kind_detection_failure_still_errors(monkeypatch, capsys):
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "coverage_commands", lambda r: [])
+
+    def _boom(r):
+        raise tasks.manifest.KindError("nope")
+
+    monkeypatch.setattr(tasks.manifest, "detect_kind", _boom)
+    assert tasks.coverage([]) == 1
+    assert "no coverage tool for kind unknown" in capsys.readouterr().err
+
+
+def test_coverage_hard_errors_when_cargo_llvm_cov_missing(monkeypatch, capsys):
+    # Missing tool = loud non-zero with the install command, never a silent
+    # skip (the hard-gate philosophy). Nothing may exec.
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "which", lambda name: None)
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "coverage_commands",
+        lambda r: [Cmd(["cargo", "llvm-cov", "--all-features"], "cargo llvm-cov", label="rust")],
+    )
+    assert tasks.coverage([]) == 1
+    assert "cargo install cargo-llvm-cov" in capsys.readouterr().err
+    assert not executed["v"]
+
+
+def test_coverage_fans_out_and_propagates_failure(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
+
+    def _fake_exec(cmd, root):
+        calls.append(cmd.argv)
+        return 0 if cmd.label == "node" else 5  # rust leg fails
+
+    monkeypatch.setattr(tasks, "_exec", _fake_exec)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "coverage_commands",
+        lambda r: [
+            Cmd(["pnpm", "run", "test:unit", "--coverage"], "pnpm …", label="node"),
+            Cmd(["cargo", "llvm-cov", "--all-features"], "cargo llvm-cov", label="rust"),
+        ],
+    )
+    assert tasks.coverage([]) == 5
+    assert len(calls) == 2  # node ran, rust ran + failed, stop there
+
+
+def test_coverage_go_pair_stops_at_failed_test_leg(monkeypatch):
+    # `go test -coverprofile` failing must short-circuit the `go tool cover`
+    # leg — the && semantics of the issue's go command.
+    calls: list[list[str]] = []
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: calls.append(cmd.argv) or 2)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "coverage_commands",
+        lambda r: [
+            Cmd(["go", "test", "-coverprofile=/tmp/c.out", "./..."], "go test", label="go"),
+            Cmd(["go", "tool", "cover", "-func=/tmp/c.out"], "go tool cover", label="go"),
+        ],
+    )
+    assert tasks.coverage([]) == 2
+    assert calls == [["go", "test", "-coverprofile=/tmp/c.out", "./..."]]
 
 
 # --- build / run: error when no command ----------------------------------
@@ -176,6 +258,13 @@ def test_cargo_test_stays_plain_without_nextest(monkeypatch):
 
 
 def test_help(capsys):
-    for fn in (tasks.test_unit, tasks.test_e2e, tasks.test_all, tasks.build, tasks.run):
+    for fn in (
+        tasks.test_unit,
+        tasks.test_e2e,
+        tasks.test_all,
+        tasks.coverage,
+        tasks.build,
+        tasks.run,
+    ):
         assert fn(["--help"]) == 0
     assert capsys.readouterr().out

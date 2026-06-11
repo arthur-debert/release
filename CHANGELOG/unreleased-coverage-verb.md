@@ -1,0 +1,1 @@
+- Add kind-aware `release-core coverage` task verb (cargo llvm-cov / go tool cover / test runner --coverage) with a loud error when no coverage tool exists for the Kind (#568)

@@ -44,6 +44,7 @@ from __future__ import annotations
 import glob
 import json
 import os
+import tempfile
 from dataclasses import dataclass, field
 
 from . import yamlio
@@ -150,6 +151,40 @@ def _cargo_test(cwd: str) -> Cmd:
         label="rust",
         cwd=None if cwd == "." else cwd,
     )
+
+
+def _cargo_llvm_cov(cwd: str) -> Cmd:
+    """``cargo llvm-cov --all-features`` for one crate dir — its default text
+    report ends with the per-file coverage table (the "least-covered modules"
+    view release#568 wants). ``--all-features`` matches :func:`_cargo_test`.
+    The exec layer (tasks.coverage) hard-errors with an install hint when
+    cargo-llvm-cov is missing — never a silent skip."""
+    where = "" if cwd == "." else f" (in {cwd})"
+    return Cmd(
+        argv=["cargo", "llvm-cov", "--all-features"],
+        display=f"cargo llvm-cov --all-features{where}",
+        label="rust",
+        cwd=None if cwd == "." else cwd,
+    )
+
+
+def _go_cover_cmds() -> list[Cmd]:
+    """The go coverage pair: ``go test -coverprofile`` then ``go tool cover
+    -func`` over the profile (the per-function summary). The profile lands in
+    the system tmpdir, never the working tree."""
+    profile = os.path.join(tempfile.gettempdir(), "release-core-coverage.out")
+    return [
+        Cmd(
+            argv=["go", "test", f"-coverprofile={profile}", "./..."],
+            display=f"go test -coverprofile={profile} ./...",
+            label="go",
+        ),
+        Cmd(
+            argv=["go", "tool", "cover", f"-func={profile}"],
+            display=f"go tool cover -func={profile}",
+            label="go",
+        ),
+    ]
 
 
 def _make_test_target(root: str) -> bool:
@@ -298,6 +333,37 @@ def e2e_commands(root: str) -> list[Cmd]:
     return []
 
 
+def coverage_commands(root: str) -> list[Cmd]:
+    """Every component's COVERAGE command, cheap-first (mirrors the
+    ``unit_commands`` fan-out): node (the test runner with ``--coverage``) →
+    rust (``cargo llvm-cov``, root + ``src-tauri/``) → go (``go test
+    -coverprofile`` + ``go tool cover -func``).
+
+    Node prefers a dedicated ``coverage``/``test:coverage`` script when the repo
+    wired one; otherwise it reuses the unit script and forwards ``--coverage``
+    (vitest and jest both take it; the vitest ``--run`` injection applies so the
+    suite exits instead of watching). Empty means NO component has a
+    coverage-capable toolchain — the verb errors loudly on that (coverage was
+    asked for; there is nothing to "skip", per the hard-gate philosophy)."""
+    cmds: list[Cmd] = []
+    scripts = _scripts(root)
+    if scripts:
+        pm = detect_pm(root)
+        named = next((s for s in ("coverage", "test:coverage") if s in scripts), None)
+        if named:
+            cmds.append(_node_run(pm, named, _vitest_extra(scripts[named])))
+        else:
+            unit = "test:unit" if "test:unit" in scripts else "test" if "test" in scripts else None
+            if unit:
+                extra = [*_vitest_extra(scripts[unit]), "--coverage"]
+                cmds.append(_node_run(pm, unit, extra))
+    for d in _rust_dirs(root):
+        cmds.append(_cargo_llvm_cov(d))
+    if os.path.isfile(os.path.join(root, "go.mod")):
+        cmds.extend(_go_cover_cmds())
+    return cmds
+
+
 def build_command(root: str) -> Cmd | None:
     """The SINGLE app-root build command (never a fan-out):
 
@@ -386,6 +452,7 @@ class RepoCommands:
 
     unit: list[Cmd] = field(default_factory=list)
     e2e: list[Cmd] = field(default_factory=list)
+    coverage: list[Cmd] = field(default_factory=list)
     build: Cmd | None = None
     run: Cmd | None = None
     docs: DocsCommands | None = None
@@ -401,6 +468,7 @@ def resolve(root: str) -> RepoCommands:
     return RepoCommands(
         unit=unit_commands(root),
         e2e=e2e_commands(root),
+        coverage=coverage_commands(root),
         build=build_command(root),
         run=run_command(root),
         docs=docs_commands(root),

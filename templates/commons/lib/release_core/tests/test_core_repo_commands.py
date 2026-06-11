@@ -294,6 +294,73 @@ def test_docs_none_when_absent(tmp_path):
     assert rc.docs_commands(str(tmp_path)) is None
 
 
+# --- coverage: kind-aware, component fan-out (release#568) ----------------
+
+
+def test_coverage_rust_is_cargo_llvm_cov(tmp_path):
+    (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.argv for c in cov] == [["cargo", "llvm-cov", "--all-features"]]
+    assert cov[0].label == "rust" and cov[0].cwd is None
+
+
+def test_coverage_go_is_coverprofile_then_cover_func(tmp_path):
+    (tmp_path / "go.mod").write_text("module x\n")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert len(cov) == 2
+    assert cov[0].argv[:2] == ["go", "test"] and cov[0].argv[-1] == "./..."
+    assert cov[1].argv[:3] == ["go", "tool", "cover"]
+    # Both legs point at the SAME profile, and it lives OUTSIDE the work tree.
+    profile = cov[0].argv[2].removeprefix("-coverprofile=")
+    assert cov[1].argv[3] == f"-func={profile}"
+    assert not profile.startswith(str(tmp_path))
+
+
+def test_coverage_node_reuses_unit_script_with_coverage_flag(tmp_path):
+    # No dedicated coverage script → unit script + --coverage; bare vitest also
+    # gets --run so the suite exits instead of watching. pnpm: no `--` leak.
+    _pkg(tmp_path, {"test:unit": "vitest"}, pm="pnpm")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.argv for c in cov] == [["pnpm", "run", "test:unit", "--run", "--coverage"]]
+
+
+def test_coverage_node_npm_needs_dashdash(tmp_path):
+    _pkg(tmp_path, {"test": "jest"}, pm="npm")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.argv for c in cov] == [["npm", "run", "test", "--", "--coverage"]]
+
+
+def test_coverage_node_prefers_dedicated_coverage_script(tmp_path):
+    # A wired coverage script wins over synthesizing flags onto the unit script.
+    _pkg(tmp_path, {"coverage": "vitest run --coverage", "test:unit": "vitest"}, pm="pnpm")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.argv for c in cov] == [["pnpm", "run", "coverage"]]  # already runs once
+
+
+def test_coverage_node_test_coverage_script_alias(tmp_path):
+    _pkg(tmp_path, {"test:coverage": "vitest run --coverage", "test": "vitest"}, pm="pnpm")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.argv for c in cov] == [["pnpm", "run", "test:coverage"]]
+
+
+def test_coverage_tauri_fans_out_node_then_rust(tmp_path):
+    _pkg(tmp_path, {"test:unit": "vitest run"}, pm="pnpm")
+    (tmp_path / "src-tauri").mkdir()
+    (tmp_path / "src-tauri" / "Cargo.toml").write_text("[package]\nname='app'\n")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.label for c in cov] == ["node", "rust"]
+    assert cov[1].cwd == "src-tauri"
+    assert cov[1].argv[:2] == ["cargo", "llvm-cov"]
+
+
+def test_coverage_empty_when_no_coverage_capable_component(tmp_path):
+    # nvim-plugin shape: busted has no portfolio coverage tool — nothing here;
+    # the VERB turns this into a loud error (see test_core_tasks).
+    (tmp_path / "lua").mkdir()
+    (tmp_path / "tests").mkdir()
+    assert rc.coverage_commands(str(tmp_path)) == []
+
+
 # --- robustness: garbled / missing manifest never crashes -----------------
 
 
@@ -306,4 +373,4 @@ def test_garbled_package_json_is_graceful(tmp_path):
 def test_resolve_empty_repo(tmp_path):
     got = rc.resolve(str(tmp_path))
     assert got.unit == [] and got.e2e == [] and got.build is None and got.run is None
-    assert got.docs is None and got.deps is None
+    assert got.coverage == [] and got.docs is None and got.deps is None
