@@ -1381,6 +1381,29 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
             "eb0cd6aef6322f24367f1d4f2475b88229ec7f89",
         }
     ),
+    # The packaged-binary smoke hooks (retired release#590): dead since WS7
+    # (#528) made the mirrors untracked — `hashFiles('app-bin/smoke-hook.sh')`
+    # on a plain checkout never matched, so the hook never executed; #592
+    # removed the dead workflow branches and this tombstone sweeps the seeded
+    # copies. One dest, both kinds' blobs (electron-app + tauri-app shipped
+    # the same path). A consumer-OVERRIDDEN hook (the documented customization
+    # path) no longer matches a shipped blob and is left alone.
+    "app-bin/smoke-hook.sh": frozenset(
+        {
+            "e66cefd08e3fdd2bc196d7ddd2273092045e46fa",  # templates/electron-app
+            "0d51b774a26ea753285c180d7918c439d3e7abf1",  # templates/tauri-app
+        }
+    ),
+    # The same hooks at their pre-#270 dest (templates/<kind>/scripts/smoke.sh,
+    # moved to app-bin/ in #270). BLOB-ONLY on purpose: `scripts/smoke.sh` is a
+    # plausible consumer-owned name — never marker/fingerprint this dest.
+    "scripts/smoke.sh": frozenset(
+        {
+            "746a5c585fed3fd3627ff1fc2d50141b6437ff58",  # templates/electron-app (earlier)
+            "b1fd39538285eb97647aadd4980c789dbcb4d14b",  # templates/electron-app
+            "8c59bc21b47bd5b49cf61518ac9fdd5892b7adfc",  # templates/tauri-app
+        }
+    ),
     **_RETIRED_SKILL_FILES,
 }
 
