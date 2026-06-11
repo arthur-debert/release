@@ -79,6 +79,14 @@ projects:
   wave-term:
     - { repo: arthur-debert/wave-term, path: wave-term }
 
+# Canary consumers (#587) — release-owned synthetic repos exercised by
+# `release-core admin canary run` BEFORE a cut. Deliberately a TOP-LEVEL
+# block, NOT under `projects:`: the fleet sweeps (verify / migrate / inbox /
+# audit) iterate `projects:` only and must never include the canaries
+# (owner decision OQ6). One entry per family: `<family>: <owner>/<name>`.
+canaries:
+  rust: arthur-debert/release-canary-rust
+
 # NOT managed even though they carry the main-branch-protection
 # ruleset (which was applied broadly across arthur-debert/* for
 # unrelated reasons). Listed here so it's self-documenting for the day

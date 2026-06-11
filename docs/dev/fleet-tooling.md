@@ -82,6 +82,51 @@ Caveats:
   (`git commit --allow-empty -m "ci: re-resolve @vN" && git push`) or
   `gh workflow run` to create a run that resolves the new `vN` tip.
 
+## `release-core admin canary run` — the pre-ship consumer-life round
+
+Where `repos verify` is the fast, fleet-wide *gate* sweep, the canary round
+is the slow, deep *workflow* test (release#587, epic #583): it makes a real
+synthetic consumer live its full life — boot from source, materialize,
+`bin/check`, e2e/bats, and a genuine prerelease cut — against an
+**unreleased** candidate ref, before `release-core cut` moves the fleet.
+Different instruments; run both before cutting.
+
+```sh
+release-core admin canary run --ref main            # the round to run before a cut
+release-core admin canary run --ref my-branch --json
+```
+
+Per registered family (the top-level `canaries:` block of
+`managed-repos.yaml` — deliberately NOT under `projects:`, so the
+verify/migrate/inbox sweeps never include the canary repos) it:
+
+1. Publishes `canary/<sha12>` — a branch of release at the candidate SHA
+   with every `uses: arthur-debert/release/...@vN` self-ref rewritten to the
+   branch, so the canary's reusable workflow resolves its composites AND its
+   wheel (arm-gate's non-`vN` from-source path) at the candidate tree.
+2. Seeds the canary repo from source in a sandboxed venv (`XDG_*` under
+   `--root`, default `/tmp/release-canary-$USER`), points its thin callers
+   at `canary/<sha12>`, adds a changelog fragment, commits the seed.
+3. Dispatches **fresh events** (never `gh run rerun`): the seed push (→ CI)
+   and a `0.0.<n>-canary.<runid>` prerelease cut, in parallel.
+4. Polls both runs to conclusion (transient-tolerant backoff, `--timeout`).
+5. Prints a per-job classified report — **INFRA** (arm-gate
+   materialize/provision, install-release-core, init, prepare internals —
+   a release bug) vs **PROJECT** (bin/check, cargo, bats, compilation —
+   canary-content rot) — and posts a `canary/<family>` commit status on
+   `release@<sha>`. Exit 0 green / 1 failures / 2 setup error.
+6. Prunes canary prereleases beyond `--keep` (default 5). `canary/*`
+   branches on release are kept (owner decision).
+
+All cut artifacts land on the canary repo only: prerelease tags + GH
+prerelease assets; crates/brew/npm are fail-closed fenced (`publish-crates:
+false`, `brew: false`, and the matching secrets are never installed there).
+
+Slice 4 (not yet landed) turns the commit status into a prescriptive gate:
+`release-core cut` will refuse without green `canary/*` statuses on the
+exact HEAD SHA — no skip flag. Until then the round is the documented
+pre-cut step alongside `repos verify`.
+
 ## Onboarding a new repo
 
 Onboarding (GitHub-side policy + repo-side files) is driven by the

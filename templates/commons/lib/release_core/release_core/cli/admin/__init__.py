@@ -6,6 +6,7 @@ so it too can be handed to several parallel agents without collisions:
 
   admin repos    ← repos.py         (list / prs / scripts / audit / verify)
   admin release  ← release_cmds.py  (advance-major / betas / lex)
+  admin canary   ← canary.py        (run — #587)
   admin policy   ← policy.py        (ruleset / sweep / dependabot)
   admin secrets  ← secrets.py       (install / token)
   admin inbox    ← inbox.py         (bare / notify-source)
@@ -27,7 +28,7 @@ import click
 
 from ...verbs import audit_smoke_test
 from .._helpers import wrap_verb
-from . import contract, inbox, policy, release_cmds, repos, secrets
+from . import canary, contract, inbox, policy, release_cmds, repos, secrets
 
 
 @click.group(
@@ -46,6 +47,7 @@ def group() -> None:
 
 group.add_command(repos.group)
 group.add_command(release_cmds.group)
+group.add_command(canary.group)
 group.add_command(policy.group)
 group.add_command(secrets.group)
 group.add_command(inbox.group)
