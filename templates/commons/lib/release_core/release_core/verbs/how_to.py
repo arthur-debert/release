@@ -101,7 +101,7 @@ _KIND_HINT: dict[str, dict[str, str]] = {
 
 _GENERIC_HINT = {
     "test": "(see this repo's manifest / CI)",
-    "coverage": "(no coverage tool for this Kind)",
+    "coverage": "(see this repo's manifest / CI)",
     "build": "(see this repo's manifest / CI)",
     "run": "(see this repo's README)",
 }

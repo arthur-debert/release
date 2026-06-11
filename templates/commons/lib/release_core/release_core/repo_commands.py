@@ -171,8 +171,10 @@ def _cargo_llvm_cov(cwd: str) -> Cmd:
 def _go_cover_cmds() -> list[Cmd]:
     """The go coverage pair: ``go test -coverprofile`` then ``go tool cover
     -func`` over the profile (the per-function summary). The profile lands in
-    the system tmpdir, never the working tree."""
-    profile = os.path.join(tempfile.gettempdir(), "release-core-coverage.out")
+    the system tmpdir, never the working tree; the PID suffix keeps concurrent
+    runs from clobbering each other. (Not ``mkstemp``: detection must stay
+    side-effect-free — ``how-to`` renders these commands without running them.)"""
+    profile = os.path.join(tempfile.gettempdir(), f"release-core-coverage-{os.getpid()}.out")
     return [
         Cmd(
             argv=["go", "test", f"-coverprofile={profile}", "./..."],
