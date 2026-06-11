@@ -91,6 +91,62 @@ def _threads_and_review_requests(owner: str, name: str, pr: int) -> tuple[list[d
         cursor = page["endCursor"]
 
 
+# The attach-verification read (release#614). One light GraphQL call: the
+# pending review requests (the same Bot-inclusive union as _THREADS_QUERY —
+# gh's `pr view --json reviewRequests` omits Bots) plus the NEWEST submitted
+# reviews. `reviews(last: 50)` is deliberate: verification only diffs against
+# a baseline taken seconds earlier, so a fresh review is always in the tail —
+# an old review can only leave the window if 50+ reviews land mid-poll.
+_ATTACH_QUERY = """
+query($owner: String!, $name: String!, $pr: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      reviewRequests(first: 100) {
+        nodes {
+          requestedReviewer {
+            ... on User { login }
+            ... on Bot { login }
+            ... on Team { slug }
+          }
+        }
+      }
+      reviews(last: 50) {
+        nodes {
+          databaseId
+          author { login }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def attach_state(pr: int) -> tuple[list[str], list[tuple[int, str]]]:
+    """Pending review-request logins + (review_id, author) of the newest reviews.
+
+    The read side of request-attach verification (release#614): GitHub can
+    accept a review-request call yet silently drop the edge, so after placing
+    a request the verb polls this until the reviewer shows up in the pending
+    requests — or has already submitted a fresh review that consumed it.
+    """
+    owner, name = ghapi.repo_slug()
+    data = ghapi.graphql(_ATTACH_QUERY, owner=owner, name=name, pr=pr)
+    pull = data["repository"]["pullRequest"]
+    logins = _requested_logins(
+        [
+            rr["requestedReviewer"]
+            for rr in pull["reviewRequests"]["nodes"]
+            if rr.get("requestedReviewer")
+        ]
+    )
+    reviews = [
+        (n["databaseId"], (n.get("author") or {}).get("login", ""))
+        for n in pull["reviews"]["nodes"]
+    ]
+    return logins, reviews
+
+
 def gather(pr: int) -> PullContext:
     """Fetch every raw input the engine needs for `pr`, live, via `gh`."""
     owner, name = ghapi.repo_slug()

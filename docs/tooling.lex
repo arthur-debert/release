@@ -138,7 +138,9 @@ release-core, the gate, distribution, and workflows
         - `release-core pr review request` — request the required review(s)
           (REVIEWS_PENDING). Reviewer-agnostic: it dispatches through the
           adapter registry, defaulting to all required reviewers
-          (`--reviewer <name>` selects one).
+          (`--reviewer <name>` selects one). It verifies the attach: exit 0
+          means the review_requested edge exists (or a fresh review already
+          consumed it); a request GitHub silently drops fails loud.
         - `release-core pr wait` — the ONE engine-driven wait (it replaced
           both `pr review wait` and `pr checks-wait`). Blocks in-turn, polls
           the engine with adaptive cadence, and returns as soon as the agent

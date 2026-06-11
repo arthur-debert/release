@@ -9,7 +9,8 @@ lives behind the `ReviewerAdapter` interface in `prstate.reviewers`.
 Commands (each is a `main(argv) -> int`, wrapped into the click tree by
 `release_core.cli.pr`):
 
-  request — request (or re-request) review(s); no-op backends say so.
+  request — request (or re-request) review(s) and VERIFY the attach;
+            no-op backends say so and skip verification.
   cancel  — withdraw pending review request(s).
   show    — read-only: print posted review(s) + ALL review threads.
 
@@ -22,12 +23,25 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from collections.abc import Callable
 
 from .. import ghapi
-from ..fetch import gather
+from ..fetch import attach_state, gather
 from ..model import PullContext
 from ..reviewers import REGISTRY, ReviewerAdapter, by_name, required_reviewers
+
+# Attach-verification poll (release#614). GitHub's review service can accept
+# every request channel's call yet silently drop the attach (service stall /
+# quota): the call returns success but no `review_requested` edge is ever
+# created, and the loop stalls invisibly waiting on a review that was never
+# requested. The real postcondition of `request` is "the edge exists", so the
+# verb polls for it. The edge is normally created synchronously — the first
+# check usually verifies; the later checks absorb propagation lag without
+# burning minutes on an outage that retrying won't fix.
+ATTACH_VERIFY_CHECKS = 4
+ATTACH_VERIFY_INTERVAL_SECONDS = 12  # 4 checks at t=0/12/24/36s — ~36s worst case
+_VERIFY_WINDOW_SECONDS = (ATTACH_VERIFY_CHECKS - 1) * ATTACH_VERIFY_INTERVAL_SECONDS
 
 _USAGE_COMMON = """\
 With no <pr-number>, resolves the PR for the current branch. Default scope is
@@ -40,19 +54,27 @@ Options:
 """
 
 USAGE_REQUEST = f"""\
-release-core pr review request — request (or re-request) review(s) on a PR.
+release-core pr review request — request (or re-request) review(s) on a PR,
+verifying the request actually attached.
 
 Usage:
   release-core pr review request [<pr-number>] [--reviewer <name>]
 
 Re-requesting after a fixup push is the same command — the backend call is
 identical. Reviewers without a request mechanism (auto-triggering, best-effort
-backends) report a no-op rather than failing.
+backends) report a no-op rather than failing; no-ops are not verified.
+
+A request only counts when GitHub actually creates the review_requested edge:
+the service can accept the call yet silently drop the attach (service stall /
+quota — release#614). After placing, the verb polls briefly ({ATTACH_VERIFY_CHECKS} checks over
+~{_VERIFY_WINDOW_SECONDS}s) until the reviewer appears in the PR's pending review requests — or has
+already submitted a fresh review (a fast bot can consume the request before
+the poll sees it). A dropped attach fails loud with exit 1.
 
 {_USAGE_COMMON}
 Exit codes:
-  0   request(s) placed (or no-op for no-mechanism reviewers)
-  1   gh failure
+  0   request(s) placed AND verified (or no-op for no-mechanism reviewers)
+  1   gh failure, or request dropped by GitHub (no review_requested edge created)
   64  bad usage
 """
 
@@ -183,7 +205,66 @@ def request_main(argv: list[str]) -> int:
     if isinstance(front, int):
         return front
     pr, adapters = front
-    return _act(pr, adapters, act=lambda a: a.request(pr), did="requested review")
+    try:
+        # Baseline BEFORE placing: any review submitted after this snapshot
+        # is fresh, so a fast bot consuming the request before the poll sees
+        # the edge still verifies. Snapshotting between request and poll
+        # instead would swallow exactly that consumed review.
+        _, baseline_reviews = attach_state(pr)
+        # flush=True: under a pipe, stdout is block-buffered while stderr is
+        # not — without it the placement lines appear AFTER a drop report.
+        placed: list[ReviewerAdapter] = []
+        for adapter in adapters:
+            if adapter.request(pr):
+                print(f"requested review: {adapter.name} on #{pr}", flush=True)
+                placed.append(adapter)
+            else:
+                print(f"{adapter.name}: auto-triggers, no request mechanism — no-op", flush=True)
+        dropped = _verify_attached(pr, placed, baseline_ids={rid for rid, _ in baseline_reviews})
+    except ghapi.GhError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    for adapter in placed:
+        if adapter not in dropped:
+            print(f"verified: {adapter.name} request attached on #{pr}", flush=True)
+    for adapter in dropped:
+        print(
+            f"{adapter.name}: request dropped by GitHub: no review_requested "
+            "edge created (service stall / quota) — retry later",
+            file=sys.stderr,
+        )
+    return 1 if dropped else 0
+
+
+def _verify_attached(
+    pr: int,
+    placed: list[ReviewerAdapter],
+    *,
+    baseline_ids: set[int],
+) -> list[ReviewerAdapter]:
+    """The placed adapters whose request edge never materialized (empty = all good).
+
+    An adapter is verified when its reviewer appears in the PR's pending
+    review requests, OR when a fresh review by it (one not in the pre-request
+    baseline) has been submitted — a fast bot can consume the request before
+    a poll sees the edge. Only adapters that actually placed a request are
+    checked; no-mechanism backends never enter.
+    """
+    pending = list(placed)
+    for check in range(ATTACH_VERIFY_CHECKS):
+        if not pending:
+            break
+        if check:
+            time.sleep(ATTACH_VERIFY_INTERVAL_SECONDS)
+        requested_logins, reviews = attach_state(pr)
+        fresh_authors = [author for rid, author in reviews if rid not in baseline_ids]
+        pending = [
+            a
+            for a in pending
+            if not any(a.matches(login) for login in requested_logins)
+            and not any(a.matches(author) for author in fresh_authors)
+        ]
+    return pending
 
 
 def cancel_main(argv: list[str]) -> int:

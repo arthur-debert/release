@@ -123,6 +123,14 @@ cancel|show` follow the same shape (`--help` for details). The done-signal
 for a review round is **zero unresolved review threads** — the engine computes
 it; you never count a particular bot's comments.
 
+The verb **verifies the attach**: GitHub can accept the request call yet
+silently drop the `review_requested` edge (service stall / quota), so after
+placing it polls briefly until the reviewer shows up in the PR's pending
+requests (a fresh review submitted meanwhile also counts). Exit 0 means the
+request is verified; a dropped attach fails loud with exit 1 — surface the
+stall and retry later instead of waiting on a review that was never
+requested.
+
 ## Triaging review comments
 
 Three categories:
