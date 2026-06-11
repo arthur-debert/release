@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 2.17.1 - 2026-06-11
+
+- rust-ci.yml e2e + bats-e2e.yml: materialize the managed tree via arm-gate (post-WS7 bin/check-e2e is an untracked mirror; the stale sparse checkout yielded a missing runner, exit 127 on every bats consumer)
+
 ## 2.17.0 - 2026-06-11
 
 - prstate polish (#564): post-flip READY messaging, flip re-run heads-up in pr ready, thread-reading tool named in ADDRESSING, --reviewer named in the too-many-args error, pr wait cadence line
