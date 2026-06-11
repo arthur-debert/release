@@ -56,22 +56,27 @@ It is **hermetic**: clones into a throwaway root (default
 `/tmp/release-fleet-verify-$USER`), syncs each consumer from the candidate
 revision, runs `lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
-before `release-core admin release advance-major` to catch a commons/lint
-regression in release's own tree instead of one consumer at a time after the
-floating `@vN` moves.
+before `release-core cut` — the cut auto-advances the floating `@vN`
+(release's `release.yml` passes `advance-major: true`), so the sweep must
+happen before cutting to catch a commons/lint regression in release's own
+tree instead of one consumer at a time after `@vN` moves.
+(`release-core admin release advance-major` remains as the manual/recovery
+advance for when that workflow job failed.)
 
 Caveats:
 
-- The gate only catches what the local lint tools can see; the canonical
-  commons gate **skips a missing tool** (exits 0). Run on a box with
-  shellcheck / yamllint / prettier / markdownlint / yq, or treat it as a
-  complement to CI, not a replacement.
+- The clones carry no project toolchain (no `npm install` / `cargo`), so
+  npm/frontend kinds FAIL typecheck/eslint/prettier as expected missing-deps
+  artifacts, not regressions — classify by failing step before chasing
+  (release#594 tracks making verify classify these itself); the consumer's
+  own PR CI is the real gate for project checks. (The managed gate itself is
+  HARD — a missing gate tool exits non-zero, never skips, per release#498.)
 - `--ref` reads templates from a git ref, so commit release changes before
   sweeping (an uncommitted working tree isn't what gets synced).
 - **Post-advance verification needs a FRESH consumer event — never
   `gh run rerun`.** A reusable-workflow ref (`…/x.yml@vN`) is resolved once,
   when the run is created; `gh run rerun` re-executes that original snapshot,
-  so after `release-core admin release advance-major` a rerun still exercises
+  so after a cut advances `@vN` a rerun still exercises
   the pre-advance release and proves nothing about the fix (caught live on
   padz, epic #583). Push an empty commit to the consumer's main
   (`git commit --allow-empty -m "ci: re-resolve @vN" && git push`) or
