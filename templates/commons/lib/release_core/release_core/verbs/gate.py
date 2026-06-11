@@ -23,11 +23,28 @@ unstaged change. (caught in the #501 footprint validation run.)
 A missing lefthook is a HARD gate failure — the gate never skips. Re-run the
 bootstrap (``setup-dev-env.sh`` / ``release-core init``) to provision it.
 
+One definition AND one runner (release#567): the gate runs the TOOLSET-provisioned
+lefthook — the binary ``setup-dev-env.sh`` / ``provision-gate-toolset.sh`` pin via
+``gate-tool-versions.sh`` (the single source, release#499/#531) — never whatever a
+consumer's ``node_modules/.bin`` or a floating PATH install happens to carry. The
+verb reads the ``LEFTHOOK_VERSION`` pin (env override → ``bin/gate-tool-versions.sh``
+→ the wheel-bundled copy) and resolves the FIRST PATH lefthook that reports that
+version, skipping ``node_modules`` entries (the consumer-dep skew source: the #525
+probe saw ``release-core gate`` and the git hook run DIFFERENT lefthook versions in
+one session). No pinned binary on PATH is a HARD failure, not a fall-back-to-
+whatever — version skew between gate runs is exactly the silent divergence the
+one-gate doctrine forbids.
+
 Config resolution (#501 / WS3 release#524): the gate definition lives ONLY in the
 ephemeral ``.release/`` build dir now — the root ``lefthook.yml`` discovery symlink
 is gone — so this verb points lefthook at ``.release/lefthook.yml`` explicitly via
 ``LEFTHOOK_CONFIG`` when present, falling back to lefthook's default discovery for a
-release-self / not-yet-migrated repo that still keeps a root config.
+release-self / not-yet-migrated repo that still keeps a root config. An
+UNMATERIALIZED gate (no ``.release/lefthook.yml`` AND no root config) is a HARD
+failure naming ``release-core init`` as the remedy — never lefthook's
+warn-and-pass (release#567: the first commit of a session fired the hook before
+init had composed ``.release/``, printed a "no config files" WARNING and passed,
+i.e. the earliest commit of a session was silently ungated).
 
 Git-hook integration (WS3): ``release-core gate --install-hook`` writes
 ``.git/hooks/pre-commit`` to ``exec release-core gate --hook`` — so the committed
@@ -44,17 +61,39 @@ Usage:
 
 Exit codes:
   0  — the gate passed (or the hook was installed)
-  1  — the gate failed, or lefthook is not installed (a HARD failure, not a skip)
+  1  — the gate failed, the pinned lefthook is not on PATH, or the gate config is
+       not materialized (all HARD failures — the gate never skips)
 """
 
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 import sys
+from collections.abc import Iterator
 
 USAGE = __doc__ or ""
+
+# The single-source pin line in gate-tool-versions.sh (release#499):
+#   LEFTHOOK_VERSION="${LEFTHOOK_VERSION:-2.1.9}"
+_PIN_RE = re.compile(r'^LEFTHOOK_VERSION="\$\{LEFTHOOK_VERSION:-([0-9][0-9A-Za-z.]*)\}"', re.M)
+
+# lefthook's own config-discovery basenames — the release-self / not-yet-migrated
+# root-config case. If NONE of these exists and .release/lefthook.yml is absent,
+# the gate is unmaterialized and must fail loud (release#567), because lefthook
+# itself treats "no config found" as a WARNING and exits 0.
+_DISCOVERY_NAMES = (
+    "lefthook.yml",
+    ".lefthook.yml",
+    "lefthook.yaml",
+    ".lefthook.yaml",
+    "lefthook.toml",
+    ".lefthook.toml",
+    "lefthook.json",
+    ".lefthook.json",
+)
 
 _HOOK_BODY = """\
 #!/bin/sh
@@ -81,16 +120,94 @@ def _repo_root() -> str:
         return os.getcwd()
 
 
-def _resolve_lefthook(root: str) -> str | None:
-    """node-stack consumers vendor lefthook under node_modules/.bin; prefer it,
-    then a PATH-global install. None when absent (a hard gate failure).
+def _pinned_lefthook_version(root: str) -> str | None:
+    """The toolset's LEFTHOOK_VERSION pin — the single source (release#499/#531).
 
-    ``shutil.which`` (not ``os.access``) so Windows PATHEXT resolution finds a
-    ``lefthook.cmd`` shim under node_modules/.bin too."""
+    Resolution order matches the shell side's contract:
+      1. the LEFTHOOK_VERSION env override (the documented per-env knob),
+      2. ``<root>/bin/gate-tool-versions.sh`` — release-self's live source / the
+         consumer's synced mirror (a symlink into ``.release/``, so it dangles
+         before init has run — hence 3),
+      3. the wheel-bundled copy shipped WITH this very code
+         (``release_core/_bundled_templates/…``) — always present in an installed
+         wheel, so the pin is knowable even on a fresh, pre-init clone.
+
+    None only in a source-tree dev checkout with no root file (the bundle is
+    staged at wheel build, not committed)."""
+    env_pin = os.environ.get("LEFTHOOK_VERSION", "").strip()
+    if env_pin:
+        return env_pin
+    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for path in (
+        os.path.join(root, "bin", "gate-tool-versions.sh"),
+        os.path.join(
+            pkg_root, "_bundled_templates", "templates", "commons", "bin", "gate-tool-versions.sh"
+        ),
+    ):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+        except OSError:
+            continue
+        m = _PIN_RE.search(text)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _lefthook_version(binary: str) -> str | None:
+    """The version a lefthook binary reports — first dotted token of --version,
+    mirroring gate_version_matches in gate-tool-versions.sh."""
+    try:
+        out = subprocess.run([binary, "--version"], capture_output=True, text=True)
+    except OSError:
+        return None
+    m = re.search(r"[0-9]+\.[0-9]+(?:\.[0-9]+)?", out.stdout or "")
+    return m.group(0) if m else None
+
+
+def _iter_path_lefthooks() -> Iterator[str]:
+    """Every distinct lefthook on PATH, in PATH order, SKIPPING node_modules
+    entries: a consumer's package.json-vendored lefthook is a floating consumer
+    dep, never the toolset's — running it is exactly the version-skew source the
+    one-runner doctrine forbids (release#567).
+
+    ``shutil.which`` per PATH entry (not ``os.access``) so Windows PATHEXT
+    resolution finds a ``lefthook.cmd`` shim too. De-duped by realpath so a
+    symlink chain doesn't probe the same binary twice."""
     from shutil import which
 
-    local = which("lefthook", path=os.path.join(root, "node_modules", ".bin"))
-    return local or which("lefthook")
+    seen: set[str] = set()
+    for entry in os.environ.get("PATH", "").split(os.pathsep):
+        if not entry or "node_modules" in entry.split(os.sep):
+            continue
+        cand = which("lefthook", path=entry)
+        if not cand:
+            continue
+        real = os.path.realpath(cand)
+        if real in seen:
+            continue
+        seen.add(real)
+        yield cand
+
+
+def _resolve_lefthook(pin: str | None) -> str | None:
+    """The ONE gate runner: the first PATH lefthook reporting the toolset pin.
+
+    With a known pin, a candidate at any OTHER version is rejected — the
+    provisioners (setup-dev-env.sh / provision-gate-toolset.sh) reconcile every
+    tool TO the pin each session/run, so "present but drifted" means the toolset
+    is unarmed and the gate must fail loud, not silently run a different runner
+    than the last environment did. Without a pin (source-tree dev checkout, no
+    versions file) the first non-node_modules PATH lefthook wins — still one
+    deterministic runner per environment, just unpinned."""
+    candidates = list(_iter_path_lefthooks())
+    if pin is None:
+        return candidates[0] if candidates else None
+    for cand in candidates:
+        if _lefthook_version(cand) == pin:
+            return cand
+    return None
 
 
 def _install_hook(root: str) -> int:
@@ -170,13 +287,24 @@ def main(argv: list[str]) -> int:
     if hook_mode:
         argv = argv[1:]
 
-    lefthook = _resolve_lefthook(root)
+    pin = _pinned_lefthook_version(root)
+    lefthook = _resolve_lefthook(pin)
     if lefthook is None:
-        print(
-            "error: lefthook not found — the gate does not skip. Re-run the "
-            "bootstrap (setup-dev-env.sh / release-core init).",
-            file=sys.stderr,
-        )
+        if pin:
+            print(
+                f"error: no lefthook at the pinned toolset version {pin} on PATH — "
+                "one gate, ONE runner: the gate only runs the toolset-provisioned "
+                "lefthook, never a floating or node_modules one (release#567). The "
+                "gate does not skip. Re-run the bootstrap (setup-dev-env.sh) to "
+                "reconcile the toolset to the pin.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "error: lefthook not found — the gate does not skip. Re-run the "
+                "bootstrap (setup-dev-env.sh / release-core init).",
+                file=sys.stderr,
+            )
         return 1
 
     env = dict(os.environ)
@@ -187,11 +315,38 @@ def main(argv: list[str]) -> int:
         env["NO_COLOR"] = "1"
     # Point lefthook at the managed config explicitly when it lives under
     # .release/ — the root discovery symlink is gone (WS3), so this is how lefthook
-    # finds the gate. Falls back to lefthook's default discovery for a release-self
-    # / not-yet-migrated repo that still keeps a root config.
+    # finds the gate. Default discovery covers a release-self / not-yet-migrated
+    # repo that still keeps a root config. NO config anywhere is a HARD failure
+    # (release#567): lefthook itself warn-and-passes on "no config found", which
+    # silently ungated the first commit of a session (the hook fires before init
+    # has materialized .release/). The gate never skips.
     managed_cfg = os.path.join(root, ".release", "lefthook.yml")
-    if os.path.isfile(managed_cfg) and "LEFTHOOK_CONFIG" not in env:
+    # An empty/whitespace LEFTHOOK_CONFIG counts as unset — pop it so it never
+    # leaks through to lefthook; the managed/discovery branches then apply.
+    explicit_cfg = env.pop("LEFTHOOK_CONFIG", "").strip()
+    if explicit_cfg:
+        # A relative LEFTHOOK_CONFIG means relative to the REPO ROOT — lefthook
+        # runs with cwd=root below — so resolve it there (not against the
+        # caller's cwd) and pass the resolved path through.
+        explicit_cfg = os.path.normpath(os.path.join(root, explicit_cfg))
+        if not os.path.isfile(explicit_cfg):
+            print(
+                f"error: LEFTHOOK_CONFIG={explicit_cfg} does not exist — the gate does not skip.",
+                file=sys.stderr,
+            )
+            return 1
+        env["LEFTHOOK_CONFIG"] = explicit_cfg
+    elif os.path.isfile(managed_cfg):
         env["LEFTHOOK_CONFIG"] = managed_cfg
+    elif not any(os.path.isfile(os.path.join(root, name)) for name in _DISCOVERY_NAMES):
+        print(
+            "error: the gate config is not materialized — .release/lefthook.yml is "
+            "missing and the repo root has no lefthook config. Run `release-core "
+            "init`, then retry: an unmaterialized gate fails loud, it never "
+            "warn-and-passes an ungated commit (release#567).",
+            file=sys.stderr,
+        )
+        return 1
 
     # --no-auto-install: running `lefthook run` otherwise auto-SYNCS hooks — it
     # would back up our binary-driven .git/hooks/pre-commit (release-core gate
