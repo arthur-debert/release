@@ -14,8 +14,9 @@ reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*
 decision is the polling caller's, not the snapshot's — the snapshot is
 stateless and has no clock.
 
-One review cycle is assumed (the first addressing is not itself re-reviewed);
-the structure leaves room to add cycles later.
+Review cycles repeat until done: a review counts only against the current
+head, so any push stales the prior review and the snapshot advises RE-REQUEST
+(the engine is the arbiter — no minor-round exception, #565).
 """
 
 from __future__ import annotations
