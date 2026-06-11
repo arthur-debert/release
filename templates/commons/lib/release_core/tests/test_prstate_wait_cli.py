@@ -181,25 +181,35 @@ def test_timeout_cap_hits_exit_2(capsys):
     assert h.now == 100.0
 
 
-def test_sleep_never_exceeds_the_remaining_timeout():
-    # --poll larger than --timeout must not block past the cap.
+def test_sleep_never_exceeds_the_remaining_timeout(capsys):
+    # --poll larger than --timeout must not block past the cap — and the
+    # progress line reports the clamped next poll, not the raw interval.
     h = _Harness(VALIDATING)
     assert h.run(poll=600.0, timeout=60.0) == 2
+    out = capsys.readouterr().out
     assert h.sleeps == [60.0]
+    assert "next poll in 1m" in out
+    assert "600" not in out
 
 
 def test_clock_drift_past_deadline_clamps_sleep_at_zero(capsys):
     # A real monotonic clock can advance past the deadline between the loop
     # condition and the remaining-time computation; the sleep must clamp at
     # zero (time.sleep raises ValueError on negatives), then time out cleanly.
-    readings = iter([0.0, 50.0, 150.0, 150.0, 200.0])
+    # Readings are scripted (last one repeats): the loop condition reads 50
+    # (inside the budget), then the clock has jumped to 150 (past it).
+    readings = [0.0, 0.0, 50.0, 150.0]
+
+    def clock() -> float:
+        return readings.pop(0) if len(readings) > 1 else readings[0]
+
     sleeps: list[float] = []
     rc = wait.wait_for_action(
         5,
         registry=REGISTRY,
         snapshot=lambda pr: VALIDATING,
         sleep=sleeps.append,
-        clock=lambda: next(readings),
+        clock=clock,
         poll=30.0,
         timeout=100.0,
     )

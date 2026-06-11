@@ -155,18 +155,22 @@ def wait_for_action(
     start = clock()
     deadline = start + deadline_cap
 
+    # The next sleep, capped to the time left: a poll interval longer than the
+    # remaining budget must not carry the wall clock past --timeout. The max()
+    # guards a real monotonic clock advancing past the deadline between the
+    # loop condition and the computation — time.sleep rejects negatives. The
+    # progress line prints this same clamped value, never the raw interval.
+    def next_sleep() -> float:
+        return max(0.0, min(interval, deadline - clock()))
+
     status = take(pr)
     if _agent_action_needed(status, registry):
         emit(status)
         return 0
-    print(_waiting_line(status, elapsed=0.0, interval=interval))
+    print(_waiting_line(status, elapsed=0.0, interval=next_sleep()))
 
     while clock() < deadline:
-        # Cap the sleep to the time left: a poll interval longer than the
-        # remaining budget must not carry the wall clock past --timeout.
-        # The max() guards a real monotonic clock advancing past the deadline
-        # between the loop condition and here — time.sleep rejects negatives.
-        sleep(max(0.0, min(interval, deadline - clock())))
+        sleep(next_sleep())
         if not fixed:
             interval = min(interval * POLL_BACKOFF, POLL_MAX_S)
         status = take(pr)
@@ -174,7 +178,7 @@ def wait_for_action(
             print(f"-- agent action available after {_fmt(clock() - start)} --")
             emit(status)
             return 0
-        print(_waiting_line(status, elapsed=clock() - start, interval=interval))
+        print(_waiting_line(status, elapsed=clock() - start, interval=next_sleep()))
 
     # One last look before declaring timeout: the state can flip during the
     # sleep that carries the clock past the deadline, and exiting on the stale
