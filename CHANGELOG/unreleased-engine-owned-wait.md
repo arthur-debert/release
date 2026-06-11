@@ -1,0 +1,1 @@
+- pr wait: ONE engine-driven wait replaces pr review wait + pr checks-wait — exits when the state engine calls for agent action; cadence is data (20s poll, 1.5x backoff to 90s, 45m cap; --poll/--timeout override)

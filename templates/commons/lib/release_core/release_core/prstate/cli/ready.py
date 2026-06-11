@@ -19,7 +19,7 @@ from .. import ghapi, gitstat
 from ..fetch import gather
 from ..state import TaskState, evaluate
 from .review import _resolve_pr
-from .task_status import _emit
+from .task_status import emit
 
 USAGE = """\
 release-core pr ready — flip a PR draft->ready, guarded by the state engine.
@@ -110,7 +110,7 @@ def _flip(pr: int) -> int:
             f"refusing to flip #{pr}: state is {status.state.value.upper()}, not READY",
             file=sys.stderr,
         )
-        _emit(status, as_json=False)
+        emit(status)
         return 1
     if not ctx.is_draft:
         print(f"#{pr} is already ready-for-review (and READY) — nothing to flip")
