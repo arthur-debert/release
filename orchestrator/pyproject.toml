@@ -11,6 +11,9 @@ dependencies = [
 [project.scripts]
 orc = "orchestrator.cli:main"
 
+[dependency-groups]
+dev = ["pytest"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

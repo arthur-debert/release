@@ -28,11 +28,15 @@ extend-exclude = ["**/.venv"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
-# All Python tests live ALONGSIDE the package (templates/commons/lib/
-# release_core/tests/) — including the folded PR state engine's suite
-# (test_prstate_*.py; release#459). The migration substrate keeps its tests next
-# to the code; collected by the bare `pytest` CI step.
-testpaths = ["templates/commons/lib/release_core/tests"]
+# All Python tests live ALONGSIDE their package — release_core's under
+# templates/commons/lib/release_core/tests/ (including the folded PR state
+# engine's suite, test_prstate_*.py; release#459), the orchestrator's under
+# orchestrator/tests/ (SDK-free modules only, e.g. orchestrator.boot;
+# release#578). Both are collected by the bare `pytest` CI step.
+testpaths = [
+  "templates/commons/lib/release_core/tests",
+  "orchestrator/tests",
+]
 # Import release_core + orchestrator without a build/install step, mirroring the
 # runtime sys.path-shim model. orchestrator.watch is importable for its pure
 # logic because it lazy-imports the Claude Agent SDK (so these tests need no SDK
