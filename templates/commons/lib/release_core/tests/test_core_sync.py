@@ -856,6 +856,64 @@ def test_claude_desired_strips_stale_block_and_refreshes(tmp_path):
     assert desired.count(sync.CLAUDE_BEGIN) == 1
 
 
+def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
+    """release#563: every init must rewrite the managed block to the current
+    how-to-pointing stub regardless of WHICH historical form it finds — the
+    @.release/ORIENTATION.md import form (padz/phos-app seeds, including the
+    blank-line variant) and any older inlined-prose body. One marker wording
+    ever shipped, so CLAUDE_BEGIN recognizes every historical block."""
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    p = tmp_path / "CLAUDE.md"
+    stub = sync.claude_desired(str(tmp_path))  # no CLAUDE.md yet → the bare stub
+
+    historical_blocks = [
+        # the import form (padz seed)
+        f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n",
+        # the import form with a blank line inside the block (phos-app seed)
+        f"{sync.CLAUDE_BEGIN}\n\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n",
+        # an older inlined-prose body
+        (
+            f"{sync.CLAUDE_BEGIN}\n"
+            "Open a live PR (never a draft — stale pre-#456 doctrine).\n"
+            f"{sync.CLAUDE_END}\n"
+        ),
+    ]
+    for block in historical_blocks:
+        p.write_text(f"{block}\n# Proj\n\nmine\n")
+        decision = sync.decide_claude(str(tmp_path), str(tmp_release))
+        assert decision.action == "refresh", block
+        assert decision.desired is not None
+        assert decision.desired.startswith(stub)
+        assert "@.release/ORIENTATION.md" not in decision.desired
+        assert "never a draft" not in decision.desired
+        assert "release-core how-to" in decision.desired
+        assert "# Proj" in decision.desired
+        assert decision.desired.count(sync.CLAUDE_BEGIN) == 1
+        # Convergence is a fixpoint: applying the refresh ends the loop.
+        p.write_text(decision.desired)
+        assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
+
+
+def test_no_orientation_file_anywhere_in_the_template_source():
+    """Regression for release#563: ORIENTATION.md was retired in WS2 (#523) —
+    no template/skill source file of that name may exist for the compose plan
+    (and therefore the wheel bundle) to pick up again."""
+    import pathlib
+
+    import pytest
+
+    repo_root = pathlib.Path(__file__).resolve().parents[5]
+    templates = repo_root / "templates"
+    skills = repo_root / "skills"
+    if not templates.is_dir():
+        pytest.skip("not running from the release source checkout")
+    offenders = [
+        p for root in (templates, skills) if root.is_dir() for p in root.rglob("ORIENTATION.md")
+    ]
+    assert offenders == []
+
+
 def test_decide_claude_unconditional_no_orientation_gate(tmp_path):
     # WS2 (#523): the stub block is unconditional — no ORIENTATION.md needs to be
     # composed in the tree for the block to be created (the old gate is gone).
@@ -1058,22 +1116,157 @@ def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
 
 
 def test_retired_tables_inventory_locked():
-    """The fleet-audit inventory (release#527): paths + variant counts. A new
-    retirement extends the tables deliberately; this guards accidental edits."""
-    assert set(sync.RETIRED_BLOB_FILES) == {
-        "bin/check-fmt",
-        "bin/check-lint",
-        "bin/changelog",
-        "bin/changelog-add",
-        "bin/changelog-cut",
-        "bin/changelog-render",
+    """The fleet-audit inventory (release#527, completed by #563): paths +
+    variant counts, re-derived from template git history. A new retirement
+    extends the tables deliberately; this guards accidental edits."""
+    expected_counts = {
+        # pre-unified-gate entry points — one blob per kind-template variant
+        "bin/check-fmt": 6,
+        "bin/check-lint": 7,
+        # earliest go/rust scripts/ layout (blob-only: common consumer names)
+        "scripts/check": 2,
+        "scripts/check-fmt": 2,
+        "scripts/check-lint": 3,
+        "scripts/check-tests": 2,
+        # pre-console-script changelog shims (#476) — full blob histories
+        "bin/changelog": 6,
+        "bin/changelog-add": 6,
+        "bin/changelog-cut": 10,
+        "bin/changelog-render": 11,
+        # #476 shims (bin/semver is BLOB-ONLY: collides with the kept
+        # console-script — it must never gain a marker/fingerprint entry)
+        "bin/semver": 2,
+        "bin/gh-task-status": 3,
+        "bin/gh-release-issue": 6,
+        # vendored semver-tool (#414), both historical dests
+        "vendor/semver-tool/semver": 1,
+        "vendor/semver-tool/LICENSE": 1,
+        "vendor/semver-tool/README.md": 1,
+        "bin/share/semver-tool/semver": 1,
+        "bin/share/semver-tool/LICENSE": 1,
+        "bin/share/semver-tool/README.md": 1,
+        # pre-path-mirror SessionStart script (also fingerprinted — tailored)
+        "scripts/setup-dev-env.sh": 21,
+        # root lefthook.yml REAL-FILE seeds ONLY (highest collision risk)
+        "lefthook.yml": 2,
+        # ORIENTATION.md (WS2 #523 / #563) — full template-history blob set
+        ".release/ORIENTATION.md": 12,
     }
+    non_skill = {
+        k: v for k, v in sync.RETIRED_BLOB_FILES.items() if not k.startswith(".claude/skills/")
+    }
+    assert {k: len(v) for k, v in non_skill.items()} == expected_counts
+
+    # The de-distributed infra-skill set (WS2/WS7): 17 skills, 49 files,
+    # 69 historical blobs — per-file blob entries under .claude/skills/.
+    skill_files = {
+        k: v for k, v in sync.RETIRED_BLOB_FILES.items() if k.startswith(".claude/skills/")
+    }
+    assert {k.split("/")[2] for k in skill_files} == {
+        "pr-review-respond",
+        "release-issue-relay",
+        "diagnose",
+        "tdd",
+        "review",
+        "triage",
+        "to-issues",
+        "handoff",
+        "qa",
+        "grill-me",
+        "grill-with-docs",
+        "improve-codebase-architecture",
+        "request-refactor-plan",
+        "ubiquitous-language",
+        "zoom-out",
+        "teach",
+        "padz-for-agents",
+    }
+    assert len(skill_files) == 49
+    assert sum(len(v) for v in skill_files.values()) == 69
+    # The STILL-distributed skills must never be tombstoned.
+    live = {"gh-pr-review-loop", *sync.REPLACE_IF_PRESENT_SKILLS}
+    assert not live & {k.split("/")[2] for k in skill_files}
+
     for dest, blobs in sync.RETIRED_BLOB_FILES.items():
         assert blobs, dest
         for sha in blobs:
             assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), (dest, sha)
     assert frozenset({".release-sync-state.yaml"}) == sync.RETIRED_MARKER_FILES
-    assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release"}
+    assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release", "scripts/setup-dev-env.sh"}
+
+
+def test_retired_catalog_pins_the_live_fleet_misses():
+    """The exact blobs the 2026-06 #563 audit found still TRACKED in consumers
+    today must be in the catalog — these are the misses that motivated the
+    completion (supage's go check-fmt/-lint; padz/phos-app's vendored
+    semver-tool; the ORIENTATION.md every pre-WS4 seed still tracks)."""
+    assert "2419933941d5607732a488669188d77269a7f49b" in sync.RETIRED_BLOB_FILES["bin/check-fmt"]
+    assert "e09ccdbbefd8db5dee80127af0a52e534a4b8229" in sync.RETIRED_BLOB_FILES["bin/check-lint"]
+    for dest in ("vendor/semver-tool/semver", "bin/share/semver-tool/semver"):
+        assert "a16042505af81862afa6d028b72b355c1572d144" in sync.RETIRED_BLOB_FILES[dest]
+    assert (
+        "eb0cd6aef6322f24367f1d4f2475b88229ec7f89"
+        in sync.RETIRED_BLOB_FILES[".release/ORIENTATION.md"]
+    )
+
+
+def test_retired_orientation_inside_release_dir_is_swept(tmp_path, monkeypatch):
+    """A pre-WS4 seed's tracked .release/ORIENTATION.md is tombstoned: the
+    dotted-dir dest resolves and lands in retired_to_remove so the managed
+    commit pathspec records the deletion explicitly."""
+    rel = tmp_path / ".release"
+    rel.mkdir()
+    orientation = rel / "ORIENTATION.md"
+    orientation.write_text("# Orientation\n\nstale doctrine\n")
+    monkeypatch.setitem(
+        sync.RETIRED_BLOB_FILES,
+        ".release/ORIENTATION.md",
+        frozenset({sync._git_blob_sha1(str(orientation))}),
+    )
+    assert ".release/ORIENTATION.md" in sync._find_retired_files(str(tmp_path))
+
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    mp = sync.compute_mirror([], str(tmp_path), str(tmp_release), migrate=False)
+    assert ".release/ORIENTATION.md" in mp.retired_to_remove
+
+
+def test_retired_dest_matching_blob_and_fingerprint_listed_once(tmp_path, monkeypatch):
+    """scripts/setup-dev-env.sh carries BOTH a blob set and a fingerprint; a
+    verbatim copy matches both and must still be swept exactly once."""
+    (tmp_path / "scripts").mkdir()
+    f = tmp_path / "scripts" / "setup-dev-env.sh"
+    f.write_text(
+        "#!/usr/bin/env bash\n"
+        "# scripts/setup-dev-env.sh — per-session dev-environment setup, invoked by\n"
+        "# the SessionStart hook in .claude/settings.json.\n"
+    )
+    monkeypatch.setitem(
+        sync.RETIRED_BLOB_FILES,
+        "scripts/setup-dev-env.sh",
+        frozenset({sync._git_blob_sha1(str(f))}),
+    )
+    found = sync._find_retired_files(str(tmp_path))
+    assert found.count("scripts/setup-dev-env.sh") == 1
+
+
+def test_retired_tailored_setup_dev_env_swept_by_fingerprint(tmp_path):
+    """A repo-TAILORED scripts/setup-dev-env.sh (extras appended, so its blob
+    is not in template history — the supage case) is still swept via the
+    verbatim header fingerprint; a consumer-authored script of the same name
+    without the header is left alone."""
+    (tmp_path / "scripts").mkdir()
+    f = tmp_path / "scripts" / "setup-dev-env.sh"
+    f.write_text(
+        "#!/usr/bin/env bash\n"
+        "# scripts/setup-dev-env.sh — per-session dev-environment setup, invoked by\n"
+        "# the SessionStart hook in .claude/settings.json.\n"
+        "echo repo-specific extras below the marker\n"
+    )
+    assert "scripts/setup-dev-env.sh" in sync._find_retired_files(str(tmp_path))
+
+    f.write_text("#!/usr/bin/env bash\nmy own session setup\n")
+    assert "scripts/setup-dev-env.sh" not in sync._find_retired_files(str(tmp_path))
 
 
 def test_retired_fingerprint_requires_header_comment_line(tmp_path):
