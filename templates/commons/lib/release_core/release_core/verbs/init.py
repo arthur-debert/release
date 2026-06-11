@@ -289,13 +289,7 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     # an empty husk). os.rmdir refuses a non-empty dir — that's the stop condition.
     for link in mirror.symlinks_to_remove:
         os.remove(link)
-        d = os.path.dirname(link)
-        while d and d not in (".", "./"):
-            try:
-                os.rmdir(d)
-            except OSError:
-                break
-            d = os.path.dirname(d)
+        _prune_empty_parents(os.path.dirname(link))
 
     # Write managed copies (real files for paths GH can't dereference, plus the
     # bootstrap files that must exist on a fresh clone — sync.BOOTSTRAP_REAL_FILES).
@@ -336,8 +330,13 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
 
     # Remove retired tombstoned files (WS6, release#527) — provenance-verified
     # in sync._find_retired_files, so only release's own retired copies land here.
+    # Prune the now-empty parent dirs too (release#563): a fully-swept
+    # vendor/semver-tool/ or .claude/skills/<name>/ must not linger as an empty
+    # husk — but os.rmdir refuses a non-empty dir, so a directory holding ANY
+    # consumer file survives untouched.
     for f in mirror.retired_to_remove:
         _rm_f(f)
+        _prune_empty_parents(os.path.dirname(f))
 
     # WS7 (release#528): the symlink mirrors are EPHEMERAL — materialized above,
     # never tracked. Keep `git status` clean by listing them in the local
@@ -363,6 +362,19 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
             if os.path.exists(tmp):
                 os.remove(tmp)
             raise
+
+
+def _prune_empty_parents(d: str) -> None:
+    """Remove now-empty parent directories upward from ``d`` (repo-relative),
+    stopping at the repo root or the first non-empty dir. os.rmdir refuses a
+    non-empty dir — that's the stop condition, so a directory holding any
+    consumer-owned file is never touched."""
+    while d and d not in (".", "./"):
+        try:
+            os.rmdir(d)
+        except OSError:
+            break
+        d = os.path.dirname(d)
 
 
 def _rm_f(path: str) -> None:
