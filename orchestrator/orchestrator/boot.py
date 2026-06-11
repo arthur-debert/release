@@ -89,6 +89,10 @@ def _run_boot_script(repo: Path) -> None:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # Boot output is arbitrary tool noise — undecodable bytes must not
+        # escape as UnicodeDecodeError past the BootError-only contract.
+        encoding="utf-8",
+        errors="replace",
     )
     if proc.stdout is None:  # can't happen with stdout=PIPE; explicit for -O runs
         raise BootError(f"{BOOT_SCRIPT}: could not capture boot output stream.")
