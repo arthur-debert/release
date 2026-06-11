@@ -1,0 +1,1 @@
+- install-release-core derives the wheel's major line from the repo's @vN thin callers (highest wins) — a v2 consumer's SessionStart can no longer pull a v3 wheel once v3 exists (#551)

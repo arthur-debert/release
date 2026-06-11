@@ -164,6 +164,46 @@ teardown() {
   [[ "$output" == *"no release in major line 'v1'"* ]]
 }
 
+@test "derived major: @vN thin callers pin the line — highest major wins (#551)" {
+  # A consumer's checkout mixes lines for real (copilot-review stays @v1 while
+  # the stack workflows ride @v2): the resolver must derive v2 and resolve the
+  # v2 LINE's newest (v2.6.0, via list.json) — falling to releases/latest would
+  # resolve the latest.json fixture (v2.5.0) instead, so the URLs distinguish
+  # the two paths.
+  mkdir -p .github/workflows
+  cat > .github/workflows/ci.yml <<'Y'
+jobs:
+  check:
+    uses: arthur-debert/release/.github/workflows/rust-ci.yml@v2
+Y
+  cat > .github/workflows/copilot-review.yml <<'Y'
+jobs:
+  request:
+    uses: arthur-debert/release/.github/workflows/copilot-review.yml@v1
+Y
+  run "$BIN" --print-url
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pinned to major line v2"* ]]
+  [[ "$output" == *"https://example.com/dl/v2.6.0/release_core-0.0.1-py3-none-any.whl"* ]]
+}
+
+@test "derived major: explicit --major overrides the thin-caller derivation" {
+  mkdir -p .github/workflows
+  printf 'uses: arthur-debert/release/.github/workflows/rust-ci.yml@v2\n' \
+    > .github/workflows/ci.yml
+  run "$BIN" --major v3 --print-url
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://example.com/dl/v3.0.0/release_core-0.0.1-py3-none-any.whl" ]
+}
+
+@test "derived major: no thin callers → releases/latest (today's behavior)" {
+  mkdir -p .github/workflows
+  printf 'jobs: {build: {runs-on: ubuntu-latest}}\n' > .github/workflows/own.yml
+  run "$BIN" --print-url
+  [ "$status" -eq 0 ]
+  [ "$output" = "https://example.com/dl/v2.5.0/release_core-0.0.1-py3-none-any.whl" ]
+}
+
 @test "--major v2 anchoring: does NOT match v20 (no v20 releases)" {
   run "$BIN" --major v20 --print-url
   [ "$status" -eq 1 ]
