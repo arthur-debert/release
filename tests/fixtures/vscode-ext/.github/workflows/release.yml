@@ -1,0 +1,35 @@
+name: Release
+
+# Thin caller — the canonical pipeline lives at
+# arthur-debert/release/.github/workflows/vscode-ext.yml@v2.
+#
+# Canary fencing (arthur-debert/release#587, fail-closed by design):
+# the VS Code Marketplace and Open VSX publishes are DISABLED here, and
+# the matching secrets (VSCE_PAT, OVSX_PAT) are never installed on this
+# repo — nor are the publish trio (CRATES_IO_KEY, HOMEBREW_TAP_TOKEN,
+# NPM_TOKEN). Cuts produce prerelease tags + a universal VSIX attached
+# to a GH release on this repo only.
+#
+# The `@v2` ref below is a readable default: `release-core admin canary
+# init` rewrites it to the current floating major at seed time, and
+# `admin canary run` rewrites it to `canary/<sha12>` every round.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.0.1-canary.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: arthur-debert/release/.github/workflows/vscode-ext.yml@v2
+    with:
+      version: ${{ inputs.version }}
+      publish-marketplace: false
+      publish-openvsx: false
+    secrets: inherit

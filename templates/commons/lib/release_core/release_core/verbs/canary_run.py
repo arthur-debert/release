@@ -8,23 +8,28 @@ into one command.
 
 Usage:
   release-core admin canary run --ref <branch|main>
-      [--family rust,npm]   restrict to these families (default: all registered)
+      [--family rust,vscode-ext]  restrict to these families (default: all
+                            registered in the `canaries:` block)
       [--root DIR]          hermetic workdir (default /tmp/release-canary-$USER)
       [--timeout MIN]       per-family poll budget in minutes (default 40)
       [--keep N]            canary prereleases to retain on cleanup (default 5)
       [--json]              machine-readable report
 
-Per family it: publishes `canary/<sha12>` (a clone of release at the candidate
-SHA with every `uses: arthur-debert/release/...@vN` self-ref rewritten to the
-canary branch, so the composites AND the wheel resolve at the candidate tree);
-seeds the canary repo from source in a sandboxed venv (XDG_* under --root —
-never the operator's real release-core); pushes the seed (push event → CI) and
-dispatches a `0.0.<n>-canary.<runid>` prerelease cut as FRESH events (never
-`gh run rerun`); polls both runs to conclusion with transient-error-tolerant
-backoff; prints a per-job classified report (INFRA = release bug, PROJECT =
-canary-content rot); posts a `canary/<family>` commit status on release@<sha>
-(what the slice-4 cut gate reads); and deletes canary prereleases beyond
---keep. `canary/*` branches on release are KEPT (owner decision OQ5).
+It publishes `canary/<sha12>` ONCE (a clone of release at the candidate SHA
+with every `uses: arthur-debert/release/...@vN` self-ref rewritten to the
+canary branch, so the composites AND the wheel resolve at the candidate
+tree); then, per family: seeds the canary repo from source in a sandboxed
+venv (XDG_* under --root — never the operator's real release-core), pushes
+the seed (push event → CI) and dispatches a `0.0.<n>-canary.<runid>`
+prerelease cut as FRESH events (never `gh run rerun`). EVERY family is
+seeded + dispatched before any polling starts, so the families' rounds run
+concurrently off the same `canary/<sha12>` branch (#605: a multi-family
+round costs one round's wall time). Each family is then polled to
+conclusion with transient-error-tolerant backoff; the verb prints a per-job
+classified report (INFRA = release bug, PROJECT = canary-content rot),
+posts a `canary/<family>` commit status on release@<sha> (what the #606 cut
+gate reads), and deletes canary prereleases beyond --keep. `canary/*`
+branches on release are KEPT (owner decision OQ5).
 
 Exit codes:
   0  — every job green (or fenced-skip)
@@ -531,6 +536,12 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
     any_failure = False
     setup_error = False
 
+    # Phase 2/3 — seed + dispatch EVERY family before any polling, so the
+    # families' rounds run concurrently on GitHub off the same canary/<sha12>
+    # branch (#605): a multi-family round costs one round's wall time. A
+    # family that fails to dispatch is recorded as a setup error and the rest
+    # proceed.
+    dispatched: dict[str, dict] = {}
     for family in families:
         repo = registry[family]
         try:
@@ -557,8 +568,30 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
                 f"canary run: {family}: seed {seed_sha[:12]} pushed, release {version} dispatched",
                 file=sys.stderr,
             )
+            dispatched[family] = {
+                "version": version,
+                "seed_sha": seed_sha,
+                "before_ids": before_ids,
+            }
+        except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
+            # Same error classes as the poll phase below: clone/boot/rewrite
+            # failures, the _retry'd gh calls past their bounded attempts, git
+            # plumbing, filesystem errors — all family-level setup errors.
+            print(f"canary run: {family}: {exc}", file=sys.stderr)
+            footer.append(f"{family}: SETUP ERROR — {exc}")
+            payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}
+            setup_error = True
+
+    # Phase 4-6 — poll each dispatched family to conclusion. The runs are
+    # already executing concurrently; the per-family --timeout budget starts
+    # at its poll, so a later family never pays an earlier family's wait.
+    for family, disp in dispatched.items():
+        repo = registry[family]
+        version = disp["version"]
+        seed_sha = disp["seed_sha"]
+        try:
             deadline = time.time() + opts["timeout_min"] * 60.0
-            runs = _resolve_runs(repo, seed_sha, before_ids, deadline)
+            runs = _resolve_runs(repo, seed_sha, disp["before_ids"], deadline)
             done = _poll_to_completion(repo, runs, deadline)
 
             family_rows: list[dict] = []
@@ -634,10 +667,10 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
             }
         except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
             # GhError/ProcError/OSError too: _retry re-raises after the
-            # bounded attempts, the git wrappers raise directly, and the
-            # caller-rewrite/fragment writes can hit filesystem errors — any
-            # of them is a family-level setup error; record it and continue
-            # to the next family rather than aborting the whole round.
+            # bounded attempts, the git wrappers raise directly, the status
+            # post and cleanup hit the network — any of them is a
+            # family-level setup error; record it and continue to the next
+            # family rather than aborting the whole round.
             print(f"canary run: {family}: {exc}", file=sys.stderr)
             footer.append(f"{family}: SETUP ERROR — {exc}")
             payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}
