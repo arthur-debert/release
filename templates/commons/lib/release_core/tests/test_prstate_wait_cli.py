@@ -188,6 +188,26 @@ def test_sleep_never_exceeds_the_remaining_timeout():
     assert h.sleeps == [60.0]
 
 
+def test_clock_drift_past_deadline_clamps_sleep_at_zero(capsys):
+    # A real monotonic clock can advance past the deadline between the loop
+    # condition and the remaining-time computation; the sleep must clamp at
+    # zero (time.sleep raises ValueError on negatives), then time out cleanly.
+    readings = iter([0.0, 50.0, 150.0, 150.0, 200.0])
+    sleeps: list[float] = []
+    rc = wait.wait_for_action(
+        5,
+        registry=REGISTRY,
+        snapshot=lambda pr: VALIDATING,
+        sleep=sleeps.append,
+        clock=lambda: next(readings),
+        poll=30.0,
+        timeout=100.0,
+    )
+    assert rc == 2
+    assert sleeps == [0.0]
+    assert "timeout" in capsys.readouterr().err
+
+
 def test_wait_catches_state_landing_during_final_sleep(capsys):
     # Agent action that arrives during the sleep that carries the clock past
     # the deadline must NOT read as a timeout (the retired review-wait's
@@ -232,11 +252,13 @@ def test_unknown_option_is_usage_error(capsys):
 
 
 @pytest.mark.parametrize("flag", ["--poll", "--timeout"])
-def test_cadence_flags_need_a_positive_number(flag, capsys):
+def test_cadence_flags_need_a_positive_finite_number(flag, capsys):
     assert wait.main(["5", flag]) == 64
     assert wait.main(["5", f"{flag}=abc"]) == 64
     assert wait.main(["5", flag, "0"]) == 64
     assert wait.main(["5", f"{flag}=-3"]) == 64
+    assert wait.main(["5", flag, "nan"]) == 64
+    assert wait.main(["5", f"{flag}=inf"]) == 64
 
 
 def test_cadence_flags_reach_the_loop(monkeypatch):

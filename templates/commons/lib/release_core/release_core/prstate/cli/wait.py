@@ -29,6 +29,7 @@ them per-invocation.
 from __future__ import annotations
 
 import json
+import math
 import sys
 import time
 from collections.abc import Callable
@@ -158,13 +159,14 @@ def wait_for_action(
     if _agent_action_needed(status, registry):
         emit(status)
         return 0
-    last_state = status.state
     print(_waiting_line(status, elapsed=0.0, interval=interval))
 
     while clock() < deadline:
         # Cap the sleep to the time left: a poll interval longer than the
         # remaining budget must not carry the wall clock past --timeout.
-        sleep(min(interval, deadline - clock()))
+        # The max() guards a real monotonic clock advancing past the deadline
+        # between the loop condition and here — time.sleep rejects negatives.
+        sleep(max(0.0, min(interval, deadline - clock())))
         if not fixed:
             interval = min(interval * POLL_BACKOFF, POLL_MAX_S)
         status = take(pr)
@@ -172,8 +174,6 @@ def wait_for_action(
             print(f"-- agent action available after {_fmt(clock() - start)} --")
             emit(status)
             return 0
-        if status.state is not last_state:
-            last_state = status.state
         print(_waiting_line(status, elapsed=clock() - start, interval=interval))
 
     # One last look before declaring timeout: the state can flip during the
@@ -297,7 +297,7 @@ def _positive_seconds(flag: str, value: str | None) -> float | None:
     except ValueError:
         print(f"error: {flag} must be a number of seconds (got: {value})", file=sys.stderr)
         return None
-    if seconds <= 0:
-        print(f"error: {flag} must be positive (got: {value})", file=sys.stderr)
+    if not math.isfinite(seconds) or seconds <= 0:
+        print(f"error: {flag} must be a positive, finite number (got: {value})", file=sys.stderr)
         return None
     return seconds
