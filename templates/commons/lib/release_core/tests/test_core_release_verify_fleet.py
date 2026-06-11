@@ -4,8 +4,10 @@ Fully offline. The gh ref-resolution and EVERY subprocess (`release-core admin
 repos list` clone + --paths, detect-kind, release-core init, lefthook) are mocked at
 the proc/gh layer —
 nothing is cloned or synced. We assert on the table rows, the per-repo
-sync/gate columns, the combined-output logs, and the exit-code policy
-(0 all-pass, 1 any sync-FAIL/gate-FAIL/missing, 2 setup error, 64 bad usage).
+sync/gate columns, the combined-output logs, the expected-FAIL classification
+(#594: npm-deps artifacts + expect-verify-fail annotations + the stale-annotation
+ratchet), and the exit-code policy (0 no unexpected failures, 1 any UNEXPECTED
+sync-FAIL/gate-FAIL/missing, 2 setup error, 64 bad usage).
 """
 
 from __future__ import annotations
@@ -37,6 +39,9 @@ def env(monkeypatch, tmp_path):
     # Default: stub log writes (fake roots don't exist on disk). The dedicated
     # log test restores the real _write_log against a real tmp dir.
     monkeypatch.setattr(rvf, "_write_log", lambda path, result: None)
+    # Default: no expect-verify-fail annotations (#594). The annotation tests
+    # override this per-test.
+    monkeypatch.setattr(rvf.managed_repos, "expect_verify_fail", lambda: {})
     return tmp_path
 
 
@@ -54,11 +59,12 @@ class _Driver:
     # Match on the leading command vector.
     _REPOS_LIST = [*rvf._SELF_CLI, "admin", "repos", "list"]
 
-    def __init__(self, paths, kinds=None, sync_rc=None, gate_rc=None, clone_rc=0):
+    def __init__(self, paths, kinds=None, sync_rc=None, gate_rc=None, gate_out=None, clone_rc=0):
         self.paths = paths
         self.kinds = kinds or {}
         self.sync_rc = sync_rc or {}
         self.gate_rc = gate_rc or {}
+        self.gate_out = gate_out or {}  # abspath → gate stdout (lefthook log)
         self.clone_rc = clone_rc
         self.calls = []
 
@@ -81,7 +87,11 @@ class _Driver:
             # lefthook at the materialized .release/lefthook.yml), not a bare
             # `lefthook run` against a now-absent root config.
             cwd = kw.get("cwd")
-            return _cp(self.gate_rc.get(cwd, 0), stdout="gate-out\n", stderr="gate-err\n")
+            return _cp(
+                self.gate_rc.get(cwd, 0),
+                stdout=self.gate_out.get(cwd, "gate-out\n"),
+                stderr="gate-err\n",
+            )
         raise AssertionError(f"unexpected proc.run: {cmd}")
 
 
@@ -133,7 +143,8 @@ def test_all_pass_exits_zero_with_table(env, monkeypatch, capsys):
     assert lines[0] == "repo\tkind\tsync\tgate"
     assert "o/a\trust-cli\tok\tpass" in lines
     assert "o/b\trust-cli\tok\tpass" in lines
-    assert "all consumers pass the gate" in out.err
+    assert "no unexpected failures" in out.err
+    assert "2 pass, 0 expected-artifact FAILs (classified), 0 unexpected" in out.err
 
 
 def test_gate_fail_exits_1(env, monkeypatch, capsys):
@@ -144,7 +155,7 @@ def test_gate_fail_exits_1(env, monkeypatch, capsys):
     out = capsys.readouterr()
     assert rc == 1
     assert "o/a\trust-cli\tok\tFAIL" in out.out.splitlines()
-    assert "FAILURES above" in out.err
+    assert "UNEXPECTED failures above" in out.err
 
 
 def test_sync_fail_skips_gate_and_exits_1(env, monkeypatch, capsys):
@@ -189,6 +200,123 @@ def test_paths_line_with_extra_tab_does_not_crash(env, monkeypatch, capsys):
     rc = rvf.main(["--root", root])
     assert rc == 1
     assert "o/a\t-\tmissing\tskipped" in capsys.readouterr().out.splitlines()
+
+
+# ── expected-FAIL classification (#594) ───────────────────────────────────────
+
+# A failing pinned-lefthook gate log whose failed checks are ALL npm-deps ones.
+_NPM_DEPS_LOG = (
+    "summary: (done in 0.42 seconds)\n"
+    "✔️ markdownlint (0.10 seconds)\n"
+    "🥊 eslint (0.01 seconds)\n"
+    "🥊 typecheck (0.02 seconds)\n"
+)
+
+# A failing log with a toolset-provided check in the failed set — real debt.
+_MIXED_LOG = (
+    "summary: (done in 0.42 seconds)\n🥊 eslint (0.01 seconds)\n🥊 markdownlint (0.10 seconds)\n"
+)
+
+
+def test_npm_deps_gate_fail_is_expected_and_exits_zero(env, monkeypatch, capsys):
+    root = "/fleetroot"
+    abspath = f"{root}/o/a"
+    paths = _row("o/a", root) + "\n"
+    driver = _Driver(
+        paths,
+        kinds={abspath: "vscode-ext"},
+        gate_rc={abspath: 1},
+        gate_out={abspath: _NPM_DEPS_LOG},
+    )
+    monkeypatch.setattr(proc, "run", driver)
+    rc = rvf.main(["--root", root])
+    out = capsys.readouterr()
+    assert rc == 0
+    rows = out.out.splitlines()
+    assert "o/a\tvscode-ext\tok\texpected-FAIL (npm-deps: eslint, typecheck)" in rows
+    assert "1 expected-artifact FAILs (classified), 0 unexpected" in out.err
+    assert "Logs under" not in out.err  # logs are pointed at only for unexpected reds
+
+
+def test_mixed_gate_fail_stays_unexpected(env, monkeypatch, capsys):
+    # eslint dragging markdownlint down with it is NOT an artifact: the
+    # toolset-provided check is real debt, so the repo stays an unexpected FAIL.
+    root = "/fleetroot"
+    abspath = f"{root}/o/a"
+    driver = _Driver(_row("o/a", root) + "\n", gate_rc={abspath: 1}, gate_out={abspath: _MIXED_LOG})
+    monkeypatch.setattr(proc, "run", driver)
+    rc = rvf.main(["--root", root])
+    out = capsys.readouterr()
+    assert rc == 1
+    assert "o/a\trust-cli\tok\tFAIL" in out.out.splitlines()
+    assert "UNEXPECTED failures above" in out.err
+
+
+def test_unparseable_gate_log_stays_unexpected(env, monkeypatch):
+    # Fail toward visibility: no parseable lefthook summary → unexpected.
+    root = "/fleetroot"
+    abspath = f"{root}/o/a"
+    monkeypatch.setattr(proc, "run", _Driver(_row("o/a", root) + "\n", gate_rc={abspath: 1}))
+    assert rvf.main(["--root", root]) == 1
+
+
+def test_annotated_gate_fail_is_expected_and_exits_zero(env, monkeypatch, capsys):
+    root = "/fleetroot"
+    abspath = f"{root}/o/a"
+    monkeypatch.setattr(
+        rvf.managed_repos, "expect_verify_fail", lambda: {"o/a": "needs the sibling theme checkout"}
+    )
+    monkeypatch.setattr(proc, "run", _Driver(_row("o/a", root) + "\n", gate_rc={abspath: 1}))
+    rc = rvf.main(["--root", root])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert (
+        "o/a\trust-cli\tok\texpected-FAIL (annotated: needs the sibling theme checkout)"
+        in out.out.splitlines()
+    )
+    assert "1 expected-artifact FAILs (classified), 0 unexpected" in out.err
+
+
+def test_annotated_repo_that_passes_is_flagged_stale(env, monkeypatch, capsys):
+    # Shrink-only ratchet: an annotation whose repo now PASSES must be flagged
+    # for removal — loudly, but without failing the sweep (exit non-zero is
+    # reserved for unexpected failures).
+    root = "/fleetroot"
+    monkeypatch.setattr(rvf.managed_repos, "expect_verify_fail", lambda: {"o/a": "old reason"})
+    monkeypatch.setattr(proc, "run", _Driver(_row("o/a", root) + "\n"))
+    rc = rvf.main(["--root", root])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert "o/a\trust-cli\tok\tpass (STALE expect-verify-fail annotation)" in out.out.splitlines()
+    assert "STALE annotation(s)" in out.err
+    assert "o/a" in out.err
+
+
+def test_annotation_does_not_cover_a_sync_failure(env, monkeypatch):
+    # The annotation explains a GATE fail only; broken sync is release plumbing.
+    root = "/fleetroot"
+    abspath = f"{root}/o/a"
+    monkeypatch.setattr(rvf.managed_repos, "expect_verify_fail", lambda: {"o/a": "reason"})
+    monkeypatch.setattr(proc, "run", _Driver(_row("o/a", root) + "\n", sync_rc={abspath: 1}))
+    assert rvf.main(["--root", root]) == 1
+
+
+def test_expect_verify_fail_reads_the_manifest_annotation(tmp_path, monkeypatch):
+    # The real accessor (the env fixture stubs it elsewhere): only annotated
+    # entries are returned, reasons verbatim.
+    from release_core.verbs import managed_repos as mr
+
+    manifest = tmp_path / "managed-repos.yaml"
+    manifest.write_text(
+        "projects:\n"
+        "  lex:\n"
+        "    - { repo: lex-fmt/lex, path: lex-fmt/lex }\n"
+        "    - repo: lex-fmt/lexed\n"
+        "      path: lex-fmt/lexed\n"
+        "      expect-verify-fail: needs the sibling theme checkout\n"
+    )
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(manifest))
+    assert mr.expect_verify_fail() == {"lex-fmt/lexed": "needs the sibling theme checkout"}
 
 
 # ── propagated env / args ─────────────────────────────────────────────────────

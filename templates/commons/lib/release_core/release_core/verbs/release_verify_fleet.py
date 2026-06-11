@@ -15,6 +15,17 @@ release#524). It never mutates your working repos. Re-runs reuse the clones
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.
 
+The tool owns the expected-FAIL classification (#594): the hermetic clones
+carry no project toolchain (no `npm install` — out of scope by design), so a
+gate FAIL whose failed checks are ALL project-toolchain ones (eslint /
+prettier / typecheck; see release_core.classify) is an expected toolchain
+artifact, reported as such and NOT a failure exit. A repo whose expected FAIL
+has an environmental cause the sweep can't satisfy (a sibling checkout)
+carries an `expect-verify-fail: <reason>` annotation in managed-repos.yaml;
+an annotated repo that PASSES is flagged STALE (shrink-only ratchet — remove
+the annotation). The operator only sees deviations: logs and a non-zero exit
+are reserved for UNEXPECTED failures.
+
 Usage:
   release-verify-fleet [--ref <ref>] [--root <dir>] [--refresh] [--only <owner/name,...>]
 
@@ -26,14 +37,10 @@ Usage:
   --refresh       fetch+reset existing fleet clones before syncing.
   --only <list>   restrict to a comma-separated subset of owner/name.
 
-Caveat: the gate only catches what the local lint tools can see. The
-canonical commons gate SKIPS a missing tool (exits 0), so run this on a
-box with shellcheck/yamllint/prettier/markdownlint/yq installed (or read
-it as a complement to CI, not a replacement).
-
 Exit codes:
-  0  — every consumer's gate passed (or skipped tools cleanly)
-  1  — at least one consumer's gate FAILED
+  0  — no unexpected failures (expected-artifact FAILs are classified, not red)
+  1  — at least one UNEXPECTED failure (missing clone, sync FAIL, or a gate
+       FAIL that doesn't classify as an expected toolchain artifact)
   2  — setup/dependency error
   64 — bad usage
 """
@@ -44,7 +51,8 @@ import os
 import shutil
 import sys
 
-from .. import gh, proc
+from .. import classify, gh, proc
+from . import managed_repos
 
 # Re-invoke THIS package's CLI in a subprocess: same interpreter, same env, same
 # code as the running process — never a bare-name PATH lookup, which on a dev
@@ -174,9 +182,16 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
             file=sys.stderr,
         )
 
+    # The expect-verify-fail annotations (#594) — read in-process from the same
+    # manifest the accessor subprocess resolves (identical env precedence).
+    annotations = managed_repos.expect_verify_fail()
+
     # --- Phase 2: per-consumer sync + gate -------------------------------
     print("repo\tkind\tsync\tgate")
-    overall = 0
+    n_pass = 0
+    n_expected = 0
+    unexpected = 0
+    stale: list[str] = []
     seen = 0
 
     paths = proc.run(
@@ -195,43 +210,79 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
 
         if found != "found":
             print(f"{repo}\t-\tmissing\tskipped")
-            overall = 1
+            unexpected += 1
             continue
 
         kind = _detect_kind(abspath)
 
-        if _run_sync(abspath, ref_sha, release_home):
-            sync = "ok"
-        else:
+        if not _run_sync(abspath, ref_sha, release_home):
+            # A sync (init) failure is release plumbing — ALWAYS unexpected;
+            # the annotations only cover the gate phase.
             print(f"{repo}\t{kind}\tFAILED\tskipped")
-            overall = 1
+            unexpected += 1
             continue
 
-        if _run_gate(abspath):
-            gate = "pass"
+        gate_ok, gate_log = _run_gate(abspath)
+        gate, kind_of_result = _classify_gate(gate_ok, gate_log, annotations.get(repo))
+        if kind_of_result == "pass":
+            n_pass += 1
+        elif kind_of_result == "stale":
+            n_pass += 1
+            stale.append(repo)
+        elif kind_of_result == "expected":
+            n_expected += 1
         else:
-            gate = "FAIL"
-            overall = 1
-        print(f"{repo}\t{kind}\t{sync}\t{gate}")
+            unexpected += 1
+        print(f"{repo}\t{kind}\tok\t{gate}")
 
     print(file=sys.stderr)
     print(
-        f"release-verify-fleet: {seen} consumer(s) swept from release@{ref_sha[:12]}.",
+        f"release-verify-fleet: {seen} consumer(s) swept from release@{ref_sha[:12]}: "
+        f"{n_pass} pass, {n_expected} expected-artifact FAILs (classified), "
+        f"{unexpected} unexpected.",
         file=sys.stderr,
     )
-    if overall != 0:
+    if stale:
         print(
-            "release-verify-fleet: FAILURES above. Logs under "
+            "release-verify-fleet: STALE annotation(s) — the gate passes now; remove "
+            f"expect-verify-fail from managed-repos.yaml: {', '.join(stale)}",
+            file=sys.stderr,
+        )
+    if unexpected:
+        print(
+            "release-verify-fleet: UNEXPECTED failures above. Logs under "
             f"{root}: <repo>/.verify-sync.log (sync) and "
             "<repo>/.verify-gate.log (gate).",
             file=sys.stderr,
         )
     else:
         print(
-            "release-verify-fleet: all consumers pass the gate against this revision.",
+            "release-verify-fleet: no unexpected failures against this revision.",
             file=sys.stderr,
         )
-    return overall
+    return 1 if unexpected else 0
+
+
+def _classify_gate(gate_ok: bool, gate_log: str, reason: str | None) -> tuple[str, str]:
+    """The gate column value + result class for one consumer (#594).
+
+    Returns ``(column_text, kind)`` with kind ∈ {pass, stale, expected,
+    unexpected}. Precedence: an annotation explains ANY gate FAIL of its repo
+    (the environmental cause usually drags dep-needing checks down with it);
+    without one, a FAIL is expected only when EVERY failed check parsed from
+    the lefthook summary is a project-toolchain check the hermetic clone can
+    never run (release_core.classify). An unparseable log stays unexpected —
+    fail toward visibility."""
+    if gate_ok:
+        if reason is not None:
+            return "pass (STALE expect-verify-fail annotation)", "stale"
+        return "pass", "pass"
+    if reason is not None:
+        return f"expected-FAIL (annotated: {reason})", "expected"
+    failed_checks = classify.failed_gate_checks(gate_log)
+    if classify.expected_artifact_fail(failed_checks):
+        return f"expected-FAIL (npm-deps: {', '.join(failed_checks)})", "expected"
+    return "FAIL", "unexpected"
 
 
 def _detect_kind(abspath: str) -> str:
@@ -262,7 +313,7 @@ def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
     return result.returncode == 0
 
 
-def _run_gate(abspath: str) -> bool:
+def _run_gate(abspath: str) -> tuple[bool, str]:
     """Run the canonical lint gate in the consumer clone.
 
     Invokes ``release-core gate`` (NOT a bare ``lefthook run``): since WS3
@@ -274,14 +325,15 @@ def _run_gate(abspath: str) -> bool:
     (release#534).
 
     Combined stdout+stderr is written to <abspath>/.verify-gate.log. Returns
-    True on a zero exit (the gate passed / skipped missing tools cleanly)."""
+    ``(passed, combined_log)`` — the log feeds the expected-artifact
+    classification (#594) without re-reading the file."""
     result = proc.run(
         [*_SELF_CLI, "gate"],
         cwd=abspath,
         check=False,
     )
     _write_log(os.path.join(abspath, ".verify-gate.log"), result)
-    return result.returncode == 0
+    return result.returncode == 0, (result.stdout or "") + (result.stderr or "")
 
 
 def _write_log(path: str, result) -> None:

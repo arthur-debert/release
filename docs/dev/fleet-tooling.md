@@ -63,14 +63,28 @@ tree instead of one consumer at a time after `@vN` moves.
 (`release-core admin release advance-major` remains as the manual/recovery
 advance for when that workflow job failed.)
 
+**The tool owns the expected-FAIL classification** (release#594) — the
+operator only sees deviations. The clones carry no project toolchain (no
+`npm install` / `cargo` — out of scope by design; the consumer's own PR CI is
+the real gate for project checks), so:
+
+- A gate FAIL whose failed checks are ALL project-toolchain ones (eslint /
+  prettier / typecheck, parsed from the pinned lefthook's summary) is an
+  **expected toolchain artifact**: reported as
+  `expected-FAIL (npm-deps: …)`, no log chase, exit 0.
+- A repo whose expected FAIL has an environmental cause the sweep can't
+  satisfy (a sibling checkout: lexed's theme, phos-app's parity repos)
+  carries an `expect-verify-fail: <reason>` annotation in
+  `managed-repos.yaml` → `expected-FAIL (annotated: <reason>)`.
+- An annotated repo that PASSES is flagged **STALE** (shrink-only ratchet) —
+  remove the annotation.
+- Exit is non-zero ONLY on an unexpected failure (missing clone, sync FAIL,
+  or a gate FAIL that doesn't classify); logs are pointed at only then.
+  (The managed gate itself is HARD — a missing gate tool exits non-zero,
+  never skips, per release#498.)
+
 Caveats:
 
-- The clones carry no project toolchain (no `npm install` / `cargo`), so
-  npm/frontend kinds FAIL typecheck/eslint/prettier as expected missing-deps
-  artifacts, not regressions — classify by failing step before chasing
-  (release#594 tracks making verify classify these itself); the consumer's
-  own PR CI is the real gate for project checks. (The managed gate itself is
-  HARD — a missing gate tool exits non-zero, never skips, per release#498.)
 - `--ref` reads templates from a git ref, so commit release changes before
   sweeping (an uncommitted working tree isn't what gets synced).
 - **Post-advance verification needs a FRESH consumer event — never
@@ -78,9 +92,30 @@ Caveats:
   when the run is created; `gh run rerun` re-executes that original snapshot,
   so after a cut advances `@vN` a rerun still exercises
   the pre-advance release and proves nothing about the fix (caught live on
-  padz, epic #583). Push an empty commit to the consumer's main
-  (`git commit --allow-empty -m "ci: re-resolve @vN" && git push`) or
-  `gh workflow run` to create a run that resolves the new `vN` tip.
+  padz, epic #583). That fresh event is one command now:
+  `release-core admin repos poke` (below).
+
+## `release-core admin repos poke` — the one-command fresh event
+
+The rerun trap as a verb (release#595): instead of the five-step hand ritual
+(throwaway clone, empty commit, push, find the run, watch + classify), one
+command creates the fresh consumer event and reports the classified verdict.
+
+```sh
+release-core admin repos poke arthur-debert/padz --watch   # poke + classified verdict
+release-core admin repos poke arthur-debert/padz \
+  --reason "ci: re-resolve @v2 after the hotfix"           # custom commit message
+```
+
+It resolves the repo through `managed-repos.yaml`, shallow-clones it under
+the hermetic root (`<root>/poke/`, never `~/h`), pushes an EMPTY commit to
+its default branch (message defaults to
+`ci: fresh-event verify of release <latest tag>`), resolves the run(s) that
+push triggered **by HEAD SHA** — never `gh run rerun` — and, with `--watch`,
+polls them to conclusion and prints the per-job classified report (the shared
+classifier, `release_core.classify`): **INFRA** = release/upstream (arm-gate
+materialize/provision, boot, init) vs **PROJECT** = consumer-side
+(build/test/deps). Exit 0 green / 1 failures / 2 setup error.
 
 ## `release-core admin canary run` — the pre-ship consumer-life round
 

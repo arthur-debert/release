@@ -494,12 +494,18 @@ def repo_list(
     return _gh_raw(args)
 
 
-def repo_clone(repo: str, dest: str):
-    """`gh repo clone <repo> <dest>` → raw CompletedProcess (check=False).
+def repo_clone(repo: str, dest: str, *, git_args: list[str] | None = None):
+    """`gh repo clone <repo> <dest> [-- <git_args…>]` → raw CompletedProcess
+    (check=False).
 
     `gh repo clone` (not plain `git clone`) works in gh-authenticated sandboxes
-    where git clone is restricted. Caller inspects ``returncode``."""
-    return _gh_raw(["repo", "clone", repo, dest])
+    where git clone is restricted. ``git_args`` are forwarded to the underlying
+    `git clone` after `--` (e.g. ``["--depth", "1"]`` for the poke verb's
+    shallow clone). Caller inspects ``returncode``."""
+    args = ["repo", "clone", repo, dest]
+    if git_args:
+        args += ["--", *git_args]
+    return _gh_raw(args)
 
 
 def pr_list(
