@@ -101,6 +101,18 @@ def _pairs(manifest: str, filter_set: list[str]) -> list[tuple[str, str]]:
     return pairs
 
 
+def canaries(manifest: str | None = None) -> dict[str, str]:
+    """The top-level ``canaries:`` block as family → owner/name (#587).
+
+    Canary repos are release-owned synthetic infra, NOT fleet consumers: they
+    live OUTSIDE ``projects:`` on purpose so everything built on :func:`_pairs`
+    (verify / migrate / inbox / audit, the ``--list``/``--paths`` modes) never
+    sweeps them (owner decision OQ6). This accessor is the only reader."""
+    data = yamlio.load(manifest or _manifest_path()) or {}
+    block = data.get("canaries") or {}
+    return {str(family): str(repo) for family, repo in block.items()}
+
+
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash modes
     mode = "list"
     refresh = False

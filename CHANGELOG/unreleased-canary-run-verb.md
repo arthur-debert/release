@@ -1,0 +1,1 @@
+- release-core admin canary run --ref: pre-ship canary round — publish canary/<sha12>, seed the canary consumer from source, dispatch CI + prerelease cut as fresh events, classified report + commit status (#587 slice 1)
