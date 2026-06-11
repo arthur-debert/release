@@ -38,9 +38,13 @@ Current-version source by Kind:
   vscode-ext               package.json .version
   tree-sitter              package.json .version
   zed-extension            extension.toml version = "..."
-  nvim-plugin, go-cli      git describe --tags --abbrev=0
-                           (no manifest by design — tag IS the version;
-                            pass an explicit X.Y.Z for the first release)
+  everything else          git describe --tags --abbrev=0
+                           (nvim-plugin, go-cli, any Kind without a
+                            version manifest, and repos detect-kind
+                            can't classify at all — e.g. the release
+                            meta repo itself. No manifest — the tag IS
+                            the version; pass an explicit X.Y.Z for
+                            the first release)
 
 Preconditions (checked by CI before mutating anything):
   - version is MAJOR.MINOR.PATCH[-PRERELEASE]
@@ -66,6 +70,7 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Callable
 
 from .. import gh, manifest, proc, version
 from .changelog import _SEMVER_TOOL_RE
@@ -79,8 +84,9 @@ pre-release suffix is stripped before bumping; to step from
 
 The current version is read from the canonical source for the
 Consumer's Kind (Cargo.toml, package.json, extension.toml, or the
-latest git tag for Kinds without a manifest). See the script header
-for the per-Kind mapping.
+latest git tag for Kinds without a manifest — including repos with
+no detectable Kind at all, e.g. manifest-less meta repos). See the
+script header for the per-Kind mapping.
 """
 
 # ---------------------------------------------------------------------
@@ -216,22 +222,28 @@ def _read_git_tag_version() -> str | None:
     return tag[1:] if tag.startswith("v") else tag
 
 
-def _read_current_version(kind: str) -> str | None:
-    if kind in ("rust-cli", "rust-lib"):
-        return _read_rust_version()
-    if kind == "tauri-app":
-        return _read_toml_version("src-tauri/Cargo.toml")
-    if kind in ("electron-app", "vscode-ext", "tree-sitter"):
-        return _read_json_version("package.json")
-    if kind == "zed-extension":
-        return _read_toml_version("extension.toml")
-    if kind in ("nvim-plugin", "go-cli"):
-        return _read_git_tag_version()
-    print(
-        f"release-core cut: don't know how to read current version for Kind={kind}",
-        file=sys.stderr,
-    )
-    return None
+# Kinds whose canonical version lives in a manifest file, mapped to their
+# reader. This is the ONE version-source mapping: a Kind listed here reads
+# its manifest; everything else — tag-sourced Kinds (nvim-plugin, go-cli),
+# Kinds with no version manifest, and repos detect-kind can't classify at
+# all (manifest-less meta repos like release itself) — reads the latest
+# git tag, because without a manifest the tag IS the version.
+_MANIFEST_READERS: dict[str, Callable[[], str | None]] = {
+    "rust-cli": _read_rust_version,
+    "rust-lib": _read_rust_version,
+    "tauri-app": lambda: _read_toml_version("src-tauri/Cargo.toml"),
+    "electron-app": lambda: _read_json_version("package.json"),
+    "vscode-ext": lambda: _read_json_version("package.json"),
+    "tree-sitter": lambda: _read_json_version("package.json"),
+    "zed-extension": lambda: _read_toml_version("extension.toml"),
+}
+
+
+def _read_current_version(kind: str | None) -> str | None:
+    reader = _MANIFEST_READERS.get(kind) if kind is not None else None
+    if reader is not None:
+        return reader()
+    return _read_git_tag_version()
 
 
 def _is_valid_literal_version(arg: str) -> bool:
@@ -286,32 +298,29 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     if arg in ("major", "minor", "patch"):
         # Detect Kind lazily — only needed for bump shortcuts that read the
         # current version. Literal-version dispatches skip this so they work
-        # in any Consumer regardless of Kind.
+        # in any Consumer regardless of Kind. An unclassifiable repo (a
+        # manifest-less meta repo like release itself) is by definition not
+        # a manifest Kind, so it takes the tag-sourced path like every other
+        # Kind without a manifest.
+        kind: str | None
         try:
             kind = manifest.detect_kind(".")
         except manifest.KindError:
-            print(
-                "release-core cut: detect-kind could not identify this repo's Kind",
-                file=sys.stderr,
-            )
-            print(
-                "  (required for bump shortcuts; pass an explicit X.Y.Z to bypass)",
-                file=sys.stderr,
-            )
-            return 1
+            kind = None
         current = _read_current_version(kind)
         if current is None:
-            if kind in ("nvim-plugin", "go-cli"):
-                print(
-                    f"release-core cut: no git tags found — Kind={kind} reads the current version\n"
-                    "  from `git describe --tags --abbrev=0`. Pass an explicit version\n"
-                    "  (e.g. release-core cut 0.1.0) for the first release.",
-                    file=sys.stderr,
-                )
-            else:
+            if kind is not None and kind in _MANIFEST_READERS:
                 print(
                     f"release-core cut: couldn't determine current version for Kind={kind}.\n"
                     "  Expected manifest not found or has no version field.",
+                    file=sys.stderr,
+                )
+            else:
+                source = f"Kind={kind}" if kind is not None else "a repo with no detectable Kind"
+                print(
+                    f"release-core cut: no git tags found — {source} reads the current version\n"
+                    "  from `git describe --tags --abbrev=0`. Pass an explicit version\n"
+                    "  (e.g. release-core cut 0.1.0) for the first release.",
                     file=sys.stderr,
                 )
             return 1
