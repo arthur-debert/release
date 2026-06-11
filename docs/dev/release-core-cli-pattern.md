@@ -142,7 +142,7 @@ PATH:
 
 - **Top-level (per-project):** `cut`, `status`, `init`, `selfcheck`,
   `changelog`, `semver`, `sync`, `detect-kind`, `audit`, `issue`.
-- **`pr`** (whole group: `pr review request|cancel|wait|show`, `pr checks-wait`,
+- **`pr`** (whole group: `pr review request|cancel|show`, `pr wait`, `pr ready`,
   `pr resolve-thread`, `pr status`) — the nested-subgroup + both-wraps exemplar.
 - **`ci`** — `fetch-deps` / `fetch-artifact` wraps.
 - **`admin/*`** — `admin repos` (`list / prs / scripts / audit / verify`),

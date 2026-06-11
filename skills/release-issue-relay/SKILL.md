@@ -210,7 +210,7 @@ These are the canonical buckets; the title prefix is what step 1's `--search` fi
 | Component | Covers |
 |---|---|
 | `copilot-review` | `copilot-review.yml` workflow misbehaves, Copilot not attached as reviewer, Auto-fix not firing |
-| `pr-review-loop` | `release-core pr review {request,cancel,wait,show}`, `gh-pr-resolve-thread`, `gh-pr-checks-wait` and related helpers |
+| `pr-review-loop` | `release-core pr review {request,cancel,show}`, `pr wait`, `pr ready`, `pr resolve-thread`, `pr status` and related helpers |
 | `rust-cli-release` | `rust-cli.yml` reusable release workflow (test, build, publish, homebrew, wasm) |
 | `ruleset` | `apply-ruleset` / branch protection / required check detection |
 | `sweep-policy` | `sweep-github-policy` / per-stack templates / destination mapping |
