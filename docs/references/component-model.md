@@ -56,7 +56,7 @@ A **Kind** template now consists of three things:
    hook entries that aren't a Capability's job (e.g. a check that
    `tauri.conf.json` parses).
 3. `templates/<kind>/**` — any other Kind-specific files (CI workflow
-   ref isn't actually shipped via release-sync; consumers reference
+   ref isn't actually composed into the tree; consumers reference
    `arthur-debert/release/.github/workflows/<kind>.yml@v2` directly).
 
 Most of what used to live in a Kind template (the hand-maintained
@@ -172,18 +172,14 @@ on every run (ADR-0001):
    target vanished from the rebuilt tree) and delete them — this is how
    **removals** propagate, with no removal manifest and no bookkeeping.
 
-The filesystem *is* the state. The only metadata sync writes is a
-**provenance marker** at `.release/.release-sync-source` — the full 40-char
-SHA of the release revision that generated the tree (ADR-0002). It is
-rewritten wholesale every sync, lives only inside `.release/` (never
-mirrored out as a symlink), and sync never reads it to decide anything; it
-exists so `release-drift-check` can rebuild against *exactly that revision*
-and separate genuine drift from mere staleness.
+The filesystem *is* the state. The only metadata init writes is a
+**provenance marker** at `.release/.release-sync-source` — the version label
+of the wheel that generated the tree (ADR-0002, historical). With the tree
+ephemeral and recomposed every session (WS4, #521), nothing reads it anymore
+— the drift-check it served was retired (drift is impossible by
+construction); it remains purely informational.
 
-There is no `.release-sync-state.yaml`. The fleet rollout view
-(`release-core admin repos audit` — "which consumers are on which release/
-ref, with which Capabilities") is derived from the provenance marker, not a
-state file.
+There is no state file.
 
 Authoritative mechanism:
 [ADR-0001](../adr/0001-release-sync-build-dir-with-symlinks.md) (build dir +

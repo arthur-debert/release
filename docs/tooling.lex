@@ -35,23 +35,20 @@ release-core, the gate, distribution, and workflows
           build / release / run + the draft-first dev cycle). The single source
           of procedural truth — see `harness.lex` and `dev-cycle.lex`.
         - `release-core gate` — run the quality gate (see [#2]).
-        - `release-core init` — DEFAULT (post-#476): materialize the WHOLE
-          managed tree from the wheel bundle (the `.release/` build dir + every
-          working-tree mirror — skills, ORIENTATION, configs, the CLAUDE.md
-          block) and auto-commit any managed change. This is "release-sync
-          sourced from the wheel"; it is what SessionStart runs, carrying the
-          full tree so consumers self-update by pull — there is no push step.
-          The `--config-only` escape hatch (and its `--full` alias) was
-          REMOVED in #532 — post-WS3 it composed root configs whose gate
-          referenced a `.release/` it never created; the full materialize is
-          the only mode.
-        - `release-core sync run` / `sync drift-check` — materialize the
-          `.release/` tree ([#5]) / fail if it has drifted.
+        - `release-core init` — materialize the managed tree from the wheel
+          bundle: the gitignored, ephemeral `.release/` build dir plus the
+          working-tree mirrors ([#5]). What SessionStart runs; the only mode
+          (the `--config-only` escape hatch was removed in #532). Auto-commits
+          a managed change when one exists — consumers self-update by pull,
+          there is no push step.
+        - `release-core build` / `run` / `test-all` / `test-e2e` — the repo's
+          kind-aware task verbs (single app-root commands).
         - `release-core changelog add|cut|render` — manage the changelog.
         - `release-core semver validate|get` — validate or read a version part.
         - `release-core detect-kind` — report this repo's release Kind.
         - `release-core cut` — cut a release for this repo.
-        - `release-core audit` — audit this repo's release posture.
+        - `release-core audit` / `status` — release posture / the
+          pilot-running done-check.
         - `release-core issue file <component> "<symptom>"` — escalate infra
           friction upstream to `arthur-debert/release`.
         - `release-core pr …` — the PR-loop helpers ([#3]).
@@ -80,8 +77,6 @@ release-core, the gate, distribution, and workflows
             | changelog | manage the changelog (add/cut/render) |
             | semver | validate or extract a version part |
             | detect-kind | detect this repo's release Kind |
-            | release-sync | materialize the .release/ tree + symlinks |
-            | release-drift-check | fail if .release/ has drifted from source |
             | gh-task-status | the PR state machine (state + next action) |
             | gh-release-issue | file or comment on a release issue upstream |
         :: table ::
@@ -95,9 +90,9 @@ release-core, the gate, distribution, and workflows
 
     `release-core gate` is the ONE quality entry. It wraps `lefthook run
     pre-commit --all-files`, so green here == green in CI, with no false-green
-    on unstaged files. It sets `LEFTHOOK_CONFIG=.release/lefthook.yml` when
-    present, so it survives dropping the root discovery symlink (the
-    footprint-min end state, #501).
+    on unstaged files. It points lefthook at `.release/lefthook.yml` via
+    `LEFTHOOK_CONFIG` — there is no tracked root gate config in a consumer
+    (WS3, #524); the gate definition lives only in the ephemeral build dir.
 
     It is a HARD gate: a missing tool exits non-zero (a setup failure, never a
     skip), and `--no-verify` is never an acceptable workaround — CI re-runs the
@@ -174,208 +169,128 @@ release-core, the gate, distribution, and workflows
     The pull model keeps consumers on the always-stable tip without per-repo
     bump PRs.
 
-    What DOES ride in the consumer's git tree is the managed TREE — the
-    `.release/` build dir + every working-tree mirror (skills, ORIENTATION,
-    configs, the CLAUDE.md block). A bare `release-core init` materializes that
-    whole tree from the wheel bundle and AUTO-COMMITS only the managed paths it
-    touched (never `git add -A`), with a deterministic message, iff they
-    actually changed — byte-identical → no commit, so churn tracks release
-    cadence, not session count. The engine is pulled, the whole tree it
-    generates is committed — so the wheel pull alone carries every managed
-    change and there is no push step. `--no-commit` skips the commit; `--push`
-    additionally fast-forwards on a clean default branch.
+    Almost nothing the wheel carries is committed in the consumer (epic #501,
+    ADR-0005 — shipped through WS7, #528). What a consumer's git tree holds is
+    only the irreducible set:
 
-    :: note :: The minimal-footprint direction (epic #501, ADR-0005) shrinks
-    this tracked tree toward zero — `.release/` becomes gitignored and
-    regenerated each session, and orientation moves into `release-core how-to`
-    output rather than synced files. This document describes the model as it
-    ships today (committed `.release/` + symlinks, ADR-0004); the roadmap is in
-    [#8].
+    - `.github/**` — the thin `@vN` workflow callers + GitHub-forced policy
+      files (real copies; GitHub reads them from the tree).
+    - The bootstrap quartet, as REAL tracked files (WS5, #526):
+      `.claude/settings.json`, `bin/install-release-core`,
+      `bin/setup-dev-env.sh`, `bin/pr-loop-guard` — the boot chain can't
+      depend on what it boots.
+    - Optionally `.release-sync.yaml` — the one per-repo knob (capability
+      override).
 
-5. Distribution — release-sync (build-dir + symlinks)
+    Everything else is EPHEMERAL, recomposed by every `init`: the `.release/`
+    build dir is gitignored (WS4, #521), and the working-tree mirrors (the
+    `bin/` task symlinks, `.editorconfig`, the distributed skill) are
+    untracked, listed in a managed `.git/info/exclude` block (WS7, #528).
+    Drift is impossible by construction — there is nothing tracked to drift.
 
-    `release-sync` (consumer alias for `release-core sync run`) is the
-    materializer that writes managed files into a consumer. ADRs 0001 and 0002
-    define it; it is validated against the `tests/release-sync/` suite, not just
-    intent. Read this before adding anything consumers should receive.
+    The managed AUTO-COMMIT therefore fires only for real-file changes (the
+    quartet, workflow copies, the CLAUDE.md stub) and for one-time migrations
+    (untracking what an older seed committed; removing tombstoned retired
+    files, #527). Pathspec-scoped, never `git add -A`, byte-identical → no
+    commit. `--no-commit` skips it (CI); `--push` additionally fast-forwards
+    on a clean default branch.
 
-    Note (direction): this whole sync/drift subsystem — `release-sync`,
-    `release-drift-check`, and the provenance marker — is *transitional*. Per
-    ADR-0005 (and WS4 of #501), once `.release/` is gitignored and regenerated
-    each session from the pinned binary, drift is impossible by construction and
-    this subsystem is retired. What follows describes the current mechanism, not
-    an enduring design.
+5. Distribution — the compose engine (init → ephemeral tree + mirrors)
 
-    The guiding rule: a consumer repo should contain as little mixed-ownership
-    state as possible. Mixed ownership (a file half-owned by release, half by
-    the consumer) is the single biggest source of confusion, so the mechanism
-    keeps the managed surface small, obvious, and non-overlapping.
+    `release-core init` is the one materializer (the standalone `release-sync`
+    verb and the drift-check subsystem were retired in WS4, #521 — with the
+    tree ephemeral there is nothing to drift). The engine lives in
+    `release_core/sync.py` (`build_plan` / `materialize` / `compute_mirror`);
+    init is its only driver. Read this before adding anything consumers should
+    receive.
 
-    5.1. The build-directory model
+    The guiding rule: a consumer repo contains as little release-owned state
+    as possible, and nothing mixed-ownership. The binary is the carrier; files
+    appear at session start and never enter git.
 
-        Every managed file a consumer receives lives in a single build
-        directory, `.release/`, materialized by `release-core` from the wheel
-        bundle (ADR-0003). The file at its expected working-tree location
-        (`lefthook.yml`, `bin/check-shell`, …) is a *symlink* into `.release/`.
-        Today `.release/` is still committed, but the direction (ADR-0004 /
-        ADR-0005, WS4 of #501) is to gitignore it and regenerate it each session
-        from the pinned binary: the binary is the carrier, so the committed tree
-        is a transitional footprint to be removed — not a goal to preserve.
+    5.1. What init composes
 
-        `.release/` is rebuilt from scratch on every sync — there is no state
-        file and no removal manifest. The filesystem is the state. A template
-        deleted upstream simply stops appearing in the rebuilt `.release/`; its
-        symlink breaks; broken-symlink cleanup removes it (ADR-0001).
+        Three template subtrees, low to high precedence (last write wins):
 
-        The symlink at the working-tree location is the signal: *this file is
-        managed by release — don't edit it here.* Edits belong upstream, in the
-        template.
+        - `templates/commons/` — the universal set; every consumer.
+        - `templates/components/<capability>/` — one per Capability the
+          consumer declares (Kind manifest default, or a `.release-sync.yaml`
+          override).
+        - `templates/<kind>/` — the consumer's Kind subtree.
 
-    5.2. What gets distributed
+        A file's destination is its source path minus the subtree prefix:
+        `templates/commons/bin/check-shell` → `.release/bin/check-shell`.
+        `lefthook.yml` is the one composed file — deep-merged from each
+        subtree's `lefthook.fragment.yaml` in precedence order; to change a
+        check, edit a fragment, never a consumer's gate. Skills ride the same
+        mechanism, whole-directory (catalogs in `harness.lex`).
 
-        Sync composes three template subtrees, low to high precedence (last
-        write wins):
+        The source is the wheel's offline bundle (no network, no clone); a
+        `$RELEASE_HOME` checkout overrides it for release-dev.
 
-        Subtrees:
-            - `templates/commons/` — the universal set; every consumer gets it
-              regardless of Kind or Capabilities.
-            - `templates/components/<capability>/` — one per Capability the
-              consumer declares (Kind manifest, or a `.release-sync.yaml`
-              override).
-            - `templates/<kind>/` — the consumer's Kind subtree.
+    5.2. Where things land
 
-        A file's destination in `.release/` is its path with the subtree prefix
-        stripped: `templates/commons/bin/check-shell` becomes
-        `.release/bin/check-shell`. `lefthook.yml` is the one composed file —
-        deep-merged from each subtree's `lefthook.fragment.yaml` in precedence
-        order (base, commons, each capability, then the Kind), not copied from a
-        single source. To change a check, edit a fragment, never a consumer's
-        gate.
+        Four placement classes, decided by the engine:
 
-        What lands where (source in this repo → destination in the consumer →
-        kind; "symlink" = relative link into `.release/`, "copy" = real file,
-        "internal" = lives only inside `.release/`, never mirrored out):
+        Ephemeral build dir (`.release/`):
+            The whole composed tree, gitignored via a self-ignoring
+            `.release/.gitignore`, recomposed every init. The gate config
+            (`lefthook.yml` + lint/format configs) lives ONLY here; tools get
+            it via explicit `--config`/`--rcfile`/`-c` paths (WS3, #524).
 
-        From templates/commons (every consumer):
-            | Source | Destination | Kind |
-            | bin/setup-dev-env.sh | bin/setup-dev-env.sh | symlink |
-            | bin/install-release-core | bin/install-release-core | symlink |
-            | bin/check-shell | bin/check-shell | symlink |
-            | bin/check-gate | bin/check-gate | symlink |
-            | .markdownlint.json, .markdownlintignore | (root) | symlink |
-            | .yamllint, .shellcheckrc, .prettierignore | (root) | symlink |
-            | .editorconfig | .editorconfig | symlink |
-            | .claude/settings.json | .claude/settings.json | symlink |
-            | lefthook.fragment.yaml | merged into .release/lefthook.yml | fragment |
-            | lib/release_core/** | (not synced) | wheel |
-        :: table ::
+        Ephemeral mirrors (untracked symlinks):
+            Working-tree symlinks into `.release/` for files tools expect at a
+            location — the `bin/` task verbs, `.editorconfig`, the distributed
+            skill. Never tracked; init lists them in a managed block in
+            `.git/info/exclude` so `git status` stays clean (WS7, #528). A
+            conflicting REAL file at a mirror dest is surfaced, not excluded.
 
-        From templates/{kind} (per-Kind):
-            | Source | Destination | Kind |
-            | .github/workflows/*.yml | .github/workflows/*.yml | copy |
-            | .github/CODEOWNERS | .github/CODEOWNERS | symlink |
-            | .github/dependabot.yml | .github/dependabot.yml | symlink |
-            | .github/pull_request_template.md | (same) | symlink |
-            | bin/* (build/check tools) | bin/* | symlink |
-            | lefthook.fragment.yaml | merged into .release/lefthook.yml | fragment |
-            | manifest.yaml | (not a file; capability defaults) | source |
-        :: table ::
+        Real tracked copies (`needs_real_file`):
+            `.github/workflows/*` (GitHub reads the tree directly; a symlink
+            blob is the literal target string) and the bootstrap quartet
+            (WS5, #526 — must exist on a fresh clone, before any init ran).
+            Copies carry a managed-marker header so stale ones are swept.
 
-        Skills ride this same mechanism, whole-directory; see `harness.lex` for
-        the catalogs and tiers.
+        The CLAUDE.md stub:
+            A marker-delimited block injected at the top of the consumer's
+            CLAUDE.md, pointing at `release-core how-to` (`harness.lex` §2).
 
-    5.3. The materialize-then-mirror cycle
+    5.3. Cleanup is part of the compose
 
-        For each sync:
+        Every init also removes what no longer belongs:
 
-        a. Resolve Kind (`detect-kind`) and Capabilities.
-        b. Build the new `.release/` tree in a tempdir by `git show`-ing every
-           file from the composed subtrees at the selected ref.
-        c. For each file in `.release/<dest>`, ensure a *relative* symlink
-           exists at `<dest>` in the working tree, pointing into `.release/`
-           (e.g. `bin/check-shell -> ../.release/bin/check-shell`).
-        d. Walk the repo for symlinks pointing into `.release/` that are now
-           broken, and delete them.
+        - Broken/de-mirrored symlinks: any `.release/`-pointing symlink whose
+          dest this compose does not mirror is swept (and its emptied skill
+          dir pruned).
+        - Stale managed copies: marker-carrying workflow files absent from the
+          plan.
+        - Retired tombstoned files (WS6, #527): real files release once
+          distributed and has since retired (`bin/check-fmt`,
+          `bin/changelog*`, the old `bin/release` shim,
+          `.release-sync-state.yaml`), removed only under provenance (exact
+          historical blob, managed marker, or verbatim header) so consumer-
+          authored work is never touched.
+        - One-time untracking migrations: a pre-WS4 committed `.release/` or
+          pre-WS7 committed mirrors are untracked in one managed commit, with
+          the ephemeral content kept live on disk.
 
-        Sync reads templates from a git ref, not the working tree (`git show
-        "$ref:$path"`). So a change is only distributed once committed. The ref
-        is: `$RELEASE_REF` if set, else a per-repo or per-Kind `release/beta/*`
-        branch, else `origin/main`.
+    5.4. The canonical-home pattern for tools
 
-    5.4. Two exceptions to the symlink rule
+        A tool that ships to consumers has its single source of truth inside
+        `templates/commons/bin/` (or the relevant subtree) — never repo-root
+        `bin/`. The maintainer gets it on `$PATH` because repo-root
+        `bin/<tool>` is a symlink into the template. A real file at repo-root
+        `bin/` is by definition maintainer-only.
 
-        Most managed files are symlinks. Two cases are not:
+        Python tooling (`changelog`, `semver`, `detect-kind`,
+        `gh-task-status`, `gh-release-issue`, and `release-core` itself)
+        ships as pip console-scripts from the wheel — never synced shims
+        (#476).
 
-        Real-file copies — `needs_real_file`:
-            Some consumers of a file don't dereference symlinks. The known case
-            is `.github/workflows/*`: GitHub reads workflow YAML directly from
-            the git tree and treats a symlink blob as the literal target string,
-            which fails to parse and silently breaks every workflow in the
-            directory. release-sync writes these as real-file copies carrying a
-            managed-marker header comment, so stale copies are still detectable
-            and removable on later syncs.
-
-        Release-internal content — `is_release_internal`:
-            Some content must live in `.release/` but must *not* be mirrored out
-            to a working-tree location. It is part of the tree (so `--check`
-            sees it change) but no symlink/copy is created for it. Two kinds:
-
-            - The provenance marker (`.release-sync-source`) — records the
-              source revision (ADR-0002); read by `release-drift-check`, never
-              used at a consumer location.
-            - `lib/release_core/*` — the Python core package. It ships to
-              consumers by *pip wheel*, not sync — but when present in the tree
-              it must exist in `.release/lib/` as a real-file internal
-              dependency, never mirrored out. The match is scoped to
-              `lib/release_core/`, not all of `lib/`: other `lib/` paths are
-              consumer-facing and must mirror (the bats Capability ships
-              `lib/bats-harness.bash`, which consumer test files source).
-
-    5.5. The canonical-home pattern for tools
-
-        A tool that ships to consumers has its single source of truth *inside*
-        `templates/commons/bin/` (or the relevant subtree) — not at repo-root
-        `bin/`. The maintainer gets it on `$PATH` because repo-root `bin/<tool>`
-        is a *symlink* into the template:
-
-        Example:
-            bin/install-release-core -> ../templates/commons/bin/install-release-core
-        :: text ::
-
-        There is exactly one copy (the template); the maintainer symlink and the
-        consumer's `.release/` copy both point at the same source. A tool
-        authored as a real file at repo-root `bin/` is, by definition, *not*
-        distributed — it is maintainer-only until moved under a template.
-
-    5.6. The changelog / semver family: pip console-scripts, not shims
-
-        `changelog`, `changelog-add`, `changelog-cut`, `changelog-render` and
-        `semver` are NO LONGER distributed as `bin/` sys.path shims. They are
-        `release_core` pip console-scripts, declared in the package's
-        `[project.scripts]` and installed when the wheel is installed
-        (`install-release-core` at SessionStart, or
-        `bin-internal/install-release-core-pkg.sh` in release CI).
-
-        Consequence for `.release/lib`: with the changelog/semver shims gone, NO
-        file synced to a consumer resolves `.release/lib/release_core` anymore —
-        `release_core` reaches consumers purely by pip wheel (release#476). The
-        remaining `release_core` sys.path shims (`bin/release-sync`,
-        `bin/release-core`, `bin/detect-kind`, `bin/release-drift-check`) are
-        maintainer-only repo-root `bin/` tools, never synced.
-
-    5.7. Provenance and drift
-
-        Each `.release/` carries `.release-sync-source` — the exact release
-        revision that generated it (ADR-0002). `release-drift-check` rebuilds
-        against that recorded revision, so it distinguishes real drift (a
-        consumer hand-edited a managed file) from mere staleness (the consumer
-        simply hasn't re-synced).
-
-    :: note :: To make something reach consumers: put its canonical copy under a
-    template subtree (usually `templates/commons/`), and — if it is a runtime
-    dependency rather than a used-at-a-location file — shield it with
-    `is_release_internal`. Validate with a sync into a throwaway consumer; add a
-    `tests/release-sync/` case.
+    :: note :: To make something reach consumers: put its canonical copy under
+    a template subtree, decide its placement class (prefer binary output >
+    ephemeral > tracked), and add a `tests/release-sync/` case plus a
+    `test_core_sync.py` lock.
 
 6. Reusable workflows
 
@@ -526,14 +441,22 @@ release-core, the gate, distribution, and workflows
         - Pull-model distribution (#416): the wheel is the carrier; consumers
           self-update at SessionStart. No push mechanism.
 
+    Done (continued):
+        - Self-improving feedback loop (epic #348, closed): consumer
+          orientation via the CLAUDE.md stub + `how-to`; the escalation
+          contract (`release-core issue file`) and the maintainer inbox
+          (`admin inbox` / `notify-source`).
+        - Minimal footprint (epic #501, ADR-0005, closed 2026-06): the binary
+          is the sole carrier. `.release/` ephemeral (WS4), bootstrap quartet
+          as real files (WS5), retired-file tombstones (WS6), ephemeral
+          mirrors + the machinery keep/fold/drop (WS7,
+          `docs/references/self-improving-machinery.md`). The drift/sync
+          subsystem is gone; a consumer tracks only the irreducible set.
+
     In progress:
-        - Self-improving feedback loop (epic #348): consumer orientation +
-          escalation contract shipped and propagated; the inbox / relay /
-          notify-source triage loop and CI-failure analysis remain.
-        - Minimal footprint (epic #501, ADR-0005): shrink the tracked consumer
-          surface toward zero — `release-core how-to`/`gate` as the carriers,
-          `.release/` ephemeral, the drift/sync subsystem retired once
-          `.release/` is gitignored. This doc consolidation (WS9) is part of it.
+        - Dev-cycle fine-tuning (epic #547): thread-state-driven done-signal,
+          state-engine-owned waits and draft↔ready, then fresh-agent
+          validation rounds on the minimal footprint.
 
     Later:
         - Architectural fine-tuning: cleaner separation of build / pack / sign /

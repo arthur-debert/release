@@ -14,7 +14,7 @@ name: Release
 # - tag + push HEAD
 # - GH release with notes rolled from the CHANGELOG/ fragment dir at
 #   cut (changelog-path: CHANGELOG.md → fragment-directory model; see
-#   the with: block). docs/breaking-changes.md stays a separate log.
+#   the with: block).
 # - publish the `release_core` wheel as a release asset (pip-bootstrap
 #   transport, ADR-0003)
 # - advance the floating-major branch (derived from the released
@@ -25,7 +25,7 @@ name: Release
 #   git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z
 #   git branch -f vX vX.Y.Z && git push origin vX --force-with-lease   # vX = the released major
 #   gh release create vX.Y.Z --notes "..."
-# See docs/breaking-changes.md for the format of release-note
+# See CHANGELOG/ fragments for the format of release-note
 # bodies we usually attach.
 
 on:
@@ -54,8 +54,7 @@ jobs:
       # into `CHANGELOG/<version>.md`, render `CHANGELOG.md`), commits both,
       # and uses the version body as the GH release notes. The admin
       # RELEASE_TOKEN bypasses the main ruleset for that commit. (This is NOT
-      # the legacy single-file Keep-a-Changelog path; `docs/breaking-changes.md`
-      # stays a separate, hand-kept breaking-changes log.) Previously this was
+      # the legacy single-file Keep-a-Changelog path.) Previously this was
       # `''` (opted out), so fragments piled up unconsumed — that was the bug.
       changelog-path: CHANGELOG.md
       advance-major: true

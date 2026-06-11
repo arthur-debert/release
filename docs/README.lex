@@ -18,9 +18,9 @@ The four narrative documents:
 
     tooling.lex:
         The machinery: `release-core` (the CLI an agent drives), the quality
-        gate, the PR state machine, the pull-model install, the `release-sync`
-        distribution engine (build-dir + symlinks, what lands where), the
-        reusable workflows, the maintainer `orc` orchestrator, and the
+        gate, the PR state machine, the pull-model install, the compose
+        engine (`init` → ephemeral `.release/` + mirrors, what lands where),
+        the reusable workflows, the maintainer `orc` orchestrator, and the
         directional roadmap.
 
     harness.lex:
@@ -33,21 +33,28 @@ The four narrative documents:
 
 Kept references (the durable "why"):
     adr/:
-        Architecture Decision Records — the build-dir + symlinks model (0001),
-        the provenance marker (0002), the pip-install bootstrap (0003), the
-        installed-package symlinks (0004), the minimal-footprint /
-        invoke-don't-discover decision (0005).
-
-    breaking-changes.md:
-        The versioning contract's breaking-changes log.
+        Architecture Decision Records — historical decisions, in order; 0005
+        (minimal footprint, invoke-don't-discover) is the current
+        architecture. Earlier ADRs describe mechanisms 0005 superseded; they
+        are records, not current design.
 
     references/:
-        Design "why" notes — the component model, the lint-debt three-case
-        model, release-token setup, fleet telemetry via issues.
+        Design "why" notes that exist nowhere else — the component model
+        (Kind/Capability composition), the lint-debt three-case model, the
+        RELEASE_TOKEN setup, and the WS7 self-improving-machinery
+        keep/fold/drop decisions.
+
+    artifacts-schema.md / lex-release-cascade.md:
+        Live interface contracts — the cross-repo artifact-pin schema
+        (read by `fetch-artifact`), and the lex multirepo release cascade.
 
     dev/:
         Maintainer tool-base docs — fleet tooling and the release-core CLI
         authoring pattern.
+
+    Release history lives in CHANGELOG.md + git tags — there is no separate
+    breaking-changes log (pull model: consumers follow `@vN`; a breaking
+    change is a new major, coordinated when cut).
 
 Reading order:
     - New to the repo: start with tooling.lex, then harness.lex.
