@@ -121,6 +121,19 @@ def canaries(manifest: str | None = None) -> dict[str, str]:
     return {str(family): str(repo) for family, repo in block.items()}
 
 
+def project_repos(manifest: str | None = None) -> set[str]:
+    """Every owner/name under ``projects:`` — the fleet consumers ONLY.
+
+    The canary-side refusal surface (#604): ``canary init`` must hard-refuse
+    to operate on (let alone force-push) a fleet consumer, so it checks its
+    resolved repo against this set. A missing manifest is an empty set, same
+    as :func:`canaries`."""
+    path = manifest or _manifest_path()
+    if not os.path.isfile(path):
+        return set()
+    return {repo for repo, _path in _pairs(path, [])}
+
+
 def known_repos(manifest: str | None = None) -> set[str]:
     """Every owner/name the registry knows: ``projects:`` entries + ``canaries:``.
 

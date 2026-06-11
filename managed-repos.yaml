@@ -84,6 +84,9 @@ projects:
 # block, NOT under `projects:`: the fleet sweeps (verify / migrate / inbox /
 # audit) iterate `projects:` only and must never include the canaries
 # (owner decision OQ6). One entry per family: `<family>: <owner>/<name>`.
+# Entries are maintained by `release-core admin canary init` (#604), which
+# seeds each repo from its `tests/fixtures/<kind>/` fixture (the dir whose
+# `.canary-family` marker names the family) and appends here on first init.
 canaries:
   rust: arthur-debert/release-canary-rust
 

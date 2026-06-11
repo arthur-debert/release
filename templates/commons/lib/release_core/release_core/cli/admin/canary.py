@@ -2,19 +2,19 @@
 
 Flat ``wrap_verb`` leaves over the canary verbs::
 
-  run   release_core.verbs.canary_run.main
+  run    release_core.verbs.canary_run.main
+  init   release_core.verbs.canary_init.main
 
 The module exports a ``group`` (a ``click.Group``); the ``admin`` assembler
 imports and attaches it. Each leaf is a faithful passthrough — argv and
-``--help`` go straight to the verb. ``canary init`` (idempotent create/reset
-of a canary repo) is slice 2 and lands here when it ships.
+``--help`` go straight to the verb.
 """
 
 from __future__ import annotations
 
 import click
 
-from ...verbs import canary_run
+from ...verbs import canary_init, canary_run
 from .._helpers import wrap_verb
 
 
@@ -37,5 +37,13 @@ group.add_command(
         canary_run.main,
         name="run",
         short_help="One canary round against --ref: publish, seed, dispatch, classify.",
+    )
+)
+
+group.add_command(
+    wrap_verb(
+        canary_init.main,
+        name="init",
+        short_help="Idempotent create/reset of a family's canary repo from its fixture.",
     )
 )

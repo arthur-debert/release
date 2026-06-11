@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/canaryapp", "crates/canary"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+description = "Synthetic rust consumer exercised by release's pre-cut canary loop (arthur-debert/release#587). Do not depend on this."
+license = "MIT"
+homepage = "https://github.com/arthur-debert/release-canary-rust"
+repository = "https://github.com/arthur-debert/release-canary-rust"
