@@ -357,6 +357,18 @@ def test_missing_ref_is_usage_error(capsys):
     assert "--ref is required" in capsys.readouterr().err
 
 
+def test_non_positive_timeout_is_usage_error(capsys):
+    rc = canary_run.main(["--ref", "main", "--timeout", "0"])
+    assert rc == 64
+    assert "positive" in capsys.readouterr().err
+
+
+def test_family_list_strips_whitespace():
+    opts = canary_run._parse_args(["--ref", "main", "--family", "rust, npm"])
+    assert isinstance(opts, dict)
+    assert opts["families"] == ["rust", "npm"]
+
+
 # ── jobs-endpoint settling ───────────────────────────────────────────────────
 
 

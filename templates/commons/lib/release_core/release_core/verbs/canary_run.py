@@ -422,8 +422,9 @@ def _resolve_runs(
 ) -> dict[str, dict]:
     """Phase 4a: resolve the two fresh runs — CI by head_sha == seed sha (also
     excludes the noise run prepare's release commit triggers), the cut by
-    workflow + a run id NOT in the pre-dispatch snapshot (id-set diff, immune
-    to local-vs-GitHub clock skew)."""
+    workflow + head_sha == seed sha + a run id NOT in the pre-dispatch
+    snapshot (id-set diff, immune to local-vs-GitHub clock skew; the head_sha
+    tie keeps a concurrent dispatch by someone else from mis-associating)."""
     runs: dict[str, dict] = {}
     while time.time() < deadline:
         if "ci" not in runs:
@@ -447,7 +448,9 @@ def _resolve_runs(
             fresh = [
                 run
                 for run in (data or {}).get("workflow_runs", [])
-                if run["id"] not in before_ids and run.get("event") == "workflow_dispatch"
+                if run["id"] not in before_ids
+                and run.get("event") == "workflow_dispatch"
+                and run.get("head_sha") == seed_sha
             ]
             if fresh:
                 runs["release"] = min(fresh, key=lambda run: run["id"])
@@ -595,7 +598,7 @@ def _parse_args(argv: list[str]) -> dict | int:
             if arg == "--ref":
                 opts["ref"] = value
             elif arg == "--family":
-                opts["families"] = [f for f in value.split(",") if f]
+                opts["families"] = [f.strip() for f in value.split(",") if f.strip()]
             elif arg == "--root":
                 opts["root"] = value
             elif arg == "--timeout":
@@ -603,6 +606,9 @@ def _parse_args(argv: list[str]) -> dict | int:
                     opts["timeout_min"] = float(value)
                 except ValueError:
                     return _usage_error(f"--timeout wants minutes, got {value!r}")
+                if opts["timeout_min"] <= 0:
+                    # A non-positive budget expires the deadline immediately.
+                    return _usage_error(f"--timeout wants a positive number, got {value!r}")
             elif arg == "--keep":
                 try:
                     opts["keep"] = int(value)
@@ -673,10 +679,11 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
             f"canary run: published {branch} ({rewritten} self-refs rewritten)",
             file=sys.stderr,
         )
-    except (CanaryError, gh.GhError, proc.ProcError) as exc:
-        # GhError/ProcError too: the helpers under here (clone, _retry'd gh
-        # calls, git plumbing) raise them past the bounded retries — every
-        # phase-0/1 failure is a setup error, never an unhandled stack trace.
+    except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
+        # GhError/ProcError/OSError too: the helpers under here (clone,
+        # _retry'd gh calls, git plumbing, the workflow-file rewrites) raise
+        # them past the bounded retries — every phase-0/1 failure is a setup
+        # error, never an unhandled stack trace.
         print(f"canary run: {exc}", file=sys.stderr)
         return 2
 
@@ -790,11 +797,12 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
                 },
                 "pruned": deleted,
             }
-        except (CanaryError, gh.GhError, proc.ProcError) as exc:
-            # GhError/ProcError too: _retry re-raises after the bounded
-            # attempts and the git wrappers raise directly — any of them is a
-            # family-level setup error; record it and continue to the next
-            # family rather than aborting the whole round.
+        except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
+            # GhError/ProcError/OSError too: _retry re-raises after the
+            # bounded attempts, the git wrappers raise directly, and the
+            # caller-rewrite/fragment writes can hit filesystem errors — any
+            # of them is a family-level setup error; record it and continue
+            # to the next family rather than aborting the whole round.
             print(f"canary run: {family}: {exc}", file=sys.stderr)
             footer.append(f"{family}: SETUP ERROR — {exc}")
             payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}
