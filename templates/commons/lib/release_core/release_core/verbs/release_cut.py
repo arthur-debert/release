@@ -52,6 +52,17 @@ Preconditions (checked by CI before mutating anything):
   - version differs from the manifest's current version
   - CHANGELOG.md has entries under `## [Unreleased]`
 
+Canary gate (#606, checked HERE before dispatching): in a repo whose
+managed-repos.yaml registers canaries (the top-level `canaries:` block —
+in practice only the release meta repo itself), the cut REFUSES unless
+every registered `canary/<family>` context is a green commit status on
+the EXACT default-branch HEAD sha being cut — the sha that
+`release-core admin canary run --ref main` stamps. Exact-sha binding
+makes freshness mechanical: any new commit on main invalidates the
+previous round by construction. There is NO skip flag (owner decision,
+#587 — escape hatches shrink). A repo with no registered canaries
+(every consumer) has no gate — registry-driven inertness, not a skip.
+
 After dispatch:
   gh run watch
   gh run list --workflow=release.yml --limit=1
@@ -73,6 +84,7 @@ import sys
 from collections.abc import Callable
 
 from .. import gh, manifest, proc, version
+from . import managed_repos
 from .changelog import _SEMVER_TOOL_RE
 
 USAGE = """\
@@ -273,6 +285,74 @@ def _is_valid_literal_version(arg: str) -> bool:
     return bool(_SEMVER_TOOL_RE.match(arg))
 
 
+# ---------------------------------------------------------------------
+# Canary gate (#606): the cut refuses without green canary statuses on
+# the exact HEAD sha being cut.
+# ---------------------------------------------------------------------
+
+_CANARY_NEXT_ACTION = "run: release-core admin canary run --ref main"
+
+
+def _canary_gate() -> int | None:
+    """Refuse the cut unless every registered `canary/<family>` context is a
+    green commit status on the exact sha this cut will run on. Returns None
+    to proceed, or an exit code to refuse.
+
+    The sha checked is the REMOTE default-branch head — `gh workflow run`
+    dispatches release.yml on the default branch at GitHub, so that head (not
+    the local HEAD, which may be ahead/behind) IS what gets cut. It is the
+    same sha `release-core admin canary run --ref main` resolves and stamps,
+    so exact-sha equality is the whole freshness story: a status on any older
+    sha simply isn't on this one.
+
+    Registry-driven inertness, not a skip flag: no `canaries:` registered
+    (every consumer repo — they have no managed-repos.yaml at all) → no gate.
+    There is NO skip flag and no env-var escape (owner decision, #587)."""
+    try:
+        registry = managed_repos.canaries()
+    except Exception as exc:  # a malformed registry must refuse loudly, not crash
+        print(f"release-core cut: cannot read the canaries registry: {exc}", file=sys.stderr)
+        return 1
+    if not registry:
+        return None
+
+    try:
+        repo_info = gh.rest("repos/{owner}/{repo}") or {}
+        default_branch = repo_info["default_branch"]
+        combined = gh.rest(f"repos/{{owner}}/{{repo}}/commits/{default_branch}/status") or {}
+    except (gh.GhError, KeyError) as exc:
+        print(
+            f"release-core cut: canary gate: cannot read commit statuses: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    sha = combined.get("sha") or ""
+    # The combined-status endpoint already collapses to the LATEST status per
+    # context, so this is one state per `canary/<family>`.
+    states = {s.get("context"): s.get("state") for s in combined.get("statuses") or []}
+    not_green: list[str] = []
+    for family in sorted(registry):
+        context = f"canary/{family}"
+        state = states.get(context)
+        if state != "success":
+            detail = state if state is not None else "missing (no status on this sha)"
+            not_green.append(f"  {context}: {detail}")
+    if not not_green:
+        contexts = ", ".join(f"canary/{family}" for family in sorted(registry))
+        print(f"Canary gate green on {sha[:12]} ({default_branch} head): {contexts}.")
+        return None
+
+    print(
+        f"release-core cut: REFUSING to cut — the canary gate is not green on "
+        f"{sha[:12]} (the {default_branch} head this cut runs on):\n"
+        + "\n".join(not_green)
+        + f"\n{_CANARY_NEXT_ACTION}",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash control flow
     if len(argv) != 1:
         print(USAGE, file=sys.stderr, end="")
@@ -342,6 +422,10 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
             file=sys.stderr,
         )
         return 1
+
+    gate_rc = _canary_gate()
+    if gate_rc is not None:
+        return gate_rc
 
     print(f"Triggering release.yml for v{new_version}...")
     # proc.run captures; forward gh's own stdout/stderr so the dispatch output
