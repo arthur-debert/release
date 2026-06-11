@@ -228,15 +228,50 @@ def test_bump_reads_kind_and_dispatches(monkeypatch, tmp_path, capsys):
     assert ["gh", "workflow", "run", "release.yml", "-f", "version=1.5.0"] in calls
 
 
-def test_bump_on_unclassifiable_dir_errors(monkeypatch, tmp_path, capsys):
+def test_bump_on_unclassifiable_dir_reads_git_tag(monkeypatch, tmp_path, capsys):
+    """#596: a manifest-less repo with no detectable Kind (the release meta
+    repo itself) is tag-sourced — the bump shortcut reads the latest tag."""
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "release.yml").write_text("name: release\n")
     (tmp_path / "README.md").write_text("nothing detectable\n")
     monkeypatch.chdir(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[:2] == ["git", "describe"]:
+            return _completed(cmd, returncode=0, stdout="v2.18.0\n")
+        return _completed(cmd, returncode=0, stdout="")
+
     monkeypatch.setattr(proc, "out", lambda cmd, **kw: str(tmp_path))
+    monkeypatch.setattr(proc, "run", fake_run)
+    monkeypatch.setattr(release_cut.shutil, "which", lambda _name: "/usr/bin/gh")
+
+    rc = release_cut.main(["minor"])
+    assert rc == 0
+    assert "Bumping minor: 2.18.0 -> 2.19.0" in capsys.readouterr().out
+    assert ["gh", "workflow", "run", "release.yml", "-f", "version=2.19.0"] in calls
+
+
+def test_bump_on_unclassifiable_dir_no_tags_errors(monkeypatch, tmp_path, capsys):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "release.yml").write_text("name: release\n")
+    (tmp_path / "README.md").write_text("nothing detectable\n")
+    monkeypatch.chdir(tmp_path)
+
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["git", "describe"]:
+            return _completed(cmd, returncode=128, stdout="", stderr="no tags")
+        return _completed(cmd, returncode=0, stdout="")
+
+    monkeypatch.setattr(proc, "out", lambda cmd, **kw: str(tmp_path))
+    monkeypatch.setattr(proc, "run", fake_run)
     rc = release_cut.main(["minor"])
     assert rc == 1
-    assert "detect-kind could not identify" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no git tags found" in err
+    assert "no detectable Kind" in err
+    assert "explicit version" in err
 
 
 def test_gh_missing_exits_1(monkeypatch, tmp_path, capsys):

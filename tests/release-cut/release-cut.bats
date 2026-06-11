@@ -348,11 +348,26 @@ EOF
 # Bump shortcut error paths.
 # ---------------------------------------------------------------------
 
-@test "bump shortcut on unclassifiable dir: detect-kind error" {
+@test "bump shortcut on unclassifiable dir: reads latest git tag (#596)" {
   _write_release_yml
   # No Cargo.toml, no package.json, no go.mod, no plugin layout —
-  # detect-kind exits 1. Bump shortcut surfaces that.
+  # detect-kind can't classify (e.g. the release meta repo itself).
+  # Manifest-less means tag-sourced: the bump reads the latest tag.
+  git add -A
+  git -c user.email=t@t -c user.name=t commit -q -m init
+  git tag v2.18.0
+  _stub_gh
+  run "$BIN/release-core" cut minor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bumping minor: 2.18.0 -> 2.19.0"* ]]
+  [[ "$output" == *"gh workflow run release.yml -f version=2.19.0"* ]]
+}
+
+@test "bump shortcut on unclassifiable dir with no tags: informative error" {
+  _write_release_yml
   run "$BIN/release-core" cut minor
   [ "$status" -eq 1 ]
-  [[ "$output" == *"detect-kind could not identify"* ]]
+  [[ "$output" == *"no git tags found"* ]]
+  [[ "$output" == *"no detectable Kind"* ]]
+  [[ "$output" == *"explicit version"* ]]
 }
