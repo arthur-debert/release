@@ -203,9 +203,130 @@ def test_non_positive_timeout_is_usage_error(capsys):
 
 
 def test_family_list_strips_whitespace():
-    opts = canary_run._parse_args(["--ref", "main", "--family", "rust, npm"])
+    opts = canary_run._parse_args(["--ref", "main", "--family", "rust, vscode-ext"])
     assert isinstance(opts, dict)
-    assert opts["families"] == ["rust", "npm"]
+    assert opts["families"] == ["rust", "vscode-ext"]
+
+
+# ── multi-family round (#605) ────────────────────────────────────────────────
+#
+# The wiring that lets rust + vscode-ext share one round: the candidate
+# branch is published ONCE, every family is seeded + dispatched BEFORE any
+# polling starts (the GH runs execute concurrently), and each family gets
+# its own classified verdict + canary/<family> commit status.
+
+TWO_FAMILY_REGISTRY = {
+    "rust": "arthur-debert/release-canary-rust",
+    "vscode-ext": "arthur-debert/release-canary-vscode-ext",
+}
+
+
+@pytest.fixture
+def round_seams(tmp_path, monkeypatch):
+    """A two-canary registry + every gh/git seam of main() stubbed, recording
+    the order of phase events. The registry accessor is stubbed directly
+    (yamlio shells out via proc, which this fixture also stubs)."""
+    import types
+
+    monkeypatch.setattr(
+        canary_run.managed_repos, "canaries", lambda manifest=None: dict(TWO_FAMILY_REGISTRY)
+    )
+
+    events: list[str] = []
+    monkeypatch.setattr(canary_run.proc, "run", lambda *a, **k: types.SimpleNamespace(returncode=0))
+    monkeypatch.setattr(
+        canary_run.gh, "repo_clone", lambda repo, dest: types.SimpleNamespace(returncode=0)
+    )
+    monkeypatch.setattr(canary_run, "_resolve_ref", lambda d, r: "a" * 40)
+    monkeypatch.setattr(canary_run, "_inflight_run", lambda repo, sha12: None)
+    monkeypatch.setattr(
+        canary_run,
+        "_publish_candidate",
+        lambda *a: (events.append("publish"), 3)[1],
+    )
+    monkeypatch.setattr(
+        canary_run,
+        "_seed_canary",
+        lambda **kw: (events.append(f"seed:{kw['family']}"), str(tmp_path / kw["family"]))[1],
+    )
+    monkeypatch.setattr(canary_run, "_retry", lambda fn, **kw: [])  # tag list
+    monkeypatch.setattr(
+        canary_run,
+        "_dispatch",
+        lambda repo, dest, version: (events.append(f"dispatch:{repo}"), ("f" * 40, set()))[1],
+    )
+    monkeypatch.setattr(
+        canary_run,
+        "_resolve_runs",
+        lambda repo, seed_sha, before, deadline: (
+            events.append(f"poll:{repo}"),
+            {"ci": {"id": 1}, "release": {"id": 2}},
+        )[1],
+    )
+    monkeypatch.setattr(
+        canary_run,
+        "_poll_to_completion",
+        lambda repo, runs, deadline: {
+            "ci": {"id": 1, "conclusion": "success", "html_url": "ci-url"},
+            "release": {"id": 2, "conclusion": "success", "html_url": "cut-url"},
+        },
+    )
+    monkeypatch.setattr(canary_run.classify, "collect_jobs", lambda repo, rid, prefix: [])
+    monkeypatch.setattr(
+        canary_run.classify, "job_rows", lambda family, wf, jobs, conclusion: ([], False)
+    )
+    statuses: list[str] = []
+    monkeypatch.setattr(
+        canary_run,
+        "_post_commit_status",
+        lambda sha, family, **kw: statuses.append(f"{family}:{kw['success']}"),
+    )
+    monkeypatch.setattr(canary_run, "_cleanup_prereleases", lambda repo, keep: [])
+    return events, statuses, str(tmp_path / "root")
+
+
+def test_two_families_dispatch_before_any_poll(round_seams):
+    events, statuses, root = round_seams
+    assert canary_run.main(["--ref", "main", "--root", root]) == 0
+    # ONE branch publish for the whole round, regardless of family count.
+    assert events.count("publish") == 1
+    # Both families dispatched BEFORE the first poll — the GH rounds overlap.
+    dispatch_idx = [i for i, e in enumerate(events) if e.startswith("dispatch:")]
+    poll_idx = [i for i, e in enumerate(events) if e.startswith("poll:")]
+    assert len(dispatch_idx) == 2 and len(poll_idx) == 2
+    assert max(dispatch_idx) < min(poll_idx)
+    # One commit status per family.
+    assert statuses == ["rust:True", "vscode-ext:True"]
+
+
+def test_family_flag_restricts_the_round(round_seams):
+    events, statuses, root = round_seams
+    assert canary_run.main(["--ref", "main", "--family", "vscode-ext", "--root", root]) == 0
+    assert events == [
+        "publish",
+        "seed:vscode-ext",
+        "dispatch:arthur-debert/release-canary-vscode-ext",
+        "poll:arthur-debert/release-canary-vscode-ext",
+    ]
+    assert statuses == ["vscode-ext:True"]
+
+
+def test_one_family_dispatch_failure_does_not_stop_the_other(round_seams, monkeypatch, capsys):
+    events, statuses, root = round_seams
+
+    def seed(**kw):
+        if kw["family"] == "rust":
+            raise canary_run.CanaryError("seed exploded")
+        events.append(f"seed:{kw['family']}")
+        return root
+
+    monkeypatch.setattr(canary_run, "_seed_canary", seed)
+    # An incomplete round is a setup error (exit 2), but the healthy family
+    # still ran to its verdict.
+    assert canary_run.main(["--ref", "main", "--root", root]) == 2
+    assert statuses == ["vscode-ext:True"]
+    out = capsys.readouterr().out
+    assert "rust: SETUP ERROR" in out and "verdict: ERROR" in out
 
 
 # ── CLI registration ─────────────────────────────────────────────────────────

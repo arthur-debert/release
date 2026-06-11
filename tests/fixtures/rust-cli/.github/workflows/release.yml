@@ -9,6 +9,14 @@ name: Release
 # never installed on this repo. Cuts produce prerelease tags + GH
 # release assets on this repo only.
 #
+# Apple signing is CERT-ONLY (#587 OQ3): the repo carries
+# APPLE_CERTIFICATE_P12_BASE64 + APPLE_CERTIFICATE_PASSWORD (declared
+# in the fixture's .canary-secrets, converged by `canary init`), so
+# every cut exercises sign-mac for real on the darwin build. The ASC_*
+# notarization trio is never installed — and `canary init` refuses it
+# on the repo — so rust-cli.yml skips the notarize step, keeping
+# Apple's 5-15 min round-trip out of the pre-cut loop.
+#
 # The `@v2` ref below is a readable default: `release-core admin canary
 # init` rewrites it to the current floating major at seed time, and
 # `admin canary run` rewrites it to `canary/<sha12>` every round.

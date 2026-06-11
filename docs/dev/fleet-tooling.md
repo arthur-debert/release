@@ -144,7 +144,10 @@ verify/migrate/inbox sweeps never include the canary repos) it:
    `--root`, default `/tmp/release-canary-$USER`), points its thin callers
    at `canary/<sha12>`, adds a changelog fragment, commits the seed.
 3. Dispatches **fresh events** (never `gh run rerun`): the seed push (→ CI)
-   and a `0.0.<n>-canary.<runid>` prerelease cut, in parallel.
+   and a `0.0.<n>-canary.<runid>` prerelease cut, in parallel. Every
+   family is seeded + dispatched *before any polling starts*, so a
+   multi-family round (release#605: rust + vscode-ext) runs concurrently
+   off the same `canary/<sha12>` branch and costs one round's wall time.
 4. Polls both runs to conclusion (transient-tolerant backoff, `--timeout`).
 5. Prints a per-job classified report — **INFRA** (arm-gate
    materialize/provision, install-release-core, init, prepare internals —
@@ -199,9 +202,16 @@ the `canaries:` registry entry (appended once).
   changes.
 - **Fail-closed secrets (#587).** The canary gets only what its family
   needs: `RELEASE_TOKEN` via the per-repo-targeted token verb (#601; pipe
-  the canonical PAT on stdin to set/rotate). The publish trio
+  the canonical PAT on stdin to set/rotate), plus whatever the fixture's
+  optional `.canary-secrets` marker declares — the rust family declares
+  the cert-only Apple signing pair (`APPLE_CERTIFICATE_P12_BASE64`,
+  `APPLE_CERTIFICATE_PASSWORD`, sourced from `--auth-dir`, the same
+  canonical files `install-release-secrets` reads), so every canary cut
+  exercises sign-mac for real (OQ3). The publish trio
   (`CRATES_IO_KEY`, `HOMEBREW_TAP_TOKEN`, `NPM_TOKEN`) is never installed
-  and its presence on the repo *fails the run* until removed. A canary
+  and its presence on the repo *fails the run* until removed; the same
+  goes for the `ASC_*` notarization trio (cert-only signing — Apple's
+  5-15 min notarytool round-trip stays out of the pre-cut loop). A canary
   with no `RELEASE_TOKEN` and no piped PAT also fails — no skip flags.
 - **`--reset` is the wedge escape** — a fresh orphan seed force-pushed to
   main. This is the ONLY repo class where a force-push is sanctioned, and

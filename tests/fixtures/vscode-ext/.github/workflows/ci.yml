@@ -1,0 +1,30 @@
+name: CI
+
+# Thin caller for the canonical reusable vscode-ext CI workflow at
+# arthur-debert/release. This repo is release-owned canary infra
+# (arthur-debert/release#587): a synthetic VS Code extension consumer
+# exercised pre-cut. Standard recipe only — no escape hatches.
+#
+# The defaults do the whole job: npm install from the committed
+# lockfile, arm-gate materializes the managed tree, and the umbrella
+# `bin/check` runs the hardened gate (eslint / prettier / typecheck via
+# npm-quality) plus the `test` script (`node --test` on the compiled
+# output).
+#
+# The `@v2` ref below is a readable default: `release-core admin canary
+# init` rewrites it to the current floating major at seed time, and
+# `admin canary run` rewrites it to `canary/<sha12>` every round.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: arthur-debert/release/.github/workflows/vscode-ext-ci.yml@v2
+    with:
+      node-version: '22'

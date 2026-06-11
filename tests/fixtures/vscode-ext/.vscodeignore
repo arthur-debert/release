@@ -1,0 +1,16 @@
+.github/**
+.release/**
+.claude/**
+.gitignore
+.vscodeignore
+.editorconfig
+.eslintrc*
+eslint.config.mjs
+tsconfig.json
+src/**
+out/**/*.test.js
+out/**/*.test.js.map
+CHANGELOG/**
+bin/**
+node_modules/**
+package-lock.json

@@ -11,10 +11,13 @@ the publish trio), under the canonical ruleset, and registered in the
 
 Usage:
   release-core admin canary init --family <f>
-      [--reset]    force-push the canary's main back to the canonical seed
-                   (wedge escape). Sanctioned ONLY for registered canary
-                   repos — the verb hard-refuses anything else.
-      [--root DIR] hermetic workdir (default /tmp/release-canary-init-$USER)
+      [--reset]        force-push the canary's main back to the canonical seed
+                       (wedge escape). Sanctioned ONLY for registered canary
+                       repos — the verb hard-refuses anything else.
+      [--root DIR]     hermetic workdir (default /tmp/release-canary-init-$USER)
+      [--auth-dir DIR] operator auth material for family-declared secrets
+                       (default ~/h/dotfiles/apple/auth — the same sources
+                       install-release-secrets reads)
 
 Run from inside arthur-debert/release. Idempotent: re-running converges —
 repo exists → not recreated; main already seeded → left alone (without
@@ -22,14 +25,20 @@ repo exists → not recreated; main already seeded → left alone (without
 set/rotate it); ruleset → upserted; registry entry → appended once.
 
 The family→fixture mapping is declarative: each tests/fixtures/<kind>/ dir
-carries a `.canary-family` marker naming its family (rust-cli → `rust`).
-Adding a family (#605: vscode-ext) = a new fixture dir with a marker + this
-verb run; the verb itself never changes.
+carries a `.canary-family` marker naming its family (rust-cli → `rust`,
+vscode-ext → `vscode-ext`). Adding a family = a new fixture dir with a
+marker + this verb run; the verb itself never changes. A fixture may also
+carry a `.canary-secrets` marker declaring the extra secrets its release
+pipeline needs (rust-cli: the cert-only Apple signing pair, #587 OQ3) —
+init sources them from --auth-dir and converges them onto the repo.
 
 Fail-closed (#587 owner decisions, no escape hatches):
   - the publish secrets (CRATES_IO_KEY, HOMEBREW_TAP_TOKEN, NPM_TOKEN) are
     NEVER installed, and their presence on the repo fails the run until
     removed (`gh secret delete <name> -R <repo>`);
+  - the ASC_* notarization trio is equally forbidden (OQ3: signing is
+    cert-only — notarization's 5-15 min Apple round-trip stays out of the
+    pre-cut loop);
   - a canary without RELEASE_TOKEN fails the run unless a PAT is piped;
   - the verb refuses to touch any repo that is in the `projects:` fleet or
     whose name is not `release-canary-*`.
@@ -50,6 +59,7 @@ import sys
 from .. import gh, proc
 from . import apply_ruleset, install_release_token, managed_repos
 from .canary_run import CanaryError, _run_sandboxed, _sandbox_env, rewrite_self_refs
+from .install_release_secrets import _b64_file
 from .release_advance_major import _highest_major
 
 USAGE = __doc__ or ""
@@ -57,11 +67,22 @@ USAGE = __doc__ or ""
 OWNER = "arthur-debert"
 REPO_PREFIX = "release-canary-"
 FAMILY_MARKER = ".canary-family"
+SECRETS_MARKER = ".canary-secrets"
 
 # The publish trio a canary must NEVER carry (#587: cuts on a canary are
 # prereleases with every publish path fenced — these secrets existing at all
 # would arm those paths).
 FORBIDDEN_SECRETS = ("CRATES_IO_KEY", "HOMEBREW_TAP_TOKEN", "NPM_TOKEN")
+
+# Equally forbidden (#587 OQ3): with an ASC key present, rust-cli.yml would
+# notarize every signed binary — Apple's 5-15 min round-trip has no place in
+# the pre-cut loop. Canary signing is cert-only.
+FORBIDDEN_NOTARIZATION_SECRETS = ("ASC_API_KEY_BASE64", "ASC_API_KEY_ID", "ASC_API_ISSUER_ID")
+
+# The one set of family-declarable secrets this verb knows how to source
+# (the cert-only Apple signing pair, from the install-release-secrets auth
+# dir). A `.canary-secrets` marker naming anything else is a setup error.
+SIGNING_SECRETS = ("APPLE_CERTIFICATE_P12_BASE64", "APPLE_CERTIFICATE_PASSWORD")
 
 SEED_COMMIT_SUBJECT = "canary: canonical seed"
 
@@ -169,9 +190,43 @@ def register_canary_text(text: str, family: str, repo: str) -> str:
     return "".join(lines)
 
 
-def forbidden_secrets_present(names: list[str]) -> list[str]:
-    """The publish-trio secrets present on the repo (must be empty to proceed)."""
-    return [n for n in FORBIDDEN_SECRETS if n in names]
+def forbidden_secrets_present(
+    names: list[str], forbidden: tuple[str, ...] = FORBIDDEN_SECRETS
+) -> list[str]:
+    """The forbidden secrets present on the repo (must be empty to proceed)."""
+    return [n for n in forbidden if n in names]
+
+
+def required_secrets(fixture_dir: str) -> tuple[str, ...]:
+    """The extra secrets the fixture's `.canary-secrets` marker declares.
+
+    Declarative like `.canary-family`: the marker lists one secret name per
+    line (# comments and blanks ignored). Names must be ones this verb knows
+    how to source (SIGNING_SECRETS) — a forbidden or unknown name is a setup
+    error, never silently skipped. No marker → no extra secrets."""
+    marker = os.path.join(fixture_dir, SECRETS_MARKER)
+    if not os.path.isfile(marker):
+        return ()
+    names: list[str] = []
+    with open(marker, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            names.append(line)
+    banned = [n for n in names if n in FORBIDDEN_SECRETS or n in FORBIDDEN_NOTARIZATION_SECRETS]
+    if banned:
+        raise CanaryError(
+            f"{marker} declares forbidden secret(s): {', '.join(banned)} — canaries "
+            "never publish and never notarize (#587)"
+        )
+    unknown = [n for n in names if n not in SIGNING_SECRETS]
+    if unknown:
+        raise CanaryError(
+            f"{marker} declares secret(s) this verb cannot source: {', '.join(unknown)} "
+            f"(known: {', '.join(SIGNING_SECRETS)})"
+        )
+    return tuple(names)
 
 
 # ── gh/git seams ─────────────────────────────────────────────────────────────
@@ -209,12 +264,13 @@ def _main_seeded(dest: str) -> bool:
 
 def _copy_fixture(fixture_dir: str, dest: str) -> None:
     """Copy the fixture tree into the seed clone, minus the verb's own
-    ``.canary-family`` marker (metadata, not seed content)."""
+    ``.canary-family`` / ``.canary-secrets`` markers (metadata, not seed
+    content)."""
     shutil.copytree(
         fixture_dir,
         dest,
         dirs_exist_ok=True,
-        ignore=shutil.ignore_patterns(FAMILY_MARKER),
+        ignore=shutil.ignore_patterns(FAMILY_MARKER, SECRETS_MARKER),
     )
 
 
@@ -305,18 +361,52 @@ def _apply_policy(dest: str) -> int:
         os.chdir(prev)
 
 
-def _converge_secrets(repo: str, *, stdin_is_tty: bool) -> None:
-    """RELEASE_TOKEN present (set/rotated from a piped PAT), publish trio absent.
+def _signing_secret_values(auth_dir: str) -> dict[str, str]:
+    """Source the cert-only signing pair from the operator's auth dir.
 
-    Fail-closed both ways: a forbidden secret on the repo fails the run until
-    deleted, and a missing RELEASE_TOKEN fails it until a PAT is piped — no
-    flag silences either."""
+    Same canonical sources install-release-secrets reads: the Developer ID
+    .p12 and its password file. The ASC key is deliberately NOT sourced —
+    cert-only is the whole point (#587 OQ3)."""
+    p12_file = os.path.join(auth_dir, "developerID_application.p12")
+    password_file = os.path.join(auth_dir, "p12_password.txt")
+    for path in (p12_file, password_file):
+        if not os.path.isfile(path):
+            raise CanaryError(
+                f"cannot source the signing pair: missing {path} — the cert material "
+                "lives with the operator (see install-release-secrets; --auth-dir to point "
+                "elsewhere)"
+            )
+    with open(password_file, encoding="utf-8") as fh:
+        password = fh.read()
+    return {
+        "APPLE_CERTIFICATE_P12_BASE64": _b64_file(p12_file),
+        "APPLE_CERTIFICATE_PASSWORD": password,
+    }
+
+
+def _converge_secrets(
+    repo: str, *, stdin_is_tty: bool, required: tuple[str, ...] = (), auth_dir: str = ""
+) -> None:
+    """RELEASE_TOKEN present (set/rotated from a piped PAT), publish trio AND
+    notarization trio absent, the fixture-declared signing pair present.
+
+    Fail-closed every way: a forbidden secret on the repo fails the run until
+    deleted, a missing RELEASE_TOKEN fails it until a PAT is piped, and a
+    missing required secret fails it unless --auth-dir can source it — no
+    flag silences any of these."""
     names = gh.secret_list(repo)
     forbidden = forbidden_secrets_present(names)
     if forbidden:
         raise CanaryError(
             f"forbidden publish secret(s) on {repo}: {', '.join(forbidden)} — remove them "
             f"(gh secret delete <name> -R {repo}) and re-run; canaries never publish (#587)"
+        )
+    notarize = forbidden_secrets_present(names, FORBIDDEN_NOTARIZATION_SECRETS)
+    if notarize:
+        raise CanaryError(
+            f"forbidden notarization secret(s) on {repo}: {', '.join(notarize)} — remove "
+            f"them (gh secret delete <name> -R {repo}) and re-run; canary signing is "
+            "cert-only (#587 OQ3)"
         )
     if not stdin_is_tty:
         if _install_token(repo) != 0:
@@ -328,6 +418,23 @@ def _converge_secrets(repo: str, *, stdin_is_tty: bool) -> None:
         raise CanaryError(
             f"{repo} has no RELEASE_TOKEN — pipe the canonical PAT to stdin "
             "(e.g. pbpaste | release-core admin canary init --family …)"
+        )
+    if required:
+        missing = [n for n in required if n not in names]
+        if not missing:
+            print(
+                f"canary init: signing secret(s) present on {repo} — kept "
+                "(delete to re-source and rotate)"
+            )
+            return
+        # The pair is set atomically: a stale half-pair (password not matching
+        # the .p12) would fail every sign-mac run, so re-source ALL of them.
+        values = _signing_secret_values(auth_dir)
+        for name in required:
+            gh.secret_set(name, values[name], repo=repo)
+        print(
+            f"canary init: signing secret(s) set on {repo}: {', '.join(required)} "
+            "(cert-only — no ASC key, #587 OQ3)"
         )
 
 
@@ -363,6 +470,7 @@ def _parse_args(argv: list[str]) -> dict | int:
         "family": None,
         "reset": False,
         "root": None,
+        "auth-dir": os.path.join(os.path.expanduser("~"), "h", "dotfiles", "apple", "auth"),
     }
     i = 0
     while i < len(argv):
@@ -370,7 +478,7 @@ def _parse_args(argv: list[str]) -> dict | int:
         if arg in ("-h", "--help"):
             print(USAGE.strip("\n"))
             return 0
-        if arg in ("--family", "--root"):
+        if arg in ("--family", "--root", "--auth-dir"):
             if i + 1 >= len(argv):
                 return _usage_error(f"{arg} needs a value")
             opts[arg.lstrip("-")] = argv[i + 1]
@@ -405,6 +513,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
         projects = managed_repos.project_repos(manifest)
         repo = resolve_repo(family, registry, projects, reset)
         fixture_dir = find_fixture(os.path.join(release_root, "tests", "fixtures"), family)
+        required = required_secrets(fixture_dir)
 
         if not _gh_preflight():
             raise CanaryError("`gh auth status` failed — authenticate first")
@@ -451,7 +560,12 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
 
     # ── converge: secrets (fail-closed) → policy → registration ──────────────
     try:
-        _converge_secrets(repo, stdin_is_tty=sys.stdin.isatty())
+        _converge_secrets(
+            repo,
+            stdin_is_tty=sys.stdin.isatty(),
+            required=required,
+            auth_dir=opts["auth-dir"],
+        )
         if _apply_policy(dest) != 0:
             raise CanaryError(f"applying the ruleset to {repo} failed")
         print(f"canary init: ruleset applied to {repo}")

@@ -87,6 +87,86 @@ def test_real_tree_rust_fixture_is_wired():
         assert os.path.exists(os.path.join(found, present)), present
 
 
+def test_real_tree_vscode_ext_fixture_is_wired():
+    # The second family (#605): tests/fixtures/vscode-ext/ claims the
+    # `vscode-ext` family — proof that adding a family changed no verb code.
+    found = canary_init.find_fixture(os.path.join(REPO_ROOT, "tests", "fixtures"), "vscode-ext")
+    assert found.endswith(os.path.join("tests", "fixtures", "vscode-ext"))
+    for absent in ("bin", ".claude", "CLAUDE.md", ".canary-secrets"):
+        assert not os.path.exists(os.path.join(found, absent))
+    # A real vscode-ext: extension sources + the lockfile vscode-ext.yml's
+    # `npm ci` requires + thin callers + the fragment-model changelog dir.
+    for present in (
+        "package.json",
+        "package-lock.json",
+        "tsconfig.json",
+        "src/extension.ts",
+        "src/liveness.test.ts",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+        "CHANGELOG/.gitkeep",
+    ):
+        assert os.path.exists(os.path.join(found, present)), present
+    # detect-kind classifies the fixture as vscode-ext (the `@vscode/vsce`
+    # devDependency is the canonical signal release-core init keys off).
+    from release_core import manifest
+
+    assert manifest.detect_kind(found) == "vscode-ext"
+    # Fencing: the release caller disables every marketplace publish path.
+    with open(os.path.join(found, ".github", "workflows", "release.yml"), encoding="utf-8") as fh:
+        caller = fh.read()
+    assert "publish-marketplace: false" in caller
+    assert "publish-openvsx: false" in caller
+
+
+def test_real_tree_rust_fixture_declares_the_signing_pair():
+    # Cert-only signing (#587 OQ3): the rust family converges exactly the
+    # cert pair — never the ASC trio, never the publish trio.
+    found = canary_init.find_fixture(os.path.join(REPO_ROOT, "tests", "fixtures"), "rust")
+    assert canary_init.required_secrets(found) == canary_init.SIGNING_SECRETS
+
+
+# ── required_secrets (the .canary-secrets marker) ────────────────────────────
+
+
+def test_required_secrets_without_marker_is_empty(tmp_path):
+    assert canary_init.required_secrets(str(tmp_path)) == ()
+
+
+def test_required_secrets_parses_names_skipping_comments(tmp_path):
+    (tmp_path / ".canary-secrets").write_text(
+        "# cert-only signing\n\nAPPLE_CERTIFICATE_P12_BASE64\nAPPLE_CERTIFICATE_PASSWORD\n"
+    )
+    assert canary_init.required_secrets(str(tmp_path)) == canary_init.SIGNING_SECRETS
+
+
+@pytest.mark.parametrize("banned", ["NPM_TOKEN", "ASC_API_KEY_BASE64"])
+def test_required_secrets_forbidden_name_refused(tmp_path, banned):
+    (tmp_path / ".canary-secrets").write_text(f"{banned}\n")
+    with pytest.raises(CanaryError, match="never publish and never notarize"):
+        canary_init.required_secrets(str(tmp_path))
+
+
+def test_required_secrets_unknown_name_refused(tmp_path):
+    (tmp_path / ".canary-secrets").write_text("SOME_OTHER_SECRET\n")
+    with pytest.raises(CanaryError, match="cannot source"):
+        canary_init.required_secrets(str(tmp_path))
+
+
+def test_copy_fixture_excludes_both_markers(tmp_path):
+    src = tmp_path / "fixture"
+    src.mkdir()
+    (src / ".canary-family").write_text("rust\n")
+    (src / ".canary-secrets").write_text("APPLE_CERTIFICATE_P12_BASE64\n")
+    (src / "Cargo.toml").write_text("[workspace]\n")
+    dest = tmp_path / "seed"
+    dest.mkdir()
+    canary_init._copy_fixture(str(src), str(dest))
+    assert os.path.exists(dest / "Cargo.toml")
+    assert not os.path.exists(dest / ".canary-family")
+    assert not os.path.exists(dest / ".canary-secrets")
+
+
 # ── resolve_repo (fail-closed refusals) ──────────────────────────────────────
 
 REGISTRY = {"rust": "arthur-debert/release-canary-rust"}
@@ -309,6 +389,100 @@ def test_missing_token_on_tty_fails_closed(seams, monkeypatch, capsys):
     monkeypatch.setattr(canary_init.gh, "secret_list", lambda repo: [])
     assert canary_init.main(["--family", "rust"]) == 1
     assert "no RELEASE_TOKEN" in capsys.readouterr().err
+
+
+def test_notarization_secret_fails_closed(seams, monkeypatch, capsys):
+    # OQ3: an ASC key on the repo would arm notarization (Apple's 5-15 min
+    # round-trip) on every canary cut — refuse until it is removed.
+    calls, _root = seams
+    monkeypatch.setattr(
+        canary_init.gh, "secret_list", lambda repo: ["RELEASE_TOKEN", "ASC_API_KEY_BASE64"]
+    )
+    assert canary_init.main(["--family", "rust"]) == 1
+    err = capsys.readouterr().err
+    assert "forbidden notarization secret" in err and "cert-only" in err
+    assert calls.policy_applied == 0
+
+
+def _declare_signing(root):
+    (root / "tests" / "fixtures" / "rust-cli" / ".canary-secrets").write_text(
+        "APPLE_CERTIFICATE_P12_BASE64\nAPPLE_CERTIFICATE_PASSWORD\n"
+    )
+
+
+def _auth_dir(tmp_path):
+    d = tmp_path / "auth"
+    d.mkdir()
+    (d / "developerID_application.p12").write_bytes(b"\x01\x02cert")
+    (d / "p12_password.txt").write_text("hunter2")
+    return d
+
+
+def test_signing_pair_sourced_and_set_when_missing(seams, monkeypatch, tmp_path, capsys):
+    _calls, root = seams
+    _declare_signing(root)
+    auth = _auth_dir(tmp_path)
+    set_calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        canary_init.gh,
+        "secret_set",
+        lambda name, value, repo: set_calls.append((name, value, repo)),
+    )
+    assert canary_init.main(["--family", "rust", "--auth-dir", str(auth)]) == 0
+    assert [(n, r) for n, _v, r in set_calls] == [
+        ("APPLE_CERTIFICATE_P12_BASE64", "arthur-debert/release-canary-rust"),
+        ("APPLE_CERTIFICATE_PASSWORD", "arthur-debert/release-canary-rust"),
+    ]
+    values = dict((n, v) for n, v, _r in set_calls)
+    assert values["APPLE_CERTIFICATE_PASSWORD"] == "hunter2"
+    assert values["APPLE_CERTIFICATE_P12_BASE64"]  # base64 of the .p12, non-empty
+    assert "cert-only" in capsys.readouterr().out
+
+
+def test_signing_pair_kept_when_present(seams, monkeypatch, tmp_path, capsys):
+    # Idempotence without local cert material: a converged repo re-runs green
+    # on a machine that has no auth dir at all.
+    _calls, root = seams
+    _declare_signing(root)
+    monkeypatch.setattr(
+        canary_init.gh,
+        "secret_list",
+        lambda repo: ["RELEASE_TOKEN", *canary_init.SIGNING_SECRETS],
+    )
+    monkeypatch.setattr(
+        canary_init.gh,
+        "secret_set",
+        lambda name, value, repo: pytest.fail("must not set when present"),
+    )
+    assert canary_init.main(["--family", "rust", "--auth-dir", str(tmp_path / "nope")]) == 0
+    assert "signing secret(s) present" in capsys.readouterr().out
+
+
+def test_signing_pair_half_present_is_resourced_whole(seams, monkeypatch, tmp_path):
+    # A stale half-pair (password not matching the .p12) would fail every
+    # sign-mac run — re-source BOTH.
+    _calls, root = seams
+    _declare_signing(root)
+    auth = _auth_dir(tmp_path)
+    monkeypatch.setattr(
+        canary_init.gh,
+        "secret_list",
+        lambda repo: ["RELEASE_TOKEN", "APPLE_CERTIFICATE_P12_BASE64"],
+    )
+    set_names: list[str] = []
+    monkeypatch.setattr(
+        canary_init.gh, "secret_set", lambda name, value, repo: set_names.append(name)
+    )
+    assert canary_init.main(["--family", "rust", "--auth-dir", str(auth)]) == 0
+    assert set_names == list(canary_init.SIGNING_SECRETS)
+
+
+def test_signing_pair_missing_auth_material_fails(seams, monkeypatch, tmp_path, capsys):
+    _calls, root = seams
+    _declare_signing(root)
+    assert canary_init.main(["--family", "rust", "--auth-dir", str(tmp_path / "nope")]) == 1
+    err = capsys.readouterr().err
+    assert "cannot source the signing pair" in err
 
 
 def test_piped_pat_routes_through_the_token_verb(seams, monkeypatch):
