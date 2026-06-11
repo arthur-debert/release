@@ -15,7 +15,9 @@ Subcommands (also reachable as `release-core admin contract <sub>`):
           prior materialize step in the same job (arm-gate / release-core
           init). Reports `file -> job -> step`; exit 1 on any violation not
           grandfathered by the shrink-only baseline
-          (docs/references/consumer-contract-lint-baseline.yaml, release#588).
+          (docs/references/consumer-contract-lint-baseline.yaml). The baseline
+          was drained to zero and the file deleted in release#588 — a missing
+          file is an empty baseline, and re-adding entries is never the fix.
 
 Options:
   --root DIR   The release repo root (default: `git rev-parse --show-toplevel`).

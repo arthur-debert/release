@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Build entry resolution for Tauri apps (in preference order):
-#   1. bin/build — canonical take-iii entry, release-core init managed
-#   2. app-bin/build-tauri.sh in the CONSUMER repo — legacy hook
-#   3. npx tauri build — minimal fallback
+#   1. app-bin/build-tauri.sh in the CONSUMER repo — legacy consumer-authored
+#      hook (tracked by the consumer, so it survives a plain checkout)
+#   2. npx tauri build — the standard entry
+#
+# (A "prefer bin/build" branch used to sit first; it was dead code post-WS7:
+# bin/build is an untracked ephemeral mirror, absent on a plain checkout, so
+# the guard never fired in CI — removed per release#588/#590.)
 #
 # Env vars:
 #   TAURI_DIR   path to Tauri project root (default: ".")
@@ -21,9 +25,7 @@ if [ -n "${BUNDLES:-}" ]; then
   extra=(--bundles "${BUNDLES}")
 fi
 
-if [ -x "${REPO_ROOT}/bin/build" ]; then
-  "${REPO_ROOT}/bin/build" "${extra[@]+"${extra[@]}"}"
-elif [ -f "${REPO_ROOT}/app-bin/build-tauri.sh" ]; then
+if [ -f "${REPO_ROOT}/app-bin/build-tauri.sh" ]; then
   bash "${REPO_ROOT}/app-bin/build-tauri.sh" "${extra[@]+"${extra[@]}"}"
 else
   npx tauri build "${extra[@]+"${extra[@]}"}"

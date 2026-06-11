@@ -43,9 +43,11 @@ MANIFEST_RELPATH = "docs/references/consumer-contract.yaml"
 
 # The hand-maintained, SHRINK-ONLY lint baseline (see load_baseline /
 # apply_baseline): pre-existing stale-shape jobs grandfathered when the lint
-# landed (#584), tracked for draining in release#588. An entry that no longer
-# matches any violation FAILS the lint ("stale baseline entry") — the ratchet
-# only tightens.
+# landed (#584). Drained to zero and the FILE DELETED in release#588 — a
+# missing file is an empty baseline. The mechanism stays (an entry that no
+# longer matches any violation FAILS the lint: "stale baseline entry"), but
+# re-creating the file is never the fix for a new finding — normalize the
+# workflow to the standard recipe instead.
 BASELINE_RELPATH = "docs/references/consumer-contract-lint-baseline.yaml"
 
 # Schema version of the manifest document. Bump when the SHAPE of the document

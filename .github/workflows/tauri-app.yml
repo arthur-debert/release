@@ -38,19 +38,15 @@ name: tauri-app release
 #   toolchain; different bindings.
 # - Three version files (npm + Cargo + tauri.conf), not just one.
 #
-# Build entry (release-sync canonical)
-# ------------------------------------
-# `bin/build` at the repo root — shipped by the tauri-app stack
-# template via release-sync. Auto-detects pm (pnpm/yarn/npm), runs
-# `<pm> tauri build`. Same script local + CI; consumers that have
-# adopted release-sync get this automatically.
+# Build entry (resolved by bin-internal/build-tauri.sh, in order)
+# ----------------------------------------------------------------
+#   1. `app-bin/build-tauri.sh` — legacy consumer-authored hook
+#      (tracked by the consumer, so it survives a plain checkout).
+#   2. `npx tauri build` — the standard entry.
 #
-# Fallbacks (in order):
-#   1. `app-bin/build-tauri.sh` — legacy convention hook, kept during
-#      the take-iii transition. Consumers adopting release-sync should
-#      delete their copy.
-#   2. `npx tauri build` — minimal fallback for consumers that haven't
-#      adopted either yet.
+# (A "prefer the managed bin/build" branch used to sit first; post-WS7
+# bin/build is an untracked ephemeral mirror, absent on a plain
+# checkout, so that branch was dead code — removed per release#588.)
 #
 # Any pre-fetch / pre-build steps (upstream WASM, codegen) belong in
 # tauri.conf.json's `beforeBuildCommand` — that's tauri's own
@@ -396,34 +392,11 @@ jobs:
           PLATFORM: ${{ matrix.t.platform }}
         run: bash .release/bin-internal/collect-tauri-bundles.sh
 
-      - name: Derive app name
-        id: app-name
-        shell: bash
-        run: |
-          conf="${{ inputs.tauri-dir && format('{0}/src-tauri/tauri.conf.json', inputs.tauri-dir) || 'src-tauri/tauri.conf.json' }}"
-          echo "name=$(jq -r '.productName // .package.productName // "App"' "$conf")" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test
-        # Optional consumer hook: run it if present, skip otherwise.
-        # Guard with a shell test, NOT `if: hashFiles(...)`. When
-        # app-bin/smoke-hook.sh is a release-sync symlink into .release/
-        # and that target isn't materialized, hashFiles() can't hash it
-        # and aborts the whole step-expression instead of returning ''
-        # — failing the build (release#316). `[ -e ]` follows the
-        # symlink and is simply false on a dangling link, so we skip
-        # cleanly.
-        shell: bash
-        env:
-          PLATFORM: ${{ matrix.t.platform }}
-          BUNDLE_DIR: ${{ steps.bundles.outputs.dir }}
-          TAURI_DIR: ${{ inputs.tauri-dir }}
-          APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: |
-          if [ -e app-bin/smoke-hook.sh ]; then
-            bash app-bin/smoke-hook.sh
-          else
-            echo "no app-bin/smoke-hook.sh (absent or dangling symlink) — skipping smoke test"
-          fi
+      # NOTE: the packaged-binary smoke step (app-bin/smoke-hook.sh) was
+      # removed as dead code: post-WS7 the hook is an untracked ephemeral
+      # mirror, absent on a plain checkout, so its existence guard never
+      # fired (release#588). Restoring packaged smoke testing (materialize
+      # first) vs retiring the hook templates is tracked in release#590.
 
       - name: Upload platform bundle
         uses: actions/upload-artifact@v6

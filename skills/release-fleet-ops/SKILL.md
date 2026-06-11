@@ -29,8 +29,10 @@ consumer-side fix was wasted motion.
 
 1. **Reproduce once, in one throwaway clone.** Not an agent per repo. The fleet
    is already cloned by `release-core admin repos verify` under
-   `/tmp/release-fleet-verify-$USER/`. Reset one to clean `main`, `release-sync`
-   from your candidate ref, run the gate. One repo tells you what 15 would.
+   `/tmp/release-fleet-verify-$USER/`. Reset one to clean `main`, compose the
+   managed tree from your candidate ref (`release-core init --no-commit` with
+   `RELEASE_HOME`/`RELEASE_REF` — the retired `release-sync` verb is gone), run
+   the gate. One repo tells you what 15 would.
 2. **Consult the oracle — is it upstream?** Two cheap, deterministic signals:
    - **Is the failing file release-managed?** A path that is a symlink into
      `.release/` (or lives in `templates/**`) is release's. Consumer-authored
@@ -50,8 +52,10 @@ consumer-side fix was wasted motion.
      belongs in a consumer PR.
 4. **Cut + advance, then verify faithfully.** After an upstream fix ships, a
    consumer's own next-session pull + its PR CI is the real gate — run what
-   production runs (see "faithful pre-flight"). To migrate a consumer *now* rather
-   than wait for its next session, run the resolver once in that repo (below).
+   production runs (see "faithful pre-flight"), and verify with a **fresh
+   event, never `gh run rerun`** (see "the rerun trap"). To migrate a consumer
+   *now* rather than wait for its next session, run the resolver once in that
+   repo (below).
 
 ## The shadow trap (check this before any consumer fix)
 
@@ -101,6 +105,23 @@ pre-commit --all-files` and a real `git commit` do **not** behave identically
 consumer's CI uses, and prefer the dogfood (release CI running the canonical
 gate over its own output) as the source of truth — its green equals the
 consumer's green by construction.
+
+## The rerun trap: `gh run rerun` does NOT re-resolve `@vN`
+
+A reusable-workflow ref (`uses: arthur-debert/release/.github/workflows/x.yml@v2`)
+is resolved **once, when the run is created**. `gh run rerun` re-executes that
+original snapshot — so after `release-core admin release advance-major`,
+rerunning a consumer's old red run still exercises the **pre-advance** release
+ref and proves nothing about the fix (caught live on padz, epic #583).
+
+Fleet verification needs a **fresh event** on the consumer:
+
+```sh
+git commit --allow-empty -m "ci: re-resolve @vN" && git push   # fresh push run
+# or: gh workflow run <wf> --repo <consumer>                   # fresh dispatch
+```
+
+Only a run created *after* the advance resolves the new `vN` tip.
 
 ## Anti-patterns (all observed; all costly)
 
