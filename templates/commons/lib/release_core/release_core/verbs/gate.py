@@ -323,12 +323,17 @@ def main(argv: list[str]) -> int:
     managed_cfg = os.path.join(root, ".release", "lefthook.yml")
     explicit_cfg = env.get("LEFTHOOK_CONFIG")
     if explicit_cfg:
+        # A relative LEFTHOOK_CONFIG means relative to the REPO ROOT — lefthook
+        # runs with cwd=root below — so resolve it there (not against the
+        # caller's cwd) and pass the resolved path through.
+        explicit_cfg = os.path.normpath(os.path.join(root, explicit_cfg))
         if not os.path.isfile(explicit_cfg):
             print(
                 f"error: LEFTHOOK_CONFIG={explicit_cfg} does not exist — the gate does not skip.",
                 file=sys.stderr,
             )
             return 1
+        env["LEFTHOOK_CONFIG"] = explicit_cfg
     elif os.path.isfile(managed_cfg):
         env["LEFTHOOK_CONFIG"] = managed_cfg
     elif not any(os.path.isfile(os.path.join(root, name)) for name in _DISCOVERY_NAMES):
