@@ -236,6 +236,14 @@ jobs:
           # (e.g. lex's bats tests reference comms submodule fixtures).
           submodules: ${{ inputs.submodules }}
 
+      - name: Set up Node (arm-gate toolset)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Set up Python (arm-gate toolset)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
       - name: Arm the gate toolset
         # Same ONE composite the `check` job uses — its materialize step
         # installs the pinned release_core wheel and composes `.release/`
