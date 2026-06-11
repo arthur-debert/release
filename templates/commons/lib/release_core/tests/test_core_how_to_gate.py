@@ -83,8 +83,11 @@ def test_how_to_dev_cycle_branches_from_origin_not_local_main():
     # clone's LOCAL default branch; branching there carries that alien commit
     # into the feature PR diff. Step 1 must say branch off origin/<default>.
     body = how_to._render("rust-cli")
-    assert "Branch off origin/" in body
-    assert "NOT local main" in body
+    assert "Branch off origin/<default-branch>" in body
+    # The example ref uses the same placeholder — never a hard-coded
+    # `origin/main` that misleads repos whose default branch differs.
+    assert "origin/main" not in body
+    assert "NOT the local default branch" in body
     assert "auto-committed a managed sync" in body
 
 
