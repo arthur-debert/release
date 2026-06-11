@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 2.15.2 - 2026-06-11
+
+- install-release-core derives the wheel's major line from the repo's @vN thin callers (highest wins) — a v2 consumer's SessionStart can no longer pull a v3 wheel once v3 exists (#551)
+
 ## 2.15.1 - 2026-06-10
 
 - arm-gate's materialize pins the wheel to the action's own major line (derived from github.action_ref) — a v2 workflow can no longer pull a v3 wheel once v3 exists (#541)
