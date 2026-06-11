@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 2.19.0 - 2026-06-11
+
+- fleet-loop doctrine corrected: repos verify runs BEFORE the cut (release.yml auto-advances the major at cut — there is no separate advance step); stale soft-gate and flat-alias claims swept from the skill + fleet-tooling docs
+- arm-gate gains toolset:false (materialize-only mode for consumer-authored jobs needing managed bin tools); release-core init warns at seed time when a consumer workflow job invokes an ephemeral mirror without materializing (#581)
+
 ## 2.18.0 - 2026-06-11
 
 - consumer-contract manifest generated from sync.py (release-core admin contract dump|check) + assumption lint catching managed-path references in jobs that never materialize (#584, epic #583 WS-A)

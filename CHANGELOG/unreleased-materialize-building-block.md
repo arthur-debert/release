@@ -1,1 +1,0 @@
-- arm-gate gains toolset:false (materialize-only mode for consumer-authored jobs needing managed bin tools); release-core init warns at seed time when a consumer workflow job invokes an ephemeral mirror without materializing (#581)
