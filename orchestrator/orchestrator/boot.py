@@ -82,7 +82,8 @@ def _run_boot_script(repo: Path) -> None:
         stderr=subprocess.STDOUT,
         text=True,
     )
-    assert proc.stdout is not None
+    if proc.stdout is None:  # can't happen with stdout=PIPE; explicit for -O runs
+        raise BootError(f"{BOOT_SCRIPT}: could not capture boot output stream.")
     for line in proc.stdout:
         print(f"[boot] {line}", end="", file=sys.stderr)
     rc = proc.wait()
@@ -159,13 +160,12 @@ def boot_clone(repo_path: str) -> BootReport:
     source_ref = _parse_source_ref(repo)
     _assert_exclude_sentinel(repo)
 
-    # Informational only: did THIS boot create a sync commit? Constrained to
-    # init's own commit subject so an unrelated commit can't masquerade as one.
-    head_after = _git(repo, "rev-parse", "HEAD")
-    subject = _git(repo, "log", "-1", "--format=%s")
-    sync_commit = (
-        subject if head_after != head_before and subject.startswith(SYNC_COMMIT_SUBJECT) else None
-    )
+    # Informational only: did THIS boot create a sync commit? Scan the whole
+    # range this boot created (a post-setup hook may commit after init, so the
+    # sync commit need not be HEAD), constrained to init's own commit subject
+    # so an unrelated commit can't masquerade as one.
+    boot_subjects = _git(repo, "log", "--format=%s", f"{head_before}..HEAD").splitlines()
+    sync_commit = next((s for s in boot_subjects if s.startswith(SYNC_COMMIT_SUBJECT)), None)
 
     report = BootReport(
         repo_path=str(repo),

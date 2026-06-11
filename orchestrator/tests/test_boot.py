@@ -97,6 +97,24 @@ def test_boot_created_sync_commit_is_recorded_informationally(tmp_path):
     assert report.sync_commit == "chore(release): sync managed tree"
 
 
+def test_sync_commit_found_even_when_not_head(tmp_path):
+    # A post-setup hook may commit AFTER init's sync commit; the report must
+    # still find the sync commit anywhere in the boot-created range.
+    repo = make_repo(tmp_path)
+    install_fake_boot_script(
+        repo,
+        extra=(
+            "git add -A && "
+            "git -c user.email=t@t -c user.name=t commit -q -m "
+            "'chore(release): sync managed tree from fixture' && "
+            "touch hook-artifact && git add hook-artifact && "
+            "git -c user.email=t@t -c user.name=t commit -q -m 'chore: post-setup hook'"
+        ),
+    )
+    report = boot_clone(str(repo))
+    assert report.sync_commit == "chore(release): sync managed tree from fixture"
+
+
 def test_boot_created_non_sync_commit_is_not_reported_as_sync(tmp_path):
     repo = make_repo(tmp_path)
     install_fake_boot_script(
