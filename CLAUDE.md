@@ -69,7 +69,7 @@ silently dropping managed `bin/` tools).
   - PR loop: `release-core pr status|wait|ready` (the state machine: one lifecycle state + next action; `pr wait` is the ONE engine-driven in-turn wait — it replaced `pr review wait` + `pr checks-wait` per #503; `pr ready` is the guarded draft→ready flip per #456), `release-core pr review request|cancel|show [--reviewer <name>]` (reviewer-agnostic, dispatches through the adapter registry in `prstate/reviewers.py` — the RETIRED `pr copilot on|off|wait|review` group and the `gh-copilot-*` bin scripts are gone, no aliases, per #555), plus `release-core pr resolve-thread` (bin shim: `gh-pr-resolve-thread`) (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` shim in #476)
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
-- `tests/fixtures/` — synthetic projects per category, exercised by `_ci.yml`
+- `tests/` — per-tool BATS suites (one dir per `bin/` / `bin-internal/` tool, run by the matching `.github/workflows/*-tests.yml`). There is NO `tests/fixtures/` tree of per-category synthetic projects: synthetic consumers are fabricated inline where needed (`tests/release-sync/helper.bash` temp repos, the throwaway fixture repos in `pip-bootstrap-smoke.yml`) and must match the CURRENT contract in `docs/references/consumer-contract.yaml` (epic #583 WS-B). A real per-kind canary consumer is WS-C (#587).
 - `docs/` — the four narrative .lex docs + ADRs + references
 - `examples/` — paste-ready consumer release.yml files
 

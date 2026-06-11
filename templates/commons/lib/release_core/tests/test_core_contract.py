@@ -4,7 +4,8 @@ Two layers:
   - REAL-TREE tests against this repo's own templates/ + CI surfaces — they
     pin the contract anchors (the bootstrap quartet, the gate-internal set),
     determinism, the committed manifest's freshness, and that the lint passes
-    on today's tree (post-#579) modulo the shrink-only baseline.
+    CLEAN on today's tree (the shrink-only baseline was drained to zero and
+    its file deleted in #588).
   - SYNTHETIC tests in tmp repos — drift detection, the #579-shape violation
     (managed-path reference, no materialize), step ordering, the composite
     pseudo-job, the checkout-provider rule, the path boundary, and the
@@ -94,13 +95,19 @@ def test_manifest_has_no_volatile_provenance():
 # ── Real tree: the assumption lint passes today (post-#579) ──────────────────
 
 
-def test_lint_passes_on_todays_tree_modulo_baseline():
+def test_lint_passes_on_todays_tree_with_zero_baseline():
+    """Post-#588 the baseline is drained: the sweep itself is clean, no
+    grandfathered jobs. A new violation OR a re-grown baseline fails here."""
     manifest = contract.build_manifest(REPO_ROOT)
     violations = contract.lint_repo(REPO_ROOT, manifest)
-    baseline = contract.load_baseline(REPO_ROOT)
-    failing, _grandfathered, stale = contract.apply_baseline(violations, baseline)
-    assert failing == [], failing
-    assert stale == [], stale
+    assert violations == [], violations
+    # The baseline FILE was deleted with the last entry (#588) — a missing
+    # file is an empty baseline, and the ratchet only shrinks.
+    assert not Path(REPO_ROOT, contract.BASELINE_RELPATH).exists(), (
+        "the consumer-contract lint baseline was drained to zero in release#588 "
+        "— do not re-create it; normalize the workflow instead"
+    )
+    assert contract.load_baseline(REPO_ROOT) == []
 
 
 def test_rust_ci_e2e_job_is_clean_post_579():

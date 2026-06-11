@@ -359,14 +359,11 @@ jobs:
           # handle notarization in dedicated submit/poll/staple steps
           # below for queue visibility.
           args=(--mac "--${ARCH}" --publish never -c.mac.notarize=false)
-          # Prefer canonical bin/build (release-sync managed via the
-          # electron-app stack). Falls back to direct `<pm> run build`
-          # for consumers that haven't adopted release-sync yet.
-          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
-            "${GITHUB_WORKSPACE}/bin/build" -- "${args[@]}"
-          else
-            ${{ steps.pm.outputs.pm }} run build "${args[@]}"
-          fi
+          # Direct `<pm> run build`. (The old "prefer canonical bin/build"
+          # branch was dead code post-WS7: bin/build is an untracked
+          # ephemeral mirror, absent on a plain checkout, so the guard
+          # always took this fallback — release#588.)
+          ${{ steps.pm.outputs.pm }} run build "${args[@]}"
 
       # ---- Notarization: submit / poll / staple --------------------
       # Per skills/macos-signing-notarization. Each step is separately
@@ -472,31 +469,11 @@ jobs:
             || echo "::warning::Staple failed — notarization may not be complete yet. DMG is still signed."
           xcrun stapler validate "${DMG_PATH}" || true
 
-      # Smoke test (convention): app-bin/smoke-hook.sh. Catches catastrophic
-      # build issues (wrong binary path, dylib missing, Windows path
-      # quirks, etc.) — the only way to know the packaged build doesn't
-      # crash on launch is to launch it. PLATFORM/ARCH/PACKAGE_DIR env
-      # vars are exposed; consumer's script handles xvfb-run on linux,
-      # binary-path resolution per arch, etc.
-      #
-      # Smoke runs AFTER signing+notarization. Any modification to the
-      # artifact in this step would invalidate notarization — keep it
-      # read-only (launch the binary, check exit / output; don't
-      # rewrite files).
-      - name: Derive app name
-        id: app-name
-        shell: bash
-        run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test (mac)
-        if: hashFiles('app-bin/smoke-hook.sh') != ''
-        shell: bash
-        env:
-          PLATFORM: mac
-          ARCH: ${{ matrix.arch }}
-          PACKAGE_DIR: ${{ inputs.output-dir }}
-          APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash app-bin/smoke-hook.sh
+      # NOTE: the packaged-binary smoke step (app-bin/smoke-hook.sh) was
+      # removed as dead code: post-WS7 the hook is an untracked ephemeral
+      # mirror, absent on a plain checkout, so its existence guard never
+      # fired (release#588). Restoring packaged smoke testing (materialize
+      # first) vs retiring the hook templates is tracked in release#590.
 
       # Upload runs `if: always() && !cancelled()` so a notarization
       # timeout (warning, not failure) still publishes the signed DMG.
@@ -575,29 +552,10 @@ jobs:
           echo "$dir" >> "$GITHUB_PATH"
 
       - name: Build (electron-builder, linux --${{ matrix.arch }})
+        # Direct `<pm> run build` — see the build-mac note on the removed
+        # bin/build preference + smoke step (release#588, release#590).
         run: |
-          # Prefer canonical bin/build (release-sync managed); fall
-          # back to direct `<pm> run build` for consumers pre-adoption.
-          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
-            "${GITHUB_WORKSPACE}/bin/build" -- --linux --${{ matrix.arch }} --publish never
-          else
-            ${{ steps.pm.outputs.pm }} run build --linux --${{ matrix.arch }} --publish never
-          fi
-
-      - name: Derive app name
-        id: app-name
-        shell: bash
-        run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test (linux)
-        if: hashFiles('app-bin/smoke-hook.sh') != ''
-        shell: bash
-        env:
-          PLATFORM: linux
-          ARCH: ${{ matrix.arch }}
-          PACKAGE_DIR: ${{ inputs.output-dir }}
-          APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash app-bin/smoke-hook.sh
+          ${{ steps.pm.outputs.pm }} run build --linux --${{ matrix.arch }} --publish never
 
       # AppImage is the canonical linux artifact for electron-app and
       # required for the release to be useful; .deb is optional (only
@@ -692,30 +650,12 @@ jobs:
         # Windows code-signing not yet integrated in this workflow. The
         # produced binary is unsigned — flag this in release notes for
         # any consumer enabling windows-archs.
+        #
+        # Direct `<pm> run build` — see the build-mac note on the removed
+        # bin/build preference + smoke step (release#588, release#590).
         run: |
-          # Prefer canonical bin/build (release-sync managed); fall
-          # back to direct `<pm> run build` for consumers pre-adoption.
-          if [ -x "${GITHUB_WORKSPACE}/bin/build" ]; then
-            "${GITHUB_WORKSPACE}/bin/build" -- --win --${{ matrix.arch }} --publish never
-          else
-            ${{ steps.pm.outputs.pm }} run build --win --${{ matrix.arch }} --publish never
-          fi
+          ${{ steps.pm.outputs.pm }} run build --win --${{ matrix.arch }} --publish never
         shell: bash
-
-      - name: Derive app name
-        id: app-name
-        shell: bash
-        run: echo "name=$(jq -r '.build.productName // .name' package.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test (windows)
-        if: hashFiles('app-bin/smoke-hook.sh') != ''
-        shell: bash
-        env:
-          PLATFORM: windows
-          ARCH: ${{ matrix.arch }}
-          PACKAGE_DIR: ${{ inputs.output-dir }}
-          APP_NAME: ${{ steps.app-name.outputs.name }}
-        run: bash app-bin/smoke-hook.sh
 
       - name: Upload windows artifacts
         uses: actions/upload-artifact@v6

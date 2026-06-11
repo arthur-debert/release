@@ -68,6 +68,14 @@ Caveats:
   complement to CI, not a replacement.
 - `--ref` reads templates from a git ref, so commit release changes before
   sweeping (an uncommitted working tree isn't what gets synced).
+- **Post-advance verification needs a FRESH consumer event — never
+  `gh run rerun`.** A reusable-workflow ref (`…/x.yml@vN`) is resolved once,
+  when the run is created; `gh run rerun` re-executes that original snapshot,
+  so after `release-core admin release advance-major` a rerun still exercises
+  the pre-advance release and proves nothing about the fix (caught live on
+  padz, epic #583). Push an empty commit to the consumer's main
+  (`git commit --allow-empty && git push`) or `gh workflow run` to create a
+  run that resolves the new `vN` tip.
 
 ## Onboarding a new repo
 

@@ -62,4 +62,7 @@ pairs that already violated the contract when the lint landed, grandfathered
 so the gate could turn on hard for everything else. The ratchet only
 tightens — a baseline entry that stops matching fails the lint ("stale
 baseline entry — delete it"), and adding an entry is never the fix for a new
-finding. Draining the baseline to zero is tracked in release#588.
+finding. The baseline was drained to zero and the file deleted in
+release#588 (a missing file is an empty baseline); the lint now runs with no
+grandfathered jobs, and re-creating the file is never the fix for a new
+finding.

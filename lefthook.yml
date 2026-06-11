@@ -163,7 +163,9 @@ pre-commit:
       # managed path (per the manifest) without a prior materialize step in the
       # same job (arm-gate / release-core init) fails. The mechanical "who still
       # assumes the old shape" sweep that would have caught release#579.
-      # Baseline (shrink-only): docs/references/consumer-contract-lint-baseline.yaml.
+      # The shrink-only baseline was drained to zero and its file deleted
+      # (release#588) — the glob entry below stays so re-introducing one
+      # re-triggers the lint, but re-creating it is never the fix.
       glob:
         - ".github/workflows/*"
         - ".github/actions/**"

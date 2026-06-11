@@ -103,9 +103,15 @@ jobs:
             fi
             echo "ok bundled: $1"
           }
-          for f in .markdownlint.json .markdownlintignore .yamllint .shellcheckrc \
-                   .editorconfig .prettierignore lefthook.fragment.yaml; do
-            require "commons/$f"
+          # Paths spelled FULLY (templates-relative, `commons/…`) — these are
+          # wheel-content assertion strings, not consumer-tree references, and
+          # the full spelling keeps the consumer-contract assumption lint
+          # (bin-internal/lint-consumer-contract.sh) from reading a bare
+          # mirror dest like `.editorconfig` as an old-shape path (release#588).
+          for f in commons/.markdownlint.json commons/.markdownlintignore \
+                   commons/.yamllint commons/.shellcheckrc commons/.editorconfig \
+                   commons/.prettierignore commons/lefthook.fragment.yaml; do
+            require "$f"
           done
           require "components/_lefthook-base.yaml"
           require "go-cli/manifest.yaml"
