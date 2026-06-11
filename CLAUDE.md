@@ -66,7 +66,7 @@ silently dropping managed `bin/` tools).
   - Release mechanics: `release-core admin release advance-major` (← retired flat `release-advance-major`) — fast-forward the floating major branch — auto-detected highest `vN`, currently `v2` — to main after a release-side merge; one command for the old four-step `checkout vN && merge --ff-only main && push` dance
   - Managed-tree compose: `release-core init` composes the gitignored, ephemeral `.release/` build dir + the committed mirrors (symlinks, real-file workflow copies, CLAUDE.md block) from the pinned wheel. WS4 (#521) made `.release/` gitignored + recomposed every session/CI, so drift of the build dir is impossible by construction — the standalone `release-sync` materializer and the `release-drift-check` gate (+ the `sync` CLI group) were RETIRED. The compose ENGINE lives in `release_core/sync.py` (`build_plan`/`materialize`/`compute_mirror`); `release-core init` is its only driver. The `.release/.release-sync-source` provenance marker (ADR-0002) is still written but transient + informational (no reader). CI materializes `.release/` via the `arm-gate` composite's `materialize` input (default on) before the gate.
   - Fleet (canonical: `release-core admin repos|inbox …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin repos list` (← `managed-repos`) — zero-logic accessor over `managed-repos.yaml`, the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`; `release-core admin repos verify` (← `release-verify-fleet`) — hermetic pre-flight lint sweep: clone fleet → `release-core init --no-commit` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-core admin release advance-major`; `release-core admin inbox` (← `release-inbox`) — read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run; `release-core admin inbox notify-source` (← `release-notify-source`) — close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue. The `release-fleet-triage` skill orchestrates inbox → fix loop → notify-source. See `docs/dev/fleet-tooling.md`.
-  - PR loop: `gh-copilot-{on,off,wait,review}`, `gh-pr-checks-wait`, `gh-pr-resolve-thread` (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` shim in #476)
+  - PR loop: `release-core pr status|wait|ready` (the state machine: one lifecycle state + next action; `pr wait` is the ONE engine-driven in-turn wait — it replaced `pr review wait` + `pr checks-wait` per #503; `pr ready` is the guarded draft→ready flip per #456), `release-core pr review request|cancel|show [--reviewer <name>]` (reviewer-agnostic, dispatches through the adapter registry in `prstate/reviewers.py` — the RETIRED `pr copilot on|off|wait|review` group and the `gh-copilot-*` bin scripts are gone, no aliases, per #555), plus `release-core pr resolve-thread` (bin shim: `gh-pr-resolve-thread`) (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` shim in #476)
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
 - `tests/fixtures/` — synthetic projects per category, exercised by `_ci.yml`
@@ -151,11 +151,13 @@ lex-fmt/lex v0.9.1.
 ## Operational rules
 
 - **Every PR is driven through the `gh-pr-review-loop` skill — invoke it before
-  `gh pr create`, not after.** The skill is the *discipline* (request Copilot →
-  wait → triage A/B/C → resolve threads as you go → stop at ready); the
-  `gh-copilot-*` / `gh-pr-checks-wait` helpers are each independently on `$PATH`,
-  so hand-composing them silently skips the disciplined steps while still
-  producing a green-looking PR. This is now *enforced*: a PreToolUse guard
+  `gh pr create`, not after.** The skill is the *discipline* (loop
+  `release-core pr status` → do the one next action → re-read; wait in-turn via
+  `release-core pr wait`, never a background monitor; triage A/B/C → resolve
+  threads as you go → flip via the guarded `release-core pr ready`, never raw
+  `gh pr ready` → stop at ready); the `release-core pr …` helpers are each
+  independently reachable, so hand-composing them silently skips the
+  disciplined steps while still producing a green-looking PR. This is now *enforced*: a PreToolUse guard
   (`bin/pr-loop-guard`, wired in `.claude/settings.json`, synced to consumers via
   `templates/commons/`) blocks a bare `gh pr create` unless the loop is armed
   (the skill arms a one-shot `pr-loop-armed` sentinel in `.git/`). If you are

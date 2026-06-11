@@ -63,7 +63,7 @@ class TaskStatus:
     open_threads: int = 0
     checks: ChecksState = ChecksState.NONE
     mergeable: str | None = None
-    cycles: int = 0  # completed Copilot review cycles
+    cycles: int = 0  # completed required-reviewer review cycles
     breaker: str | None = None  # which circuit breaker fired, if any
 
     def to_dict(self) -> dict:
@@ -160,7 +160,8 @@ def evaluate(
     if ctx.mergeable == "MERGEABLE":
         status.state = TaskState.READY
         status.next_action = (
-            "reviewed + CI green + mergeable — flip draft->ready and page the human"
+            "reviewed + CI green + mergeable — run `release-core pr ready` "
+            "to flip draft->ready and page the human"
         )
         return status
 

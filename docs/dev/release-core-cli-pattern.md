@@ -75,8 +75,7 @@ group.add_command(wrap_verb(
 ### `wrap_script(script, *, name, short_help) -> click.Command`
 
 For commands backed by a standalone `bin/<script>` (bash/python tools:
-`gh-copilot-*`, `gh-pr-checks-wait`, `gh-pr-resolve-thread`, `fetch-deps`,
-`fetch-artifact`). Execs the script **by name off `$PATH`** (these are on `$PATH`
+`gh-pr-resolve-thread`, `fetch-deps`, `fetch-artifact`). Execs the script **by name off `$PATH`** (these are on `$PATH`
 in every environment that has them — dodot locally, `action_path` in CI; we
 never compute a path relative to the installed wheel), forwards args verbatim,
 and propagates the child's exit code. A missing tool is a clear exit 127.
@@ -85,9 +84,9 @@ and propagates the child's exit code. A missing tool is a clear exit 127.
 from ._helpers import wrap_script
 
 group.add_command(wrap_script(
-    "gh-copilot-wait",
-    name="wait",
-    short_help="Block until Copilot's review lands on a PR.",
+    "gh-pr-resolve-thread",
+    name="resolve-thread",
+    short_help="Resolve a PR review thread.",
 ))
 ```
 
@@ -142,7 +141,7 @@ PATH:
 
 - **Top-level (per-project):** `cut`, `status`, `init`, `selfcheck`,
   `changelog`, `semver`, `sync`, `detect-kind`, `audit`, `issue`.
-- **`pr`** (whole group: `pr copilot on|off|wait|review`, `pr checks-wait`,
+- **`pr`** (whole group: `pr review request|cancel|show`, `pr wait`, `pr ready`,
   `pr resolve-thread`, `pr status`) — the nested-subgroup + both-wraps exemplar.
 - **`ci`** — `fetch-deps` / `fetch-artifact` wraps.
 - **`admin/*`** — `admin repos` (`list / prs / scripts / audit / verify`),

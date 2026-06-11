@@ -24,13 +24,20 @@ class ReviewLifecycle(StrEnum):
 
 @dataclass(frozen=True)
 class ReviewComment:
-    """One inline review comment (REST `databaseId` is the stable handle)."""
+    """One inline review comment (REST `databaseId` is the stable handle).
+
+    `review_id` is the database id of the pull-request review the comment was
+    submitted with (GraphQL `pullRequestReview.databaseId` == the REST review
+    `id`). It is what groups thread findings into per-review cycles for the
+    circuit breakers — there is no separate REST comment fetch anymore.
+    """
 
     comment_id: int
     path: str
     line: int | None
     body: str
     author: str
+    review_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -97,8 +104,6 @@ class PullContext:
     issue_comments: list[dict] = field(default_factory=list)  # Gemini bot comments
     requested_logins: list[str] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)  # gh statusCheckRollup entries
-    review_comments: list[dict] = field(default_factory=list)  # REST inline comments
-    # (carry pull_request_review_id -> per-cycle grouping for breakers)
 
     def reviews_on_head(self) -> list[Review]:
         """Reviews made against the current head — stale reviews don't count."""

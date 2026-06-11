@@ -34,6 +34,13 @@ The Development Life Cycle
         lint/format/static only — run the repo's `test` verb yourself too, since
         CI runs tests as a separate required check (tooling.lex §2).
 
+        Gate fidelity: a local check that reads ambient local state — a sibling
+        `../repo` checkout, a tool only your machine has, an env var CI doesn't
+        set — passes locally and lies about CI. CI must provision the resource
+        explicitly (fetch it, install it, set it); if a check needs something,
+        make CI provide it rather than trusting that local green implies CI
+        green.
+
     1.3. PR shepherding (draft-first, state-machine-driven)
 
         Drive this through the `gh-pr-review-loop` skill, which arms the
@@ -42,19 +49,25 @@ The Development Life Cycle
 
         - Open the PR as a DRAFT, linking the issue if relevant (`for #<id>` /
           `closes #<id>`).
-        - Ensure the right reviewers are requested.
-        - Wait for reviews + CI checks (block in-turn with the wait commands;
-          don't hand the wait to a detached background process).
-        - Address reviews, fix CI if needed, commit and push.
-        - When all reviews are addressed, all CI checks pass, and the PR is
-          mergeable, flip draft → READY. That hands it to a human; don't
-          auto-merge.
+        - Loop: `release-core pr status` reports one lifecycle state plus the
+          single next action — do that action (request reviews via
+          `release-core pr review request`, triage threads, fix CI), then
+          re-read.
+        - Wait with `release-core pr wait` — the one engine-driven wait. It
+          blocks in-turn and returns as soon as there is something to do;
+          never hand the wait to a detached background process (a subagent
+          that yields to wait terminates and is never re-woken).
+        - When the engine says READY (reviews addressed, CI green, mergeable),
+          flip draft → ready with `release-core pr ready` — the guarded flip
+          refuses early, so it can't fire prematurely. That hands it to a
+          human; don't auto-merge.
 
     1.4. User validation
 
         The user merges or asks for changes/clarifications. If more work is
-        needed, flip the PR back to draft; only when the new changes + checks
-        pass flip back to READY for re-validation.
+        needed, flip the PR back to draft (`release-core pr ready --undo`);
+        only when the new changes + checks pass flip back to READY for
+        re-validation.
 
     On re-requesting a review:
 

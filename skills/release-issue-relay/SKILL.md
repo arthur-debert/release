@@ -14,7 +14,7 @@ This skill is **only** for infrastructure issues that the consumer repo cannot f
 | Use it for | Do not use it for |
 |---|---|
 | `copilot-review.yml` workflow runs SUCCESS but Copilot is not actually attached as reviewer | A Copilot review comment that says "rename this variable" |
-| `gh-copilot-wait` times out on a non-draft PR with no obvious reason | A test failure specific to the code in this PR |
+| `release-core pr wait` times out on a non-draft PR with no obvious reason | A test failure specific to the code in this PR |
 | `apply-ruleset` / `gh-repo-setup` rejects a check name that exists in the workflow | A policy file conflict that's clearly intentional per-repo customization |
 | `rust-cli` reusable workflow errors out in a way that looks like infra, not project code | A `cargo clippy` warning that needs a code fix |
 | `sweep-github-policy` produces a conflict that looks like a template bug | A pre-commit hook failure specific to the staged diff |
@@ -210,7 +210,7 @@ These are the canonical buckets; the title prefix is what step 1's `--search` fi
 | Component | Covers |
 |---|---|
 | `copilot-review` | `copilot-review.yml` workflow misbehaves, Copilot not attached as reviewer, Auto-fix not firing |
-| `pr-review-loop` | `gh-copilot-{on,off,wait}`, `gh-pr-resolve-thread`, `gh-pr-checks-wait` and related helpers |
+| `pr-review-loop` | `release-core pr review {request,cancel,show}`, `pr wait`, `pr ready`, `pr resolve-thread`, `pr status` and related helpers |
 | `rust-cli-release` | `rust-cli.yml` reusable release workflow (test, build, publish, homebrew, wasm) |
 | `ruleset` | `apply-ruleset` / branch protection / required check detection |
 | `sweep-policy` | `sweep-github-policy` / per-stack templates / destination mapping |

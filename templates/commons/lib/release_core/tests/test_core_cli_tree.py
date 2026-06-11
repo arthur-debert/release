@@ -3,7 +3,7 @@ exemplar dispatch (release#460).
 
 Pins what the parallel agents build on: the full group skeleton is registered
 (so ``--help`` shows the whole shape), the exemplar ``pr`` group is fully wired
-(nested ``copilot`` subgroup, ``wrap_script`` leaves, ``pr status``), the
+(nested ``review`` subgroup, ``wrap_script`` leaves, ``pr status``), the
 top-level verb-wrap exemplars (``cut``, ``status``) dispatch, every leaf carries
 a one-line short_help, and unimplemented leaves are registered stubs.
 """
@@ -36,10 +36,25 @@ def test_toplevel_groups_registered():
 
 def test_pr_group_is_fully_wired():
     grp = pr.group
-    assert set(grp.commands) >= {"copilot", "checks-wait", "resolve-thread", "status"}
-    copilot = grp.commands["copilot"]
-    assert isinstance(copilot, click.Group)
-    assert set(copilot.commands) == {"on", "off", "wait", "review"}
+    assert set(grp.commands) >= {"review", "wait", "resolve-thread", "status", "ready"}
+    review = grp.commands["review"]
+    assert isinstance(review, click.Group)
+    assert set(review.commands) == {"request", "cancel", "show"}
+
+
+def test_pr_copilot_group_is_gone():
+    # The reviewer-named surface was REMOVED in #555 — no aliases, no shims.
+    assert "copilot" not in pr.group.commands
+    assert cli_entry.main(["pr", "copilot", "on", "1"]) != 0
+
+
+def test_retired_waits_are_gone():
+    # `pr review wait` + `pr checks-wait` were REPLACED by the engine-owned
+    # `pr wait` in #503 — removed outright, no aliases.
+    assert "checks-wait" not in pr.group.commands
+    assert "wait" not in pr.group.commands["review"].commands
+    assert cli_entry.main(["pr", "checks-wait", "1"]) != 0
+    assert cli_entry.main(["pr", "review", "wait", "1"]) != 0
 
 
 def test_admin_skeleton_registered():
@@ -114,6 +129,29 @@ def test_pr_status_dispatches_to_task_status_help(capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert "gh-task-status" in (captured.out + captured.err)
+
+
+def test_pr_ready_dispatches_to_ready_verb(capsys):
+    rc = cli_entry.main(["pr", "ready", "--help"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "pr ready" in (captured.out + captured.err)
+
+
+def test_pr_review_leaves_dispatch_to_review_verbs(capsys):
+    # Each leaf forwards --help to its verb's own USAGE (the wrap_verb contract).
+    for leaf in ("request", "cancel", "show"):
+        rc = cli_entry.main(["pr", "review", leaf, "--help"])
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert f"pr review {leaf}" in (captured.out + captured.err)
+
+
+def test_pr_wait_dispatches_to_wait_verb(capsys):
+    rc = cli_entry.main(["pr", "wait", "--help"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "pr wait" in (captured.out + captured.err)
 
 
 # --- stub behavior --------------------------------------------------------
