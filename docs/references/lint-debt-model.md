@@ -59,7 +59,8 @@ Orthogonal to the three cases — *who owns the thing being fixed*:
 ## The one tracked-but-not-authored exception
 
 A few files are *committed* (so can't be gitignored) yet aren't prose to
-author-lint: the generated `CHANGELOG`, mdbook `SUMMARY.md`, test `fixtures/`,
+author-lint: the generated `CHANGELOG` and `release-notes.md`, mdbook
+`SUMMARY.md`, test `fixtures/`,
 generated regression/`benchmark/` corpora (golden converter output that
 deliberately exercises edge cases → intentionally not clean markdown; fix the
 generator, not the fixture), agent skill-docs. Those — and only those — live in
