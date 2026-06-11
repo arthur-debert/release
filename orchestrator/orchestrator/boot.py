@@ -46,6 +46,14 @@ class BootError(RuntimeError):
     """A fatal boot condition — the probe must die loudly, not run unbooted."""
 
 
+def _read_text(path: Path, what: str) -> str:
+    """Read a boot artifact, mapping read failures to the BootError contract."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise BootError(f"could not read {what} at {path}: {e}") from e
+
+
 @dataclass(frozen=True)
 class BootReport:
     """What a probe boot actually booted (recorded, then asserted)."""
@@ -101,7 +109,7 @@ def _parse_source_ref(repo: Path) -> str:
         )
     lines = [
         ln.strip()
-        for ln in marker.read_text(encoding="utf-8").splitlines()
+        for ln in _read_text(marker, "provenance marker").splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
     if not lines:
@@ -115,7 +123,7 @@ def _assert_exclude_sentinel(repo: Path) -> None:
     exclude = (repo / exclude_rel).resolve()
     if (
         not exclude.is_file()
-        or EXCLUDE_SENTINEL not in exclude.read_text(encoding="utf-8").splitlines()
+        or EXCLUDE_SENTINEL not in _read_text(exclude, "git info/exclude").splitlines()
     ):
         raise BootError(
             f"boot-assert (b) failed: managed-mirrors sentinel missing from {exclude} — "

@@ -169,6 +169,19 @@ def test_marker_with_only_comments_names_assert_a(tmp_path):
         boot_clone(str(repo))
 
 
+def test_unreadable_marker_fails_as_boot_error(tmp_path):
+    # A non-UTF8 marker must surface as BootError (the module's only failure
+    # mode), not a raw UnicodeDecodeError stack trace.
+    repo = make_repo(tmp_path)
+    install_fake_boot_script(
+        repo,
+        write_marker=False,
+        extra=f"mkdir -p .release && printf '\\xff\\xfe\\x00\\xff' > {SOURCE_MARKER}",
+    )
+    with pytest.raises(BootError, match="could not read provenance marker"):
+        boot_clone(str(repo))
+
+
 def test_missing_exclude_sentinel_names_assert_b(tmp_path):
     repo = make_repo(tmp_path)
     install_fake_boot_script(repo, write_sentinel=False)
