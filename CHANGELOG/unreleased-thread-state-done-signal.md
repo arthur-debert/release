@@ -1,0 +1,1 @@
+- PR review-loop done-signal and comment reading now driven off GraphQL reviewThreads (all threads, any author) — the partial REST inline-comment fetch and its exact-string Copilot author filter are gone (#515, #455)

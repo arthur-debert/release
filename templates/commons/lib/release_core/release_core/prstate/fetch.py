@@ -15,6 +15,11 @@ from .model import PullContext, Review, ReviewComment, Thread
 # thread node and its first comment, so truncating a >100-comment thread's tail
 # can't flip a gating decision. Thread COUNT is the real risk (a missed thread
 # is a missed unresolved blocker), so reviewThreads IS paginated via the cursor.
+#
+# `pullRequestReview { databaseId }` ties each comment back to the review that
+# produced it — that is how the circuit breakers group findings into Copilot
+# cycles now that the REST `/pulls/{n}/comments` fetch is gone (it surfaced only
+# a subset of inline comments and missed second-bot reviews; release#515).
 _THREADS_QUERY = """
 query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
@@ -25,7 +30,15 @@ query($owner: String!, $name: String!, $pr: Int!, $cursor: String) {
           id
           isResolved
           comments(first: 100) {
-            nodes { databaseId path line originalLine body author { login } }
+            nodes {
+              databaseId
+              path
+              line
+              originalLine
+              body
+              author { login }
+              pullRequestReview { databaseId }
+            }
           }
         }
       }
@@ -65,7 +78,6 @@ def gather(pr: int) -> PullContext:
         thread_nodes=thread_nodes,
         reactions=ghapi.rest(f"{base}/issues/{pr}/reactions", paginate=True) or [],
         issue_comments=ghapi.rest(f"{base}/issues/{pr}/comments", paginate=True) or [],
-        review_comments=ghapi.rest(f"{base}/pulls/{pr}/comments", paginate=True) or [],
     )
 
 
@@ -76,7 +88,6 @@ def context_from_raw(
     thread_nodes: list[dict],
     reactions: list[dict],
     issue_comments: list[dict],
-    review_comments: list[dict] | None = None,
 ) -> PullContext:
     """Pure: assemble a `PullContext` from raw gh payloads. No network."""
     return PullContext(
@@ -92,7 +103,6 @@ def context_from_raw(
         issue_comments=issue_comments,
         requested_logins=_requested_logins(meta.get("reviewRequests") or []),
         checks=meta.get("statusCheckRollup") or [],
-        review_comments=review_comments or [],
     )
 
 
@@ -114,6 +124,7 @@ def _thread(node: dict) -> Thread:
             line=c.get("line") or c.get("originalLine"),
             body=c.get("body") or "",
             author=(c.get("author") or {}).get("login", ""),
+            review_id=(c.get("pullRequestReview") or {}).get("databaseId"),
         )
         for c in node["comments"]["nodes"]
     )
