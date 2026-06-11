@@ -90,6 +90,18 @@ def test_ready_draft_pr_flips_and_hands_to_the_human(engine, flips, capsys):
     assert "handed to the human" in out
 
 
+def test_flip_warns_that_checks_rerun_on_the_ready_event(engine, flips, capsys):
+    # GitHub re-runs checks on ready_for_review, so status reads VALIDATING
+    # right after a successful flip. The flip output must set that expectation
+    # itself (#564) — the engine stays a truthful clockless snapshot.
+    engine("ready_checks_green")
+    assert ready.main(["201"]) == 0
+    out = capsys.readouterr().out
+    assert "re-runs checks" in out
+    assert "VALIDATING" in out
+    assert "release-core pr wait" in out
+
+
 def test_already_ready_pr_is_idempotent_success(engine, flips, capsys):
     engine("ready_checks_green", draft=False)  # READY, flag already flipped
     assert ready.main(["201"]) == 0

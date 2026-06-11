@@ -154,6 +154,33 @@ def test_output_comes_from_the_engine_not_hardcoded_names(capsys):
 # --- cadence: data, overridable ------------------------------------------------
 
 
+def test_entering_the_wait_surfaces_the_cadence_and_knobs(capsys):
+    # The cadence must not be opaque (#564): the first waiting output names
+    # the schedule in effect and the --poll/--timeout overrides, once.
+    h = _Harness(PENDING_WAITING, READY)
+    assert h.run() == 0
+    out = capsys.readouterr().out
+    assert out.count("cadence:") == 1
+    assert "polling every 20s, backing off x1.5 to a 1m30s cap" in out
+    assert "--poll" in out
+    assert "giving up after 45m" in out
+    assert "--timeout" in out
+
+
+def test_cadence_line_reflects_a_fixed_poll_and_timeout(capsys):
+    h = _Harness(PENDING_WAITING, READY)
+    assert h.run(poll=30.0, timeout=600.0) == 0
+    out = capsys.readouterr().out
+    assert "polling every 30s (fixed via --poll)" in out
+    assert "giving up after 10m" in out
+
+
+def test_immediate_exit_prints_no_cadence_line(capsys):
+    h = _Harness(READY)
+    assert h.run() == 0
+    assert "cadence:" not in capsys.readouterr().out
+
+
 def test_default_cadence_backs_off_to_the_cap():
     h = _Harness(PENDING_WAITING, *([VALIDATING] * 10), READY)
     assert h.run() == 0

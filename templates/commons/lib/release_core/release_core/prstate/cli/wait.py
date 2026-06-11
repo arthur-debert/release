@@ -167,6 +167,7 @@ def wait_for_action(
     if _agent_action_needed(status, registry):
         emit(status)
         return 0
+    print(_cadence_line(poll=poll, timeout=deadline_cap))
     print(_waiting_line(status, elapsed=0.0, interval=next_sleep()))
 
     while clock() < deadline:
@@ -234,6 +235,18 @@ def _needs_request(status: TaskStatus, registry: list[ReviewerAdapter]) -> bool:
 
 
 # --- rendering ------------------------------------------------------------------
+
+
+def _cadence_line(*, poll: float | None, timeout: float) -> str:
+    """Printed once on entering the wait: the cadence in effect and its knobs."""
+    if poll is not None:
+        cadence = f"polling every {_fmt(poll)} (fixed via --poll)"
+    else:
+        cadence = (
+            f"polling every {_fmt(POLL_INITIAL_S)}, backing off x{POLL_BACKOFF:g} "
+            f"to a {_fmt(POLL_MAX_S)} cap (--poll <s> fixes the interval)"
+        )
+    return f"cadence: {cadence}; giving up after {_fmt(timeout)} (--timeout <s> overrides)"
 
 
 def _waiting_line(status: TaskStatus, *, elapsed: float, interval: float) -> str:
