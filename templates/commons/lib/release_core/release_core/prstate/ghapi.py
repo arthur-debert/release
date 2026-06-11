@@ -104,6 +104,20 @@ def pr_edit_reviewer(pr: int, reviewer: str, *, remove: bool = False) -> None:
     _gh(["pr", "edit", str(pr), "--repo", f"{owner}/{name}", flag, reviewer])
 
 
+def pr_ready(pr: int, *, undo: bool = False) -> None:
+    """Flip a PR's draft flag via ``gh pr ready`` (``--undo`` for ready→draft).
+
+    ``gh pr ready`` is idempotent: flipping a PR that is already in the target
+    state prints a notice and exits 0, so callers don't need to pre-check the
+    flag to stay safe — they pre-check only to *say* something more useful.
+    """
+    owner, name = repo_slug()
+    args = ["pr", "ready", str(pr), "--repo", f"{owner}/{name}"]
+    if undo:
+        args.append("--undo")
+    _gh(args)
+
+
 def repo_slug() -> tuple[str, str]:
     """Return (owner, name) for the current repo."""
     data = json.loads(_gh(["repo", "view", "--json", "owner,name"]))

@@ -160,7 +160,8 @@ def evaluate(
     if ctx.mergeable == "MERGEABLE":
         status.state = TaskState.READY
         status.next_action = (
-            "reviewed + CI green + mergeable — flip draft->ready and page the human"
+            "reviewed + CI green + mergeable — run `release-core pr ready` "
+            "to flip draft->ready and page the human"
         )
         return status
 

@@ -36,7 +36,7 @@ def test_toplevel_groups_registered():
 
 def test_pr_group_is_fully_wired():
     grp = pr.group
-    assert set(grp.commands) >= {"review", "checks-wait", "resolve-thread", "status"}
+    assert set(grp.commands) >= {"review", "checks-wait", "resolve-thread", "status", "ready"}
     review = grp.commands["review"]
     assert isinstance(review, click.Group)
     assert set(review.commands) == {"request", "cancel", "wait", "show"}
@@ -120,6 +120,13 @@ def test_pr_status_dispatches_to_task_status_help(capsys):
     captured = capsys.readouterr()
     assert rc == 0
     assert "gh-task-status" in (captured.out + captured.err)
+
+
+def test_pr_ready_dispatches_to_ready_verb(capsys):
+    rc = cli_entry.main(["pr", "ready", "--help"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "pr ready" in (captured.out + captured.err)
 
 
 def test_pr_review_leaves_dispatch_to_review_verbs(capsys):
