@@ -137,7 +137,8 @@ def evaluate(
             return status
         status.state = TaskState.ADDRESSING
         status.next_action = (
-            f"triage {open_threads} open thread(s): fix-or-reply, then resolve each"
+            f"triage {open_threads} open thread(s): read them with "
+            "`release-core pr review show`, then fix-or-reply + resolve each"
         )
         return status
 
@@ -159,10 +160,16 @@ def evaluate(
 
     if ctx.mergeable == "MERGEABLE":
         status.state = TaskState.READY
-        status.next_action = (
-            "reviewed + CI green + mergeable — run `release-core pr ready` "
-            "to flip draft->ready and page the human"
-        )
+        if ctx.is_draft:
+            status.next_action = (
+                "reviewed + CI green + mergeable — run `release-core pr ready` "
+                "to flip draft->ready and page the human"
+            )
+        else:
+            status.next_action = (
+                "reviewed + CI green + mergeable, already ready-for-review — "
+                "done; await the human's verify + merge"
+            )
         return status
 
     # Reviewed, but mergeability still unknown (GitHub computing) — re-poll.

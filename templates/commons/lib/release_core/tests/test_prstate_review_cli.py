@@ -83,6 +83,16 @@ def test_reviewer_flag_needs_a_value(capsys):
     assert "--reviewer" in capsys.readouterr().err
 
 
+def test_positional_reviewer_error_names_the_flag(capsys):
+    # `pr review request <pr> <reviewer>` is the observed misuse (#564): the
+    # only positional is the PR number, and the error must teach the flag
+    # instead of a bare "too many arguments".
+    assert review.request_main(["1", "somebot"]) == 64
+    err = capsys.readouterr().err
+    assert "'somebot'" in err
+    assert "--reviewer <name>" in err
+
+
 def test_unknown_reviewer_is_usage_error(fakes, capsys):
     assert review.request_main(["1", "--reviewer", "nosuchbot"]) == 64
     err = capsys.readouterr().err
