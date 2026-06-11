@@ -321,6 +321,27 @@ def test_list_mode_excludes_canaries(manifest, capsys):
     assert "release-canary-rust" not in out
 
 
+def test_job_rows_unsettled_listing_under_green_run_is_not_a_failure():
+    # The jobs endpoint can stay stale past the settle re-polls: a job still
+    # in_progress under a run whose conclusion is success must be annotated,
+    # never counted as a failure (the run conclusion is the backstop).
+    jobs = [
+        {"name": "ci / check", "conclusion": "success", "status": "completed", "steps": []},
+        {"name": "ci / e2e", "conclusion": None, "status": "in_progress", "steps": []},
+    ]
+    rows, failed = canary_run.job_rows("rust", "ci", jobs, "success")
+    assert not failed
+    assert rows[1]["conclusion"] == "unsettled (run green)"
+    assert rows[1]["class"] == "-"
+
+
+def test_job_rows_in_progress_under_failed_run_still_counts():
+    jobs = [{"name": "ci / e2e", "conclusion": None, "status": "in_progress", "steps": []}]
+    rows, failed = canary_run.job_rows("rust", "ci", jobs, "failure")
+    assert failed
+    assert rows[0]["conclusion"] == "IN_PROGRESS"
+
+
 # ── arg validation ───────────────────────────────────────────────────────────
 
 

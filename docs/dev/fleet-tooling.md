@@ -114,7 +114,7 @@ verify/migrate/inbox sweeps never include the canary repos) it:
    materialize/provision, install-release-core, init, prepare internals —
    a release bug) vs **PROJECT** (bin/check, cargo, bats, compilation —
    canary-content rot) — and posts a `canary/<family>` commit status on
-   release@`<sha>`. Exit 0 green / 1 failures / 2 setup error.
+   `release@<sha>`. Exit 0 green / 1 failures / 2 setup error.
 6. Prunes canary prereleases beyond `--keep` (default 5). `canary/*`
    branches on release are kept (owner decision).
 

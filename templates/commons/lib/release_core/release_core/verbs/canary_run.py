@@ -152,16 +152,27 @@ def classify_failure(failed_step: str, steps: list[dict]) -> str:
     return "INFRA"
 
 
-def job_rows(family: str, workflow: str, jobs: list[dict]) -> tuple[list[dict], bool]:
+def job_rows(
+    family: str, workflow: str, jobs: list[dict], run_conclusion: str | None = None
+) -> tuple[list[dict], bool]:
     """Per-job report rows for one completed run. Returns (rows, any_failure).
 
     Skipped jobs are annotated: `skipped (fenced)` when nothing failed before
     them (a designed fence, e.g. publish-crates: false), `skipped (cascade)`
-    when an earlier failure cancelled the chain."""
+    when an earlier failure cancelled the chain.
+
+    ``run_conclusion`` is the backstop for an UNSETTLED jobs listing (the
+    endpoint lags the run resource): a job still reporting in_progress under a
+    run whose conclusion is success is a stale snapshot, not a failure — it is
+    annotated, never counted as failed."""
     rows: list[dict] = []
     any_failure = False
     for job in jobs:
         conclusion = job.get("conclusion") or job.get("status") or "?"
+        status = job.get("status")
+        if status is not None and status != "completed" and run_conclusion == "success":
+            rows.append(_row(family, workflow, job, "unsettled (run green)", "-", "-"))
+            continue
         if conclusion == "success":
             rows.append(_row(family, workflow, job, "success", "-", "-"))
         elif conclusion == "skipped":
@@ -718,7 +729,9 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
                 run = done[key]
                 run_urls[key] = run.get("html_url", "")
                 workflow = "ci" if key == "ci" else "release"
-                rows, failed = job_rows(family, workflow, _collect_jobs(repo, run["id"]))
+                rows, failed = job_rows(
+                    family, workflow, _collect_jobs(repo, run["id"]), run.get("conclusion")
+                )
                 # A run can fail with zero failed jobs visible (e.g. startup
                 # failure); trust the run conclusion as the backstop.
                 failed = failed or run.get("conclusion") not in ("success", "skipped")
