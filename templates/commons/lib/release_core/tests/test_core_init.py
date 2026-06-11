@@ -627,6 +627,10 @@ def _setup_full_repo(tmp_path, monkeypatch, src_root):
     repo = _init_git_repo(tmp_path / "consumer")
     monkeypatch.delenv("RELEASE_HOME", raising=False)
     monkeypatch.delenv("RELEASE_REF", raising=False)
+    # Deterministic provenance label: neutralize any ambient resolved-release
+    # stamp (release#580) — env SET + empty means "no stamp" to read_source_tag,
+    # shadowing a real <venv>/release-source.tag on the host.
+    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "")
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
     monkeypatch.setattr(init, "_bundle_root", lambda: str(src_root))
     monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
@@ -1040,6 +1044,106 @@ def test_full_uses_release_home_clone_when_present(tmp_path, monkeypatch, capsys
     # Provenance marker carries the git sha (not the wheel version).
     marker = (repo / ".release" / ".release-sync-source").read_text()
     assert "release-core" not in marker
+
+
+# ── release#580: the resolved-release-tag stamp labels the commit + marker ────
+# install-release-core stamps <venv>/release-source.tag with the release tag the
+# wheel was resolved from (the wheel's package version is a static 0.0.1). The
+# bundle-path init must carry it into the managed auto-commit subject AND the
+# .release-sync-source marker; absent stamp → the wheel-version fallback. The
+# env override (RELEASE_CORE_SOURCE_TAG) is the test channel for the stamp.
+
+
+@_needs_yq
+@_needs_git
+def test_bundle_init_stamped_tag_labels_commit_and_marker(tmp_path, monkeypatch, capsys):
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "v2.17.1")
+
+    assert init.main([]) == 0
+    capsys.readouterr()
+    # The commit subject carries the REAL release line — and keeps the exact
+    # "chore(release): sync managed tree" prefix other tooling greps.
+    subject = _git(repo, "log", "-1", "--pretty=format:%s")
+    assert subject == "chore(release): sync managed tree from release v2.17.1 (release-core wheel)"
+    # The marker gains the tag line ALONGSIDE the existing source line.
+    lines = (repo / ".release" / ".release-sync-source").read_text().splitlines()
+    assert "v2.17.1" in lines
+    assert any(ln.startswith("release-core ") for ln in lines), "ref_sha line must remain"
+
+
+@_needs_yq
+@_needs_git
+def test_bundle_init_no_stamp_falls_back_to_wheel_version(tmp_path, monkeypatch, capsys):
+    # A wheel installed by an older (pre-#580) resolver has no stamp: the label
+    # falls back to the static wheel-version string — the one-session boot-window
+    # robustness, not a compat shim. (_setup_full_repo already forces "no stamp".)
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    assert init.main([]) == 0
+    capsys.readouterr()
+    subject = _git(repo, "log", "-1", "--pretty=format:%s")
+    assert subject.startswith("chore(release): sync managed tree from release-core ")
+    marker = (repo / ".release" / ".release-sync-source").read_text()
+    assert "install-release-core" not in marker  # no tag block without a stamp
+
+
+@_needs_yq
+@_needs_git
+def test_bundle_init_from_source_stamp_labels_truthfully(tmp_path, monkeypatch, capsys):
+    # A --from-source install stamps "from-source <shortsha>" — the label says
+    # so verbatim (never a faked tag).
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "from-source abc1234")
+
+    assert init.main([]) == 0
+    capsys.readouterr()
+    subject = _git(repo, "log", "-1", "--pretty=format:%s")
+    assert subject == "chore(release): sync managed tree from release-core (from-source abc1234)"
+    lines = (repo / ".release" / ".release-sync-source").read_text().splitlines()
+    assert "from-source abc1234" in lines
+
+
+def test_source_label_matches_the_exact_from_source_sentinel():
+    # The from-source classification is an EXACT sentinel match ("from-source" /
+    # "from-source <sha>"), not a loose prefix: a release tag is free-form, so a
+    # tag literally named "from-source-v2.0.0" still labels as a release tag.
+    src = sync.BundleSource("/x", ref_sha="release-core 0.0.1")
+    src.release_tag = "from-source"
+    assert init._source_label(src) == "release-core (from-source)"
+    src.release_tag = "from-source abc1234"
+    assert init._source_label(src) == "release-core (from-source abc1234)"
+    src.release_tag = "from-source-v2.0.0"
+    assert init._source_label(src) == "release from-source-v2.0.0 (release-core wheel)"
+    src.release_tag = None
+    assert init._source_label(src) == "release-core 0.0.1"
+
+
+@_needs_yq
+@_needs_git
+def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
+    # The $RELEASE_HOME override composes from a live clone: its resolved SHA is
+    # the provenance, so the venv stamp (which describes the installed WHEEL)
+    # must not relabel the commit or reach the marker.
+    src = _full_source_tree(tmp_path / "src")
+    clone = _git_clone_from(src, tmp_path / "clone")
+    repo = _init_git_repo(tmp_path / "consumer")
+    monkeypatch.setenv("RELEASE_HOME", str(clone))
+    monkeypatch.setenv("RELEASE_REF", "HEAD")
+    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "v2.17.1")
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
+
+    assert init.main([]) == 0
+    capsys.readouterr()
+    subject = _git(repo, "log", "-1", "--pretty=format:%s")
+    sha = _git(clone, "rev-parse", "HEAD")
+    assert subject == f"chore(release): sync managed tree from {sha}"
+    marker = (repo / ".release" / ".release-sync-source").read_text()
+    assert "v2.17.1" not in marker
 
 
 # ── WS5 (release#526): the bootstrap quartet materializes as REAL files ───────

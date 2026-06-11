@@ -275,6 +275,27 @@ fi
 "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check \
   --force-reinstall "$source"
 
+# Stamp the resolved release PROVENANCE into the tool venv (release#580):
+# `release-core init` reads <venv>/release-source.tag (located via sys.prefix)
+# to label the managed-sync auto-commit and the .release-sync-source marker
+# with the REAL release line — the wheel's package version is a static 0.0.1,
+# so without the stamp a consumer's history can't tell v2.16 from v2.17. The
+# FILE (not an env var) is the durable channel: a later bare `release-core
+# init` (the SessionStart self-sync) runs without this resolver in the chain.
+if [ -n "$FROM_SOURCE" ]; then
+  # Truthful from-source stamp — never fake a tag: "from-source" plus the
+  # source checkout's short HEAD when it is a git tree (release's own CI).
+  stamp="from-source"
+  if sha="$(git -C "$FROM_SOURCE" rev-parse --short HEAD 2>/dev/null)"; then
+    stamp="from-source $sha"
+  fi
+else
+  # The wheel asset URL is .../releases/download/<tag>/<asset> — the resolved
+  # release tag is the second-to-last path segment.
+  stamp="${source%/*}"; stamp="${stamp##*/}"
+fi
+printf '%s\n' "$stamp" > "$VENV_DIR/release-source.tag"
+
 # Expose the venv's console-scripts on PATH (symlink into BIN_DIR), so the gate
 # and the user's shell find `release-core`, `changelog`, `changelog-render`, …
 # without the tool venv itself being on PATH. Skip the venv's own internals.
