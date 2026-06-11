@@ -174,8 +174,10 @@ lex-fmt/lex v0.9.1.
   configs live only in the ephemeral `.release/` (no tracked root `lefthook.yml`);
   the binary is the carrier — `release-core gate` points lefthook at
   `.release/lefthook.yml` and the git hook is `release-core gate --install-hook` →
-  `release-core gate --hook`. (`.editorconfig` + `.shellcheckrc` stay root-mirrored
-  — shellcheck has no portable `--rcfile` on the fleet's 0.9.0.) (Release's OWN repo keeps a hand-authored root
+  `release-core gate --hook`. (`.editorconfig` is the one root mirror kept —
+  editors discover it; `.shellcheckrc` moved gate-internal in #531 F3: the
+  toolset ships shellcheck ≥ 0.10 via the shellcheck-py wheel, so the gate
+  passes `--rcfile .release/.shellcheckrc`.) (Release's OWN repo keeps a hand-authored root
   `lefthook.yml` with release-only checks — it is the source, not a consumer.) It is a HARD gate — a missing tool exits non-zero (never
   skips), and `--no-verify` is never an acceptable workaround (CI re-runs the
   gate on a clean runner where the tools are guaranteed). **To add or change a

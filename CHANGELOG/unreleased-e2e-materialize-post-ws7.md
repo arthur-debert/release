@@ -1,0 +1,1 @@
+- rust-ci.yml e2e + bats-e2e.yml: materialize the managed tree via arm-gate (post-WS7 bin/check-e2e is an untracked mirror; the stale sparse checkout yielded a missing runner, exit 127 on every bats consumer)
