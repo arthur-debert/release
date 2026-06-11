@@ -307,9 +307,15 @@ def _canary_gate() -> int | None:
 
     Registry-driven inertness, not a skip flag: no `canaries:` registered
     (every consumer repo — they have no managed-repos.yaml at all) → no gate.
-    There is NO skip flag and no env-var escape (owner decision, #587)."""
+    There is NO skip flag and no env-var escape (owner decision, #587).
+
+    The registry is read from the manifest of the REPO BEING CUT (main() has
+    already chdir'd to its root) — deliberately NOT managed_repos's
+    script-dir/env resolution, which the bin/release-core shim pins to
+    release's own manifest: a maintainer cutting a *consumer* repo from a
+    release dev shell must not be gated on release's canaries."""
     try:
-        registry = managed_repos.canaries()
+        registry = managed_repos.canaries(os.path.join(os.getcwd(), "managed-repos.yaml"))
     except Exception as exc:  # a malformed registry must refuse loudly, not crash
         print(f"release-core cut: cannot read the canaries registry: {exc}", file=sys.stderr)
         return 1
@@ -320,7 +326,9 @@ def _canary_gate() -> int | None:
         repo_info = gh.rest("repos/{owner}/{repo}") or {}
         default_branch = repo_info["default_branch"]
         combined = gh.rest(f"repos/{{owner}}/{{repo}}/commits/{default_branch}/status") or {}
-    except (gh.GhError, KeyError) as exc:
+    except (gh.GhError, KeyError, ValueError) as exc:
+        # ValueError covers json.JSONDecodeError: a gh that answers with
+        # non-JSON (proxy page, truncated output) must refuse, never traceback.
         print(
             f"release-core cut: canary gate: cannot read commit statuses: {exc}",
             file=sys.stderr,

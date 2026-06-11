@@ -450,6 +450,26 @@ def test_gate_status_api_error_refuses(gh_dispatch, canary_registry, monkeypatch
     assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
 
 
+def test_gate_binds_to_the_repo_being_cut_not_the_shim_env(gh_dispatch, monkeypatch, tmp_path):
+    """bin/release-core exports MANAGED_REPOS_SCRIPT_DIR (and tests may set
+    MANAGED_REPOS_MANIFEST) pinning managed_repos's default resolution at
+    RELEASE's own manifest — that must NOT leak the gate into another repo's
+    cut. The registry is the manifest of the repo being cut (cwd repo root),
+    which here has none ⇒ no gate, even with the env pointing at a registry."""
+    other = tmp_path / "elsewhere-managed-repos.yaml"
+    other.write_text("canaries:\n  rust: arthur-debert/release-canary-rust\n")
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(other))
+    monkeypatch.setenv("MANAGED_REPOS_SCRIPT_DIR", str(tmp_path))
+
+    def no_rest(path, **kw):
+        raise AssertionError(f"gate must not consult another repo's registry: {path}")
+
+    monkeypatch.setattr(release_cut.gh, "rest", no_rest)
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 0
+    assert ["gh", "workflow", "run", "release.yml", "-f", "version=1.2.3"] in gh_dispatch
+
+
 def test_gate_registry_read_error_refuses(gh_dispatch, monkeypatch, capsys):
     def broken_registry(manifest=None):
         raise RuntimeError("yq exploded")
