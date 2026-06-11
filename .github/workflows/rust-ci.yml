@@ -130,8 +130,8 @@ on:
           history) when the consumer's checks need git history —
           e.g. a "diff since N commits ago" test (rustloc#57 surfaced
           this) or any rustdoc / changelog tooling that walks tags.
-          Only affects the `check` job's checkout. The `e2e` job uses
-          a sparse checkout that doesn't need this knob.
+          Only affects the `check` job's checkout. The `e2e` job
+          always uses the default shallow depth.
         type: number
         required: false
         default: 1
@@ -222,24 +222,35 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Checkout (sparse — e2e + bin only)
+      - name: Checkout
         uses: actions/checkout@v6
         with:
-          # Pulls just what `bin/check-e2e` needs: the bats suite and
-          # the canonical runner. Keeps the e2e job fast (the binary
-          # comes in via download-artifact, not from source).
-          # .release/ is required because bin/ is symlinks pointing
-          # into it (ADR-0001 build-dir + symlinks model). Without
-          # .release/, `bin/check-e2e` is a broken symlink.
-          sparse-checkout: |
-            .release
-            tests/e2e
-            live-tests
-            bin
-            lib
+          # FULL checkout, not sparse: post-WS4/WS7 (release#521/#528)
+          # `.release/` is gitignored and `bin/check-e2e` / `lib/` are
+          # untracked ephemeral mirrors, so a sparse checkout of those
+          # paths yields nothing — the managed tree must be MATERIALIZED
+          # (arm-gate below), and `release-core init` needs the full repo
+          # to detect the Kind. (The binary still comes in via
+          # download-artifact, not from source.)
           # Submodules forwarded here too — some e2e suites need them
           # (e.g. lex's bats tests reference comms submodule fixtures).
           submodules: ${{ inputs.submodules }}
+
+      - name: Set up Node (arm-gate toolset)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Set up Python (arm-gate toolset)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Arm the gate toolset
+        # Same ONE composite the `check` job uses — its materialize step
+        # installs the pinned release_core wheel and composes `.release/`
+        # + the bin/lib mirrors, so `bin/check-e2e` exists on this fresh
+        # runner (it is an untracked mirror post-WS7, never in the
+        # checkout itself).
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
 
       - name: Download binary
         if: inputs.binary-name != ''

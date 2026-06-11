@@ -91,6 +91,21 @@ jobs:
         with:
           submodules: ${{ inputs.submodules }}
 
+      - name: Set up Node (arm-gate toolset)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Set up Python (arm-gate toolset)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Arm the gate toolset
+        # Materializes the managed tree (arm-gate's materialize step):
+        # the default runner `bin/check-e2e` is an untracked ephemeral
+        # mirror post-WS7 (release#528) — it does not exist on a fresh
+        # checkout until `release-core init` composes it.
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
+
       - name: Install bats-core
         # Modern canonical install. Replaces the per-consumer `git clone` +
         # `install.sh` boilerplate that exists in dodot et al today.
