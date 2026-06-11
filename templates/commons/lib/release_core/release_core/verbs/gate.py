@@ -321,7 +321,9 @@ def main(argv: list[str]) -> int:
     # silently ungated the first commit of a session (the hook fires before init
     # has materialized .release/). The gate never skips.
     managed_cfg = os.path.join(root, ".release", "lefthook.yml")
-    explicit_cfg = env.get("LEFTHOOK_CONFIG")
+    # An empty/whitespace LEFTHOOK_CONFIG counts as unset — pop it so it never
+    # leaks through to lefthook; the managed/discovery branches then apply.
+    explicit_cfg = env.pop("LEFTHOOK_CONFIG", "").strip()
     if explicit_cfg:
         # A relative LEFTHOOK_CONFIG means relative to the REPO ROOT — lefthook
         # runs with cwd=root below — so resolve it there (not against the

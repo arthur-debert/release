@@ -378,6 +378,29 @@ def test_gate_explicit_lefthook_config_is_respected(monkeypatch, tmp_path):
     assert captured["env"]["LEFTHOOK_CONFIG"] == str(mine)
 
 
+def test_gate_empty_lefthook_config_counts_as_unset(monkeypatch, tmp_path):
+    """An empty/whitespace LEFTHOOK_CONFIG is unset — scrubbed from the env so
+    it never leaks to lefthook; the managed config applies as usual."""
+    (tmp_path / ".release").mkdir()
+    (tmp_path / ".release" / "lefthook.yml").write_text("pre-commit:\n")
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd, cwd, env):
+        captured["env"] = env
+        return _Result()
+
+    monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
+    monkeypatch.setenv("LEFTHOOK_CONFIG", "   ")
+    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    assert gate.main([]) == 0
+    assert captured["env"]["LEFTHOOK_CONFIG"] == str(tmp_path / ".release" / "lefthook.yml")
+
+
 def test_gate_explicit_relative_lefthook_config_resolves_against_root(monkeypatch, tmp_path):
     """A RELATIVE LEFTHOOK_CONFIG is relative to the repo root (lefthook runs
     with cwd=root) — validated and resolved there, not against the caller's
