@@ -52,6 +52,35 @@ def test_addressing_reports_open_thread_count(context):
     assert "1 open thread" in status.next_action
 
 
+def test_addressing_names_the_thread_reading_tool(context):
+    # Discoverability (#564): the agent must learn HOW to read the threads from
+    # the next action itself, not fall back to raw `gh api`.
+    status = evaluate(context("copilot_changes_requested"))
+    assert "release-core pr review show" in status.next_action
+    assert "resolve" in status.next_action
+
+
+# --- READY next-action: draft vs already-flipped (#564) ----------------------
+
+
+def test_ready_draft_says_flip(context):
+    status = evaluate(context("ready_checks_green"))  # isDraft: true
+    assert status.state is TaskState.READY
+    assert "release-core pr ready" in status.next_action
+
+
+def test_ready_non_draft_says_done_not_flip(context):
+    # Post-flip a READY PR is in the human's hands: the next action must say
+    # done/await merge, never re-prescribe the flip the agent already made.
+    ctx = context("ready_checks_green")
+    ctx.is_draft = False
+    status = evaluate(ctx)
+    assert status.state is TaskState.READY
+    assert "release-core pr ready" not in status.next_action
+    assert "done" in status.next_action
+    assert "merge" in status.next_action
+
+
 def test_blocked_reasons_are_distinct(context):
     assert "conflict" in evaluate(context("blocked_merge_conflict")).next_action
     assert "failing" in evaluate(context("blocked_checks_failing")).next_action

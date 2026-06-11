@@ -124,6 +124,13 @@ def attach(root: click.Group) -> None:
     )
     root.add_command(
         wrap_verb(
+            tasks.coverage,
+            name="coverage",
+            short_help="Run THIS repo's coverage tool(s); per-module summary (kind-aware).",
+        )
+    )
+    root.add_command(
+        wrap_verb(
             tasks.build,
             name="build",
             short_help="Build THIS repo (the single app-root build command).",

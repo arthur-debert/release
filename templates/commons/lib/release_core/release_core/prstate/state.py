@@ -14,8 +14,9 @@ reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*
 decision is the polling caller's, not the snapshot's — the snapshot is
 stateless and has no clock.
 
-One review cycle is assumed (the first addressing is not itself re-reviewed);
-the structure leaves room to add cycles later.
+Review cycles repeat until done: a review counts only against the current
+head, so any push stales the prior review and the snapshot advises RE-REQUEST
+(the engine is the arbiter — no minor-round exception, #565).
 """
 
 from __future__ import annotations
@@ -137,7 +138,8 @@ def evaluate(
             return status
         status.state = TaskState.ADDRESSING
         status.next_action = (
-            f"triage {open_threads} open thread(s): fix-or-reply, then resolve each"
+            f"triage {open_threads} open thread(s): read them with "
+            "`release-core pr review show`, then fix-or-reply + resolve each"
         )
         return status
 
@@ -159,10 +161,16 @@ def evaluate(
 
     if ctx.mergeable == "MERGEABLE":
         status.state = TaskState.READY
-        status.next_action = (
-            "reviewed + CI green + mergeable — run `release-core pr ready` "
-            "to flip draft->ready and page the human"
-        )
+        if ctx.is_draft:
+            status.next_action = (
+                "reviewed + CI green + mergeable — run `release-core pr ready` "
+                "to flip draft->ready and page the human"
+            )
+        else:
+            status.next_action = (
+                "reviewed + CI green + mergeable, already ready-for-review — "
+                "done; await the human's verify + merge"
+            )
         return status
 
     # Reviewed, but mergeability still unknown (GitHub computing) — re-poll.

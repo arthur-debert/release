@@ -149,13 +149,66 @@ if [ -f go.mod ] && ! command -v golangci-lint >/dev/null 2>&1; then
   command -v golangci-lint >/dev/null 2>&1 || _warn_unarmed golangci-lint
 fi
 
-# --- 0.1. Pre-commit hook wiring (BOTH local and cloud) -----------------
+# --- 0.1. Pull-model: self-update release_core from the published wheel --
+# The north star (ADR-0003): repos AUTO-UPDATE on session start — this REPLACED
+# the hand-run push treadmill (`orc propagate`, since removed). The boot resolver
+# `install-release-core`
+# resolves the latest release wheel, pip-installs it (--force-reinstall — the
+# wheel version is static, so `-U` would skip it; deps resolve from PyPI), THEN runs `release-core
+# init` itself (it locates the just-installed console-script across venv/--user/
+# system layouts). A bare `init` now materializes the WHOLE managed tree from the
+# wheel bundle (the .release/ build dir + every working-tree mirror — skills,
+# ORIENTATION, configs, the CLAUDE.md block) and auto-commits any managed change
+# (#476 cutover) — not just the config subset. So SessionStart self-syncs the full
+# tree from the pulled wheel: no push needed (no push mechanism exists). One
+# command does the whole boot. Runs in BOTH local and cloud (above the cloud-only
+# gate) — auto-update is the whole point. Runs BEFORE the hook wiring (release#567):
+# init materializes the ephemeral .release/ (the gate config), so the very first
+# session of a fresh clone wires a hook that has a gate to run.
+#
+# BEST-EFFORT, never aborts the session: every call is `|| warn`, and init
+# failure inside the resolver is itself best-effort. The committed tree already
+# in the repo degrades gracefully if the pull fails (a stale repo is
+# older-but-working, never broken).
+#
+# The resolver is part of the committed bootstrap: it ships in the synced set
+# (templates/commons/bin/ → consumer bin/install-release-core), so it is found at
+# `$REPO_ROOT/bin/install-release-core` without needing the consumer's bin/ on
+# PATH. Fall back to a PATH lookup (release-dev, where dodot puts bin/ on PATH).
+# If neither resolves (a consumer not yet seeded with the resolver), the block
+# no-ops — safe to land fleet-wide before the seeding propagate.
+#
+# Install target: the resolver self-isolates — it installs release_core into its
+# OWN dedicated venv (never the user pip / system site / a project venv) and
+# symlinks the console-scripts onto PATH (~/.local/bin). So there's nothing to
+# choose here: just invoke it. (It still tolerates a stale caller passing
+# --user/--break-system-packages, so an in-flight fleet migration can't break.)
+_resolver=""
+if [ -x "${REPO_ROOT}/bin/install-release-core" ]; then
+  _resolver="${REPO_ROOT}/bin/install-release-core"
+elif command -v install-release-core >/dev/null 2>&1; then
+  _resolver="install-release-core"
+fi
+if [ -n "${_resolver}" ]; then
+  "${_resolver}" \
+    || echo "warning: install-release-core failed — release_core not updated this session" >&2
+fi
+
+# --- 0.2. Pre-commit hook wiring (BOTH local and cloud) -----------------
 # Wiring `.git/hooks/pre-commit` is per-clone state — every fresh clone
 # (and cloud snapshot) starts without it, so we wire it on every session
 # and in both contexts. Runs ABOVE the cloud-only gate because skipping
 # it locally is what produces the "agents are still running husky"
 # symptom: lefthook never gets installed, husky's old wiring keeps
 # firing.
+#
+# Runs AFTER the pull-model boot (§0.1) deliberately (release#567): on a
+# fresh clone/session the boot installs release-core and `release-core
+# init` materializes the ephemeral `.release/` (gitignored since WS4, so
+# EVERY session starts without it) — wiring first left the earliest
+# commits of a session without a hook at all, and a previously-wired hook
+# firing before init warn-and-passed on the missing config (the
+# first-commit-of-session boot hole; gate now fails loud on that too).
 #
 # Default: lefthook (binary installed at env-setup time in cloud, by
 # brew/cargo/npm locally). Fallback for repos that ship a hand-rolled
@@ -181,7 +234,8 @@ elif command -v lefthook >/dev/null 2>&1; then
   _lefthook="lefthook"
 fi
 
-if [ -f .release/lefthook.yml ] && command -v release-core >/dev/null 2>&1; then
+if command -v release-core >/dev/null 2>&1 \
+   && { [ -f .release/lefthook.yml ] || [ ! -f lefthook.yml ]; }; then
   # WS3 (release#524): the gate definition lives ONLY in the ephemeral .release/
   # build dir — there is no tracked root lefthook.yml for a stock `lefthook
   # install` shim to discover. Wire the git hook through the binary instead:
@@ -190,6 +244,11 @@ if [ -f .release/lefthook.yml ] && command -v release-core >/dev/null 2>&1; then
   # stale core.hooksPath redirect itself. This is the path every migrated consumer
   # takes; the root-lefthook.yml branch below is for release's own repo (which
   # keeps a hand-authored root gate) and not-yet-migrated consumers.
+  #
+  # The no-root-lefthook.yml arm (release#567): a consumer whose §0.1 init failed
+  # (network hiccup) has no .release/lefthook.yml YET — wire the binary hook
+  # anyway, so its commits hit `release-core gate --hook`'s fail-loud
+  # unmaterialized-config error instead of running ungated with no hook at all.
   if ! release-core gate --install-hook >/dev/null; then
     echo "warning: release-core gate --install-hook failed — pre-commit hook NOT wired" >&2
   fi
@@ -239,49 +298,6 @@ elif [ -x app-bin/pre-commit ]; then
   elif ! ln -sf "${REPO_ROOT}/app-bin/pre-commit" "${_hooks_dir}/pre-commit"; then
     echo "warning: failed to symlink app-bin/pre-commit into \"${_hooks_dir}\" — pre-commit hook NOT wired" >&2
   fi
-fi
-
-# --- 0.2. Pull-model: self-update release_core from the published wheel --
-# The north star (ADR-0003): repos AUTO-UPDATE on session start — this REPLACED
-# the hand-run push treadmill (`orc propagate`, since removed). The boot resolver
-# `install-release-core`
-# resolves the latest release wheel, pip-installs it (--force-reinstall — the
-# wheel version is static, so `-U` would skip it; deps resolve from PyPI), THEN runs `release-core
-# init` itself (it locates the just-installed console-script across venv/--user/
-# system layouts). A bare `init` now materializes the WHOLE managed tree from the
-# wheel bundle (the .release/ build dir + every working-tree mirror — skills,
-# ORIENTATION, configs, the CLAUDE.md block) and auto-commits any managed change
-# (#476 cutover) — not just the config subset. So SessionStart self-syncs the full
-# tree from the pulled wheel: no push needed (no push mechanism exists). One
-# command does the whole boot. Runs in BOTH local and cloud (above the cloud-only
-# gate) — auto-update is the whole point.
-#
-# BEST-EFFORT, never aborts the session: every call is `|| warn`, and init
-# failure inside the resolver is itself best-effort. The committed tree already
-# in the repo degrades gracefully if the pull fails (a stale repo is
-# older-but-working, never broken).
-#
-# The resolver is part of the committed bootstrap: it ships in the synced set
-# (templates/commons/bin/ → consumer bin/install-release-core), so it is found at
-# `$REPO_ROOT/bin/install-release-core` without needing the consumer's bin/ on
-# PATH. Fall back to a PATH lookup (release-dev, where dodot puts bin/ on PATH).
-# If neither resolves (a consumer not yet seeded with the resolver), the block
-# no-ops — safe to land fleet-wide before the seeding propagate.
-#
-# Install target: the resolver self-isolates — it installs release_core into its
-# OWN dedicated venv (never the user pip / system site / a project venv) and
-# symlinks the console-scripts onto PATH (~/.local/bin). So there's nothing to
-# choose here: just invoke it. (It still tolerates a stale caller passing
-# --user/--break-system-packages, so an in-flight fleet migration can't break.)
-_resolver=""
-if [ -x "${REPO_ROOT}/bin/install-release-core" ]; then
-  _resolver="${REPO_ROOT}/bin/install-release-core"
-elif command -v install-release-core >/dev/null 2>&1; then
-  _resolver="install-release-core"
-fi
-if [ -n "${_resolver}" ]; then
-  "${_resolver}" \
-    || echo "warning: install-release-core failed — release_core not updated this session" >&2
 fi
 
 # Cloud-only gate. Everything below is cloud-only — local sessions

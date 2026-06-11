@@ -113,7 +113,11 @@ def _parse(argv: list[str], usage: str) -> tuple[int | None, str | None] | int:
         elif pr_arg is None:
             pr_arg = arg
         else:
-            print("error: too many arguments", file=sys.stderr)
+            print(
+                f"error: too many arguments ({arg!r}) — the only positional is "
+                "the PR number; select a reviewer with --reviewer <name>",
+                file=sys.stderr,
+            )
             return 64
     if pr_arg is not None and not pr_arg.isdigit():
         print(f"error: PR number must be numeric (got: {pr_arg})", file=sys.stderr)

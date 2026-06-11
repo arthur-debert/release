@@ -1,5 +1,5 @@
-"""test-unit / test-e2e / test-all / build / run — detect THIS repo's real
-command for each task and exec it, propagating the exit code.
+"""test-unit / test-e2e / test-all / coverage / build / run — detect THIS
+repo's real command for each task and exec it, propagating the exit code.
 
 These are the runnable half of release#507: where ``release-core how-to`` renders
 what each verb resolves to, these execute it. They read :mod:`release_core.repo_commands`
@@ -12,12 +12,15 @@ Dispatch shape (see repo_commands for the rationale):
   test-unit  fan-out over every component's unit suite, cheap-first.
   test-e2e   the build-dependent e2e suite, kept separate from unit.
   test-all   unit then e2e.
+  coverage   fan-out over every component's coverage tool (release#568).
   build/run  the SINGLE app-root command.
 
 Skip-vs-fail: a test verb with NOTHING wired skips-with-notice (exit 0) — an
 unscaffolded suite must not fail the loop (mirrors the wrappers). ``build``/``run``
 asked of a repo with no derivable command is a real error (exit 1) — you asked to
-build something that has no build.
+build something that has no build. ``coverage`` follows the build/run side:
+asked-for coverage with no coverage-capable component (or a missing
+cargo-llvm-cov) is a loud exit 1, never a silent skip.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ import subprocess
 import sys
 from shutil import which
 
-from .. import repo_commands
+from .. import manifest, repo_commands
 from ..repo_commands import Cmd
 
 
@@ -123,6 +126,48 @@ def test_all(argv: list[str]) -> int:
     if rc != 0:
         return rc
     return _fanout(e2e, root)
+
+
+# --- coverage --------------------------------------------------------------
+
+
+def coverage(argv: list[str]) -> int:
+    """Run every component's coverage tool and end on its per-module summary
+    (release#568). UNLIKE the test verbs this never skips-with-notice: coverage
+    was explicitly asked for, so a Kind with no coverage toolchain is a loud
+    error, and a missing tool (cargo-llvm-cov) hard-errors with the install
+    command — never a silent skip (the hard-gate philosophy)."""
+    if _is_help(argv):
+        print(
+            "release-core coverage — run THIS repo's coverage (kind-aware: "
+            "test runner --coverage / cargo llvm-cov / go tool cover) and "
+            "print the per-module summary"
+        )
+        return 0
+    root = _repo_root()
+    cmds = repo_commands.coverage_commands(root)
+    if not cmds:
+        try:
+            kind = manifest.detect_kind(root)
+        except manifest.KindError:
+            kind = "unknown"
+        print(
+            f"release-core coverage: no coverage tool for kind {kind} — no "
+            "component of this repo has a coverage-capable toolchain "
+            "(node test script, Cargo.toml, or go.mod).",
+            file=sys.stderr,
+        )
+        return 1
+    for cmd in cmds:
+        if cmd.argv[:2] == ["cargo", "llvm-cov"] and not which("cargo-llvm-cov"):
+            print(
+                "release-core coverage: cargo-llvm-cov is not installed — "
+                "install it with `cargo install cargo-llvm-cov --locked` "
+                "and re-run.",
+                file=sys.stderr,
+            )
+            return 1
+    return _fanout(cmds, root)
 
 
 # --- build / run (single app-root command) --------------------------------

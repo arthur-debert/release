@@ -398,6 +398,101 @@ def test_push_happens_on_clean_default_branch(tmp_path, monkeypatch, capsys):
     assert "chore(release)" in _git(bare, "log", "-1", "--pretty=format:%s", "main")
 
 
+# --------------------------------------------------------------------------
+# the branch-from-origin hint (release#566)
+#
+# When the auto-commit lands on the checked-out DEFAULT branch and stays local,
+# an agent that branches from local <default> carries the alien sync commit
+# into its feature PR diff. init must say so loudly — and ONLY when a commit
+# actually happened on the default branch and was not pushed.
+# --------------------------------------------------------------------------
+
+_HINT = "managed sync committed on"
+
+
+def _repo_with_origin(tmp_path, *, default_branch="main"):
+    """A real repo whose `origin` is a bare clone with origin/HEAD set, so
+    gh.git_default_branch resolves (the same dance the push tests do)."""
+    repo = _init_git_repo(tmp_path / "repo", default_branch=default_branch)
+    bare = tmp_path / "origin.git"
+    _subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(repo, "remote", "add", "origin", str(bare))
+    _git(repo, "push", "-q", "-u", "origin", default_branch)
+    _git(repo, "remote", "set-head", "origin", default_branch)
+    return repo
+
+
+@_needs_git
+def test_branch_hint_fires_when_auto_commit_lands_on_default_branch(tmp_path, monkeypatch, capsys):
+    repo = _repo_with_origin(tmp_path)
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out  # the auto-commit happened…
+    assert f"{_HINT} 'main'" in out  # …and the hint names the branch
+    assert "branch from origin/main" in out  # …with the remedy
+
+
+@_needs_git
+def test_branch_hint_absent_on_noop_init(tmp_path, monkeypatch, capsys):
+    # No managed change → no auto-commit → no hint (the common steady-state
+    # SessionStart must stay quiet).
+    repo = _repo_with_origin(tmp_path)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_run_full_sync", lambda *a, **k: (0, [], "test-ref", []))
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "already current" in out
+    assert _HINT not in out
+
+
+@_needs_git
+def test_branch_hint_absent_on_feature_branch(tmp_path, monkeypatch, capsys):
+    # The commit landing on a feature branch is the rider's own problem space —
+    # the hint is specifically about polluting the DEFAULT branch.
+    repo = _repo_with_origin(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert _HINT not in out
+
+
+@_needs_git
+def test_branch_hint_absent_when_commit_was_pushed(tmp_path, monkeypatch, capsys):
+    # --push succeeded on the default branch: the commit is on origin, so
+    # branching from local <default> is fine — no hint.
+    repo = _repo_with_origin(tmp_path)
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main(["--push"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "pushed to main." in out
+    assert _HINT not in out
+
+
+@_needs_git
+def test_branch_hint_absent_without_an_origin(tmp_path, monkeypatch, capsys):
+    # No origin remote → no origin/<default> to branch from (and no PR to
+    # pollute) — the hint must not fire with an unresolvable remedy.
+    repo = _init_git_repo(tmp_path / "repo")
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert _HINT not in out
+
+
 @_needs_git
 def test_commit_failure_does_not_fail_init(tmp_path, monkeypatch, capsys):
     # If the commit itself errors, init must still exit 0 (commit is best-effort).
@@ -1060,6 +1155,104 @@ def test_full_removes_retired_tombstoned_files_in_managed_commit(tmp_path, monke
     assert "bin/deploy" not in committed
     # The removals are real deletions in the index, not stray edits.
     assert _git(repo, "status", "--porcelain", ".release-sync-state.yaml", "bin/release") == ""
+
+
+@_needs_yq
+@_needs_git
+def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch, capsys):
+    """release#563: a pre-WS4 seed TRACKS .release/ORIENTATION.md (stale,
+    doctrine-contradicting) and carries the OLD @.release/ORIENTATION.md
+    CLAUDE.md import. One bare init converges BOTH: the recompose removes the
+    on-disk copy and never re-materializes it, the tombstone + WS4 untracking
+    record the deletion, and the stub refresh rewrites the managed block to
+    the how-to-pointing form. The second init is a no-op."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    (repo / ".release").mkdir()
+    orientation = repo / ".release" / "ORIENTATION.md"
+    orientation.write_text("# Orientation\n\nOpen a live PR (never a draft).\n")
+    monkeypatch.setitem(
+        init.sync.RETIRED_BLOB_FILES,
+        ".release/ORIENTATION.md",
+        frozenset({init.sync._git_blob_sha1(str(orientation))}),
+    )
+    (repo / "CLAUDE.md").write_text(
+        f"{init.sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{init.sync.CLAUDE_END}\n"
+        "\n# Consumer\n\nmine\n"
+    )
+    _git(repo, "add", "-f", ".release/ORIENTATION.md", "CLAUDE.md")
+    _git(repo, "commit", "-q", "-m", "pre-WS4 seed: tracked .release + old import stub")
+
+    assert init.main([]) == 0
+    out = capsys.readouterr().out
+    assert "committed" in out
+    # Gone from disk, NOT re-materialized by the recompose.
+    assert not orientation.exists()
+    # Untracked — the deletion is recorded, not resurrected by the pathspec commit.
+    assert _git(repo, "ls-files", ".release/ORIENTATION.md") == ""
+    # The stub converged to the how-to-pointing form; consumer prose survives.
+    claude = (repo / "CLAUDE.md").read_text()
+    assert "release-core how-to" in claude
+    assert "@.release/ORIENTATION.md" not in claude
+    assert "# Consumer" in claude
+    assert _git(repo, "status", "--porcelain") == ""
+
+    # Idempotent: nothing left to converge.
+    head = _git(repo, "rev-parse", "HEAD")
+    assert init.main([]) == 0
+    out = capsys.readouterr().out
+    assert "already current" in out
+    assert _git(repo, "rev-parse", "HEAD") == head
+    assert not orientation.exists()
+
+
+@_needs_yq
+@_needs_git
+def test_full_sweeps_retired_vendor_dir_and_prunes_husk(tmp_path, monkeypatch, capsys):
+    """release#563: the vendored semver-tool (retired #414) is swept per-file
+    under blob provenance and its emptied directory husk is pruned — but a
+    consumer-owned file inside the dir keeps the dir (and itself) alive."""
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    vendor = repo / "vendor" / "semver-tool"
+    vendor.mkdir(parents=True)
+    contents = {
+        "vendor/semver-tool/semver": "#!/usr/bin/env bash\nsemver tool\n",
+        "vendor/semver-tool/LICENSE": "Apache-2.0\n",
+        "vendor/semver-tool/README.md": "# semver-tool\n",
+    }
+    for rel, body in contents.items():
+        (repo / rel).write_text(body)
+        monkeypatch.setitem(
+            init.sync.RETIRED_BLOB_FILES,
+            rel,
+            frozenset({init.sync._git_blob_sha1(str(repo / rel))}),
+        )
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "pre-pull seed: vendored semver-tool")
+
+    assert init.main([]) == 0
+    out = capsys.readouterr().out
+    assert "committed" in out
+    assert not (repo / "vendor").exists(), "left a vendor/ husk behind"
+    last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
+    assert "D\tvendor/semver-tool/semver" in last
+    assert _git(repo, "status", "--porcelain") == ""
+
+    # Re-seed WITH a consumer file alongside: the files sweep, the dir stays.
+    vendor.mkdir(parents=True)
+    for rel, body in contents.items():
+        (repo / rel).write_text(body)
+    (vendor / "NOTES.md").write_text("consumer-owned\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "re-seed with consumer file")
+    capsys.readouterr()
+    assert init.main([]) == 0
+    capsys.readouterr()
+    assert not (vendor / "semver").exists()
+    assert (vendor / "NOTES.md").exists(), "consumer file must survive the prune"
 
 
 @_needs_yq

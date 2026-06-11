@@ -8,7 +8,7 @@ ORIENTATION.md or per-Kind doc to drift (release#501, "invoke, don't discover").
 
 It does NOT guess commands by Kind. The no-arg path reads THIS repo's real
 commands via :mod:`release_core.repo_commands` (the component detector) and lists
-the uniform ``release-core test-unit|test-e2e|test-all|build|run`` verbs
+the uniform ``release-core test-unit|test-e2e|test-all|coverage|build|run`` verbs
 annotated with what each resolves to — so it can't assert a command the repo
 doesn't have (release#507). The ``how-to <kind>`` arg path is the abstract
 "explain this Kind" documentation mode (no specific repo to read).
@@ -54,39 +54,46 @@ def _repo_root() -> str:
 _KIND_HINT: dict[str, dict[str, str]] = {
     "rust-cli": {
         "test": "cargo test",
+        "coverage": "cargo llvm-cov",
         "build": "cargo build --release",
         "run": "cargo run -- <args>",
     },
     "zed-extension": {
         "test": "cargo test",
+        "coverage": "cargo llvm-cov",
         "build": "cargo build --release",
         "run": "(install as a dev extension)",
     },
     "go-cli": {
         "test": "go test ./...",
+        "coverage": "go test -coverprofile + go tool cover -func",
         "build": "go build ./...",
         "run": "go run . <args>",
     },
     "vscode-ext": {
         "deps": "npm install",
         "test": "your package.json test* scripts",
+        "coverage": "your test script with --coverage",
         "build": "your package.json build script",
         "run": "watch script, then F5",
     },
     "electron-app": {
         "deps": "npm install",
         "test": "your package.json test:unit / test:e2e scripts",
+        "coverage": "your test script with --coverage",
         "build": "your package.json build script",
         "run": "dev/start script",
     },
     "tauri-app": {
         "deps": "<pm> install",
         "test": "frontend test* scripts + cargo test (src-tauri/)",
+        "coverage": "frontend --coverage + cargo llvm-cov (src-tauri/)",
         "build": "<pm> tauri build",
         "run": "dev / tauri dev script",
     },
     "nvim-plugin": {
         "test": "app-bin/test-all (or busted tests/)",
+        "coverage": "(no coverage tool for this Kind)",
         "build": "(none — interpreted)",
         "run": "(open Neovim with the plugin on the runtimepath)",
     },
@@ -94,6 +101,7 @@ _KIND_HINT: dict[str, dict[str, str]] = {
 
 _GENERIC_HINT = {
     "test": "(see this repo's manifest / CI)",
+    "coverage": "(see this repo's manifest / CI)",
     "build": "(see this repo's manifest / CI)",
     "run": "(see this repo's README)",
 }
@@ -120,6 +128,8 @@ def _verbs_section_repo(root: str) -> list[str]:
     e2e = _resolved(rc.e2e) if rc.e2e else "(no e2e suite wired)"
     lines.append(f"  test (e2e)          : release-core test-e2e    → {e2e}")
     lines.append("  test (unit + e2e)   : release-core test-all")
+    cov = _resolved(rc.coverage) if rc.coverage else "(no coverage tool for this repo)"
+    lines.append(f"  coverage            : release-core coverage    → {cov}")
     build = rc.build.display if rc.build else "(no build command detected)"
     lines.append(f"  build               : release-core build       → {build}")
     lines.append(
@@ -148,6 +158,8 @@ def _verbs_section_kind(kind: str) -> list[str]:
     lines.append(f"  test (unit)         : release-core test-unit   → {hint['test']}")
     lines.append("  test (e2e)          : release-core test-e2e")
     lines.append("  test (unit + e2e)   : release-core test-all")
+    cov = hint.get("coverage", _GENERIC_HINT["coverage"])
+    lines.append(f"  coverage            : release-core coverage    → {cov}")
     lines.append(f"  build               : release-core build       → {hint['build']}")
     lines.append(
         "  release             : release-core cut <major|minor|patch>"
@@ -171,7 +183,13 @@ _GATE_BLURB = (
 def _dev_cycle_section() -> list[str]:
     lines: list[str] = []
     lines.append("The dev cycle (the ONE flow — draft-first)")
-    lines.append("  1. Branch off main.")
+    lines.append(
+        "  1. Branch off origin/<default-branch> (`git fetch origin && "
+        "git switch -c <branch> origin/<default-branch>`), NOT the local "
+        "default branch: the SessionStart boot may have auto-committed a "
+        "managed sync there, and branching from it carries that alien "
+        "commit into your PR diff."
+    )
     lines.append("  2. Make the change.")
     lines.append(
         "  3. Add a changelog fragment (required, same PR): "

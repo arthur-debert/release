@@ -71,12 +71,11 @@ The Development Life Cycle
 
     On re-requesting a review:
 
-        After addressing a review and pushing, do you re-request the review? It
-        depends. For small things (a double allocation, a flaky shell call, a
-        better name) — no. If the first review flagged larger design or
-        algorithm changes (a "this really needs to change significantly"), the
-        addressing commit can itself carry small-to-large issues, so a second
-        review is welcome. Otherwise, not.
+        After any push, re-request the review — no exception for small
+        rounds. The state engine is the arbiter: a review counts only
+        against the current head, so any push makes the prior review stale
+        and `release-core pr status` advises RE-REQUEST. That next action
+        is authoritative; bot re-reviews are cheap, so comply and move on.
 
 2. Larger features (multiple PRs)
 

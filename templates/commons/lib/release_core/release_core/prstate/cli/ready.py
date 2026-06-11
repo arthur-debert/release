@@ -117,4 +117,9 @@ def _flip(pr: int) -> int:
         return 0
     ghapi.pr_ready(pr)
     print(f"#{pr}: draft -> ready — handed to the human for verify + merge")
+    print(
+        "note: GitHub re-runs checks on the ready_for_review event, so status "
+        "may briefly read VALIDATING — run `release-core pr wait` once more "
+        "if you need green confirmation"
+    )
     return 0
