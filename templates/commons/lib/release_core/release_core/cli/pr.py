@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import click
 
+from ..prstate.cli import ready as ready_cli
 from ..prstate.cli import review as review_cli
 from ..prstate.cli import task_status
 from ._helpers import wrap_script, wrap_verb
@@ -104,5 +105,12 @@ group.add_command(
         task_status.main,
         name="status",
         short_help="Where does this PR stand? (lifecycle state + next action)",
+    )
+)
+group.add_command(
+    wrap_verb(
+        ready_cli.main,
+        name="ready",
+        short_help="Flip draft->ready when the engine says READY (--undo reverts).",
     )
 )
