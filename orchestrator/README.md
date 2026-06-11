@@ -82,6 +82,32 @@ The clone bounds the blast radius; the widened permissions let the
 agent actually execute lint/test commands rather than just describing
 them.
 
+### Probes boot the clone first (release#578)
+
+SDK-launched sessions never fire the consumer's SessionStart hook, so a
+bare probe would evaluate a stale, unbooted tree — that produced false
+PASSes in two validation rounds. Before launching the agent session,
+`orc probe` now runs the clone's own real boot chain
+(`bin/setup-dev-env.sh` → `install-release-core` → `release-core init`),
+exactly as a real session would, and then **boot-asserts** that the
+managed sync actually applied:
+
+- `.release/.release-sync-source` exists and names a source sha/ref
+  (assert a — init composed the managed tree);
+- the clone's git `info/exclude` carries the WS7 managed-mirrors block
+  sentinel (assert b — init rewrote the mirrors exclude block).
+
+The asserts check **materialized state, never commits** — an
+already-converged clone commits nothing, and that is success. A boot
+report (provenance ref, `release-core --version`, whether this boot
+created a sync commit) is printed to stderr before the session starts.
+
+Any boot failure — missing `bin/setup-dev-env.sh`, non-zero exit, or a
+failed assert — **aborts the probe by design**: an unbooted probe's
+findings describe a stale world, not what we shipped, so they are
+invalid. There is no fallback boot path. The eval prompt stays
+hint-free; only the boot is explicit.
+
 ### Eval prompt convention
 
 Probe prompts begin with the marker line:
@@ -136,6 +162,9 @@ fresh agent's `lefthook run` surfaced it.
 ## Layout
 
 - `orchestrator/cli.py` — `orc` entry point
+- `orchestrator/boot.py` — `boot_clone()`: the probe's explicit, fail-loud
+  consumer-clone boot + boot-assert + boot report (release#578; pure stdlib,
+  unit-tested in `tests/test_boot.py` against fake boot scripts)
 - `orchestrator/session.py` — `run_session()` wrapping `ClaudeSDKClient`
 - `orchestrator/watch.py` — `orc watch` poll-loop + pure `decide()` dispatch
   (imports `release_core.prstate.state`; lazy-imports the SDK so its logic
@@ -143,6 +172,9 @@ fresh agent's `lefthook run` surfaced it.
 - `orchestrator/state.py` — JSON-backed `{repo_path: session_id}` store
   at `~/.local/state/release-orchestrator/sessions.json`
 - `tests/spike.sh` — end-to-end smoke check
+- `tests/test_boot.py` — pytest suite for `boot_clone()` (no network, no SDK;
+  collected by the workspace-root `pytest`, or run
+  `uv run --project orchestrator pytest orchestrator/tests` directly)
 
 ## What's deliberately not here yet
 

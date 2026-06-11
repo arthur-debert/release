@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import state, watch
+from .boot import BootError, boot_clone
 from .session import run_session
 
 
@@ -53,6 +54,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
     would let the subordinate agent run anything. The probe session is
     NOT persisted (so a later `orc resume` won't pick it up).
 
+    Before the agent session launches, the clone is BOOTED via its own
+    `bin/setup-dev-env.sh` (the real SessionStart chain — SDK sessions
+    never fire the hook, release#578), with a fail-loud boot-assert and a
+    boot report on stderr. A boot failure aborts: an unbooted probe is
+    invalid by design. The prompt stays hint-free; only the boot is added.
+
     See orchestrator/README.md for the canonical eval-prompt pattern.
     """
     if not args.yes:
@@ -65,6 +72,10 @@ def cmd_probe(args: argparse.Namespace) -> int:
         )
         return 2
     _guard_billing()
+    try:
+        boot_clone(args.repo)
+    except BootError as e:
+        sys.exit(f"orc probe: boot failed — probe invalidated: {e}")
     asyncio.run(
         run_session(
             args.repo,
@@ -257,7 +268,8 @@ def main(argv: list[str] | None = None) -> int:
     p_probe = sub.add_parser(
         "probe",
         help="evaluate a repo's environment via a fresh subordinate agent "
-        "(throwaway clone — uses bypassPermissions)",
+        "(throwaway clone — uses bypassPermissions; boots the clone via its "
+        "own bin/setup-dev-env.sh first, fail-loud)",
     )
     p_probe.add_argument("repo", help="path to throwaway clone of consumer repo")
     p_probe.add_argument("prompt", help="eval prompt — see orchestrator/README.md")
