@@ -72,9 +72,10 @@ Caveats:
 ## Onboarding a new repo
 
 Onboarding (GitHub-side policy + repo-side files) is driven by the
-`release-core admin` tree, not by a skill: `release-core admin policy
-ruleset|sweep|dependabot` for the GitHub-side state, `release-core admin
-secrets token` for `RELEASE_TOKEN`, then add the repo to
-`managed-repos.yaml` and verify with `release-core audit --repo <owner/repo>`
-/ `release-core admin smoke-test <owner/repo>`. See `release-core admin
---help` for the current commands and flags.
+`release-core admin` tree, not by a skill:
+`release-core admin policy ruleset|sweep|dependabot` for the GitHub-side
+state, `release-core admin secrets token` for `RELEASE_TOKEN`, then add the
+repo to `managed-repos.yaml` and verify with
+`release-core audit --repo <owner/repo>` /
+`release-core admin smoke-test <owner/repo>`.
+See `release-core admin --help` for the current commands and flags.

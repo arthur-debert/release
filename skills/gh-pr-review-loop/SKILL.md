@@ -48,7 +48,7 @@ Don't improvise around it.
 
 ## Arming the guard
 
-A PreToolUse guard (`pr-loop-guard`) blocks a bare `gh pr create` so this loop
+A PreToolUse guard (`bin/pr-loop-guard`) blocks a bare `gh pr create` so this loop
 can't be skipped under task momentum. Before you open the PR, arm it in its
 **own step**:
 
