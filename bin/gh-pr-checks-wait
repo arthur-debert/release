@@ -4,9 +4,9 @@
 # Usage:
 #   gh-pr-checks-wait <pr-number> [extra gh args...]
 #
-# Thin shim around `gh pr checks --watch --interval 30` for naming
-# symmetry with gh-copilot-wait. Polls every 30s. Any extra arguments
-# are forwarded to `gh pr checks` (e.g. `--required` to filter).
+# Thin shim around `gh pr checks --watch --interval 30` — the CI-checks
+# sibling of `release-core pr review wait`. Polls every 30s. Any extra
+# arguments are forwarded to `gh pr checks` (e.g. `--required` to filter).
 #
 # Exit codes:
 #   0  — all checks passed

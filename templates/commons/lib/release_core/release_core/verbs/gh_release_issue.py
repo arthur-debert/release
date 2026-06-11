@@ -5,7 +5,7 @@ Usage:
 
 Components (free-form, but standardize on these):
   copilot-review     — copilot-review.yml workflow misbehaves
-  pr-review-loop     — gh-copilot-{on,off,wait} or related helpers
+  pr-review-loop     — `release-core pr review|status` or related helpers
   rust-cli-release   — rust-cli reusable release workflow
   ruleset            — apply-ruleset / branch protection
   sweep-policy       — sweep-github-policy / templates

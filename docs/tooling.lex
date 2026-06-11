@@ -131,9 +131,12 @@ release-core, the gate, distribution, and workflows
 
     The happy-path command sequence for one PR:
         - `release-core pr status` — where am I?
-        - `release-core pr copilot on` — request the Copilot review
-          (REVIEWS_PENDING).
-        - `release-core pr copilot wait` — block in-turn until the review lands.
+        - `release-core pr review request` — request the required review(s)
+          (REVIEWS_PENDING). Reviewer-agnostic: it dispatches through the
+          adapter registry, defaulting to all required reviewers
+          (`--reviewer <name>` selects one).
+        - `release-core pr review wait` — block in-turn until the pending
+          review(s) land.
         - `release-core pr status` — now ADDRESSING; triage the threads.
         - `release-core pr resolve-thread` — resolve addressed threads.
         - `release-core pr checks-wait` — if VALIDATING, block until CI is green.
@@ -144,7 +147,7 @@ release-core, the gate, distribution, and workflows
     through the skill, not by hand-composing the helpers (a PreToolUse guard
     enforces this — see CLAUDE.md and `dev-cycle.lex`).
 
-    :: warning :: The wait commands (`pr copilot wait`, `pr checks-wait`) block
+    :: warning :: The wait commands (`pr review wait`, `pr checks-wait`) block
     in-turn — they are how an agent waits on CI without yielding. A subagent
     that yields to a background monitor terminates and is never re-woken. Drive
     the loop through `pr status` (state + next action) and block with the wait

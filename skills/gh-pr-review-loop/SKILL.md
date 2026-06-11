@@ -41,10 +41,10 @@ Single home: **`~/h/release/bin/`** — both the policy/setup tools and the day-
 | Command | What it does |
 |---|---|
 | `release-core pr status [<pr>] [--json]` | **The orient step.** Reads the PR once and reports one lifecycle state (`REVIEWS_PENDING` / `ADDRESSING` / `REVIEWED` / `VALIDATING` / `READY` / `BLOCKED`) plus the next action. Reviewer-agnostic (Copilot required, Gemini best-effort), with circuit breakers folded in. Read-only. Resolves the current branch's PR if `<pr>` is omitted. See "Orienting with release-core pr status" below. |
-| `release-core pr copilot on <pr>` | Request Copilot review (`gh pr edit --add-reviewer @copilot` — goes through GraphQL with the bot's real node_id; the `requested_reviewers` REST POST silently no-ops with `reviewers[]=copilot-pull-request-reviewer[bot]`). |
-| `release-core pr copilot off <pr>` | Remove Copilot reviewer. |
-| `release-core pr copilot wait <pr>` | Block until Copilot posts a review on the PR's current head SHA. 7m initial sleep, 2m polling, 30m hard cap. Exit 0 = posted; 2 = timeout. |
-| `release-core pr copilot review <pr>` | Composite: on + wait + print review body and inline comments. |
+| `release-core pr review request [<pr>] [--reviewer <name>]` | Request (or re-request) the required review(s). Reviewer-agnostic: dispatches through the adapter registry (default: all required reviewers); each adapter owns its bot's mechanics (Copilot's goes through GraphQL with the bot's real node_id; the `requested_reviewers` REST POST silently no-ops). |
+| `release-core pr review cancel [<pr>] [--reviewer <name>]` | Withdraw pending review request(s). |
+| `release-core pr review wait [<pr>] [--reviewer <name>]` | Block until the pending required review(s) land on the PR's current head. 7m initial sleep, 2m polling, 30m hard cap. Exit 0 = posted; 2 = timeout. |
+| `release-core pr review show [<pr>] [--reviewer <name>]` | Read-only: print the posted review(s) + every review thread (any author). |
 | `release-core pr resolve-thread <pr> <comment-id>` | Resolve the review thread containing the given comment via GraphQL `resolveReviewThread`. Idempotent — already-resolved threads exit 0 without complaint. Use after you fix-and-push or reply with rationale (see step 5 below). |
 | `release-core pr checks-wait <pr> [extra gh args...]` | Wait for all required checks to pass (or fail). Exit 0 = all pass; 1 = any fail. |
 | `release-core issue file <component> <symptom>` | File a bug at `arthur-debert/release` from inside any consumer repo. Auto-collects current repo, branch, PR, and recent workflow run for reproduction context. Use whenever the loop misbehaves in a way the consumer can't fix locally (see "When the loop misbehaves" below). |
@@ -110,14 +110,14 @@ It reads the PR once and reports exactly one lifecycle state plus the next actio
 
 | State | Meaning | What to do |
 |---|---|---|
-| `REVIEWS_PENDING` | a required reviewer (Copilot) hasn't finished | step 4 — `release-core pr copilot wait` |
+| `REVIEWS_PENDING` | a required reviewer (Copilot) hasn't finished | step 4 — `release-core pr review wait` |
 | `ADDRESSING` | reviews in, open threads remain | steps 5–5b — triage, fix/reply, resolve |
 | `REVIEWED` | reviews done, mergeability still computing | re-check shortly |
 | `VALIDATING` | reviews done, CI running | step 7 — `release-core pr checks-wait` |
 | `READY` | reviewed + CI green + mergeable | step 8 — flip draft→ready if drafted, page the user |
 | `BLOCKED` | failing check, merge conflict, **or a circuit breaker fired** | stop; surface the reason to the user |
 
-**Gemini is best-effort.** A silent or quota'd Gemini never holds the PR in `REVIEWS_PENDING` — only Copilot (required) gates. The snapshot is stateless and has no clock, so the *skip-after-timeout* call for a slow best-effort reviewer is yours: if you've already waited out `release-core pr copilot wait` and Gemini still shows `in_progress`, proceed.
+**Gemini is best-effort.** A silent or quota'd Gemini never holds the PR in `REVIEWS_PENDING` — only Copilot (required) gates. The snapshot is stateless and has no clock, so the *skip-after-timeout* call for a slow best-effort reviewer is yours: if you've already waited out `release-core pr review wait` and Gemini still shows `in_progress`, proceed.
 
 **Circuit breakers.** When `release-core pr status` returns `BLOCKED` with a `breaker:` line (`cycle-cap`, `diff-trajectory`, `comment-set`, `repeat-finding`), the review loop is diverging — do **not** push another fixup cycle. Stop and surface the breaker reason to the user. This is the first-class "stop and hand back" outcome, not a failure.
 
@@ -146,7 +146,7 @@ Build-dir migration PRs (from `migrate-consumer-to-build-dir`) carry a `migratio
 ### Step 4: waiting for Copilot
 
 ```sh
-release-core pr copilot wait <PR>
+release-core pr review wait <PR>
 ```
 
 Run in background (`run_in_background: true`) so the conversation isn't tied up for 7+ minutes. The script will exit when Copilot's review is posted on the PR's *current head SHA* (the SHA filter is critical — `submitted_at >= start_time` was the previous design and failed when the review was already posted before the wait started).
@@ -246,13 +246,13 @@ Whenever you end a turn on a PR — ready to merge, blocked, or stopping early �
 
 Two hard rules before you report:
 
-1. **Re-verify actual state — don't trust the last wait result.** A `release-core pr copilot wait` / `release-core pr checks-wait` exit code can be stale by the time you stop (a check finished, a new commit landed). Always read live state first:
+1. **Re-verify actual state — don't trust the last wait result.** A `release-core pr review wait` / `release-core pr checks-wait` exit code can be stale by the time you stop (a check finished, a new commit landed). Always read live state first:
 
    ```sh
    gh pr view <PR> --json url,headRefOid,mergeStateStatus,mergeable,statusCheckRollup,reviews --jq '{url,head:.headRefOid,mergeState:.mergeStateStatus,mergeable,checks:[.statusCheckRollup[]?|{name:.name,c:.conclusion}],reviews:[.reviews[]?|{by:.author.login,state:.state}]}'
    ```
 
-2. **Never stop with only "I'll wait for the background task."** If a background wait is genuinely needed, *poll it to completion first* — `release-core pr copilot wait` and `release-core pr checks-wait` block precisely so you can. Returning before they resolve wastes the run: the parent finds the event already arrived and has to restart you.
+2. **Never stop with only "I'll wait for the background task."** If a background wait is genuinely needed, *poll it to completion first* — `release-core pr review wait` and `release-core pr checks-wait` block precisely so you can. Returning before they resolve wastes the run: the parent finds the event already arrived and has to restart you.
 
 Then emit the report block verbatim — same shape every time so downstream agents can parse it:
 
@@ -301,8 +301,8 @@ touch "$(git rev-parse --git-dir)/pr-loop-armed"        # arm the PR-loop guard 
 gh pr create --title "..." --body "..."
 
 # 3. The first PR can't auto-trigger Copilot (workflow not on main yet); request manually:
-release-core pr copilot on <PR>
-release-core pr copilot wait <PR>           # background
+release-core pr review request <PR>
+release-core pr review wait <PR>            # blocks in-turn
 
 # Triage, push fixups, wait checks, merge.
 
@@ -315,7 +315,7 @@ release-core admin smoke-test <owner/repo>
 
 Notes:
 
-- The first PR is forced to use `release-core pr copilot on` manually (workflow needs to be on main first).
+- The first PR is forced to use `release-core pr review request` manually (workflow needs to be on main first).
 - Order: `release-core admin policy ruleset` → `release-core admin secrets token` → drop policy files → PR. The ruleset enables auto-discovery for `release-core admin secrets token` and `release-core admin policy dependabot`; running them before adds `--repos` overhead.
 - If `release-core admin policy ruleset`'s auto-detect picks up zero checks (brand-new repo with no prior CI runs), it falls back to yq job IDs. Pass `--checks` explicitly if both fail.
 - Non-rust stacks (Electron, VS Code, nvim-plugin, tree-sitter, Zed): per-stack templates aren't written yet. Drop in only the stack-agnostic 3 files (`CODEOWNERS`, `dependabot.yml`, `workflows/copilot-review.yml`) by `cp ~/h/release/templates/rust/<file>` — those have no Rust-specific content. Skip `pull_request_template.md` and `copilot-instructions.md` (rust-flavored content) until proper per-stack templates ship.
@@ -353,7 +353,7 @@ Symptoms worth filing:
 
 - `copilot-review.yml` reports SUCCESS but `requested_reviewers` is empty after 60s
 - `copilot-review.yml` exits FAILURE with a non-obvious error
-- `release-core pr copilot wait` times out (30m, no review) on a non-draft PR
+- `release-core pr review wait` times out (30m, no review) on a non-draft PR
 - `rust-cli` release workflow fails in a way that looks like infra, not project code
 - Ruleset blocks a merge with check names that don't exist in the workflow output
 - `release-core admin policy sweep` produces a conflict that looks like a template bug

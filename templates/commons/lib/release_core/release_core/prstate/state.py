@@ -63,7 +63,7 @@ class TaskStatus:
     open_threads: int = 0
     checks: ChecksState = ChecksState.NONE
     mergeable: str | None = None
-    cycles: int = 0  # completed Copilot review cycles
+    cycles: int = 0  # completed required-reviewer review cycles
     breaker: str | None = None  # which circuit breaker fired, if any
 
     def to_dict(self) -> dict:

@@ -90,6 +90,20 @@ def graphql(query: str, **variables: object) -> dict:
     return payload["data"]
 
 
+def pr_edit_reviewer(pr: int, reviewer: str, *, remove: bool = False) -> None:
+    """Add (or remove) a reviewer on a PR via ``gh pr edit``.
+
+    ``gh pr edit --add-reviewer`` resolves the reviewer handle to its real
+    node id and mutates through GraphQL. That path is load-bearing for bot
+    reviewers: the REST ``requested_reviewers`` POST silently no-ops for them
+    (returns 200 but leaves ``requested_reviewers`` empty) — never swap this
+    for the REST call.
+    """
+    owner, name = repo_slug()
+    flag = "--remove-reviewer" if remove else "--add-reviewer"
+    _gh(["pr", "edit", str(pr), "--repo", f"{owner}/{name}", flag, reviewer])
+
+
 def repo_slug() -> tuple[str, str]:
     """Return (owner, name) for the current repo."""
     data = json.loads(_gh(["repo", "view", "--json", "owner,name"]))
@@ -97,15 +111,20 @@ def repo_slug() -> tuple[str, str]:
 
 
 def pr_meta(pr: int) -> dict:
-    """PR-level metadata the engine needs in one call."""
+    """PR-level metadata the engine needs in one call.
+
+    Deliberately does NOT fetch ``reviewRequests``: ``gh pr view --json``
+    silently omits Bot-typed requested reviewers (a requested Copilot reads as
+    ``[]``), so the engine sources requested reviewers from GraphQL instead
+    (`fetch._threads_and_review_requests`).
+    """
     out = _gh(
         [
             "pr",
             "view",
             str(pr),
             "--json",
-            "number,headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,"
-            "reviewRequests,statusCheckRollup",
+            "number,headRefOid,baseRefName,isDraft,mergeable,mergeStateStatus,statusCheckRollup",
         ]
     )
     return json.loads(out)

@@ -22,7 +22,7 @@ Confirm the Kind anytime with `release-core detect-kind`.
 4. Stage your change and run `release-core gate` until green.
 5. Open the PR **as a draft**: `gh pr create --draft`.
 6. **Drive the review loop via the `gh-pr-review-loop` skill** (it arms the PR-loop
-   guard, requests Copilot, waits, triages, resolves threads). A bare `gh pr create`
+   guard, requests the required reviews, waits, triages, resolves threads). A bare `gh pr create`
    may be blocked by the guard until the skill arms the loop — that's expected.
 7. Flip to **ready** (`gh pr ready`) only when reviewed + CI green + mergeable.
    That hands it to a human. Don't auto-merge. (`gh pr ready --undo` to flip back.)
