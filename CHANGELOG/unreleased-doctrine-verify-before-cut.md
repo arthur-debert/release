@@ -1,0 +1,1 @@
+- fleet-loop doctrine corrected: repos verify runs BEFORE the cut (release.yml auto-advances the major at cut — there is no separate advance step); stale soft-gate and flat-alias claims swept from the skill + fleet-tooling docs

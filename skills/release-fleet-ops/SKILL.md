@@ -1,6 +1,6 @@
 ---
 name: release-fleet-ops
-description: "Drive and diagnose release→consumer fleet changes from inside arthur-debert/release: shipping a fix to the fleet (cut + advance-major; consumers pull it), migrating/seeding a consumer onto the pull model, advancing the floating major, and — above all — diagnosing why a consumer's CI/gate is red and routing it to the right repo. Use when doing release-side work that affects consumers, or whenever you face 'is this a release bug or a consumer bug?'. Triggered by: release-core admin repos verify, release-core admin release advance-major, migrating a consumer, a consumer CI failure after a sync, or a fleet-wide lint/gate failure."
+description: "Drive and diagnose release→consumer fleet changes from inside arthur-debert/release: shipping a fix to the fleet (verify, then cut — the cut auto-advances the major; consumers pull it), migrating/seeding a consumer onto the pull model, advancing the floating major, and — above all — diagnosing why a consumer's CI/gate is red and routing it to the right repo. Use when doing release-side work that affects consumers, or whenever you face 'is this a release bug or a consumer bug?'. Triggered by: release-core admin repos verify, release-core admin release advance-major, migrating a consumer, a consumer CI failure after a sync, or a fleet-wide lint/gate failure."
 ---
 
 # release-fleet-ops
@@ -43,14 +43,19 @@ consumer-side fix was wasted motion.
      upstream by definition. Red dogfood = release bug. Green dogfood + red
      consumer = consumer-specific.
 3. **Route.**
-   - **Upstream:** fix in `release/`, open a PR, **merge to main**, cut a release
-     (`release.yml`), and `release-core admin release advance-major`. The fix
-     reaches consumers by PULL — each self-updates at its next SessionStart. There
-     is no push step (`orc propagate` was removed); the wheel is the carrier.
+   - **Upstream:** fix in `release/`, open a PR, **merge to main**, run the
+     pre-flight (`release-core admin repos verify`), then cut a release —
+     `release.yml` publishes the wheel AND auto-advances the floating major
+     (`advance-major: true`), so the cut IS the ship; there is no separate
+     advance step to verify in front of. The fix reaches consumers by PULL —
+     each self-updates at its next SessionStart. There is no push step
+     (`orc propagate` was removed); the wheel is the carrier.
    - **Consumer:** fix in the consumer repo — but first rule out a *shadow*
      (below). Genuinely-consumer-authored content debt is the only thing that
      belongs in a consumer PR.
-4. **Cut + advance, then verify faithfully.** After an upstream fix ships, a
+4. **Pre-flight before the cut; verify faithfully after.** The sweep must run
+   BEFORE cutting (the cut auto-advances — there is no between window). After
+   an upstream fix ships, a
    consumer's own next-session pull + its PR CI is the real gate — run what
    production runs (see "faithful pre-flight"), and verify with a **fresh
    event, never `gh run rerun`** (see "the rerun trap"). To migrate a consumer
@@ -79,8 +84,11 @@ exists only because the gate used to be brittle), not to re-patch upstream.
 
 - `release-core admin repos verify --ref <ref>` — hermetic pre-flight: clones the
   fleet, syncs each from `<ref>`, runs the gate. Use it BEFORE
-  `release-core admin release advance-major`. Its clones double as your
-  reproduction sandbox. (Flat alias `release-verify-fleet` still works.)
+  `release-core cut` — the cut auto-advances the floating major, so there is
+  no later checkpoint. Its clones double as your reproduction sandbox.
+  Expect npm/frontend kinds to FAIL on typecheck/eslint/prettier in the bare
+  clones (missing-deps artifacts, not regressions — classify by failing step;
+  #594 tracks making verify classify these itself).
 - **Migrate/seed a consumer (replaces `orc propagate`, which was removed):** in
   the target repo on a fresh branch, run the resolver once — `bash
   bin/install-release-core` (use release's own `bin/install-release-core` if the
@@ -93,9 +101,10 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   what the consumer actually pulls — not your local release checkout.)
 - `orc probe --yes <clone> "<eval prompt>"` — spin ONE fresh agent to evaluate a
   repo's state and report. Use for a perspective check, not as a per-repo fixer.
-- `release-core admin release advance-major` — fast-forward the floating major to
-  main (ff-only). Run `release-core admin repos verify` first. (Flat alias
-  `release-advance-major` still works.)
+- `release-core admin release advance-major` — manual/recovery fast-forward of
+  the floating major to main (ff-only). Normally NOT needed: `release.yml`
+  auto-advances at cut (`advance-major: true`); reach for the verb only when
+  that job failed or for an out-of-band advance.
 
 ## Faithful pre-flight
 
@@ -110,7 +119,7 @@ consumer's green by construction.
 
 A reusable-workflow ref (`uses: arthur-debert/release/.github/workflows/x.yml@v2`)
 is resolved **once, when the run is created**. `gh run rerun` re-executes that
-original snapshot — so after `release-core admin release advance-major`,
+original snapshot — so after a cut advances `@vN`,
 rerunning a consumer's old red run still exercises the **pre-advance** release
 ref and proves nothing about the fix (caught live on padz, epic #583).
 
