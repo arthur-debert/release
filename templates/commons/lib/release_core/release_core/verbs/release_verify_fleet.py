@@ -183,8 +183,19 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
         )
 
     # The expect-verify-fail annotations (#594) — read in-process from the same
-    # manifest the accessor subprocess resolves (identical env precedence).
-    annotations = managed_repos.expect_verify_fail()
+    # manifest the accessor subprocess resolves (identical env precedence). A
+    # failed read (missing/unparseable manifest, yq gone mid-run) is a setup
+    # error like every other phase: clean message, exit 2 — never a traceback,
+    # and never a silent {} (an annotation set that vanished would resurface
+    # the annotated repos as false unexpected reds).
+    try:
+        annotations = managed_repos.expect_verify_fail()
+    except Exception as exc:
+        print(
+            f"release-verify-fleet: cannot read the fleet manifest annotations: {exc}",
+            file=sys.stderr,
+        )
+        return 2
 
     # --- Phase 2: per-consumer sync + gate -------------------------------
     print("repo\tkind\tsync\tgate")

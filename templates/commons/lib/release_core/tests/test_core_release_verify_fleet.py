@@ -301,6 +301,18 @@ def test_annotation_does_not_cover_a_sync_failure(env, monkeypatch):
     assert rvf.main(["--root", root]) == 1
 
 
+def test_unreadable_annotations_exit_2_not_a_traceback(env, monkeypatch, capsys):
+    # A failed annotation read (manifest gone, yq unavailable) is a setup error
+    # like every other phase: clean message + exit 2, never a stack trace.
+    def boom():
+        raise RuntimeError("yq exploded")
+
+    monkeypatch.setattr(rvf.managed_repos, "expect_verify_fail", boom)
+    monkeypatch.setattr(proc, "run", _Driver(""))
+    assert rvf.main(["--root", "/fleetroot"]) == 2
+    assert "cannot read the fleet manifest annotations: yq exploded" in capsys.readouterr().err
+
+
 def test_expect_verify_fail_reads_the_manifest_annotation(tmp_path, monkeypatch):
     # The real accessor (the env fixture stubs it elsewhere): only annotated
     # entries are returned, reasons verbatim.
