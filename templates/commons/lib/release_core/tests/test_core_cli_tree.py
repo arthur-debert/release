@@ -109,10 +109,12 @@ def test_every_leaf_has_a_short_help():
 def test_cut_dispatches_to_release_cut_help(capsys):
     # cut --help forwards to the release_cut verb's own help (exit 0). The verb
     # prints its usage to stderr; the passthrough preserves the stream faithfully.
+    # The usage line names the canonical `release-core cut`, not the flat
+    # `release-cut` name retired in #468 (fixed in #582).
     rc = cli_entry.main(["cut", "--help"])
     captured = capsys.readouterr()
     assert rc == 0
-    assert "release-cut" in (captured.out + captured.err)
+    assert "usage: release-core cut" in (captured.out + captured.err)
 
 
 def test_status_dispatches_to_done_check_help(capsys):

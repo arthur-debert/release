@@ -45,15 +45,22 @@ READY = _status(TaskState.READY)
 
 
 class _Harness:
-    """Scripted snapshots + a fake clock advanced only by sleeping."""
+    """Scripted snapshots + a fake clock advanced only by sleeping.
 
-    def __init__(self, *statuses: TaskStatus):
+    A scripted entry may be an exception instance — the snapshot raises it,
+    modelling a poll that fails (transient gh/network blip).
+    """
+
+    def __init__(self, *statuses: TaskStatus | Exception):
         self.statuses = list(statuses)
         self.now = 0.0
         self.sleeps: list[float] = []
 
     def snapshot(self, pr: int) -> TaskStatus:
-        return self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        item = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
 
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
@@ -149,6 +156,72 @@ def test_output_comes_from_the_engine_not_hardcoded_names(capsys):
     out = capsys.readouterr().out
     assert "next action for reviews_pending" in out
     assert "next action for ready" in out
+
+
+# --- transient poll failures are retried, persistent ones give up (#582) --------
+
+
+def _blip() -> GhError:
+    return GhError("gh api graphql failed (1): net/http: TLS handshake timeout")
+
+
+def test_transient_poll_failures_are_retried_and_the_wait_survives(capsys):
+    # Two consecutive poll failures, then the API recovers: the wait must ride
+    # through them and still land on agent action — not die on the first blip.
+    h = _Harness(PENDING_WAITING, _blip(), _blip(), READY)
+    assert h.run() == 0
+    out, err = capsys.readouterr()
+    assert "READY" in out
+    # Each retried failure is logged to stderr — visible, never silent.
+    assert err.count("TLS handshake timeout") == 2
+    assert "retry 1/3" in err
+    assert "retry 2/3" in err
+    # Linear retry backoff (5s, 10s) interleaves with the poll cadence.
+    assert wait.POLL_RETRY_BACKOFF_S in h.sleeps
+    assert wait.POLL_RETRY_BACKOFF_S * 2 in h.sleeps
+
+
+def test_persistent_poll_failure_exhausts_retries_and_raises(capsys):
+    # More consecutive failures than POLL_RETRIES: the wait gives up and the
+    # GhError propagates (main maps it to exit 1, covered below).
+    blips = [_blip() for _ in range(wait.POLL_RETRIES + 1)]
+    h = _Harness(PENDING_WAITING, *blips, READY)
+    with pytest.raises(GhError, match="TLS handshake timeout"):
+        h.run()
+    err = capsys.readouterr().err
+    assert err.count("retry") == wait.POLL_RETRIES  # logged each attempt, then gave up
+
+
+def test_retry_budget_resets_after_a_successful_poll(capsys):
+    # The retry cap is per-poll, not per-wait: a success resets it, so a long
+    # wait can absorb more than POLL_RETRIES blips total as long as no single
+    # outage exceeds the cap.
+    h = _Harness(PENDING_WAITING, _blip(), VALIDATING, _blip(), _blip(), READY)
+    assert h.run() == 0
+    err = capsys.readouterr().err
+    assert "retry 1/3" in err
+    assert "retry 2/3" in err
+    assert "retry 3/3" not in err
+
+
+def test_first_fetch_failure_fails_fast_without_retry(capsys):
+    # Real errors (bad PR number, auth) surface on the FIRST fetch — retrying
+    # them only delays the loud failure, so there is no retry there.
+    h = _Harness(_blip(), READY)
+    with pytest.raises(GhError, match="TLS handshake timeout"):
+        h.run()
+    assert h.sleeps == []
+    assert "retry" not in capsys.readouterr().err
+
+
+def test_failure_during_final_post_deadline_look_is_retried(capsys):
+    # The last look before declaring timeout goes through the same retry path:
+    # a blip there must not kill a wait that is about to report cleanly.
+    h = _Harness(VALIDATING, VALIDATING, VALIDATING, VALIDATING, _blip(), READY)
+    assert h.run(poll=40.0, timeout=100.0) == 0
+    out, err = capsys.readouterr()
+    assert "READY" in out
+    assert err.count("retry") == 1
 
 
 # --- cadence: data, overridable ------------------------------------------------
