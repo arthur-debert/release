@@ -1,0 +1,1 @@
+- release-core cut refuses without green canary/<family> commit statuses on the exact HEAD being cut (no skip flag, #606)

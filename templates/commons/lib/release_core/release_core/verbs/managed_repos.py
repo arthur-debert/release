@@ -107,8 +107,16 @@ def canaries(manifest: str | None = None) -> dict[str, str]:
     Canary repos are release-owned synthetic infra, NOT fleet consumers: they
     live OUTSIDE ``projects:`` on purpose so everything built on :func:`_pairs`
     (verify / migrate / inbox / audit, the ``--list``/``--paths`` modes) never
-    sweeps them (owner decision OQ6). This accessor is the only reader."""
-    data = yamlio.load(manifest or _manifest_path()) or {}
+    sweeps them (owner decision OQ6). This accessor is the only reader.
+
+    A missing manifest is an empty registry, not an error: only the release
+    meta repo carries managed-repos.yaml, so in a consumer repo "no manifest"
+    mechanically means "no canaries registered" — which is what keeps the
+    slice-4 cut gate (#606) registry-driven rather than skip-flagged."""
+    path = manifest or _manifest_path()
+    if not os.path.isfile(path):
+        return {}
+    data = yamlio.load(path) or {}
     block = data.get("canaries") or {}
     return {str(family): str(repo) for family, repo in block.items()}
 

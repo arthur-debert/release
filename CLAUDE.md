@@ -40,10 +40,16 @@ silently dropping managed `bin/` tools).
   (`gh-task-status`, `gh-release-issue`) / `release-core cut`, not synced
   `bin/` shims.
 - **Core fleet loop (PULL only — `orc propagate` was REMOVED):**
-  `release-core admin repos verify` (pre-flight on the candidate main) → cut a
-  release (`release.yml` publishes the `release_core` wheel **and
+  `release-core admin repos verify` (pre-flight on the candidate main) →
+  `release-core admin canary run --ref main` (the pre-ship consumer-life
+  round; posts a `canary/<family>` commit status on the candidate sha) → cut a
+  release (`release-core cut` **REFUSES without a green `canary/<family>`
+  status for every registered family on the exact main HEAD being cut** — no
+  skip flag, #606; exact-sha binding means any new commit on main invalidates
+  the previous round, so re-run the canary after any push. `release.yml`
+  publishes the `release_core` wheel **and
   auto-advances the floating major** — it passes `advance-major: true`, so
-  there is NO separate advance step and the pre-flight must run BEFORE the
+  there is NO separate advance step and verify + canary must run BEFORE the
   cut) → fresh-event check on a consumer (empty commit to its main, never
   `gh run rerun`; #595 tracks the one-command verb). That's it — consumers
   self-update at SessionStart: `install-release-core` pulls the wheel and a bare

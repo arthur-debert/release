@@ -89,7 +89,8 @@ is the slow, deep *workflow* test (release#587, epic #583): it makes a real
 synthetic consumer live its full life — boot from source, materialize,
 `bin/check`, e2e/bats, and a genuine prerelease cut — against an
 **unreleased** candidate ref, before `release-core cut` moves the fleet.
-Different instruments; run both before cutting.
+Different instruments; run both before cutting (the canary half is
+enforced — see the gate below).
 
 ```sh
 release-core admin canary run --ref main            # the round to run before a cut
@@ -122,10 +123,17 @@ All cut artifacts land on the canary repo only: prerelease tags + GH
 prerelease assets; crates/brew/npm are fail-closed fenced (`publish-crates:
 false`, `brew: false`, and the matching secrets are never installed there).
 
-Slice 4 (not yet landed) turns the commit status into a prescriptive gate:
-`release-core cut` will refuse without green `canary/*` statuses on the
-exact HEAD SHA — no skip flag. Until then the round is the documented
-pre-cut step alongside `repos verify`.
+The commit status is a prescriptive gate (release#606): `release-core cut`
+refuses unless EVERY registered `canary/<family>` context is a green commit
+status on the exact main-HEAD sha it dispatches (the remote default-branch
+head — what the workflow_dispatch actually cuts). Exact-sha binding makes
+freshness mechanical: any new commit on main invalidates the previous round
+by construction, so the recipe is verify → canary run → cut. There is **no
+skip flag and no env-var escape** (owner decision, #587 — escape hatches
+shrink); the refusal names the one next action,
+`release-core admin canary run --ref main`. The gate is registry-driven:
+no `canaries:` registered (every consumer repo — they carry no
+managed-repos.yaml) ⇒ no gate, mechanically, not via a skip.
 
 ## Onboarding a new repo
 

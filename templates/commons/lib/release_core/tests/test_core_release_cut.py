@@ -146,6 +146,10 @@ def gh_dispatch(monkeypatch, tmp_path):
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / ".github" / "workflows" / "release.yml").write_text("name: release\n")
     monkeypatch.chdir(tmp_path)
+    # Hermetic canary registry: no manifest in tmp_path (and no ambient
+    # override) ⇒ no canaries registered ⇒ the #606 cut gate is inert.
+    monkeypatch.delenv("MANAGED_REPOS_MANIFEST", raising=False)
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
     calls: list[list[str]] = []
 
     def fake_out(cmd, **kw):
@@ -306,6 +310,197 @@ def test_workspace_only_root_git_tag_kind(monkeypatch, tmp_path, capsys):
     rc = release_cut.main(["minor"])
     assert rc == 0
     assert "Bumping minor: 0.3.1 -> 0.4.0" in capsys.readouterr().out
+
+
+# --- canary gate (#606) -------------------------------------------------
+# The cut refuses without green canary/<family> commit statuses on the exact
+# default-branch HEAD being cut. Registry-driven: no canaries registered ⇒ no
+# gate (a consumer repo has no managed-repos.yaml). NO skip flag by design.
+
+_GATE_SHA = "deadbeef" * 5
+
+
+def _fake_rest(combined_statuses, *, sha=_GATE_SHA, calls=None):
+    """A gh.rest stub serving the two gate endpoints (repo → default_branch,
+    combined status for that branch head)."""
+
+    def rest(path, **kw):
+        if calls is not None:
+            calls.append(path)
+        if path == "repos/{owner}/{repo}":
+            return {"default_branch": "main"}
+        if path == "repos/{owner}/{repo}/commits/main/status":
+            return {"sha": sha, "statuses": combined_statuses}
+        raise AssertionError(f"unexpected gh.rest: {path}")
+
+    return rest
+
+
+@pytest.fixture
+def canary_registry(monkeypatch):
+    """Two registered families — the gate must require BOTH green."""
+    monkeypatch.setattr(
+        release_cut.managed_repos,
+        "canaries",
+        lambda manifest=None: {
+            "rust": "arthur-debert/release-canary-rust",
+            "npm": "arthur-debert/release-canary-npm",
+        },
+    )
+
+
+def test_gate_all_green_proceeds(gh_dispatch, canary_registry, monkeypatch, capsys):
+    monkeypatch.setattr(
+        release_cut.gh,
+        "rest",
+        _fake_rest(
+            [
+                {"context": "canary/rust", "state": "success"},
+                {"context": "canary/npm", "state": "success"},
+                # Unrelated contexts never participate in the gate.
+                {"context": "ci/lint", "state": "failure"},
+            ]
+        ),
+    )
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert f"Canary gate green on {_GATE_SHA[:12]}" in out
+    assert "canary/npm" in out and "canary/rust" in out
+    assert ["gh", "workflow", "run", "release.yml", "-f", "version=1.2.3"] in gh_dispatch
+
+
+def test_gate_missing_context_refuses_naming_it(gh_dispatch, canary_registry, monkeypatch, capsys):
+    # rust is green on this sha; npm never reported — the round is incomplete.
+    monkeypatch.setattr(
+        release_cut.gh,
+        "rest",
+        _fake_rest([{"context": "canary/rust", "state": "success"}]),
+    )
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "REFUSING to cut" in err
+    assert "canary/npm: missing (no status on this sha)" in err
+    assert "canary/rust" not in err  # only the not-green contexts are named
+    assert "run: release-core admin canary run --ref main" in err
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
+
+
+@pytest.mark.parametrize("state", ["pending", "failure", "error"])
+def test_gate_non_success_state_refuses(gh_dispatch, canary_registry, monkeypatch, capsys, state):
+    monkeypatch.setattr(
+        release_cut.gh,
+        "rest",
+        _fake_rest(
+            [
+                {"context": "canary/rust", "state": state},
+                {"context": "canary/npm", "state": "success"},
+            ]
+        ),
+    )
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert f"canary/rust: {state}" in err
+    assert "run: release-core admin canary run --ref main" in err
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
+
+
+def test_gate_stale_round_is_missing_by_construction(
+    gh_dispatch, canary_registry, monkeypatch, capsys
+):
+    """Exact-sha binding IS the freshness check: a green round on an older
+    main sha leaves the CURRENT head with no statuses at all — the combined
+    status for the head simply doesn't carry the contexts."""
+    monkeypatch.setattr(release_cut.gh, "rest", _fake_rest([]))
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "canary/npm: missing (no status on this sha)" in err
+    assert "canary/rust: missing (no status on this sha)" in err
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
+
+
+def test_no_canaries_registered_means_no_gate(gh_dispatch, monkeypatch, capsys):
+    """A consumer repo (no canaries registered) never hits the status API —
+    the gate is inert by registry, not by a skip flag."""
+    monkeypatch.setattr(release_cut.managed_repos, "canaries", lambda manifest=None: {})
+
+    def no_rest(path, **kw):
+        raise AssertionError(f"gate must not call gh.rest without a registry: {path}")
+
+    monkeypatch.setattr(release_cut.gh, "rest", no_rest)
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 0
+    assert "Canary gate" not in capsys.readouterr().out
+    assert ["gh", "workflow", "run", "release.yml", "-f", "version=1.2.3"] in gh_dispatch
+
+
+def test_gate_status_api_error_refuses(gh_dispatch, canary_registry, monkeypatch, capsys):
+    from release_core import gh as gh_mod
+
+    def boom(path, **kw):
+        raise gh_mod.GhError("api unreachable")
+
+    monkeypatch.setattr(release_cut.gh, "rest", boom)
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 1
+    assert "cannot read commit statuses" in capsys.readouterr().err
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
+
+
+def test_gate_binds_to_the_repo_being_cut_not_the_shim_env(gh_dispatch, monkeypatch, tmp_path):
+    """bin/release-core exports MANAGED_REPOS_SCRIPT_DIR (and tests may set
+    MANAGED_REPOS_MANIFEST) pinning managed_repos's default resolution at
+    RELEASE's own manifest — that must NOT leak the gate into another repo's
+    cut. The registry is the manifest of the repo being cut (cwd repo root),
+    which here has none ⇒ no gate, even with the env pointing at a registry."""
+    other = tmp_path / "elsewhere-managed-repos.yaml"
+    other.write_text("canaries:\n  rust: arthur-debert/release-canary-rust\n")
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(other))
+    monkeypatch.setenv("MANAGED_REPOS_SCRIPT_DIR", str(tmp_path))
+
+    def no_rest(path, **kw):
+        raise AssertionError(f"gate must not consult another repo's registry: {path}")
+
+    monkeypatch.setattr(release_cut.gh, "rest", no_rest)
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 0
+    assert ["gh", "workflow", "run", "release.yml", "-f", "version=1.2.3"] in gh_dispatch
+
+
+def test_gate_registry_read_error_refuses(gh_dispatch, monkeypatch, capsys):
+    def broken_registry(manifest=None):
+        raise RuntimeError("yq exploded")
+
+    monkeypatch.setattr(release_cut.managed_repos, "canaries", broken_registry)
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 1
+    assert "cannot read the canaries registry" in capsys.readouterr().err
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in gh_dispatch)
+
+
+def test_gate_runs_on_bump_shortcut_path_too(canary_registry, monkeypatch, tmp_path, capsys):
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "release.yml").write_text("name: release\n")
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "foo"\nversion = "1.4.2"\n')
+    monkeypatch.chdir(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        return _completed(cmd, returncode=0, stdout="")
+
+    monkeypatch.setattr(proc, "out", lambda cmd, **kw: str(tmp_path))
+    monkeypatch.setattr(proc, "run", fake_run)
+    monkeypatch.setattr(release_cut.shutil, "which", lambda _name: "/usr/bin/gh")
+    monkeypatch.setattr(release_cut.gh, "rest", _fake_rest([]))
+
+    rc = release_cut.main(["minor"])
+    assert rc == 1
+    assert "REFUSING to cut" in capsys.readouterr().err
+    assert not any(c[:3] == ["gh", "workflow", "run"] for c in calls)
 
 
 def test_go_cli_no_tags_errors(monkeypatch, tmp_path, capsys):

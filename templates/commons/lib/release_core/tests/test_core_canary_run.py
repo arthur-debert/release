@@ -305,6 +305,13 @@ def test_canaries_absent_block_is_empty(tmp_path):
     assert managed_repos.canaries(str(path)) == {}
 
 
+def test_canaries_missing_manifest_is_empty(tmp_path):
+    # A consumer repo has no managed-repos.yaml at all: that means "no
+    # canaries registered", not an error — the #606 cut gate is inert there
+    # by construction (registry-driven, not a skip flag).
+    assert managed_repos.canaries(str(tmp_path / "nope.yaml")) == {}
+
+
 def test_projects_sweep_does_not_include_canaries(manifest):
     # THE OQ6 invariant: everything built on _pairs (verify / migrate / inbox /
     # audit, --list/--paths) never sweeps the canary repos.
