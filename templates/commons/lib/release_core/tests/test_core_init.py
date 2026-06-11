@@ -1361,6 +1361,43 @@ def test_full_sweeps_retired_vendor_dir_and_prunes_husk(tmp_path, monkeypatch, c
 
 @_needs_yq
 @_needs_git
+def test_full_sweeps_retired_smoke_hook_shipped_bytes(tmp_path, monkeypatch, capsys):
+    """release#590: a seeded consumer still TRACKING the shipped
+    app-bin/smoke-hook.sh has it swept (and the deletion committed) by a bare
+    init. REAL template bytes, NO catalog monkeypatch — this drives the live
+    RETIRED_BLOB_FILES entry. A consumer-OVERRIDDEN hook (the documented
+    customization path) no longer matches a shipped blob and is left alone."""
+    fixture = os.path.join(os.path.dirname(__file__), "retired_fixtures", "smoke-hook.electron-app")
+    with open(fixture, "rb") as fh:
+        shipped = fh.read()
+    src = _full_source_tree(tmp_path / "src")
+    repo = _setup_full_repo(tmp_path, monkeypatch, src)
+
+    (repo / "app-bin").mkdir()
+    (repo / "app-bin" / "smoke-hook.sh").write_bytes(shipped)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "seed: shipped smoke hook")
+
+    assert init.main([]) == 0
+    assert "committed" in capsys.readouterr().out
+    assert not (repo / "app-bin").exists(), "left an app-bin/ husk behind"
+    last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
+    assert "D\tapp-bin/smoke-hook.sh" in last
+    assert _git(repo, "status", "--porcelain") == ""
+
+    # Consumer-edited bytes: not ours to delete — survives further inits.
+    (repo / "app-bin").mkdir()
+    (repo / "app-bin" / "smoke-hook.sh").write_bytes(shipped + b"# dynamic packaged e2e\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "consumer-owned smoke hook")
+    capsys.readouterr()
+    assert init.main([]) == 0
+    capsys.readouterr()
+    assert (repo / "app-bin" / "smoke-hook.sh").exists(), "consumer-modified hook must survive"
+
+
+@_needs_yq
+@_needs_git
 def test_full_untracks_pre_ws7_committed_mirrors(tmp_path, monkeypatch, capsys):
     """WS7 (release#528): a pre-WS7 seed committed the symlink mirrors. A bare
     init untracks them — the commit records the deletions while the symlinks

@@ -1145,6 +1145,27 @@ def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
     assert mp.retired_to_remove == [dest]
 
 
+def test_retired_smoke_hook_shipped_bytes_swept_modified_kept(tmp_path):
+    """release#590: the REAL shipped smoke-hook bytes (pinned as fixtures —
+    the templates themselves are deleted) match the live catalog entry and are
+    swept; a consumer-OVERRIDDEN hook (the documented customization path) no
+    longer matches a shipped blob and is left alone. No monkeypatch: this
+    exercises the actual RETIRED_BLOB_FILES entry."""
+    fixtures = os.path.join(os.path.dirname(__file__), "retired_fixtures")
+    catalog = sync.RETIRED_BLOB_FILES["app-bin/smoke-hook.sh"]
+    (tmp_path / "app-bin").mkdir()
+    hook = tmp_path / "app-bin" / "smoke-hook.sh"
+    for kind in ("electron-app", "tauri-app"):
+        with open(os.path.join(fixtures, f"smoke-hook.{kind}"), "rb") as fh:
+            shipped = fh.read()
+        hook.write_bytes(shipped)
+        assert sync._git_blob_sha1(str(hook)) in catalog, kind
+        assert "app-bin/smoke-hook.sh" in sync._find_retired_files(str(tmp_path)), kind
+
+        hook.write_bytes(shipped + b"# consumer dynamic smoke\n")
+        assert "app-bin/smoke-hook.sh" not in sync._find_retired_files(str(tmp_path)), kind
+
+
 def test_retired_tables_inventory_locked():
     """The fleet-audit inventory (release#527, completed by #563): paths +
     variant counts, re-derived from template git history. A new retirement
@@ -1181,6 +1202,10 @@ def test_retired_tables_inventory_locked():
         "lefthook.yml": 2,
         # ORIENTATION.md (WS2 #523 / #563) — full template-history blob set
         ".release/ORIENTATION.md": 12,
+        # packaged-binary smoke hooks (#590) — one blob per kind at the final
+        # dest, plus the pre-#270 scripts/ dest (blob-only: common name)
+        "app-bin/smoke-hook.sh": 2,
+        "scripts/smoke.sh": 3,
     }
     non_skill = {
         k: v for k, v in sync.RETIRED_BLOB_FILES.items() if not k.startswith(".claude/skills/")

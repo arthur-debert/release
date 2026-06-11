@@ -1,0 +1,1 @@
+- orphaned packaged-binary smoke-hook templates retired (dead since WS7; tombstoned so seeded consumers sweep the stale copies) (#590)
