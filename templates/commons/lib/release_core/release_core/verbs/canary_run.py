@@ -755,12 +755,16 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
             payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}
             setup_error = True
 
-    if any_failure:
+    # Verdict mirrors the exit code exactly (ERROR↔2 dominates FAIL↔1 dominates
+    # PASS↔0): an incomplete round is never trustworthy, so a setup error wins
+    # even when another family also has real job failures.
+    if setup_error:
+        suffix = " Job failures also present above." if any_failure else ""
+        footer.append(f"verdict: ERROR — round incomplete (setup failure above).{suffix}")
+        payload["verdict"] = "ERROR"
+    elif any_failure:
         footer.append(f"verdict: FAIL — do NOT cut/advance from {sha12}.")
         payload["verdict"] = "FAIL"
-    elif setup_error:
-        footer.append("verdict: ERROR — round incomplete (setup failure above).")
-        payload["verdict"] = "ERROR"
     else:
         footer.append(f"verdict: PASS — release@{sha12} survived the consumer life.")
         payload["verdict"] = "PASS"
