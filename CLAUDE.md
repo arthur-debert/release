@@ -70,7 +70,7 @@ silently dropping managed `bin/` tools).
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
 - `tests/fixtures/` — synthetic projects per category, exercised by `_ci.yml`
-- `docs/` — consumer guide, secrets, breaking-changes log
+- `docs/` — the four narrative .lex docs + ADRs + references
 - `examples/` — paste-ready consumer release.yml files
 
 ### `bin/` is on $PATH via dodot

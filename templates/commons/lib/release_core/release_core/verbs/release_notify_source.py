@@ -9,7 +9,7 @@ This reads ONE release issue, extracts every source PR it points at (the
 `**PR:** <url>` line in the body plus the `- PR: <url>` lines the relay skill
 appends on each "Also hit on" duplicate), and posts a consistent notification
 comment on each. The message shape is owned here, not hand-written per repo
-(per docs/references/fleet-telemetry-via-issues.md §2).
+(the issues-as-telemetry design: consumers file upstream, the inbox triages, this notifies back).
 
 Outward-facing fan-out across consumer repos, so it is DRY-RUN BY DEFAULT:
 it prints the plan and the exact comment body. Pass --post to actually comment.

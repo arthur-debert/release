@@ -1,0 +1,1 @@
+- docs: lean doc set — breaking-changes log + dev-era references deleted; tooling/harness/README rewritten to the shipped minimal-footprint model (ephemeral .release/, untracked mirrors, wheel carrier)

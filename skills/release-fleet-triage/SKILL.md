@@ -103,7 +103,7 @@ their tracker), then close the release issue manually.
 ## Guardrails
 
 - **The release issue is a pointer, not a discussion venue** (per
-  `docs/references/fleet-telemetry-via-issues.md`). The fix happens on the
+  the issues-as-telemetry design). The fix happens on the
   release PR; the notification happens on the consumer's PR; the release issue
   just gets closed with a back-reference. Don't relitigate the bug in three places.
 - **Events, not state.** One issue = one reported moment. Close it when handled;

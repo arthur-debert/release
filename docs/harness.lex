@@ -18,35 +18,37 @@ The Agent Harness
     - §0 — install the gate toolset (lefthook, ruff, yamllint, shellcheck,
       markdownlint, and language linters as detected). Best-effort to install,
       but the gate itself is HARD: a missing tool fails the commit, never skips.
-    - §0.1 — wire the pre-commit hook (`lefthook install`).
+    - §0.1 — wire the pre-commit hook through the binary
+      (`release-core gate --install-hook`; the hook runs
+      `release-core gate --hook`).
     - §0.2 — the pull-model boot (ADR-0003): run `bin/install-release-core`,
-      which resolves the `release_core` wheel from a GitHub release, `pip install
-      --force-reinstall`s it (deps from PyPI), then runs a bare `release-core
-      init`. That init materializes the WHOLE managed tree from the wheel bundle
-      (the `.release/` build dir + every working-tree mirror — skills,
-      ORIENTATION, configs, the CLAUDE.md block) and auto-commits any managed
-      change. This is the pull-model self-sync: the wheel pull carries the whole
-      tree and there is no push step. (The `--config-only` escape hatch was
-      removed in #532 — the full materialize is the only mode.)
+      which derives the repo's major line from its `@vN` thin callers (#551),
+      resolves the `release_core` wheel from that line's latest GitHub
+      release, `pip install --force-reinstall`s it into an isolated venv
+      (deps from PyPI), then runs a bare `release-core init`. That init
+      materializes the managed tree from the wheel bundle — the ephemeral
+      `.release/` build dir, the untracked mirrors (skills, `bin/` verbs,
+      `.editorconfig`), the real-file quartet + workflow copies, and the
+      CLAUDE.md stub — and auto-commits any managed change. The wheel pull
+      carries everything; there is no push step.
     - §1+ (cloud only) — submodule/tag restore, dependency cache warm-up, venv
       setup, CA cert import, optional per-repo `app-bin/post-setup-hook.sh`.
 
-    What must exist before a session starts: the bootstrap entry points
-    themselves — `bin/setup-dev-env.sh`, `bin/install-release-core`, and
-    `.claude/settings.json`. They ship in the committed bootstrap (synced from
-    `templates/commons/bin/`), so a freshly cloned consumer can boot before
-    `release_core` is installed. Everything else (the gate tools, the
-    `release_core` package, the cloud dependency caches) is pulled or installed
-    at session start.
+    What must exist before a session starts: the bootstrap QUARTET, committed
+    as real files (WS5, #526) — `.claude/settings.json`,
+    `bin/install-release-core`, `bin/setup-dev-env.sh`, and
+    `bin/pr-loop-guard` — so a freshly cloned consumer can boot before
+    `release_core` is installed (the boot chain can't depend on what it
+    boots). Everything else (the gate tools, the `release_core` package, the
+    mirrors, the cloud dependency caches) is pulled or materialized at session
+    start.
 
     :: note :: The `release_core` Python package is NOT a synced file. It ships
-    as a wheel from a GitHub release and is pip-installed at boot. The synced
-    surface is the thin bootstrap + configs + workflow callers; the engine
-    arrives out-of-band (tooling.lex §4). Its console-scripts — `changelog`,
-    `changelog-add`, `changelog-cut`, `changelog-render`, `semver`,
-    `detect-kind`, `release-sync`, `release-drift-check`, `gh-task-status`,
-    `gh-release-issue` — land on PATH from the wheel; they are no longer synced
-    `bin/` shims (release#476).
+    as a wheel from a GitHub release and is pip-installed at boot. The tracked
+    surface is the quartet + workflow callers; the engine arrives out-of-band
+    (tooling.lex §4). Its console-scripts — `release-core`, `changelog`,
+    `semver`, `detect-kind`, `gh-task-status`, `gh-release-issue` — land on
+    PATH from the wheel; they are not synced `bin/` shims (release#476).
 
 2. Orientation — how the agent learns this repo
 
@@ -182,12 +184,14 @@ The Agent Harness
         `SKILL.md`.
 
         The path, per file under `skills/<name>/`:
-            - Source of truth: `skills/<name>/<subpath>` in this repo.
-            - `release-sync`, run in the consumer, writes the file as a real blob
-              into the consumer's committed `.release/` build tree at
+            - Source of truth: `skills/<name>/<subpath>` in this repo (shipped
+              inside the wheel bundle).
+            - `release-core init`, run in the consumer, writes the file into
+              the EPHEMERAL `.release/` build tree at
               `.release/.claude/skills/<name>/<subpath>`.
             - It then creates a relative symlink at the discovery path
-              `.claude/skills/<name>/<subpath>` pointing back into `.release/`.
+              `.claude/skills/<name>/<subpath>` pointing back into `.release/`
+              — untracked, listed in `.git/info/exclude` (WS7).
             - Claude Code discovers skills under `.claude/skills/`, follows the
               symlink, and reads it.
 
