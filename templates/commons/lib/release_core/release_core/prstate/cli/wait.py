@@ -20,6 +20,10 @@ Semantics:
   state + next action (the same rendering as `pr status`). Transitions
   between waiting states (review lands -> CI still running) are reported and
   the wait keeps going: exit 0 always means "the agent can act NOW".
+- A mid-wait poll that fails (transient gh/network blip) is retried
+  POLL_RETRIES times with backoff — logged to stderr, never silent — before
+  the wait gives up with exit 1 (release#582). The first fetch still fails
+  fast: that's where the real errors (bad PR number, auth) surface.
 
 Cadence is data, not magic constants buried in logic: the module-level
 constants below are the single source, and `--poll` / `--timeout` override
@@ -51,6 +55,8 @@ POLL_INITIAL_S = 20.0  # first re-poll interval
 POLL_BACKOFF = 1.5  # interval multiplier per poll (disabled by --poll)
 POLL_MAX_S = 90.0  # backoff cap
 MAX_WAIT_S = 45 * 60.0  # overall cap — generous enough for review + CI
+POLL_RETRIES = 3  # transient mid-wait poll failures retried before giving up
+POLL_RETRY_BACKOFF_S = 5.0  # retry sleep grows linearly: 5s, 10s, 15s
 
 # States the wait blocks through; everything else is agent action.
 # REVIEWS_PENDING is conditional — see _agent_action_needed.
@@ -163,6 +169,11 @@ def wait_for_action(
     def next_sleep() -> float:
         return max(0.0, min(interval, deadline - clock()))
 
+    # The FIRST fetch fails fast: a GhError here is where the real errors live
+    # (bad PR number, auth, missing gh) and retrying them only delays the loud
+    # failure. Once a poll has succeeded, mid-wait failures are overwhelmingly
+    # transient (TLS handshake timeout, API blip) — those go through
+    # _poll_with_retry below.
     status = take(pr)
     if _agent_action_needed(status, registry):
         emit(status)
@@ -174,7 +185,7 @@ def wait_for_action(
         sleep(next_sleep())
         if not fixed:
             interval = min(interval * POLL_BACKOFF, POLL_MAX_S)
-        status = take(pr)
+        status = _poll_with_retry(take, pr, sleep=sleep)
         if _agent_action_needed(status, registry):
             print(f"-- agent action available after {_fmt(clock() - start)} --")
             emit(status)
@@ -184,7 +195,7 @@ def wait_for_action(
     # One last look before declaring timeout: the state can flip during the
     # sleep that carries the clock past the deadline, and exiting on the stale
     # snapshot would falsely report a timeout.
-    status = take(pr)
+    status = _poll_with_retry(take, pr, sleep=sleep)
     if _agent_action_needed(status, registry):
         print(f"-- agent action available after {_fmt(clock() - start)} --")
         emit(status)
@@ -204,6 +215,41 @@ def _snapshot(pr: int) -> TaskStatus:
     """One engine evaluation: fetch the PR context, run `evaluate()`."""
     ctx = gather(pr)
     return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+
+
+def _poll_with_retry(
+    take: Callable[[int], TaskStatus],
+    pr: int,
+    *,
+    sleep: Callable[[float], None],
+) -> TaskStatus:
+    """One mid-wait poll, retried on failure (release#582).
+
+    The wait's whole job is to be left alone for minutes, so a single
+    transient gh/network blip (`net/http: TLS handshake timeout`, a 5xx)
+    must not kill it. No error taxonomy: the structural distinction is
+    positional — real errors (bad PR number, auth) surface on the FIRST
+    fetch, which fails fast in `wait_for_action`; by the time this runs, a
+    poll has already succeeded, so a GhError is presumed transient. Retry
+    POLL_RETRIES times with linear backoff, logging each failure to stderr
+    so the blip is visible, and re-raise only when it persists (-> exit 1).
+    The retry sleeps are bounded (~30s total) and deliberately not clamped
+    to the --timeout budget — the post-deadline final look still runs.
+    """
+    failures = 0
+    while True:
+        try:
+            return take(pr)
+        except GhError as exc:
+            failures += 1
+            if failures > POLL_RETRIES:
+                raise
+            backoff = POLL_RETRY_BACKOFF_S * failures
+            print(
+                f"poll failed (retry {failures}/{POLL_RETRIES} in {_fmt(backoff)}): {exc}",
+                file=sys.stderr,
+            )
+            sleep(backoff)
 
 
 def _agent_action_needed(status: TaskStatus, registry: list[ReviewerAdapter]) -> bool:

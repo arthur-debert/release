@@ -71,7 +71,7 @@ from .. import gh, manifest, proc, version
 from .changelog import _SEMVER_TOOL_RE
 
 USAGE = """\
-usage: release-cut <major|minor|patch|X.Y.Z[-PRERELEASE]>
+usage: release-core cut <major|minor|patch|X.Y.Z[-PRERELEASE]>
 
 Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
 pre-release suffix is stripped before bumping; to step from
@@ -228,7 +228,7 @@ def _read_current_version(kind: str) -> str | None:
     if kind in ("nvim-plugin", "go-cli"):
         return _read_git_tag_version()
     print(
-        f"release-cut: don't know how to read current version for Kind={kind}",
+        f"release-core cut: don't know how to read current version for Kind={kind}",
         file=sys.stderr,
     )
     return None
@@ -280,7 +280,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     # Graceful no-op for Consumers that don't ship a release workflow
     # (github-action repos, tree-sitter standalone grammars, etc.).
     if not os.path.isfile(".github/workflows/release.yml"):
-        print("release-cut: no .github/workflows/release.yml in this repo; nothing to do.")
+        print("release-core cut: no .github/workflows/release.yml in this repo; nothing to do.")
         return 0
 
     if arg in ("major", "minor", "patch"):
@@ -291,7 +291,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
             kind = manifest.detect_kind(".")
         except manifest.KindError:
             print(
-                "release-cut: detect-kind could not identify this repo's Kind",
+                "release-core cut: detect-kind could not identify this repo's Kind",
                 file=sys.stderr,
             )
             print(
@@ -303,14 +303,14 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
         if current is None:
             if kind in ("nvim-plugin", "go-cli"):
                 print(
-                    f"release-cut: no git tags found — Kind={kind} reads the current version\n"
+                    f"release-core cut: no git tags found — Kind={kind} reads the current version\n"
                     "  from `git describe --tags --abbrev=0`. Pass an explicit version\n"
-                    "  (e.g. release-cut 0.1.0) for the first release.",
+                    "  (e.g. release-core cut 0.1.0) for the first release.",
                     file=sys.stderr,
                 )
             else:
                 print(
-                    f"release-cut: couldn't determine current version for Kind={kind}.\n"
+                    f"release-core cut: couldn't determine current version for Kind={kind}.\n"
                     "  Expected manifest not found or has no version field.",
                     file=sys.stderr,
                 )
@@ -321,7 +321,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
         new_version = arg
     else:
         print(
-            "release-cut: version must be MAJOR.MINOR.PATCH[-PRERELEASE] or one of: "
+            "release-core cut: version must be MAJOR.MINOR.PATCH[-PRERELEASE] or one of: "
             f"major, minor, patch (got: {arg})",
             file=sys.stderr,
         )
@@ -329,7 +329,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
 
     if shutil.which("gh") is None:
         print(
-            "release-cut: gh CLI not found — install from https://cli.github.com/",
+            "release-core cut: gh CLI not found — install from https://cli.github.com/",
             file=sys.stderr,
         )
         return 1
