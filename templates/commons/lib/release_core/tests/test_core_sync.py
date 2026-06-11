@@ -78,6 +78,36 @@ def test_is_release_internal(dest, internal):
     assert sync.is_release_internal(dest) is internal
 
 
+# ── read_source_tag: the resolved-release stamp in the tool venv (#580) ───────
+
+
+def test_read_source_tag_reads_the_venv_stamp(tmp_path, monkeypatch):
+    monkeypatch.delenv("RELEASE_CORE_SOURCE_TAG", raising=False)
+    monkeypatch.setattr(sync.sys, "prefix", str(tmp_path))
+    (tmp_path / sync.SOURCE_TAG_FILE).write_text("v2.17.1\n")
+    assert sync.read_source_tag() == "v2.17.1"
+
+
+def test_read_source_tag_absent_or_blank_is_none(tmp_path, monkeypatch):
+    # No stamp (a wheel installed by an older resolver) → None, the fallback.
+    monkeypatch.delenv("RELEASE_CORE_SOURCE_TAG", raising=False)
+    monkeypatch.setattr(sync.sys, "prefix", str(tmp_path))
+    assert sync.read_source_tag() is None
+    (tmp_path / sync.SOURCE_TAG_FILE).write_text("\n")
+    assert sync.read_source_tag() is None
+
+
+def test_read_source_tag_env_override_wins(tmp_path, monkeypatch):
+    # The env var, when SET, shadows the file (the test channel); empty means
+    # "no stamp" so tests can neutralize a real host venv stamp.
+    monkeypatch.setattr(sync.sys, "prefix", str(tmp_path))
+    (tmp_path / sync.SOURCE_TAG_FILE).write_text("v2.16.0\n")
+    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "v2.17.1")
+    assert sync.read_source_tag() == "v2.17.1"
+    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "")
+    assert sync.read_source_tag() is None
+
+
 # ── Symlink target computation (relative, path-mirror) ────────────────────────
 
 

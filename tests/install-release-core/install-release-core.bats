@@ -293,6 +293,31 @@ EOF
 }
 
 # --------------------------------------------------------------------------
+# provenance stamp (#580): the resolved release tag lands in the venv so
+# `release-core init` can label the managed-sync commit with the REAL release
+# line (the wheel's package version is a static 0.0.1).
+# --------------------------------------------------------------------------
+
+@test "stamp: install writes the resolved release tag into <venv>/release-source.tag" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [ -f "$WORK/relcore/venv/release-source.tag" ]
+  [ "$(cat "$WORK/relcore/venv/release-source.tag")" = "v2.5.0" ]
+}
+
+@test "stamp: --major v2 stamps the tag of the release the wheel was resolved from" {
+  run "$BIN" --major v2
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/relcore/venv/release-source.tag")" = "v2.6.0" ]
+}
+
+@test "stamp: --print-url writes no stamp (resolve only)" {
+  run "$BIN" --print-url
+  [ "$status" -eq 0 ]
+  [ ! -e "$WORK/relcore/venv/release-source.tag" ]
+}
+
+# --------------------------------------------------------------------------
 # --from-source: install the local checkout's package (release CI), SAME
 # isolated-venv machinery — no second install script.
 # --------------------------------------------------------------------------
@@ -331,6 +356,26 @@ EOF
   run "$BIN" --from-source "$WORK/empty" --no-init
   [ "$status" -ne 0 ]
   [[ "$output" == *"no pyproject.toml"* ]]
+}
+
+@test "from-source: stamps 'from-source <shortsha>' when the source is a git checkout" {
+  mkdir -p "$WORK/src"; : > "$WORK/src/pyproject.toml"
+  git -C "$WORK/src" init -q
+  git -C "$WORK/src" config user.email t@example.com
+  git -C "$WORK/src" config user.name Test
+  git -C "$WORK/src" add -A
+  git -C "$WORK/src" commit -qm init
+  sha="$(git -C "$WORK/src" rev-parse --short HEAD)"
+  run "$BIN" --from-source "$WORK/src" --no-init
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/relcore/venv/release-source.tag")" = "from-source $sha" ]
+}
+
+@test "from-source: stamps bare 'from-source' when the source is not a git tree (never fakes a tag)" {
+  mkdir -p "$WORK/src"; : > "$WORK/src/pyproject.toml"
+  run "$BIN" --from-source "$WORK/src" --no-init
+  [ "$status" -eq 0 ]
+  [ "$(cat "$WORK/relcore/venv/release-source.tag")" = "from-source" ]
 }
 
 @test "from-source: still exposes console-scripts + persists GITHUB_PATH (same machinery)" {

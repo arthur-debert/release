@@ -143,7 +143,16 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
             )
         from .. import __version__ as _v
 
-        source: sync.Source = sync.BundleSource(bundle_root, ref_sha=f"release-core {_v}")
+        # release#580: carry the resolved release tag the boot resolver stamped
+        # into the tool venv (the wheel's own version is a static 0.0.1) so the
+        # auto-commit + the .release-sync-source marker can say WHICH release
+        # line seeded this tree. Absent stamp (older resolver) → None; the
+        # ref_sha wheel-version string remains the label fallback.
+        source: sync.Source = sync.BundleSource(
+            bundle_root,
+            ref_sha=f"release-core {_v}",
+            release_tag=sync.read_source_tag(),
+        )
     else:
         assert release_home is not None
         release_ref = os.environ.get("RELEASE_REF") or None
@@ -202,6 +211,27 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
     return out
 
 
+def _source_label(source: sync.Source) -> str:
+    """The provenance label for the auto-commit message + summary (release#580).
+
+    When the boot resolver stamped the resolved release tag into the tool venv,
+    the label carries the REAL release line — "release v2.17.1 (release-core
+    wheel)" — instead of the static wheel version ("release-core 0.0.1", which
+    cannot tell v2.16 from v2.17 in a consumer's history). A --from-source
+    install stamps "from-source [<shortsha>]" and labels as "release-core
+    (from-source <shortsha>)" — truthful, never a faked tag. No stamp (a wheel
+    installed by an older resolver, or a dev checkout) → the source's ref_sha
+    string, unchanged (GitSource always lands here: its resolved SHA already IS
+    the provenance).
+    """
+    tag = source.release_tag
+    if not tag:
+        return source.ref_sha
+    if tag.startswith("from-source"):
+        return f"release-core ({tag})"
+    return f"release {tag} (release-core wheel)"
+
+
 def _run_full_sync(
     repo_root: str, repo_name: str, *, dry_run: bool
 ) -> tuple[int, list[str], str, list[str]]:
@@ -247,7 +277,7 @@ def _run_full_sync(
         managed = _managed_paths_for_commit(mirror, claude)
 
         if dry_run:
-            return changes, managed, source.ref_sha, list(mirror.conflicts)
+            return changes, managed, _source_label(source), list(mirror.conflicts)
 
         # Apply: atomic .release/ swap, then the mirror/CLAUDE.md apply phase.
         # _apply_mirror runs relative to cwd; init has already chdir'd into repo_root.
@@ -261,7 +291,7 @@ def _run_full_sync(
         if not swapped:
             shutil.rmtree(tmp_release, ignore_errors=True)
 
-    return changes, managed, source.ref_sha, list(mirror.conflicts)
+    return changes, managed, _source_label(source), list(mirror.conflicts)
 
 
 def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:

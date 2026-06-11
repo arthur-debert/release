@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 
 from . import gh
@@ -51,10 +52,19 @@ class Source:
     the lefthook header (the resolved git SHA for GitSource; the wheel version /
     a sentinel for BundleSource). ``label`` is a human-readable description of
     the source used only in error messages (the git ref for GitSource).
+
+    ``release_tag`` is the resolved release PROVENANCE the boot resolver stamped
+    into the tool venv at install time (release#580) — e.g. "v2.17.1", or
+    "from-source <shortsha>" for a --from-source install. Only the bundle path
+    carries it (the wheel is what the stamp describes); GitSource composes from
+    a live clone whose ref_sha already says exactly where the content came from.
+    When set, materialize() writes it into .release-sync-source alongside the
+    ref_sha line, and init labels the managed auto-commit with it.
     """
 
     ref_sha: str = ""
     label: str = "source"
+    release_tag: str | None = None
 
     def list_tree(self, subtree: str) -> list[tuple[str, str]]:  # pragma: no cover - interface
         raise NotImplementedError
@@ -115,10 +125,11 @@ class BundleSource(Source):
     filesystems.
     """
 
-    def __init__(self, bundle_root: str, ref_sha: str = "") -> None:
+    def __init__(self, bundle_root: str, ref_sha: str = "", release_tag: str | None = None) -> None:
         self.bundle_root = bundle_root
         self.ref_sha = ref_sha
         self.label = ref_sha or "wheel bundle"
+        self.release_tag = release_tag
 
     def _abs(self, relpath: str) -> str:
         # relpath is always POSIX/'/'-separated; translate to the host separator.
@@ -178,7 +189,37 @@ MANAGED_MARKER = "# Managed by release — do not edit. Regenerate via release-c
 # the next init rather than going unrecognized.
 MANAGED_MARKER_SIGNATURE = "# Managed by release"
 SOURCE_MARKER = ".release-sync-source"
+# The resolved-release stamp the boot resolver writes into the tool venv at
+# install time (release#580): <venv>/release-source.tag, one line — the release
+# tag the wheel was downloaded from (e.g. "v2.17.1"), or "from-source
+# [<shortsha>]" for a --from-source install. The FILE (not an env var) is the
+# durable channel: a later bare `release-core init` (the SessionStart self-sync)
+# runs without install-release-core in the chain, and sys.prefix — the venv the
+# running release-core lives in — locates it on every run.
+SOURCE_TAG_FILE = "release-source.tag"
 GITIGNORE_FILE = ".gitignore"
+
+
+def read_source_tag() -> str | None:
+    """The resolved release provenance stamped by install-release-core, or None.
+
+    Reads ``<sys.prefix>/release-source.tag``. None when absent — a wheel
+    installed by an older (pre-#580) resolver, or a dev checkout venv — in
+    which case callers fall back to the static wheel-version string (a
+    one-session boot-window robustness, not a compat shim). The
+    $RELEASE_CORE_SOURCE_TAG env var, when SET, overrides the file (tests;
+    empty value means "no stamp").
+    """
+    if "RELEASE_CORE_SOURCE_TAG" in os.environ:
+        return os.environ["RELEASE_CORE_SOURCE_TAG"].strip() or None
+    path = os.path.join(sys.prefix, SOURCE_TAG_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
 # WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
 # and recomposed every session/CI from the pinned wheel, never committed. A
 # `.gitignore` of `*` inside the dir makes it self-ignoring: git sees nothing
@@ -606,7 +647,10 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
     with open(gitignore, "w", encoding="utf-8") as fh:
         fh.write(GITIGNORE_BODY)
 
-    # Provenance marker (ADR-0002): static comment lines + the full source SHA.
+    # Provenance marker (ADR-0002): static comment lines + the full source SHA,
+    # plus — when the boot resolver stamped one (release#580) — the resolved
+    # release tag, so the marker can tell WHICH release line seeded this tree
+    # (the wheel's package version is a static 0.0.1).
     marker = os.path.join(tmp_release, SOURCE_MARKER)
     with open(marker, "w", encoding="utf-8") as fh:
         fh.write(
@@ -616,6 +660,12 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
             "# this marker is transient and has no reader — drift-check was retired.\n"
             f"{ref_sha}\n"
         )
+        if source.release_tag:
+            fh.write(
+                "# resolved release tag — stamped into the tool venv by\n"
+                "# install-release-core at wheel-install time (release#580).\n"
+                f"{source.release_tag}\n"
+            )
 
 
 def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release: str) -> None:
