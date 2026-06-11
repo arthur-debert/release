@@ -5,6 +5,14 @@
 # to require a leading `---`).
 extends: default
 
+# Generated lockfiles are committed-but-not-authored (the lint-debt model):
+# pnpm writes flow mappings as `{ foo: bar }`, which fails the default
+# `braces` rule on every consumer that commits a pnpm-lock.yaml. Never lint
+# what a tool generates — fix the generator or ignore; pnpm's format is not
+# ours to fix. (Caught by the 2.17.0 fleet pre-flight on simple-gal-ui.)
+ignore: |
+  pnpm-lock.yaml
+
 rules:
   line-length:
     max: 120
