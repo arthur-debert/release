@@ -1,7 +1,7 @@
 """Circuit breakers — detect a diverging review loop and STOP before iterating.
 
-Heuristics for the review-loop circuit breakers. A *cycle* is
-one Copilot review; its findings are the review-thread comments attached to
+Heuristics for the review-loop circuit breakers. A *cycle* is one review by a
+REQUIRED reviewer; its findings are the review-thread comments attached to
 that review (GraphQL `reviewThreads`, the single source of truth for inline
 comments — the REST `/pulls/{n}/comments` fetch surfaced only a subset and is
 gone; release#515). All inputs derive from gh review history, except diff
@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .model import PullContext
-from .reviewers import CopilotAdapter
+from .reviewers import required_reviewers
 
 CYCLE_CAP = 3
 DIFF_GROWTH_TOLERANCE = 1.1  # allow 10% jitter before calling it "growing"
@@ -47,21 +47,19 @@ class BreakerVerdict:
     cycles: int
 
 
-# Login matching is the adapter's job — never re-roll an author filter here
-# (Copilot's review login is `copilot-pull-request-reviewer[bot]` but its
-# comment author renders as `Copilot`; release#455).
-_COPILOT = CopilotAdapter()
-
-
 def build_cycles(ctx: PullContext, diff_sizer: DiffSizer | None = None) -> list[Cycle]:
-    """One Cycle per Copilot review, chronological, with its finding keys.
+    """One Cycle per required-reviewer review, chronological, with its findings.
 
     Findings come from the thread comments (resolved or not — a resolved
     finding was still a finding of that cycle), keyed by the review each
-    comment was submitted with (`ReviewComment.review_id`).
+    comment was submitted with (`ReviewComment.review_id`). Login matching is
+    the adapter's job — never re-roll an author filter here (a reviewer's
+    review login and comment author can render differently; release#455).
     """
+    required = required_reviewers()
     reviews = sorted(
-        (r for r in ctx.reviews if _COPILOT.matches(r.author)), key=lambda r: r.review_id
+        (r for r in ctx.reviews if any(a.matches(r.author) for a in required)),
+        key=lambda r: r.review_id,
     )
     thread_comments = [c for t in ctx.threads for c in t.comments]
     cycles: list[Cycle] = []

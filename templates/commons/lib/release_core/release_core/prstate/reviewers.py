@@ -1,26 +1,55 @@
 """Reviewer adapters — the only place that knows reviewer-specific mechanics.
 
-The state machine consumes the adapter interface (`required`, `detect`,
-`open_threads`) and never branches on a reviewer's name. Adding a reviewer is
-adding an adapter to `REGISTRY`; nothing downstream changes. This is what keeps
-the core stable as the coding-agent landscape shifts.
+The state machine and the CLI consume the adapter interface (`required`,
+`detect`, `open_threads` on the read side; `request`, `cancel`,
+`instruction_files` on the act side) and never branch on a reviewer's name.
+Adding a reviewer is adding an adapter to `REGISTRY`; nothing downstream
+changes. This is what keeps the core stable as the coding-agent landscape
+shifts.
 """
 
 from __future__ import annotations
 
+from . import ghapi
 from .model import PullContext, ReviewLifecycle, Thread
 
 
 class ReviewerAdapter:
-    """Base adapter. Subclasses define `name`, `required`, `matches`, `detect`."""
+    """Base adapter. Subclasses define the read side (`matches`, `detect`) and
+    the act side (`request`, `cancel`); `instruction_files` declares where the
+    reviewer's per-repo code-review instructions live."""
 
     name: str = ""
     required: bool = False
+    # Repo-relative path(s) of this reviewer's code-review instruction file(s).
+    # Structure only: the adapter declares the location; whether content ships
+    # there is a per-reviewer onboarding decision.
+    instruction_files: tuple[str, ...] = ()
 
     def matches(self, login: str) -> bool:
         raise NotImplementedError
 
     def detect(self, ctx: PullContext) -> ReviewLifecycle:
+        raise NotImplementedError
+
+    def request(self, pr: int) -> bool:
+        """Request — or re-request, same call — this reviewer on `pr`.
+
+        Returns True when a request was actually placed, False when the
+        reviewer has no request mechanism (auto-triggering / best-effort
+        backends). Re-request after a fixup push is not a separate verb:
+        the state machine's never-requested vs stale-after-push distinction
+        is a read-side concern (`state._has_stale_review`); the act is the
+        same either way.
+        """
+        raise NotImplementedError
+
+    def cancel(self, pr: int) -> bool:
+        """Withdraw a pending review request on `pr`.
+
+        Returns True when a request was withdrawn, False when there is no
+        request mechanism to withdraw from (no-op backends).
+        """
         raise NotImplementedError
 
     def authored_threads(self, ctx: PullContext) -> list[Thread]:
@@ -49,9 +78,21 @@ class CopilotAdapter(ReviewerAdapter):
 
     name = "copilot"
     required = True
+    instruction_files = (".github/copilot-instructions.md",)
 
     def matches(self, login: str) -> bool:
         return "copilot" in login.lower()
+
+    def request(self, pr: int) -> bool:
+        # `gh pr edit --add-reviewer @copilot` — GraphQL with the bot's real
+        # node_id (via ghapi.pr_edit_reviewer; the REST requested_reviewers
+        # POST silently no-ops for Copilot). Re-request is the same call.
+        ghapi.pr_edit_reviewer(pr, "@copilot")
+        return True
+
+    def cancel(self, pr: int) -> bool:
+        ghapi.pr_edit_reviewer(pr, "@copilot", remove=True)
+        return True
 
     def detect(self, ctx: PullContext) -> ReviewLifecycle:
         # A DISMISSED review (cleared by an admin or the author) is no longer a
@@ -83,9 +124,20 @@ class GeminiAdapter(ReviewerAdapter):
 
     name = "gemini"
     required = False
+    # Declared location only — no content shipped until Gemini is onboarded
+    # as a required reviewer.
+    instruction_files = (".gemini/styleguide.md",)
 
     def matches(self, login: str) -> bool:
         return "gemini" in login.lower()
+
+    def request(self, pr: int) -> bool:
+        # The Gemini app auto-triggers on PR open; there is no request
+        # mechanism, and it is best-effort anyway — a no-op, not an error.
+        return False
+
+    def cancel(self, pr: int) -> bool:
+        return False
 
     def detect(self, ctx: PullContext) -> ReviewLifecycle:
         # Any-head, not head-strict: Gemini won't review the new head again.
@@ -111,3 +163,11 @@ REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), GeminiAdapter()]
 
 def required_reviewers() -> list[ReviewerAdapter]:
     return [r for r in REGISTRY if r.required]
+
+
+def by_name(name: str) -> ReviewerAdapter | None:
+    """Look an adapter up by its registry name (the `--reviewer` selector)."""
+    for r in REGISTRY:
+        if r.name == name.lower():
+            return r
+    return None

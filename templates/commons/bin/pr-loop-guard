@@ -167,10 +167,10 @@ def main():
     arm_lines = "\n".join(f"    touch {os.path.join(p)}" for p in checked)
     deny(
         "PRs in this repo are driven through the `gh-pr-review-loop` skill "
-        "(request Copilot review → wait → triage comments → resolve threads as "
-        "you go → stop at ready), NOT by hand-composing gh-copilot-* / "
-        "gh-pr-checks-wait. Invoke the gh-pr-review-loop skill before opening "
-        "the PR.\n\n"
+        "(request the required reviews → wait → triage comments → resolve "
+        "threads as you go → stop at ready), NOT by hand-composing "
+        "`release-core pr review ...` / gh-pr-checks-wait. Invoke the "
+        "gh-pr-review-loop skill before opening the PR.\n\n"
         "If you are ALREADY running the loop, arm it once (a SEPARATE step, "
         "before the gh pr create call) and retry. Arm any of these exact paths "
         "(the cwd is reset between calls, so don't rely on `git rev-parse` in the "

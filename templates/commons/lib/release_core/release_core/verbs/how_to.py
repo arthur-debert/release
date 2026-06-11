@@ -185,9 +185,9 @@ def _dev_cycle_section() -> list[str]:
     lines.append("  5. Open the PR as a DRAFT: gh pr create --draft")
     lines.append(
         "  6. Drive the review loop via the `gh-pr-review-loop` skill (it arms "
-        "the PR-loop guard, requests Copilot, waits, triages, resolves threads). "
-        "A bare `gh pr create` may be blocked by the guard until the skill arms "
-        "the loop — that's expected."
+        "the PR-loop guard, requests the required reviews, waits, triages, "
+        "resolves threads). A bare `gh pr create` may be blocked by the guard "
+        "until the skill arms the loop — that's expected."
     )
     lines.append(
         "  7. Flip to READY (gh pr ready) only when reviewed + CI green + "

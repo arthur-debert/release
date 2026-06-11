@@ -115,3 +115,62 @@ def test_resolved_thread_clears_open_but_keeps_authored(context):
     assert COPILOT.detect(ctx) == ReviewLifecycle.DONE_COMMENTS
     assert COPILOT.open_threads(ctx) == []
     assert len(COPILOT.authored_threads(ctx)) == 1
+
+
+# --- the act side (request / cancel / instruction files; release#555) -------
+
+
+def test_by_name_resolves_registry_adapters():
+    from release_core.prstate.reviewers import by_name
+
+    assert by_name("copilot") is not None and by_name("copilot").name == "copilot"
+    assert by_name("GEMINI") is not None and by_name("GEMINI").name == "gemini"
+    assert by_name("coderabbit") is None  # no adapter while on trial (#555)
+
+
+def test_copilot_request_goes_through_gh_pr_edit_graphql(monkeypatch):
+    # The GraphQL `gh pr edit --add-reviewer @copilot` path is load-bearing:
+    # the REST requested_reviewers POST silently no-ops for Copilot.
+    from release_core.prstate import ghapi
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        ghapi,
+        "pr_edit_reviewer",
+        lambda pr, reviewer, remove=False: calls.append((pr, reviewer, remove)),
+    )
+    assert COPILOT.request(91) is True
+    assert calls == [(91, "@copilot", False)]
+
+
+def test_copilot_cancel_removes_the_reviewer(monkeypatch):
+    from release_core.prstate import ghapi
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        ghapi,
+        "pr_edit_reviewer",
+        lambda pr, reviewer, remove=False: calls.append((pr, reviewer, remove)),
+    )
+    assert COPILOT.cancel(91) is True
+    assert calls == [(91, "@copilot", True)]
+
+
+def test_gemini_request_and_cancel_are_noops(monkeypatch):
+    # Gemini auto-triggers and is best-effort: no request mechanism, no gh call.
+    from release_core.prstate import ghapi
+
+    def _boom(*a, **k):  # any gh traffic is a bug
+        raise AssertionError("gemini must not touch gh")
+
+    monkeypatch.setattr(ghapi, "pr_edit_reviewer", _boom)
+    monkeypatch.setattr(ghapi, "_gh", _boom)
+    assert GEMINI.request(91) is False
+    assert GEMINI.cancel(91) is False
+
+
+def test_adapters_declare_their_instruction_files():
+    # Structure only (#555): the adapter declares where its review-instruction
+    # file lives; shipping content there is a separate onboarding decision.
+    assert COPILOT.instruction_files == (".github/copilot-instructions.md",)
+    assert GEMINI.instruction_files == (".gemini/styleguide.md",)

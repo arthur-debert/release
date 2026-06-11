@@ -1,0 +1,1 @@
+- Reviewer-agnostic review surface: ReviewerAdapter grows the act side (request/cancel + instruction-file declaration); 'pr copilot on|off|wait|review' renamed to 'pr review request|cancel|wait|show [--reviewer]' with no aliases; gh-copilot-* bin scripts retired

@@ -162,7 +162,7 @@ Cloud sessions don't poll for new review comments on their own. After opening a 
 
 2. **Manual poll** — if Auto-fix isn't installed or appropriate for the repo, re-run the step-1 "list unresolved review threads" query periodically. When the count increases, address the new threads.
 
-Local Claude Code (CLI/Desktop) has no webhook subscription equivalent; either poll manually, or in repos with `~/h/release/bin/` on PATH use the broader `gh-pr-review-loop` skill which wraps `gh-copilot-wait` for the Copilot-specific path.
+Local Claude Code (CLI/Desktop) has no webhook subscription equivalent; either poll manually, or in repos with `~/h/release/bin/` on PATH use the broader `gh-pr-review-loop` skill which blocks on `release-core pr review wait` for the pending required review(s).
 
 ## After fixup pushes
 
