@@ -173,8 +173,10 @@ on every run (ADR-0001):
    **removals** propagate, with no removal manifest and no bookkeeping.
 
 The filesystem *is* the state. The only metadata init writes is a
-**provenance marker** at `.release/.release-sync-source` — the version label
-of the wheel that generated the tree (ADR-0002, historical). With the tree
+**provenance marker** at `.release/.release-sync-source` — a provenance
+string for the source that generated the tree: the wheel's version label on
+the normal bundle path, or the resolved git SHA when composing from a
+`$RELEASE_HOME` checkout (ADR-0002, historical). With the tree
 ephemeral and recomposed every session (WS4, #521), nothing reads it anymore
 — the drift-check it served was retired (drift is impossible by
 construction); it remains purely informational.
