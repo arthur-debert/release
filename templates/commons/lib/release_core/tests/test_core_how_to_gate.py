@@ -123,13 +123,34 @@ def test_how_to_undetectable_kind_renders_generic_not_error(monkeypatch, capsys)
 
 
 def test_gate_missing_lefthook_is_a_hard_failure(monkeypatch, capsys):
-    monkeypatch.setattr(gate, "_resolve_lefthook", lambda root: None)
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: None)
     monkeypatch.setattr(gate, "_repo_root", lambda: ".")
     assert gate.main([]) == 1
     assert "lefthook not found" in capsys.readouterr().err
 
 
-def test_gate_runs_all_files_over_the_repo(monkeypatch):
+def test_gate_no_lefthook_at_the_pin_is_a_hard_failure(monkeypatch, capsys):
+    """One gate, ONE runner (release#567): a PATH that only carries lefthook at
+    some OTHER version than the toolset pin is a hard failure naming the pin and
+    the bootstrap remedy — never a silent fall-back to whatever is around."""
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: "2.1.9")
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: None)
+    monkeypatch.setattr(gate, "_repo_root", lambda: ".")
+    assert gate.main([]) == 1
+    err = capsys.readouterr().err
+    assert "pinned toolset version 2.1.9" in err
+    assert "setup-dev-env.sh" in err
+
+
+def _gated_root(tmp_path):
+    """A repo root whose gate IS materialized (root config), so main() gets past
+    the release#567 unmaterialized-config hard failure."""
+    (tmp_path / "lefthook.yml").write_text("pre-commit:\n")
+    return str(tmp_path)
+
+
+def test_gate_runs_all_files_over_the_repo(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
     class _Result:
@@ -140,17 +161,19 @@ def test_gate_runs_all_files_over_the_repo(monkeypatch):
         captured["cwd"] = cwd
         return _Result()
 
-    monkeypatch.setattr(gate, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(gate, "_resolve_lefthook", lambda root: "lefthook")
+    root = _gated_root(tmp_path)
+    monkeypatch.setattr(gate, "_repo_root", lambda: root)
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.setattr(gate.subprocess, "run", _fake_run)
     assert gate.main([]) == 0
     cmd = captured["cmd"]
     expected = ["lefthook", "run", "pre-commit", "--no-auto-install", "--all-files", "--no-tty"]
     assert cmd[:6] == expected
-    assert captured["cwd"] == "/repo"
+    assert captured["cwd"] == root
 
 
-def test_gate_hook_mode_runs_staged_not_all_files(monkeypatch):
+def test_gate_hook_mode_runs_staged_not_all_files(monkeypatch, tmp_path):
     """--hook (the git pre-commit entry) runs lefthook over the STAGED set — NO
     --all-files — so stage_fixed auto-fix+restage stays correct at commit time."""
     captured: dict[str, object] = {}
@@ -162,8 +185,9 @@ def test_gate_hook_mode_runs_staged_not_all_files(monkeypatch):
         captured["cmd"] = cmd
         return _Result()
 
-    monkeypatch.setattr(gate, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(gate, "_resolve_lefthook", lambda root: "lefthook")
+    monkeypatch.setattr(gate, "_repo_root", lambda: _gated_root(tmp_path))
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.setattr(gate.subprocess, "run", _fake_run)
     assert gate.main(["--hook"]) == 0
     cmd = captured["cmd"]
@@ -187,11 +211,171 @@ def test_gate_points_lefthook_at_managed_config(monkeypatch, tmp_path):
         return _Result()
 
     monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
-    monkeypatch.setattr(gate, "_resolve_lefthook", lambda root: "lefthook")
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
     monkeypatch.setattr(gate.subprocess, "run", _fake_run)
     assert gate.main([]) == 0
     assert captured["env"]["LEFTHOOK_CONFIG"] == str(tmp_path / ".release" / "lefthook.yml")
+
+
+# --- one runner: the gate pins its lefthook to the toolset (release#567) ----
+
+
+def test_pin_read_from_root_gate_tool_versions(tmp_path, monkeypatch):
+    """The pin comes from the SAME single source the provisioners use —
+    bin/gate-tool-versions.sh (release#499/#531)."""
+    monkeypatch.delenv("LEFTHOOK_VERSION", raising=False)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "gate-tool-versions.sh").write_text(
+        '# pins\nLEFTHOOK_VERSION="${LEFTHOOK_VERSION:-9.9.9}"\n'
+    )
+    assert gate._pinned_lefthook_version(str(tmp_path)) == "9.9.9"
+
+
+def test_pin_env_override_wins(tmp_path, monkeypatch):
+    """LEFTHOOK_VERSION env is the single source's documented override knob —
+    it wins over the file, matching the shell-side `:-` semantics."""
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "gate-tool-versions.sh").write_text(
+        'LEFTHOOK_VERSION="${LEFTHOOK_VERSION:-9.9.9}"\n'
+    )
+    monkeypatch.setenv("LEFTHOOK_VERSION", "1.2.3")
+    assert gate._pinned_lefthook_version(str(tmp_path)) == "1.2.3"
+
+
+def test_pin_falls_back_to_the_wheel_bundle(tmp_path, monkeypatch):
+    """Pre-init (fresh clone), the consumer's bin/gate-tool-versions.sh is a
+    dangling symlink into the not-yet-composed .release/ — the wheel-bundled
+    copy that ships WITH this code still pins the runner."""
+    monkeypatch.delenv("LEFTHOOK_VERSION", raising=False)
+    pkg = tmp_path / "pkg"
+    bundled = pkg / "_bundled_templates" / "templates" / "commons" / "bin"
+    bundled.mkdir(parents=True)
+    (bundled / "gate-tool-versions.sh").write_text(
+        'LEFTHOOK_VERSION="${LEFTHOOK_VERSION:-7.7.7}"\n'
+    )
+    (pkg / "verbs").mkdir()
+    monkeypatch.setattr(gate, "__file__", str(pkg / "verbs" / "gate.py"))
+    repo = tmp_path / "repo"  # no bin/gate-tool-versions.sh here
+    repo.mkdir()
+    assert gate._pinned_lefthook_version(str(repo)) == "7.7.7"
+
+
+def _fake_lefthook(dirpath, version: str) -> None:
+    dirpath.mkdir(parents=True, exist_ok=True)
+    binpath = dirpath / "lefthook"
+    binpath.write_text(f'#!/bin/sh\necho "lefthook version {version}"\n')
+    binpath.chmod(0o755)
+
+
+def test_resolve_lefthook_picks_the_pinned_binary_not_first_on_path(tmp_path, monkeypatch):
+    """PATH order does not pick the runner — the PIN does. A floating/stale
+    lefthook earlier on PATH is skipped in favor of the toolset-pinned one
+    (the #525 probe's version-skew bug)."""
+    stale = tmp_path / "stale"
+    pinned = tmp_path / "pinned"
+    _fake_lefthook(stale, "2.1.1")
+    _fake_lefthook(pinned, "2.1.9")
+    monkeypatch.setenv("PATH", f"{stale}{os.pathsep}{pinned}")
+    got = gate._resolve_lefthook("2.1.9")
+    assert got == str(pinned / "lefthook")
+
+
+def test_resolve_lefthook_skips_node_modules(tmp_path, monkeypatch):
+    """A consumer's package.json-vendored lefthook (node_modules/.bin on PATH)
+    is a floating consumer dep, never the gate's runner — even at the pin."""
+    vendored = tmp_path / "node_modules" / ".bin"
+    _fake_lefthook(vendored, "2.1.9")
+    monkeypatch.setenv("PATH", str(vendored))
+    assert gate._resolve_lefthook("2.1.9") is None
+    # Without a pin it is skipped too — node_modules is never the toolset.
+    assert gate._resolve_lefthook(None) is None
+
+
+def test_resolve_lefthook_unpinned_takes_first_on_path(tmp_path, monkeypatch):
+    """No knowable pin (source-tree dev checkout): the first non-node_modules
+    PATH lefthook is the runner — still one deterministic runner per env."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _fake_lefthook(first, "2.0.0")
+    _fake_lefthook(second, "2.1.9")
+    monkeypatch.setenv("PATH", f"{first}{os.pathsep}{second}")
+    assert gate._resolve_lefthook(None) == str(first / "lefthook")
+
+
+# --- fail loud on an unmaterialized gate config (release#567) ---------------
+
+
+def test_gate_unmaterialized_config_fails_loud(monkeypatch, tmp_path, capsys):
+    """No .release/lefthook.yml AND no root config: the gate exits non-zero and
+    names `release-core init` — never lefthook's warn-and-pass (the
+    first-commit-of-session boot hole)."""
+    monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
+    monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
+    assert gate.main(["--hook"]) == 1
+    err = capsys.readouterr().err
+    assert "not materialized" in err
+    assert "release-core init" in err
+
+
+def test_gate_root_config_uses_default_discovery(monkeypatch, tmp_path):
+    """release-self / not-yet-migrated: a root lefthook.yml satisfies the gate
+    via lefthook's own discovery — no LEFTHOOK_CONFIG injected."""
+    (tmp_path / "lefthook.yml").write_text("pre-commit:\n")
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd, cwd, env):
+        captured["env"] = env
+        return _Result()
+
+    monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
+    monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
+    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    assert gate.main([]) == 0
+    assert "LEFTHOOK_CONFIG" not in captured["env"]
+
+
+def test_gate_explicit_lefthook_config_missing_fails_loud(monkeypatch, tmp_path, capsys):
+    """An explicit LEFTHOOK_CONFIG pointing at a missing file is a hard failure
+    too — lefthook would warn-and-pass it."""
+    monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
+    monkeypatch.setenv("LEFTHOOK_CONFIG", str(tmp_path / "nope.yml"))
+    assert gate.main([]) == 1
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_gate_explicit_lefthook_config_is_respected(monkeypatch, tmp_path):
+    """A caller's existing LEFTHOOK_CONFIG wins over the managed config."""
+    (tmp_path / ".release").mkdir()
+    (tmp_path / ".release" / "lefthook.yml").write_text("pre-commit:\n")
+    mine = tmp_path / "mine.yml"
+    mine.write_text("pre-commit:\n")
+    captured: dict[str, object] = {}
+
+    class _Result:
+        returncode = 0
+
+    def _fake_run(cmd, cwd, env):
+        captured["env"] = env
+        return _Result()
+
+    monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
+    monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
+    monkeypatch.setenv("LEFTHOOK_CONFIG", str(mine))
+    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    assert gate.main([]) == 0
+    assert captured["env"]["LEFTHOOK_CONFIG"] == str(mine)
 
 
 def _git_init(path) -> None:
