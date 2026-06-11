@@ -1,0 +1,1 @@
+- Gate: yamllint ignores generated pnpm-lock.yaml (committed-but-not-authored; pnpm's brace style failed the default braces rule)
