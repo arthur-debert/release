@@ -1,10 +1,13 @@
 """Circuit breakers — detect a diverging review loop and STOP before iterating.
 
 Heuristics for the review-loop circuit breakers. A *cycle* is
-one Copilot review; its findings are the inline comments attached to that
-review. All inputs derive from gh review history, except diff sizes, which come
-from git and are injected via `diff_sizer` — omitted in pure evaluation, in
-which case the diff-trajectory breaker is skipped rather than guessed.
+one Copilot review; its findings are the review-thread comments attached to
+that review (GraphQL `reviewThreads`, the single source of truth for inline
+comments — the REST `/pulls/{n}/comments` fetch surfaced only a subset and is
+gone; release#515). All inputs derive from gh review history, except diff
+sizes, which come from git and are injected via `diff_sizer` — omitted in pure
+evaluation, in which case the diff-trajectory breaker is skipped rather than
+guessed.
 
 The verdict folds into the state machine as the STOP form of BLOCKED, and only
 when the loop would otherwise iterate (open threads remain). A converged PR is
@@ -17,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .model import PullContext
+from .reviewers import CopilotAdapter
 
 CYCLE_CAP = 3
 DIFF_GROWTH_TOLERANCE = 1.1  # allow 10% jitter before calling it "growing"
@@ -43,19 +47,27 @@ class BreakerVerdict:
     cycles: int
 
 
-def _is_copilot(login: str) -> bool:
-    return "copilot" in login.lower()
+# Login matching is the adapter's job — never re-roll an author filter here
+# (Copilot's review login is `copilot-pull-request-reviewer[bot]` but its
+# comment author renders as `Copilot`; release#455).
+_COPILOT = CopilotAdapter()
 
 
 def build_cycles(ctx: PullContext, diff_sizer: DiffSizer | None = None) -> list[Cycle]:
-    """One Cycle per Copilot review, chronological, with its finding keys."""
-    reviews = sorted((r for r in ctx.reviews if _is_copilot(r.author)), key=lambda r: r.review_id)
+    """One Cycle per Copilot review, chronological, with its finding keys.
+
+    Findings come from the thread comments (resolved or not — a resolved
+    finding was still a finding of that cycle), keyed by the review each
+    comment was submitted with (`ReviewComment.review_id`).
+    """
+    reviews = sorted(
+        (r for r in ctx.reviews if _COPILOT.matches(r.author)), key=lambda r: r.review_id
+    )
+    thread_comments = [c for t in ctx.threads for c in t.comments]
     cycles: list[Cycle] = []
     for index, review in enumerate(reviews, start=1):
         keys = frozenset(
-            (c.get("path") or "", c.get("original_line") or c.get("line"))
-            for c in ctx.review_comments
-            if c.get("pull_request_review_id") == review.review_id
+            (c.path, c.line) for c in thread_comments if c.review_id == review.review_id
         )
         size = diff_sizer(review.commit_id) if diff_sizer else None
         cycles.append(Cycle(index, review.commit_id, keys, size))

@@ -26,7 +26,6 @@ def load_context(name: str) -> PullContext:
         thread_nodes=data.get("threads", []),
         reactions=data.get("reactions", []),
         issue_comments=data.get("issue_comments", []),
-        review_comments=data.get("review_comments", []),
     )
 
 

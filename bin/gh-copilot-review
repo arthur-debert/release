@@ -12,7 +12,8 @@
 #
 # Output:
 #   - "=== copilot review on <repo>#<pr> ===" — review state + body
-#   - "=== inline comments ===" — file:line + comment body, one per line
+#   - "=== review threads ===" — every review thread (any author, via GraphQL
+#     reviewThreads): [open|resolved] file:line, thread/comment ids, bodies
 #
 # Exit codes:
 #   0  — review printed
