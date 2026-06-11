@@ -119,7 +119,7 @@ consumer's green by construction.
 
 A reusable-workflow ref (`uses: arthur-debert/release/.github/workflows/x.yml@v2`)
 is resolved **once, when the run is created**. `gh run rerun` re-executes that
-original snapshot — so after a cut advances `vN`,
+original snapshot — so after a cut advances `@vN`,
 rerunning a consumer's old red run still exercises the **pre-advance** release
 ref and proves nothing about the fix (caught live on padz, epic #583).
 
