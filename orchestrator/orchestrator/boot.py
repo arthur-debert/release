@@ -36,6 +36,9 @@ SOURCE_MARKER = ".release/.release-sync-source"
 # git info/exclude (see _EXCLUDE_BEGIN in release_core/verbs/init.py).
 EXCLUDE_SENTINEL = "# >>> release-core managed mirrors (rewritten by every init) >>>"
 
+# Subject prefix of the auto-commit `release-core init` creates when the
+# managed sync changes tracked files (the full subject appends the source
+# label — see _commit_subject in release_core/verbs/init.py).
 SYNC_COMMIT_SUBJECT = "chore(release): sync managed tree"
 
 
@@ -54,13 +57,20 @@ class BootReport:
 
 
 def _git(repo: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as e:
+        # Keep the failure mode deterministic: cmd_probe catches BootError only.
+        raise BootError(
+            f"git {' '.join(args)} failed in {repo} (exit {e.returncode}): "
+            f"{(e.stderr or e.stdout or '').strip()}"
+        ) from e
 
 
 def _run_boot_script(repo: Path) -> None:
@@ -149,10 +159,13 @@ def boot_clone(repo_path: str) -> BootReport:
     source_ref = _parse_source_ref(repo)
     _assert_exclude_sentinel(repo)
 
-    # Informational only: did THIS boot create a sync commit?
+    # Informational only: did THIS boot create a sync commit? Constrained to
+    # init's own commit subject so an unrelated commit can't masquerade as one.
     head_after = _git(repo, "rev-parse", "HEAD")
     subject = _git(repo, "log", "-1", "--format=%s")
-    sync_commit = subject if head_after != head_before else None
+    sync_commit = (
+        subject if head_after != head_before and subject.startswith(SYNC_COMMIT_SUBJECT) else None
+    )
 
     report = BootReport(
         repo_path=str(repo),

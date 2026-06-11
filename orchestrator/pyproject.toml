@@ -12,7 +12,9 @@ dependencies = [
 orc = "orchestrator.cli:main"
 
 [dependency-groups]
-dev = ["pytest"]
+# Kept aligned with release_core's dev group so a `--project orchestrator`
+# run can't resolve an older pytest than the workspace-root one.
+dev = ["pytest>=8"]
 
 [build-system]
 requires = ["hatchling"]

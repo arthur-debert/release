@@ -97,6 +97,29 @@ def test_boot_created_sync_commit_is_recorded_informationally(tmp_path):
     assert report.sync_commit == "chore(release): sync managed tree"
 
 
+def test_boot_created_non_sync_commit_is_not_reported_as_sync(tmp_path):
+    repo = make_repo(tmp_path)
+    install_fake_boot_script(
+        repo,
+        extra=(
+            "git add -A && "
+            "git -c user.email=t@t -c user.name=t commit -q -m 'docs: unrelated commit'"
+        ),
+    )
+    report = boot_clone(str(repo))
+    assert report.sync_commit is None
+
+
+def test_non_git_dir_fails_as_boot_error(tmp_path):
+    # Not a git worktree: git failures must surface as BootError (cmd_probe
+    # only catches BootError), not a raw CalledProcessError stack trace.
+    repo = tmp_path / "not-a-repo"
+    repo.mkdir()
+    install_fake_boot_script(repo)
+    with pytest.raises(BootError, match="git rev-parse"):
+        boot_clone(str(repo))
+
+
 def test_missing_boot_script_fails_loudly(tmp_path):
     repo = make_repo(tmp_path)
     with pytest.raises(BootError, match="setup-dev-env.sh not found"):
