@@ -68,3 +68,14 @@ Caveats:
   complement to CI, not a replacement.
 - `--ref` reads templates from a git ref, so commit release changes before
   sweeping (an uncommitted working tree isn't what gets synced).
+
+## Onboarding a new repo
+
+Onboarding (GitHub-side policy + repo-side files) is driven by the
+`release-core admin` tree, not by a skill:
+`release-core admin policy ruleset|sweep|dependabot` for the GitHub-side
+state, `release-core admin secrets token` for `RELEASE_TOKEN`, then add the
+repo to `managed-repos.yaml` and verify with
+`release-core audit --repo <owner/repo>` /
+`release-core admin smoke-test <owner/repo>`.
+See `release-core admin --help` for the current commands and flags.

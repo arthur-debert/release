@@ -114,7 +114,11 @@ release-core, the gate, distribution, and workflows
     The PR loop is not a checklist an agent eyeballs — it is a state machine.
     `release-core pr status` (flat alias `gh-task-status`) reads the live PR and
     returns a state plus the single next action. It never mutates the PR; the
-    agent acts on the next action, then re-reads.
+    agent acts on the next action, then re-reads. The surface is
+    reviewer-agnostic: reviews are handled identically whether the reviewer is
+    a human or any bot — bot names and mechanics live only in the adapter
+    registry behind `pr review`. The done-signal for a review round is zero
+    unresolved review threads, never a per-bot comment count.
 
     The states:
         - NO_PR — no PR for this branch; open a draft to start.
@@ -124,8 +128,8 @@ release-core, the gate, distribution, and workflows
         - REVIEWED — reviews + threads done; mergeability still computing,
           re-check shortly.
         - VALIDATING — reviewed + mergeable; CI checks running, wait.
-        - READY — reviewed + CI green + mergeable; flip draft→ready and page
-          the human.
+        - READY — reviewed + CI green + mergeable; flip draft→ready
+          (`release-core pr ready`) and page the human.
         - BLOCKED — merge conflict, failing CI, or the loop's circuit breaker
           fired; stop and surface to the human.
 
@@ -135,23 +139,29 @@ release-core, the gate, distribution, and workflows
           (REVIEWS_PENDING). Reviewer-agnostic: it dispatches through the
           adapter registry, defaulting to all required reviewers
           (`--reviewer <name>` selects one).
-        - `release-core pr review wait` — block in-turn until the pending
-          review(s) land.
+        - `release-core pr wait` — the ONE engine-driven wait (it replaced
+          both `pr review wait` and `pr checks-wait`). Blocks in-turn, polls
+          the engine with adaptive cadence, and returns as soon as the agent
+          has something to do (exit 0 = action available, 2 = timeout;
+          `--poll` / `--timeout` tune it).
         - `release-core pr status` — now ADDRESSING; triage the threads.
         - `release-core pr resolve-thread` — resolve addressed threads.
-        - `release-core pr checks-wait` — if VALIDATING, block until CI is green.
-        - `release-core pr status` — READY → flip draft→ready, hand to the
+        - `release-core pr wait` — if VALIDATING, block until CI resolves.
+        - `release-core pr ready` — at READY, the guarded flip: it refuses
+          (exit 1, printing state + next action) unless the engine says READY,
+          and `--undo` flips back to draft for re-work. The only sanctioned
+          way to flip the flag — never raw `gh pr ready`. Then hand to the
           human.
 
     This whole loop is the `gh-pr-review-loop` skill's discipline; drive it
     through the skill, not by hand-composing the helpers (a PreToolUse guard
     enforces this — see CLAUDE.md and `dev-cycle.lex`).
 
-    :: warning :: The wait commands (`pr review wait`, `pr checks-wait`) block
-    in-turn — they are how an agent waits on CI without yielding. A subagent
-    that yields to a background monitor terminates and is never re-woken. Drive
-    the loop through `pr status` (state + next action) and block with the wait
-    commands; do not hand the wait to a detached background process.
+    :: warning :: `pr wait` blocks in-turn — it is how an agent waits on
+    reviews or CI without yielding. A subagent that yields to a background
+    monitor terminates and is never re-woken. Drive the loop through
+    `pr status` (state + next action) and block with `pr wait`; do not hand
+    the wait to a detached background process.
 
 4. Install — the pull model
 
