@@ -166,7 +166,7 @@ Local Claude Code (CLI/Desktop) has no webhook subscription equivalent; either p
 
 ## After fixup pushes
 
-CI re-runs automatically on push. **Do not** re-request Copilot for minor follow-up rounds — the canonical `copilot-review.yml` workflow only auto-triggers on `pull_request: [opened, ready_for_review]`, and one Copilot review per PR is the convention. Re-request manually only if the round is substantial:
+CI re-runs automatically on push, but reviews do not — the canonical `copilot-review.yml` workflow only auto-triggers at PR `opened`. **Re-request the review after every push, no matter how small the round**: a review counts only against the current head, so any push makes the prior review stale (this is the state engine's head-strict model — its RE-REQUEST next-action is authoritative; there is no minor-vs-substantial exception, and bot re-reviews are cheap). Re-request manually:
 
 ```sh
 gh pr edit "$PR" --add-reviewer @copilot
@@ -244,7 +244,7 @@ UNRESOLVED=$(gh api graphql -F owner="$OWNER" -F name="$REPO" -F pr="$PR" -f que
 | `CHECKS_RC=124` (timeout) | Don't decide automatically — inspect `gh pr checks "$PR"` manually. If checks are actually green, treat as `CHECKS_RC=0` and continue; if there's a stuck check, surface to the user. |
 | `CHECKS_RC` non-zero, not 124 (any check failed) | Fix what failed, push, loop. Don't stop here. |
 | `CHECKS_RC=0`, `UNRESOLVED>0` | Triage and resolve them. Don't stop here. |
-| `CHECKS_RC=0`, `UNRESOLVED=0`, **`isDraft=true`** | **Flip to ready.** `gh pr ready "$PR"`. This is the agent's explicit cue to the user that iteration is done. Note: the canonical `copilot-review.yml` policy (as of 2026-05-15) fires Copilot at PR `opened` regardless of draft state and does **not** re-trigger on `ready_for_review`, so flipping to ready won't restart the review loop — Copilot already had its pass. If you still want a second pass (e.g. substantial changes since the first), manually request via `gh pr edit "$PR" --add-reviewer @copilot`. |
+| `CHECKS_RC=0`, `UNRESOLVED=0`, **`isDraft=true`** | **Flip to ready.** `gh pr ready "$PR"`. This is the agent's explicit cue to the user that iteration is done. Note: the canonical `copilot-review.yml` policy (as of 2026-05-15) fires Copilot at PR `opened` regardless of draft state and does **not** re-trigger on `ready_for_review`, so flipping to ready won't restart the review loop. Every fixup push should already have re-requested the review (see "After fixup pushes"), so by this point the latest review is on the current head. |
 | `CHECKS_RC=0`, `UNRESOLVED=0`, `isDraft=false`, `mergeStateStatus=CLEAN`, `mergeable=MERGEABLE` | **Stop.** This is the explicit signal to the user that you're done. Report state, leave the PR for human final read. |
 
 The flip-to-ready step is the **explicit cue for the user** that the agent is done iterating. Without it, you leave the PR perpetually in draft and the user has to manually flip + check + merge. With it, the user sees "PR went from draft to ready, both bots have reviewed, all green" and reads-and-merges.
@@ -257,7 +257,7 @@ gh pr ready "$PR"
 echo "PR flipped to ready — this is the agent's 'done' signal; no Copilot re-trigger under the current policy (Copilot already reviewed at open)"
 ```
 
-Under the canonical `copilot-review.yml` policy (as of 2026-05-15), Copilot fired at PR `opened` regardless of draft state, so by the time you reach this flip-to-ready step both reviewers have already had their pass and you've addressed them. The flip is a clean state transition with no follow-up review round — you're done; the user does the final read and merges. If you genuinely want a fresh Copilot pass (e.g. because the changes since the first review are substantial), manually request via `gh pr edit "$PR" --add-reviewer @copilot` after the flip.
+Under the canonical `copilot-review.yml` policy (as of 2026-05-15), Copilot fired at PR `opened` regardless of draft state, and every fixup push re-requested a fresh pass (see "After fixup pushes"), so by the time you reach this flip-to-ready step the reviewers have reviewed the current head and you've addressed them. The flip is a clean state transition with no follow-up review round — you're done; the user does the final read and merges.
 
 ## When the user merges
 

@@ -168,10 +168,11 @@ Resolve aggressively:
 
 ### Re-requesting a review
 
-Do **not** re-request on minor rounds (a name, a flaky call, a double-alloc) —
-one review per PR is the convention. Re-request explicitly (`release-core pr
-review request`) only when a round of changes is substantial enough — design or
-algorithm-level — to warrant a fresh look.
+After **any** push, re-request the review (`release-core pr review request`).
+The state engine is the arbiter: a review counts only against the current
+head, so a push makes the prior review stale and `release-core pr status`
+advises RE-REQUEST — that next action is authoritative. There is no
+minor-vs-substantial exception; bot re-reviews are cheap.
 
 ## Breakers: BLOCKED means stop
 
