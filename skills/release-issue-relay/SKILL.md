@@ -14,7 +14,7 @@ This skill is **only** for infrastructure issues that the consumer repo cannot f
 | Use it for | Do not use it for |
 |---|---|
 | `copilot-review.yml` workflow runs SUCCESS but Copilot is not actually attached as reviewer | A Copilot review comment that says "rename this variable" |
-| `release-core pr review wait` times out on a non-draft PR with no obvious reason | A test failure specific to the code in this PR |
+| `release-core pr wait` times out on a non-draft PR with no obvious reason | A test failure specific to the code in this PR |
 | `apply-ruleset` / `gh-repo-setup` rejects a check name that exists in the workflow | A policy file conflict that's clearly intentional per-repo customization |
 | `rust-cli` reusable workflow errors out in a way that looks like infra, not project code | A `cargo clippy` warning that needs a code fix |
 | `sweep-github-policy` produces a conflict that looks like a template bug | A pre-commit hook failure specific to the staged diff |
