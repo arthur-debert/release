@@ -171,7 +171,12 @@ _GATE_BLURB = (
 def _dev_cycle_section() -> list[str]:
     lines: list[str] = []
     lines.append("The dev cycle (the ONE flow — draft-first)")
-    lines.append("  1. Branch off main.")
+    lines.append(
+        "  1. Branch off origin/<default-branch> (`git fetch origin && "
+        "git switch -c <branch> origin/main`), NOT local main: the "
+        "SessionStart boot may have auto-committed a managed sync on local "
+        "main, and branching there carries that alien commit into your PR diff."
+    )
     lines.append("  2. Make the change.")
     lines.append(
         "  3. Add a changelog fragment (required, same PR): "

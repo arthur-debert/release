@@ -78,6 +78,16 @@ def test_how_to_always_states_the_one_gate_and_draft_first_cycle():
         assert "changelog add" in body
 
 
+def test_how_to_dev_cycle_branches_from_origin_not_local_main():
+    # release#566: SessionStart may have auto-committed a managed sync on the
+    # clone's LOCAL default branch; branching there carries that alien commit
+    # into the feature PR diff. Step 1 must say branch off origin/<default>.
+    body = how_to._render("rust-cli")
+    assert "Branch off origin/" in body
+    assert "NOT local main" in body
+    assert "auto-committed a managed sync" in body
+
+
 def test_how_to_distinguishes_gate_from_tests():
     # The gate runs lint/format, NOT tests — how-to must say so, or a fresh agent
     # treats a green gate as CI-green and skips tests (caught in the lex dogfood).
