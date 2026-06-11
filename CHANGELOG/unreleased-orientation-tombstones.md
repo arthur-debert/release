@@ -1,1 +1,0 @@
-- Retire .release/ORIENTATION.md for real (tombstone + deterministic CLAUDE.md stub refresh) and complete the WS6 tombstone catalog from re-derived template history (#563)

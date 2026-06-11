@@ -1,1 +1,0 @@
-- Dev-cycle doctrine: the state engine is the arbiter — every push re-requests review; the minor/substantial re-review nuance is dropped (#565)

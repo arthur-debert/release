@@ -1,1 +1,0 @@
-- init: loud branch-from-origin/<default> hint when the managed sync auto-commits on the checked-out default branch; how-to step 1 says branch off origin, not local main (#566)

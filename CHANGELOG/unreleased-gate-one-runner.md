@@ -1,1 +1,0 @@
-- gate pins its lefthook runner to the toolset pin and fails loud on an unmaterialized gate config (#567)

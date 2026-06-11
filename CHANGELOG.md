@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 2.17.0 - 2026-06-11
+
+- prstate polish (#564): post-flip READY messaging, flip re-run heads-up in pr ready, thread-reading tool named in ADDRESSING, --reviewer named in the too-many-args error, pr wait cadence line
+- Add kind-aware `release-core coverage` task verb (cargo llvm-cov / go tool cover / test runner --coverage) with a loud error when no coverage tool exists for the Kind (#568)
+- Dev-cycle doctrine: the state engine is the arbiter — every push re-requests review; the minor/substantial re-review nuance is dropped (#565)
+- gate pins its lefthook runner to the toolset pin and fails loud on an unmaterialized gate config (#567)
+- init: loud branch-from-origin/<default> hint when the managed sync auto-commits on the checked-out default branch; how-to step 1 says branch off origin, not local main (#566)
+- Retire .release/ORIENTATION.md for real (tombstone + deterministic CLAUDE.md stub refresh) and complete the WS6 tombstone catalog from re-derived template history (#563)
+- Gate: yamllint ignores generated pnpm-lock.yaml (committed-but-not-authored; pnpm's brace style failed the default braces rule)
+
 ## 2.16.0 - 2026-06-11
 
 - release-core pr ready: the engine-owned guarded draft->ready flip (refuses unless state is READY; --undo flips back unconditionally)
