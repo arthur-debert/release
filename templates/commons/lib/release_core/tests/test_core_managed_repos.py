@@ -95,3 +95,53 @@ def test_missing_manifest_exits_2(tmp_path, monkeypatch, capsys):
     rc = managed_repos.main(["--list"])
     assert rc == 2
     assert "manifest not found" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# known_repos / validate_repo_targets — the per-repo-targeting registry (#601)
+# --------------------------------------------------------------------------
+
+CANARY_FIXTURE = FIXTURE + "canaries:\n  rust: arthur-debert/release-canary-rust\n"
+
+
+@pytest.fixture
+def canary_fleet(tmp_path, monkeypatch):
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(CANARY_FIXTURE)
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(manifest))
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+    return manifest
+
+
+def test_known_repos_unions_projects_and_canaries(canary_fleet):
+    assert managed_repos.known_repos() == {
+        "lex-fmt/lex",
+        "lex-fmt/comms",
+        "arthur-debert/phos-app",
+        "arthur-debert/dodot",
+        "arthur-debert/release-canary-rust",
+    }
+
+
+def test_known_repos_without_canaries_block(fleet):
+    # FIXTURE has no canaries: block — projects only, no crash.
+    assert managed_repos.known_repos() == {
+        "lex-fmt/lex",
+        "lex-fmt/comms",
+        "arthur-debert/phos-app",
+        "arthur-debert/dodot",
+    }
+
+
+def test_validate_repo_targets_all_known_is_empty(canary_fleet):
+    err = managed_repos.validate_repo_targets(["lex-fmt/lex", "arthur-debert/release-canary-rust"])
+    assert err == ""
+
+
+def test_validate_repo_targets_unknown_names_the_registry(canary_fleet):
+    err = managed_repos.validate_repo_targets(["o/zzz", "lex-fmt/lex", "o/aaa"])
+    assert "managed-repos.yaml" in err
+    assert "projects: or canaries:" in err
+    # only the unknown entries, sorted
+    assert err.endswith("o/aaa, o/zzz")
+    assert "lex-fmt/lex" not in err

@@ -1,0 +1,1 @@
+- admin secrets token|install gain --repos per-repo targeting, validated against managed-repos.yaml (projects + canaries) (#601)
