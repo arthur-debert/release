@@ -1,0 +1,43 @@
+# consumer-contract-lint-baseline.yaml — the SHRINK-ONLY baseline for the
+# assumption lint (bin-internal/lint-consumer-contract.sh, #584).
+#
+# Hand-maintained, unlike the generated consumer-contract.yaml next to it.
+# Each entry grandfathers ONE `file → job` that already violated the contract
+# when the lint landed (pre-WS7 mirror-path assumptions / assertion-string
+# false positives). The ratchet only tightens:
+#   - a NEW violation (not listed here) fails the lint;
+#   - an entry that no longer matches any violation ALSO fails the lint
+#     ("stale baseline entry — delete it");
+#   - adding an entry is never the fix for a new finding — normalize the
+#     workflow to the standard recipe instead (#583 owner constraint:
+#     escape hatches shrink, not grow).
+#
+# Draining this file to zero is tracked in release#588.
+known_stale_jobs:
+  - file: ".github/workflows/electron-app.yml"
+    job: "build-linux"
+    reason: >-
+      Pre-WS7 shape: prefers the untracked bin/build mirror and the
+      app-bin/smoke-hook.sh smoke hook behind existence guards; both are
+      dead code on a plain checkout. Fix per release#588.
+  - file: ".github/workflows/electron-app.yml"
+    job: "build-mac"
+    reason: >-
+      Same pre-WS7 bin/build + app-bin/smoke-hook.sh preference as
+      build-linux. Fix per release#588.
+  - file: ".github/workflows/electron-app.yml"
+    job: "build-windows"
+    reason: >-
+      Same pre-WS7 bin/build + app-bin/smoke-hook.sh preference as
+      build-linux. Fix per release#588.
+  - file: ".github/workflows/tauri-app.yml"
+    job: "build"
+    reason: >-
+      Existence-guarded app-bin/smoke-hook.sh smoke step (untracked mirror,
+      dead on a plain checkout). Fix per release#588.
+  - file: ".github/workflows/pip-bootstrap-smoke.yml"
+    job: "smoke"
+    reason: >-
+      False-positive class: wheel-content assertion strings name
+      .editorconfig as a bare filename in a for-list. Spell the assertion
+      paths fully to drain (release#588).

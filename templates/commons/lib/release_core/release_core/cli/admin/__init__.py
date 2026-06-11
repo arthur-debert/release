@@ -9,6 +9,7 @@ so it too can be handed to several parallel agents without collisions:
   admin policy   ← policy.py        (ruleset / sweep / dependabot)
   admin secrets  ← secrets.py       (install / token)
   admin inbox    ← inbox.py         (bare / notify-source)
+  admin contract ← contract.py      (dump / check / lint — #584)
   admin smoke-test  ← audit-smoke-test  (a flat leaf, defined here)
 
 Each module exports a ``group`` (a ``click.Group``); this assembler imports
@@ -26,7 +27,7 @@ import click
 
 from ...verbs import audit_smoke_test
 from .._helpers import wrap_verb
-from . import inbox, policy, release_cmds, repos, secrets
+from . import contract, inbox, policy, release_cmds, repos, secrets
 
 
 @click.group(
@@ -48,6 +49,7 @@ group.add_command(release_cmds.group)
 group.add_command(policy.group)
 group.add_command(secrets.group)
 group.add_command(inbox.group)
+group.add_command(contract.group)
 
 # A flat leaf directly under admin (no nested group).
 group.add_command(

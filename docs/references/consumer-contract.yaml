@@ -1,0 +1,158 @@
+# consumer-contract.yaml — the consumer-tree contract (epic #583, WS-A #584).
+#
+# GENERATED — do not hand-edit. Source of truth: release_core/sync.py
+# (constants + classification predicates) applied to this repo's templates/
+# tree. Regenerate with:
+#
+#   release-core admin contract dump
+#
+# A PR that changes the contract (sync.py classification, templates/ dests,
+# tombstones) MUST regenerate this file in the same PR — the root lefthook.yml
+# `consumer-contract-check` gate entry fails on drift.
+#
+# This manifest is PRESCRIPTIVE, not descriptive (#583 owner constraint): it
+# states what a consumer tree MUST look like. Where a repo diverges, the fix
+# is a one-time consumer normalization PR — never a manifest exception or a
+# central knob. Escape hatches shrink, not grow.
+#
+# Sections:
+#   tracked_real_files    — the only files release tracks in a consumer: the
+#                           bootstrap quartet (must work on a fresh clone,
+#                           BEFORE .release/ exists) + .github/workflows/*
+#                           managed real copies (GitHub won't deref symlinks).
+#   gitignored            — the ephemeral .release/ build dir (WS4).
+#   untracked_mirrors     — symlink dests recomposed every init, excluded via
+#                           .git/info/exclude, NEVER tracked (WS7).
+#   gate_internal         — live only inside .release/ (WS3).
+#   tombstones            — retired dests init removes (provenance-gated, WS6).
+#   managed_path_prefixes — path prefixes whose presence in a CI job means the
+#                           job MUST materialize first (arm-gate /
+#                           release-core init); the assumption lint
+#                           (bin-internal/lint-consumer-contract.sh) enforces
+#                           this over every workflow + composite action.
+
+contract_schema: 1
+tracked_real_files:
+  bootstrap:
+    - ".claude/settings.json"
+    - "bin/install-release-core"
+    - "bin/pr-loop-guard"
+    - "bin/setup-dev-env.sh"
+  workflow_copies:
+    - ".github/workflows/copilot-review.yml"
+gitignored:
+  - ".release/"
+untracked_mirrors:
+  - ".claude/skills/electron-e2e-testing/SKILL.md"
+  - ".claude/skills/gh-pr-review-loop/SKILL.md"
+  - ".claude/skills/lex-multirepo/SKILL.md"
+  - ".claude/skills/lex-primer/SKILL.md"
+  - ".claude/skills/macos-signing-notarization/SKILL.md"
+  - ".editorconfig"
+  - ".github/CODEOWNERS"
+  - ".github/copilot-instructions.md"
+  - ".github/dependabot.yml"
+  - ".github/pull_request_template.md"
+  - "CHANGELOG/README.txt"
+  - "app-bin/smoke-hook.sh"
+  - "bin/build"
+  - "bin/check"
+  - "bin/check-docs"
+  - "bin/check-e2e"
+  - "bin/check-gate"
+  - "bin/check-shell"
+  - "bin/check-tests"
+  - "bin/diff-since-release"
+  - "bin/e2e"
+  - "bin/gate-tool-versions.sh"
+  - "lib/bats-harness.bash"
+  - "tests/e2e/bats/helpers/setup.bash"
+gate_internal:
+  - ".markdownlint.json"
+  - ".markdownlintignore"
+  - ".prettierignore"
+  - ".shellcheckrc"
+  - ".yamllint"
+  - "lefthook.yml"
+tombstones:
+  blob:
+    - ".claude/skills/diagnose/.upstream"
+    - ".claude/skills/diagnose/SKILL.md"
+    - ".claude/skills/diagnose/scripts/hitl-loop.template.sh"
+    - ".claude/skills/grill-me/.upstream"
+    - ".claude/skills/grill-me/SKILL.md"
+    - ".claude/skills/grill-with-docs/.upstream"
+    - ".claude/skills/grill-with-docs/ADR-FORMAT.md"
+    - ".claude/skills/grill-with-docs/CONTEXT-FORMAT.md"
+    - ".claude/skills/grill-with-docs/SKILL.md"
+    - ".claude/skills/handoff/.upstream"
+    - ".claude/skills/handoff/SKILL.md"
+    - ".claude/skills/improve-codebase-architecture/.upstream"
+    - ".claude/skills/improve-codebase-architecture/DEEPENING.md"
+    - ".claude/skills/improve-codebase-architecture/HTML-REPORT.md"
+    - ".claude/skills/improve-codebase-architecture/INTERFACE-DESIGN.md"
+    - ".claude/skills/improve-codebase-architecture/LANGUAGE.md"
+    - ".claude/skills/improve-codebase-architecture/SKILL.md"
+    - ".claude/skills/padz-for-agents/SKILL.md"
+    - ".claude/skills/pr-review-respond/SKILL.md"
+    - ".claude/skills/qa/.upstream"
+    - ".claude/skills/qa/SKILL.md"
+    - ".claude/skills/release-issue-relay/SKILL.md"
+    - ".claude/skills/request-refactor-plan/.upstream"
+    - ".claude/skills/request-refactor-plan/SKILL.md"
+    - ".claude/skills/review/.upstream"
+    - ".claude/skills/review/SKILL.md"
+    - ".claude/skills/tdd/.upstream"
+    - ".claude/skills/tdd/SKILL.md"
+    - ".claude/skills/tdd/deep-modules.md"
+    - ".claude/skills/tdd/interface-design.md"
+    - ".claude/skills/tdd/mocking.md"
+    - ".claude/skills/tdd/refactoring.md"
+    - ".claude/skills/tdd/tests.md"
+    - ".claude/skills/teach/.upstream"
+    - ".claude/skills/teach/GLOSSARY-FORMAT.md"
+    - ".claude/skills/teach/LEARNING-RECORD-FORMAT.md"
+    - ".claude/skills/teach/MISSION-FORMAT.md"
+    - ".claude/skills/teach/RESOURCES-FORMAT.md"
+    - ".claude/skills/teach/SKILL.md"
+    - ".claude/skills/to-issues/.upstream"
+    - ".claude/skills/to-issues/SKILL.md"
+    - ".claude/skills/triage/.upstream"
+    - ".claude/skills/triage/AGENT-BRIEF.md"
+    - ".claude/skills/triage/OUT-OF-SCOPE.md"
+    - ".claude/skills/triage/SKILL.md"
+    - ".claude/skills/ubiquitous-language/.upstream"
+    - ".claude/skills/ubiquitous-language/SKILL.md"
+    - ".claude/skills/zoom-out/.upstream"
+    - ".claude/skills/zoom-out/SKILL.md"
+    - ".release/ORIENTATION.md"
+    - "bin/changelog"
+    - "bin/changelog-add"
+    - "bin/changelog-cut"
+    - "bin/changelog-render"
+    - "bin/check-fmt"
+    - "bin/check-lint"
+    - "bin/gh-release-issue"
+    - "bin/gh-task-status"
+    - "bin/semver"
+    - "bin/share/semver-tool/LICENSE"
+    - "bin/share/semver-tool/README.md"
+    - "bin/share/semver-tool/semver"
+    - "lefthook.yml"
+    - "scripts/check"
+    - "scripts/check-fmt"
+    - "scripts/check-lint"
+    - "scripts/check-tests"
+    - "scripts/setup-dev-env.sh"
+    - "vendor/semver-tool/LICENSE"
+    - "vendor/semver-tool/README.md"
+    - "vendor/semver-tool/semver"
+  marker:
+    - ".release-sync-state.yaml"
+  fingerprint:
+    - "bin/release"
+    - "scripts/setup-dev-env.sh"
+managed_path_prefixes:
+  - ".release/"
+  - "bin/check"
+  - "lib/release_core/"
