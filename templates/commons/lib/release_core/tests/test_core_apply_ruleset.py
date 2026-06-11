@@ -170,12 +170,202 @@ def test_pr_workflow_paths_skips_malformed_yaml(tmp_path, monkeypatch):
     assert apply_ruleset._pr_workflow_paths(str(wf)) == []
 
 
-def test_checks_from_yq_skips_malformed_yaml(monkeypatch):
+def test_checks_from_workflows_skips_malformed_yaml(monkeypatch):
     def boom(_path):
         raise yamlio.YamlError("yq parse failure")
 
     monkeypatch.setattr(apply_ruleset.yamlio, "load", boom)
-    assert apply_ruleset._checks_from_yq("/top", [".github/workflows/ci.yml"]) == []
+    assert apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"]) == []
+
+
+# --------------------------------------------------------------------------
+# Static detection — reusable-workflow callers resolve to nested contexts
+# (release#602). The fleet's consumers are thin callers (one job `uses:` a
+# release reusable workflow), and the bare caller-job name is NEVER a reported
+# context — only `<caller-job> / <called-job>` is. yamlio.load/loads are
+# monkeypatched (the suite has no yq); the contents-API hop is mocked at the
+# gh.rest data layer with base64 payloads, exercising the real decode path.
+# --------------------------------------------------------------------------
+
+
+def _b64_doc(doc) -> str:
+    import base64
+
+    return base64.b64encode(json.dumps(doc).encode("utf-8")).decode("ascii")
+
+
+_PADZ_CALLER = {
+    "on": {"push": {"branches": ["**"]}, "pull_request": None},
+    "jobs": {
+        "ci": {
+            "uses": "arthur-debert/release/.github/workflows/rust-ci.yml@v2",
+            "with": {"binary-name": "padz", "bats": True},
+        }
+    },
+}
+
+_RUST_CI = {
+    "on": {"workflow_call": {"inputs": {"bats": {"type": "boolean", "default": False}}}},
+    "jobs": {
+        "check": {"runs-on": "ubuntu-latest"},
+        "e2e": {"if": "inputs.bats", "runs-on": "ubuntu-latest"},
+    },
+}
+
+
+def _route_contents(monkeypatch, routes: dict):
+    """gh.rest stub serving contents-API payloads; yamlio.loads decodes the
+    JSON text (JSON is YAML — the b64 decode path runs for real)."""
+
+    def fake_rest(path, *, method=None, fields=None, body=None, paginate=False):
+        if path not in routes:
+            raise gh.GhError(f"404: {path}")
+        return {"content": _b64_doc(routes[path])}
+
+    monkeypatch.setattr(gh, "rest", fake_rest)
+    monkeypatch.setattr(apply_ruleset.yamlio, "loads", json.loads)
+
+
+def test_checks_from_workflows_padz_ground_truth(monkeypatch):
+    # padz's real ruleset is the validation target: `ci / check`, `ci / e2e`
+    # (bats: true enables the `if: inputs.bats` job) — never the bare `ci`.
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: _PADZ_CALLER)
+    _route_contents(
+        monkeypatch,
+        {"repos/arthur-debert/release/contents/.github/workflows/rust-ci.yml?ref=v2": _RUST_CI},
+    )
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == ["ci / check", "ci / e2e"]
+
+
+def test_checks_from_workflows_excludes_input_gated_job_when_not_enabled(monkeypatch):
+    # Same caller without `bats: true` → the `if: inputs.bats` job never runs
+    # for this consumer and must not be required.
+    caller = {
+        "on": {"pull_request": None},
+        "jobs": {
+            "ci": {
+                "uses": "arthur-debert/release/.github/workflows/rust-ci.yml@v2",
+                "with": {"binary-name": "padz"},
+            }
+        },
+    }
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: caller)
+    _route_contents(
+        monkeypatch,
+        {"repos/arthur-debert/release/contents/.github/workflows/rust-ci.yml?ref=v2": _RUST_CI},
+    )
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == ["ci / check"]
+
+
+def test_checks_from_workflows_mixed_plain_and_caller_jobs(monkeypatch):
+    # A plain job reports its display name (static `name:` override wins; a
+    # `${{ … }}` name falls back to the job ID); a caller job reports nested
+    # contexts. Both coexist in one workflow.
+    caller = {
+        "on": {"pull_request": None},
+        "jobs": {
+            "lint": {"name": "Lint (fast)"},
+            "dyn": {"name": "build-${{ matrix.os }}"},
+            "ci": {"uses": "o/r/.github/workflows/inner.yml@v1"},
+        },
+    }
+    inner = {"jobs": {"check": {}}}
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: caller)
+    _route_contents(monkeypatch, {"repos/o/r/contents/.github/workflows/inner.yml?ref=v1": inner})
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == ["Lint (fast)", "ci / check", "dyn"]
+
+
+def test_checks_from_workflows_recurses_nested_reusable_calls(monkeypatch):
+    # A called workflow that itself calls a reusable workflow reports the full
+    # ancestry: `a / b / c`.
+    caller = {
+        "on": {"pull_request": None},
+        "jobs": {"a": {"uses": "o/r/.github/workflows/mid.yml@v1"}},
+    }
+    mid = {"jobs": {"b": {"uses": "o/r/.github/workflows/leaf.yml@v1"}}}
+    leaf = {"jobs": {"c": {}}}
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: caller)
+    _route_contents(
+        monkeypatch,
+        {
+            "repos/o/r/contents/.github/workflows/mid.yml?ref=v1": mid,
+            "repos/o/r/contents/.github/workflows/leaf.yml?ref=v1": leaf,
+        },
+    )
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == ["a / b / c"]
+
+
+def test_checks_from_workflows_self_reference_terminates_at_nesting_cap(monkeypatch, capsys):
+    # A pathological self-referencing workflow must terminate (GitHub's own
+    # nesting cap bounds the recursion) and contribute nothing, with a warning.
+    caller = {
+        "on": {"pull_request": None},
+        "jobs": {"a": {"uses": "o/r/.github/workflows/self.yml@v1"}},
+    }
+    selfdoc = {"jobs": {"again": {"uses": "o/r/.github/workflows/self.yml@v1"}}}
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: caller)
+    _route_contents(monkeypatch, {"repos/o/r/contents/.github/workflows/self.yml?ref=v1": selfdoc})
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == []
+    assert "nesting too deep" in capsys.readouterr().err
+
+
+def test_checks_from_workflows_unresolvable_uses_warns_and_skips(monkeypatch, capsys):
+    # A fetch failure (or a malformed reference) must NOT degrade to the bare
+    # caller name — that context is never reported and would deadlock every PR.
+    caller = {
+        "on": {"pull_request": None},
+        "jobs": {
+            "ci": {"uses": "o/r/.github/workflows/gone.yml@v1"},
+            "noref": {"uses": "o/r/.github/workflows/x.yml"},  # missing @ref
+        },
+    }
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: caller)
+    _route_contents(monkeypatch, {})  # every fetch 404s
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == []
+    err = capsys.readouterr().err
+    assert "cannot resolve reusable workflow" in err
+    assert "ci" not in out and "noref" not in out
+
+
+def test_checks_from_workflows_resolves_repo_local_uses_from_working_tree(monkeypatch):
+    # `uses: ./.github/workflows/inner.yml` is read from the same working tree
+    # the caller was read from — no API hop for the repo's own files.
+    docs = {
+        "ci.yml": {
+            "on": {"pull_request": None},
+            "jobs": {"ci": {"uses": "./.github/workflows/inner.yml"}},
+        },
+        "inner.yml": {"jobs": {"check": {}, "package": {}}},
+    }
+    monkeypatch.setattr(apply_ruleset.yamlio, "load", lambda path: docs[os.path.basename(path)])
+    out = apply_ruleset._checks_from_workflows("/top", [".github/workflows/ci.yml"])
+    assert out == ["ci / check", "ci / package"]
+
+
+def test_called_job_included_resolves_simple_inputs_conditions():
+    fn = apply_ruleset._called_job_included
+    assert fn({}, {}) is True  # no `if:` → always runs
+    assert fn({"if": "inputs.bats"}, {"bats": True}) is True
+    assert fn({"if": "inputs.bats"}, {}) is False
+    assert fn({"if": "${{ inputs.e2e }}"}, {"e2e": "true"}) is True
+    assert fn({"if": "${{ inputs.e2e }}"}, {"e2e": False}) is False
+    # Unresolvable expressions are included: a job-level skip still reports a
+    # (satisfying) check run, unlike a never-reporting path-filtered workflow.
+    assert fn({"if": "github.event_name == 'push'"}, {}) is True
+    assert fn({"if": "inputs.bats == true"}, {"bats": True}) is True
+
+
+def test_job_display_name_static_override_else_id():
+    assert apply_ruleset.job_display_name("check", {}) == "check"
+    assert apply_ruleset.job_display_name("check", {"name": "Check (fast)"}) == "Check (fast)"
+    assert apply_ruleset.job_display_name("b", {"name": "x-${{ matrix.os }}"}) == "b"
+    assert apply_ruleset.job_display_name("j", "not a dict") == "j"
 
 
 # --------------------------------------------------------------------------
