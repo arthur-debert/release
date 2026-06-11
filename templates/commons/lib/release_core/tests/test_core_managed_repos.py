@@ -154,3 +154,16 @@ def test_validate_repo_targets_unreadable_registry_is_a_message(tmp_path, monkey
     err = managed_repos.validate_repo_targets(["lex-fmt/lex"])
     assert "cannot read the fleet registry" in err
     assert "managed-repos.yaml" in err
+
+
+def test_validate_repo_targets_structurally_invalid_registry_is_a_message(tmp_path, monkeypatch):
+    # Parseable YAML but the wrong SHAPE (entries are strings, not {repo, path}
+    # mappings) → the KeyError/TypeError out of _pairs is converted to the same
+    # clean hard-error string, never a traceback.
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("projects:\n  o:\n    - just-a-string\n")
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(manifest))
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+    err = managed_repos.validate_repo_targets(["lex-fmt/lex"])
+    assert "cannot read the fleet registry" in err
+    assert "managed-repos.yaml" in err
