@@ -166,8 +166,10 @@ teardown() {
 
 @test "derived major: @vN thin callers pin the line — highest major wins (#551)" {
   # A consumer's checkout mixes lines for real (copilot-review stays @v1 while
-  # the stack workflows ride @v2): the resolver must derive v2, NOT fall to
-  # releases/latest (which is the v3.0.0 fixture here — the exact hazard).
+  # the stack workflows ride @v2): the resolver must derive v2 and resolve the
+  # v2 LINE's newest (v2.6.0, via list.json) — falling to releases/latest would
+  # resolve the latest.json fixture (v2.5.0) instead, so the URLs distinguish
+  # the two paths.
   mkdir -p .github/workflows
   cat > .github/workflows/ci.yml <<'Y'
 jobs:
