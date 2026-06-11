@@ -27,7 +27,10 @@ Usage:
 
 Discovery: queries every repo under the given owners that has the
 `main-branch-protection` ruleset (same set install-release-token uses),
-then filters to those with Cargo.toml at the repo root.
+then filters to those with Cargo.toml at the repo root. --repos skips
+discovery and targets exactly the given owner/name list; each entry must
+be registered in managed-repos.yaml (projects: or canaries:), the only
+fleet source of truth.
 
 Shell→Python migration: the gh-api+jq
 discovery and the `gh secret set` loop moved into Python (gh.rest /
@@ -43,6 +46,7 @@ import re
 import sys
 
 from .. import cli, gh
+from . import managed_repos
 
 USAGE = __doc__ or ""
 
@@ -242,9 +246,16 @@ def main(argv: list[str]) -> int:
         return int(exc.code or 0)
 
     owners = values["owners"]
-    explicit_repos = values["repos"]
+    explicit_repos = [r.strip() for r in values["repos"].split(",") if r.strip()]
     auth_dir = values["auth-dir"]
     dry_run = bool(values["dry-run"])
+
+    # Fail fast on a bad target list — before sourcing secrets or any write.
+    if explicit_repos:
+        err = managed_repos.validate_repo_targets(explicit_repos)
+        if err:
+            print(err, file=sys.stderr)
+            return 64
 
     # --- collect secret sources (fail fast, before any discovery) ---
     try:
@@ -253,9 +264,9 @@ def main(argv: list[str]) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    # --- discovery ---
+    # --- discovery (skipped when --repos targets an explicit, validated list) ---
     if explicit_repos:
-        repos = [r for r in explicit_repos.split(",") if r]
+        repos = explicit_repos
     else:
         print(f"discovering onboarded rust repos in: {owners}")
         repos = discover_rust_repos([o for o in owners.split(",") if o])

@@ -11,10 +11,13 @@ Usage:
   install-release-token            # reads token from stdin
   pbpaste | install-release-token  # macOS clipboard
   install-release-token --owners arthur-debert,lex-fmt
+  install-release-token --repos arthur-debert/release-canary-rust
 
 Discovery: queries every repo under the given owners for a ruleset named
 "main-branch-protection". Same logic apply-ruleset uses to find onboarded
-repos.
+repos. --repos skips discovery and targets exactly the given owner/name
+list; each entry must be registered in managed-repos.yaml (projects: or
+canaries:), the only fleet source of truth.
 
 Shell→Python migration: the gh-api+jq
 discovery + the `gh secret set`/`gh secret list` set-then-verify loop moved
@@ -31,6 +34,7 @@ import re
 import sys
 
 from .. import cli, gh, proc
+from . import managed_repos
 
 USAGE = __doc__ or ""
 
@@ -199,13 +203,24 @@ def discover_onboarded_repos(owners: list[str]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    opts = [cli.Opt("--owners", takes_value=True, default="arthur-debert,lex-fmt")]
+    opts = [
+        cli.Opt("--owners", takes_value=True, default="arthur-debert,lex-fmt"),
+        cli.Opt("--repos", takes_value=True, default=""),
+    ]
     try:
         values, _ = cli.parse(argv, opts, positionals=(0, 0), doc=_usage_block())
     except SystemExit as exc:
         return int(exc.code or 0)
 
     owners = values["owners"]
+    explicit_repos = [r.strip() for r in values["repos"].split(",") if r.strip()]
+
+    # Fail fast on a bad target list — before stdin, validation, or any write.
+    if explicit_repos:
+        err = managed_repos.validate_repo_targets(explicit_repos)
+        if err:
+            print(err, file=sys.stderr)
+            return 64
 
     if sys.stdin.isatty():
         prog = "install-release-token"
@@ -227,9 +242,12 @@ def main(argv: list[str]) -> int:
     for line in info:
         print(line)
 
-    # --- discovery ---
-    print(f"discovering onboarded repos in: {owners}")
-    repos = discover_onboarded_repos([o for o in owners.split(",") if o])
+    # --- discovery (skipped when --repos targets an explicit, validated list) ---
+    if explicit_repos:
+        repos = explicit_repos
+    else:
+        print(f"discovering onboarded repos in: {owners}")
+        repos = discover_onboarded_repos([o for o in owners.split(",") if o])
 
     if not repos:
         print(f"no onboarded repos found under: {owners}", file=sys.stderr)

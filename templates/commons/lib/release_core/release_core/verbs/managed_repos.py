@@ -121,6 +121,48 @@ def canaries(manifest: str | None = None) -> dict[str, str]:
     return {str(family): str(repo) for family, repo in block.items()}
 
 
+def known_repos(manifest: str | None = None) -> set[str]:
+    """Every owner/name the registry knows: ``projects:`` entries + ``canaries:``.
+
+    The validation surface for per-repo targeting (#601): a verb that accepts
+    an explicit ``--repos`` list checks each entry against this set —
+    managed-repos.yaml is the ONLY fleet source of truth. Canary repos are
+    included on purpose: they are deliberately excluded from the ``projects:``
+    sweeps (OQ6) but must be individually targetable (e.g. installing
+    RELEASE_TOKEN on arthur-debert/release-canary-rust)."""
+    path = manifest or _manifest_path()
+    repos = {repo for repo, _path in _pairs(path, [])}
+    repos.update(canaries(path).values())
+    return repos
+
+
+def validate_repo_targets(repos: list[str], manifest: str | None = None) -> str:
+    """Check an explicit per-repo target list against the registry (#601).
+
+    Returns the error message to print, or "" when every entry is known.
+    Shared by the ``admin secrets token|install`` ``--repos`` flags: an
+    unknown owner/name is a hard error naming the registry, so a typo can
+    never write a secret to an unmanaged repo. An unreadable registry is the
+    same hard error — surfaced as a message, never a traceback: YamlError
+    (missing yq, missing/unparseable manifest) plus the structural failures a
+    malformed-but-parseable manifest raises out of ``_pairs``/``canaries``
+    (wrong shapes / missing keys → KeyError/TypeError/AttributeError)."""
+    try:
+        known = known_repos(manifest)
+    except (yamlio.YamlError, KeyError, TypeError, AttributeError) as exc:
+        return (
+            "error: cannot read the fleet registry (managed-repos.yaml): "
+            f"{type(exc).__name__}: {exc}"
+        )
+    unknown = sorted(set(repos) - known)
+    if not unknown:
+        return ""
+    return (
+        "error: repo(s) not registered in managed-repos.yaml "
+        f"(projects: or canaries:): {', '.join(unknown)}"
+    )
+
+
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash modes
     mode = "list"
     refresh = False
