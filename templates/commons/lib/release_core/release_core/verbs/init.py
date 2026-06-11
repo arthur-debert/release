@@ -227,7 +227,10 @@ def _source_label(source: sync.Source) -> str:
     tag = source.release_tag
     if not tag:
         return source.ref_sha
-    if tag.startswith("from-source"):
+    # Exact-sentinel match ("from-source" / "from-source <sha>"), not a loose
+    # prefix: a release tag is free-form, so a tag literally named
+    # "from-source-v2.0.0" must still label as a release tag.
+    if tag == "from-source" or tag.startswith("from-source "):
         return f"release-core ({tag})"
     return f"release {tag} (release-core wheel)"
 

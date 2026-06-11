@@ -1107,6 +1107,21 @@ def test_bundle_init_from_source_stamp_labels_truthfully(tmp_path, monkeypatch, 
     assert "from-source abc1234" in lines
 
 
+def test_source_label_matches_the_exact_from_source_sentinel():
+    # The from-source classification is an EXACT sentinel match ("from-source" /
+    # "from-source <sha>"), not a loose prefix: a release tag is free-form, so a
+    # tag literally named "from-source-v2.0.0" still labels as a release tag.
+    src = sync.BundleSource("/x", ref_sha="release-core 0.0.1")
+    src.release_tag = "from-source"
+    assert init._source_label(src) == "release-core (from-source)"
+    src.release_tag = "from-source abc1234"
+    assert init._source_label(src) == "release-core (from-source abc1234)"
+    src.release_tag = "from-source-v2.0.0"
+    assert init._source_label(src) == "release from-source-v2.0.0 (release-core wheel)"
+    src.release_tag = None
+    assert init._source_label(src) == "release-core 0.0.1"
+
+
 @_needs_yq
 @_needs_git
 def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
