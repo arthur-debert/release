@@ -184,15 +184,20 @@ def _dev_cycle_section() -> list[str]:
     lines.append("  4. Run `release-core gate` until green.")
     lines.append("  5. Open the PR as a DRAFT: gh pr create --draft")
     lines.append(
-        "  6. Drive the review loop via the `gh-pr-review-loop` skill (it arms "
-        "the PR-loop guard, requests the required reviews, waits, triages, "
-        "resolves threads). A bare `gh pr create` may be blocked by the guard "
-        "until the skill arms the loop — that's expected."
+        "  6. Drive the review loop via the `gh-pr-review-loop` skill, off the "
+        "state machine: `release-core pr status` reports one lifecycle state "
+        "plus the single next action — do it (request the required reviews "
+        "via `release-core pr review request` — reviewer-agnostic, human or "
+        "bot alike — triage threads, fix CI), then re-read. Wait by blocking "
+        "in-turn on `release-core pr wait` (never a detached background "
+        "wait). The skill arms the PR-loop guard; a bare `gh pr create` may "
+        "be blocked until it does — that's expected."
     )
     lines.append(
-        "  7. Flip to READY (gh pr ready) only when reviewed + CI green + "
-        "mergeable. That hands it to a human; don't auto-merge. "
-        "(gh pr ready --undo flips back.)"
+        "  7. Flip to READY with `release-core pr ready` — the guarded flip; "
+        "it refuses unless the engine says READY (never raw `gh pr ready`). "
+        "That hands it to a human; don't auto-merge. "
+        "(`release-core pr ready --undo` flips back for re-work.)"
     )
     lines.append("")
     lines.append("When infra itself is broken (the gate/build/release tooling)")
