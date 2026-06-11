@@ -133,6 +133,31 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# No explicit --major and not --from-source → derive the major line from THIS
+# repo's thin callers (release#551): `uses: <repo>/...@vN` in .github/workflows/
+# IS the consumer's pin declaration, so the wheel follows it instead of
+# `releases/latest` — which would hand a v2-pinned consumer the v3 wheel the
+# moment a v3 release exists. The HIGHEST major wins: consumers legitimately mix
+# lines (the copilot-review.yml caller stayed @v1 fleet-wide while the stack
+# workflows moved to @v2), and a mid-migration repo should follow the line it is
+# moving TO. No callers / no workflows dir → empty → releases/latest, today's
+# behavior (e.g. a pure-transport run outside a repo). Same self-deciding-from-
+# the-checkout pattern as arm-gate's action_ref pin (release#541).
+derive_caller_major() {
+  [ -d .github/workflows ] || return 0
+  grep -rhoE "${REPO}/[^@\"']*@v[0-9]+" .github/workflows 2>/dev/null \
+    | sed 's/.*@v//' \
+    | sort -n \
+    | tail -n1 \
+    | sed 's/^/v/'
+}
+if [ -z "$MAJOR" ] && [ -z "$FROM_SOURCE" ]; then
+  MAJOR="$(derive_caller_major || true)"
+  if [ "$MAJOR" = "v" ]; then MAJOR=""; fi   # no match → sed prefixed an empty line
+  [ -n "$MAJOR" ] \
+    && echo "install-release-core: pinned to major line $MAJOR (derived from this repo's @vN thin callers)" >&2
+fi
+
 # The wheel asset name pattern (must match the publish job's output name).
 # Two forms: a human-readable one for messages, and a jq-string form whose
 # backslash is doubled so it survives embedding in a jq string literal
