@@ -292,6 +292,24 @@ EOF
   [ ! -e "$WORK/relcore/venv" ]
 }
 
+@test "print-url: gh failure (e.g. missing auth) fails loudly, installs nothing" {
+  # The arm-gate resolution probe (#587 slice 1) runs `--print-url --major v2`
+  # to exercise the gh-authenticated published-wheel path — the exact #535
+  # failure surface (gh REQUIRES a token even for a public repo). A gh failure
+  # must propagate as a non-zero exit (failing the CI step), never degrade to
+  # an empty URL or a silent install skip.
+  cat > stub/gh <<'STUB'
+#!/usr/bin/env bash
+echo "gh: To use GitHub CLI in automation, set the GH_TOKEN environment variable." >&2
+exit 4
+STUB
+  run "$BIN" --print-url --major v2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GH_TOKEN"* ]]
+  [ ! -s "$PIP_LOG" ]
+  [ ! -e "$WORK/relcore/venv" ]
+}
+
 # --------------------------------------------------------------------------
 # provenance stamp (#580): the resolved release tag lands in the venv so
 # `release-core init` can label the managed-sync commit with the REAL release
