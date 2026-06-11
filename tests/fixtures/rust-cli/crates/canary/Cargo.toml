@@ -1,0 +1,13 @@
+[package]
+name = "canary"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+# Canary fencing (release#587): never publishable, even by accident.
+publish = false
+
+[dependencies]
+canaryapp = { path = "../canaryapp" }

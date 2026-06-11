@@ -3,10 +3,12 @@
 *.swo
 *~
 
-# Test fixture build outputs
+# Canary-fixture build outputs (tests/fixtures/<kind>/ is the authored canary
+# seed, #604 — build dirs are ignored, but Cargo.lock is NOT: the canary repo
+# tracks its lockfile per the rust-binary fleet convention, and the fixture
+# must match the canary's tracked tree exactly so they cannot diverge).
 tests/fixtures/*/target/
 tests/fixtures/*/dist/
-tests/fixtures/*/Cargo.lock
 tests/fixtures/*/node_modules/
 .antigravitycli/
 .claude/scheduled_tasks.lock

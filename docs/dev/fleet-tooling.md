@@ -170,6 +170,44 @@ shrink); the refusal names the one next action,
 no `canaries:` registered (every consumer repo — they carry no
 managed-repos.yaml) ⇒ no gate, mechanically, not via a skip.
 
+## `release-core admin canary init` — the canary-repo lifecycle as a verb
+
+Where `canary run` exercises an existing canary, `canary init`
+(release#604) creates or resets one — idempotently, from the authored
+per-kind seed under `tests/fixtures/<kind>/`:
+
+```sh
+release-core admin canary init --family rust                  # converge
+pbpaste | release-core admin canary init --family rust        # + set/rotate RELEASE_TOKEN
+release-core admin canary init --family rust --reset          # force-push the canonical seed
+```
+
+Run from inside release. One run converges everything: `gh repo create`
+(PUBLIC, owner decision OQ2; skipped when it exists), seed of main from the
+fixture (skipped when already seeded, unless `--reset`), the pull-model
+boot from THIS checkout (`install-release-core --from-source` + a sandboxed
+`release-core init`, same sandbox as `canary run`), secrets, ruleset, and
+the `canaries:` registry entry (appended once).
+
+- **Fixture = source of truth.** Each `tests/fixtures/<kind>/` dir carries
+  a `.canary-family` marker naming its family (`rust-cli` → `rust`); it
+  holds exactly the canary's *authored* content — project tree, thin
+  callers (their `@vN` ref is rewritten to the current floating major at
+  seed time), `.release-sync.yaml` — never what init generates (bootstrap
+  quartet, copilot-review.yml, CLAUDE.md). Adding a family (release#605:
+  vscode-ext) = a new fixture dir + one `canary init` run; the verb never
+  changes.
+- **Fail-closed secrets (#587).** The canary gets only what its family
+  needs: `RELEASE_TOKEN` via the per-repo-targeted token verb (#601; pipe
+  the canonical PAT on stdin to set/rotate). The publish trio
+  (`CRATES_IO_KEY`, `HOMEBREW_TAP_TOKEN`, `NPM_TOKEN`) is never installed
+  and its presence on the repo *fails the run* until removed. A canary
+  with no `RELEASE_TOKEN` and no piped PAT also fails — no skip flags.
+- **`--reset` is the wedge escape** — a fresh orphan seed force-pushed to
+  main. This is the ONLY repo class where a force-push is sanctioned, and
+  the verb hard-refuses anything not in the `canaries:` registry, anything
+  in `projects:`, and any repo not named `release-canary-*`.
+
 ## Onboarding a new repo
 
 Onboarding (GitHub-side policy + repo-side files) is driven by the

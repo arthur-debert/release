@@ -1,0 +1,30 @@
+name: CI
+
+# Thin caller for the canonical reusable Rust CI workflow at
+# arthur-debert/release. This repo is release-owned canary infra
+# (arthur-debert/release#587): a synthetic rust consumer exercised
+# pre-cut. Standard recipe only — no escape hatches.
+#
+# `binary-name: canary` makes the check job build and upload
+# `canary-linux`; `bats: true` adds an e2e job that downloads it,
+# installs bats-core, and runs `bin/check-e2e` with CANARY_BIN
+# pointing at the artifact — the contract tests/e2e/canary.bats reads.
+#
+# The `@v2` ref below is a readable default: `release-core admin canary
+# init` rewrites it to the current floating major at seed time, and
+# `admin canary run` rewrites it to `canary/<sha12>` every round.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: arthur-debert/release/.github/workflows/rust-ci.yml@v2
+    with:
+      binary-name: canary
+      bats: true

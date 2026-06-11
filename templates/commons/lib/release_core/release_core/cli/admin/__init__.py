@@ -6,7 +6,7 @@ so it too can be handed to several parallel agents without collisions:
 
   admin repos    ← repos.py         (list / prs / scripts / audit / verify)
   admin release  ← release_cmds.py  (advance-major / betas / lex)
-  admin canary   ← canary.py        (run — #587)
+  admin canary   ← canary.py        (run / init — #587, #604)
   admin policy   ← policy.py        (ruleset / sweep / dependabot)
   admin secrets  ← secrets.py       (install / token)
   admin inbox    ← inbox.py         (bare / notify-source)
