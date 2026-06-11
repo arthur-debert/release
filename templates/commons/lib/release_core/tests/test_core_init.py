@@ -398,6 +398,101 @@ def test_push_happens_on_clean_default_branch(tmp_path, monkeypatch, capsys):
     assert "chore(release)" in _git(bare, "log", "-1", "--pretty=format:%s", "main")
 
 
+# --------------------------------------------------------------------------
+# the branch-from-origin hint (release#566)
+#
+# When the auto-commit lands on the checked-out DEFAULT branch and stays local,
+# an agent that branches from local <default> carries the alien sync commit
+# into its feature PR diff. init must say so loudly — and ONLY when a commit
+# actually happened on the default branch and was not pushed.
+# --------------------------------------------------------------------------
+
+_HINT = "managed sync committed on"
+
+
+def _repo_with_origin(tmp_path, *, default_branch="main"):
+    """A real repo whose `origin` is a bare clone with origin/HEAD set, so
+    gh.git_default_branch resolves (the same dance the push tests do)."""
+    repo = _init_git_repo(tmp_path / "repo", default_branch=default_branch)
+    bare = tmp_path / "origin.git"
+    _subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    _git(repo, "remote", "add", "origin", str(bare))
+    _git(repo, "push", "-q", "-u", "origin", default_branch)
+    _git(repo, "remote", "set-head", "origin", default_branch)
+    return repo
+
+
+@_needs_git
+def test_branch_hint_fires_when_auto_commit_lands_on_default_branch(tmp_path, monkeypatch, capsys):
+    repo = _repo_with_origin(tmp_path)
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out  # the auto-commit happened…
+    assert f"{_HINT} 'main'" in out  # …and the hint names the branch
+    assert "branch from origin/main" in out  # …with the remedy
+
+
+@_needs_git
+def test_branch_hint_absent_on_noop_init(tmp_path, monkeypatch, capsys):
+    # No managed change → no auto-commit → no hint (the common steady-state
+    # SessionStart must stay quiet).
+    repo = _repo_with_origin(tmp_path)
+    monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
+    monkeypatch.setattr(init, "_run_full_sync", lambda *a, **k: (0, [], "test-ref", []))
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "already current" in out
+    assert _HINT not in out
+
+
+@_needs_git
+def test_branch_hint_absent_on_feature_branch(tmp_path, monkeypatch, capsys):
+    # The commit landing on a feature branch is the rider's own problem space —
+    # the hint is specifically about polluting the DEFAULT branch.
+    repo = _repo_with_origin(tmp_path)
+    _git(repo, "checkout", "-q", "-b", "feat/x")
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert _HINT not in out
+
+
+@_needs_git
+def test_branch_hint_absent_when_commit_was_pushed(tmp_path, monkeypatch, capsys):
+    # --push succeeded on the default branch: the commit is on origin, so
+    # branching from local <default> is fine — no hint.
+    repo = _repo_with_origin(tmp_path)
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main(["--push"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "pushed to main." in out
+    assert _HINT not in out
+
+
+@_needs_git
+def test_branch_hint_absent_without_an_origin(tmp_path, monkeypatch, capsys):
+    # No origin remote → no origin/<default> to branch from (and no PR to
+    # pollute) — the hint must not fire with an unresolvable remedy.
+    repo = _init_git_repo(tmp_path / "repo")
+    _patch_full(monkeypatch, repo, _MANAGED)
+
+    rc = init.main([])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "committed" in out
+    assert _HINT not in out
+
+
 @_needs_git
 def test_commit_failure_does_not_fail_init(tmp_path, monkeypatch, capsys):
     # If the commit itself errors, init must still exit 0 (commit is best-effort).

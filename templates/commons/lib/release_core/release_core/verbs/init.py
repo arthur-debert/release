@@ -618,33 +618,44 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
     n = gh.git_commit_file_count(cwd=repo_root) or len(written)
     print(f"committed {n} managed file(s): {message}")
 
-    if not push:
-        return
-
-    # --push guard: ONLY when on the default branch AND the tree is otherwise
-    # clean (no non-managed changes — the managed paths are now committed, so a
-    # clean check needs no exceptions). Otherwise the commit stays local.
     branch = gh.git_current_branch(cwd=repo_root)
     default = gh.git_default_branch(cwd=repo_root)
-    if branch is None or default is None or branch != default:
+
+    pushed = False
+    if push:
+        # --push guard: ONLY when on the default branch AND the tree is otherwise
+        # clean (no non-managed changes — the managed paths are now committed, so a
+        # clean check needs no exceptions). Otherwise the commit stays local.
+        if branch is None or default is None or branch != default:
+            print(
+                f"  push skipped: on '{branch or 'detached HEAD'}', not the default "
+                f"branch ('{default or 'unknown'}') — commit kept local.",
+                file=sys.stderr,
+            )
+        elif not gh.git_is_clean(cwd=repo_root):
+            print(
+                "  push skipped: working tree has other uncommitted changes — commit kept local.",
+                file=sys.stderr,
+            )
+        else:
+            try:
+                gh.git_push_ff(branch, cwd=repo_root)
+                pushed = True
+                print(f"  pushed to {branch}.")
+            except Exception as exc:
+                print(f"  push skipped: {exc}", file=sys.stderr)
+
+    # Loud hint (release#566): the auto-commit just landed on the checked-out
+    # DEFAULT branch and stays LOCAL. An agent that now branches from local
+    # <default> carries this alien sync commit straight into its feature PR
+    # diff (the #525 probe burned a review cycle on exactly that) — say so,
+    # with the remedy, every time it actually happens.
+    if not pushed and branch is not None and branch == default:
         print(
-            f"  push skipped: on '{branch or 'detached HEAD'}', not the default "
-            f"branch ('{default or 'unknown'}') — commit kept local.",
-            file=sys.stderr,
+            f"NOTE: managed sync committed on '{branch}' (local only — not pushed).\n"
+            f"      When branching for a PR, branch from origin/{default} (or push\n"
+            f"      this commit first) so the sync commit does not ride into your PR diff."
         )
-        return
-    if not gh.git_is_clean(cwd=repo_root):
-        print(
-            "  push skipped: working tree has other uncommitted changes — commit kept local.",
-            file=sys.stderr,
-        )
-        return
-    try:
-        gh.git_push_ff(branch, cwd=repo_root)
-    except Exception as exc:
-        print(f"  push skipped: {exc}", file=sys.stderr)
-        return
-    print(f"  pushed to {branch}.")
 
 
 def _main_full(
