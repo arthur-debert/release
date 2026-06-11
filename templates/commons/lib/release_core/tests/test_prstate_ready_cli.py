@@ -141,20 +141,30 @@ def test_gh_failure_during_the_flip_is_exit_1(monkeypatch, engine, capsys):
 
 
 def test_undo_flips_back_without_consulting_the_engine(monkeypatch, flips, capsys):
-    # gather must not even run: re-work is allowed from ANY state.
+    # gather must not even run: re-work is allowed from ANY state. Only the
+    # cheap draft-flag metadata read happens (output truthfulness, not gating).
     def _no_gather(pr):
         raise AssertionError("--undo must not read the engine")
 
     monkeypatch.setattr(ready, "gather", _no_gather)
+    monkeypatch.setattr(ghapi, "pr_meta", lambda pr: {"isDraft": False})
     assert ready.main(["33", "--undo"]) == 0
     assert flips == [(33, True)]
     assert "ready -> draft" in capsys.readouterr().out
+
+
+def test_undo_on_an_already_draft_pr_is_a_truthful_noop(monkeypatch, flips, capsys):
+    monkeypatch.setattr(ghapi, "pr_meta", lambda pr: {"isDraft": True})
+    assert ready.main(["33", "--undo"]) == 0
+    assert flips == []  # no mutation, and no false "ready -> draft" claim
+    assert "already a draft" in capsys.readouterr().out
 
 
 def test_undo_gh_failure_is_exit_1(monkeypatch, capsys):
     def _down(pr, undo=False):
         raise ghapi.GhError("gh pr ready failed (1): nope")
 
+    monkeypatch.setattr(ghapi, "pr_meta", lambda pr: {"isDraft": False})
     monkeypatch.setattr(ghapi, "pr_ready", _down)
     assert ready.main(["33", "--undo"]) == 1
     assert "nope" in capsys.readouterr().err

@@ -87,7 +87,15 @@ def main(argv: list[str]) -> int:
 
 
 def _undo(pr: int) -> int:
-    """ready->draft, unconditionally: re-work is always allowed."""
+    """ready->draft, unconditionally: re-work is always allowed.
+
+    Unconditional means "never gated on the ENGINE" — a cheap metadata
+    pre-check keeps the output truthful (an already-draft PR is a no-op
+    success, not a fresh "ready -> draft" claim).
+    """
+    if ghapi.pr_meta(pr).get("isDraft"):
+        print(f"#{pr} is already a draft — nothing to flip")
+        return 0
     ghapi.pr_ready(pr, undo=True)
     print(f"#{pr}: ready -> draft — the agent takes its turn back")
     return 0
