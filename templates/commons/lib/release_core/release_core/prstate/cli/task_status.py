@@ -56,7 +56,7 @@ def main(argv: list[str]) -> int:
         print(f"error: PR number must be numeric (got: {pr_arg})", file=sys.stderr)
         return 64
 
-    pr = int(pr_arg) if pr_arg is not None else current_pr()
+    pr = int(pr_arg) if pr_arg is not None else _current_pr()
     if pr is None:
         emit(no_pr(), as_json=as_json)
         return 0
@@ -66,8 +66,13 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-def current_pr() -> int | None:
-    """Resolve the PR number for the current branch, or None if there is none."""
+def _current_pr() -> int | None:
+    """Resolve the PR number for the current branch, or None if there is none.
+
+    Deliberately lossy (any gh failure reads as NO_PR): `pr status` is a
+    read-only report and must not error out of a status line. `pr wait` has a
+    stricter contract (exit 1 on gh failure) and carries its own resolver.
+    """
     try:
         data = json.loads(ghapi._gh(["pr", "view", "--json", "number"]))
     except (ghapi.GhError, json.JSONDecodeError):

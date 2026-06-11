@@ -175,6 +175,17 @@ def test_timeout_cap_hits_exit_2(capsys):
     err = capsys.readouterr().err
     assert "timeout" in err
     assert "validating" in err  # says what it was still waiting on
+    # The final sleep is capped to the remaining budget — the wall clock never
+    # overshoots --timeout (Copilot review on #561).
+    assert h.sleeps == [30.0, 30.0, 30.0, 10.0]
+    assert h.now == 100.0
+
+
+def test_sleep_never_exceeds_the_remaining_timeout():
+    # --poll larger than --timeout must not block past the cap.
+    h = _Harness(VALIDATING)
+    assert h.run(poll=600.0, timeout=60.0) == 2
+    assert h.sleeps == [60.0]
 
 
 def test_wait_catches_state_landing_during_final_sleep(capsys):
@@ -241,11 +252,39 @@ def test_cadence_flags_reach_the_loop(monkeypatch):
 
 
 def test_no_pr_for_branch_is_agent_action_exit_0(monkeypatch, capsys):
-    monkeypatch.setattr(wait, "current_pr", lambda: None)
+    monkeypatch.setattr(wait, "_resolve_pr", lambda: None)
     assert wait.main([]) == 0
     out = capsys.readouterr().out
     assert "NO_PR" in out
     assert "create a draft PR" in out
+
+
+def test_resolver_maps_only_the_no_pr_answer_to_none(monkeypatch):
+    # gh's "no pull requests found" -> None (the NO_PR state)...
+    def no_pr_found(args, **kwargs):
+        raise GhError('gh pr view failed (1): no pull requests found for branch "x"')
+
+    monkeypatch.setattr(wait.ghapi, "_gh", no_pr_found)
+    assert wait._resolve_pr() is None
+
+    # ...but any other gh failure propagates (auth, missing gh, API flake).
+    def auth_down(args, **kwargs):
+        raise GhError("gh pr view failed (1): not logged in")
+
+    monkeypatch.setattr(wait.ghapi, "_gh", auth_down)
+    with pytest.raises(GhError, match="not logged in"):
+        wait._resolve_pr()
+
+
+def test_gh_failure_resolving_the_pr_is_exit_1_not_no_pr(monkeypatch, capsys):
+    # With <pr> omitted, a real gh failure must surface as exit 1 with gh's
+    # message — never read as NO_PR/exit 0 (Copilot review on #561).
+    def auth_down(args, **kwargs):
+        raise GhError("gh pr view failed (1): not logged in")
+
+    monkeypatch.setattr(wait.ghapi, "_gh", auth_down)
+    assert wait.main([]) == 1
+    assert "not logged in" in capsys.readouterr().err
 
 
 def test_gh_failure_is_exit_1(monkeypatch, capsys):

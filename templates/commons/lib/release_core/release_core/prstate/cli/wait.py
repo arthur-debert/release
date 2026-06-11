@@ -28,17 +28,18 @@ them per-invocation.
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from collections.abc import Callable
 
-from .. import gitstat
+from .. import ghapi, gitstat
 from ..fetch import gather
 from ..ghapi import GhError
 from ..model import ReviewLifecycle
 from ..reviewers import REGISTRY, ReviewerAdapter
 from ..state import TaskState, TaskStatus, evaluate, no_pr
-from .task_status import current_pr, emit
+from .task_status import emit
 
 # --- cadence (the single source; --poll/--timeout override) ------------------
 #
@@ -96,7 +97,7 @@ def main(argv: list[str]) -> int:
     pr_arg, poll, timeout = parsed
 
     try:
-        pr = pr_arg if pr_arg is not None else current_pr()
+        pr = pr_arg if pr_arg is not None else _resolve_pr()
         if pr is None:
             # No PR for the branch: that IS agent action (create the draft PR).
             emit(no_pr())
@@ -105,6 +106,28 @@ def main(argv: list[str]) -> int:
     except GhError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+
+
+def _resolve_pr() -> int | None:
+    """The current branch's PR number, or None when the branch has none.
+
+    None is reserved for gh's well-known "no pull requests found" answer —
+    that IS the NO_PR state. Every other `gh` failure (missing gh, auth,
+    transient API errors) propagates as GhError so the caller exits 1 per the
+    contract, never as a misleading NO_PR. If gh ever rewords the no-PR
+    message, the failure mode is loud (exit 1 with gh's real message), not a
+    wrong state.
+    """
+    try:
+        data = json.loads(ghapi._gh(["pr", "view", "--json", "number"]))
+    except GhError as exc:
+        if "no pull requests found" in str(exc).lower():
+            return None
+        raise
+    except json.JSONDecodeError as exc:
+        raise GhError(f"unparseable `gh pr view` output: {exc}") from exc
+    number = data.get("number")
+    return int(number) if number is not None else None
 
 
 def wait_for_action(
@@ -139,7 +162,9 @@ def wait_for_action(
     print(_waiting_line(status, elapsed=0.0, interval=interval))
 
     while clock() < deadline:
-        sleep(interval)
+        # Cap the sleep to the time left: a poll interval longer than the
+        # remaining budget must not carry the wall clock past --timeout.
+        sleep(min(interval, deadline - clock()))
         if not fixed:
             interval = min(interval * POLL_BACKOFF, POLL_MAX_S)
         status = take(pr)
