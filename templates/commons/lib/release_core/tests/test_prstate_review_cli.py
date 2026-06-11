@@ -1,10 +1,11 @@
 """The `pr review` act surface (release#555) — registry-driven, no name branching.
 
 Covers the CLI contract offline (usage errors, --reviewer selection, no-op
-backends) and the wait loop with injected clock/sleep. The CLI layer is
-exercised against FAKE adapters to prove it never branches on a reviewer's
-name — selection and mechanics flow entirely through the adapter interface —
-plus one test through the REAL registry down to the (mocked) gh boundary.
+backends). The CLI layer is exercised against FAKE adapters to prove it never
+branches on a reviewer's name — selection and mechanics flow entirely through
+the adapter interface — plus one test through the REAL registry down to the
+(mocked) gh boundary. The wait moved to the engine-owned `pr wait`
+(release#503) — see test_prstate_wait_cli.py.
 """
 
 from __future__ import annotations
@@ -61,9 +62,7 @@ def fakes(monkeypatch):
 # --- argv contract (offline) ------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "main", [review.request_main, review.cancel_main, review.wait_main, review.show_main]
-)
+@pytest.mark.parametrize("main", [review.request_main, review.cancel_main, review.show_main])
 def test_help_exits_zero(main, capsys):
     assert main(["--help"]) == 0
     assert "pr review" in capsys.readouterr().out
@@ -154,80 +153,6 @@ def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
     assert review.request_main(["42"]) == 0
     assert calls == [(42, "@copilot")]
     assert "copilot" in capsys.readouterr().out
-
-
-# --- wait --------------------------------------------------------------------
-
-
-def _wait_harness(monkeypatch, fakes, *, done_after_polls: int | None):
-    """Drive wait_for_reviews with a fake clock; flip the adapters to done
-    after `done_after_polls` gathers (None = never)."""
-    alpha, beta, _ = fakes
-    state = {"now": 0.0, "gathers": 0}
-
-    def gather(pr: int) -> PullContext:
-        state["gathers"] += 1
-        if done_after_polls is not None and state["gathers"] > done_after_polls:
-            alpha.done = beta.done = True
-        return PullContext(number=pr, head_sha="h", is_draft=True)
-
-    monkeypatch.setattr(review, "gather", gather)
-    return state, (lambda s: state.__setitem__("now", state["now"] + s)), (lambda: state["now"])
-
-
-def test_wait_returns_immediately_when_already_done(monkeypatch, fakes, capsys):
-    alpha, beta, _ = fakes
-    alpha.done = beta.done = True
-    state, sleep, clock = _wait_harness(monkeypatch, fakes, done_after_polls=None)
-    assert review.wait_for_reviews(5, [alpha, beta], sleep=sleep, clock=clock) == 0
-    assert state["now"] == 0  # no sleeping at all
-    assert "already in" in capsys.readouterr().out
-
-
-def test_wait_polls_until_done(monkeypatch, fakes, capsys):
-    alpha, beta, _ = fakes
-    state, sleep, clock = _wait_harness(monkeypatch, fakes, done_after_polls=2)
-    assert review.wait_for_reviews(5, [alpha, beta], sleep=sleep, clock=clock) == 0
-    # initial 7m sleep happened, then 2m polls until the flip
-    assert state["now"] >= review.INITIAL_SLEEP_S
-
-
-def test_wait_times_out_with_exit_2(monkeypatch, fakes, capsys):
-    alpha, beta, _ = fakes
-    state, sleep, clock = _wait_harness(monkeypatch, fakes, done_after_polls=None)
-    assert review.wait_for_reviews(5, [alpha, beta], sleep=sleep, clock=clock) == 2
-    captured = capsys.readouterr()
-    assert "timeout" in captured.err
-    assert "alpha" in captured.err and "beta" in captured.err
-
-
-def test_wait_catches_review_landing_during_final_sleep(monkeypatch, fakes, capsys):
-    # A review that lands during the sleep that carries the clock past the
-    # deadline must NOT read as a timeout: the loop re-checks once after exit.
-    alpha, beta, _ = fakes
-    state = {"now": 0.0}
-
-    def gather(pr: int) -> PullContext:
-        if state["now"] >= review.MAX_WAIT_S:  # "landed" while the last sleep ran
-            alpha.done = beta.done = True
-        return PullContext(number=pr, head_sha="h", is_draft=True)
-
-    monkeypatch.setattr(review, "gather", gather)
-    sleep = lambda s: state.__setitem__("now", state["now"] + s)  # noqa: E731
-    clock = lambda: state["now"]  # noqa: E731
-    assert review.wait_for_reviews(5, [alpha, beta], sleep=sleep, clock=clock) == 0
-    assert "posted" in capsys.readouterr().out
-
-
-def test_wait_only_blocks_on_pending_reviewers(monkeypatch, fakes, capsys):
-    # One required reviewer already done: the wait names only the pending one.
-    alpha, beta, _ = fakes
-    alpha.done = True
-    state, sleep, clock = _wait_harness(monkeypatch, fakes, done_after_polls=None)
-    assert review.wait_for_reviews(5, [alpha, beta], sleep=sleep, clock=clock) == 2
-    captured = capsys.readouterr()
-    assert "beta" in captured.out
-    assert "alpha" not in captured.err  # alpha is not among the timed-out set
 
 
 # --- show ---------------------------------------------------------------------

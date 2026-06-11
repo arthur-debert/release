@@ -1,6 +1,6 @@
 """`release-core pr review` — the reviewer-agnostic act surface.
 
-request / cancel / wait / show over the reviewer-adapter registry. Nothing
+request / cancel / show over the reviewer-adapter registry. Nothing
 here branches on a reviewer's name: the default scope is the *required*
 reviewer set, `--reviewer <name>` selects one adapter by registry name, and
 every per-bot mechanic (how a request is placed, what "done" looks like)
@@ -12,31 +12,22 @@ Commands (each is a `main(argv) -> int`, wrapped into the click tree by
   request — request (or re-request) review(s); no-op backends say so.
   cancel  — withdraw pending review request(s).
   show    — read-only: print posted review(s) + ALL review threads.
-  wait    — block until the selected reviewer(s) are done. Cadence is the
-            retired gh-copilot-wait's, unchanged for now (7m initial sleep,
-            2m polling, 30m cap — release#503 reworks it), but the done
-            test is `adapter.detect()`, not a bot-specific API filter.
+
+Waiting is NOT here: the engine-owned `pr wait` (release#503, `cli/wait.py`)
+replaced the per-reviewer `review wait` — the state engine knows what is
+being waited on, so there is one wait for the whole loop.
 """
 
 from __future__ import annotations
 
 import json
 import sys
-import time
 from collections.abc import Callable
 
 from .. import ghapi
 from ..fetch import gather
-from ..model import PullContext, ReviewLifecycle
+from ..model import PullContext
 from ..reviewers import REGISTRY, ReviewerAdapter, by_name, required_reviewers
-
-_DONE = {ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS}
-
-# Wait cadence — carried over verbatim from the retired gh-copilot-wait.
-# The hardcoded sleeps go away in release#503; do not tune them here.
-INITIAL_SLEEP_S = 7 * 60
-POLL_INTERVAL_S = 2 * 60
-MAX_WAIT_S = 30 * 60
 
 _USAGE_COMMON = """\
 With no <pr-number>, resolves the PR for the current branch. Default scope is
@@ -75,24 +66,6 @@ Usage:
 Exit codes:
   0   request(s) withdrawn (or no-op for no-mechanism reviewers)
   1   gh failure
-  64  bad usage
-"""
-
-USAGE_WAIT = f"""\
-release-core pr review wait — block until pending review(s) land on a PR.
-
-Usage:
-  release-core pr review wait [<pr-number>] [--reviewer <name>]
-
-Blocks IN-TURN (this is how an agent waits without yielding) until every
-selected reviewer is done on the PR's current head. Cadence: 7m initial
-sleep, 2m polling, 30m hard cap. Already-done reviewers return immediately.
-
-{_USAGE_COMMON}
-Exit codes:
-  0   selected review(s) are in
-  1   gh failure
-  2   timeout (30m elapsed with review(s) still pending)
   64  bad usage
 """
 
@@ -234,73 +207,6 @@ def _act(
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
-
-
-# --- wait --------------------------------------------------------------------
-
-
-def wait_main(argv: list[str]) -> int:
-    front = _setup(argv, USAGE_WAIT)
-    if isinstance(front, int):
-        return front
-    pr, adapters = front
-    try:
-        return wait_for_reviews(pr, adapters)
-    except ghapi.GhError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-
-
-def wait_for_reviews(
-    pr: int,
-    adapters: list[ReviewerAdapter],
-    *,
-    sleep: Callable[[float], None] = time.sleep,
-    clock: Callable[[], float] = time.monotonic,
-) -> int:
-    """Block until every adapter reads done on the current head; 2 on timeout.
-
-    `sleep`/`clock` are injectable for tests; the cadence constants are the
-    retired gh-copilot-wait's, kept verbatim until release#503.
-    """
-    start = clock()
-    deadline = start + MAX_WAIT_S
-
-    pending = _pending_names(gather(pr), adapters)
-    if not pending:
-        print(f"review(s) already in on #{pr}: {', '.join(a.name for a in adapters)}")
-        return 0
-    print(f"waiting on review(s) for #{pr}: {', '.join(pending)} (7m initial, 2m poll, 30m max)")
-    sleep(INITIAL_SLEEP_S)
-
-    while clock() < deadline:
-        pending = _pending_names(gather(pr), adapters)
-        if not pending:
-            elapsed = int((clock() - start) // 60)
-            print(f"review(s) posted (after {elapsed}m)")
-            return 0
-        remaining = int((deadline - clock()) // 60)
-        elapsed = int((clock() - start) // 60)
-        print(
-            f"still pending: {', '.join(pending)} "
-            f"({elapsed}m elapsed, {remaining}m remaining); polling in 2m"
-        )
-        sleep(POLL_INTERVAL_S)
-
-    # One last look before declaring timeout: a review can land during the
-    # final sleep that carries the clock past the deadline, and exiting on the
-    # stale pending set would falsely report a timeout.
-    pending = _pending_names(gather(pr), adapters)
-    if not pending:
-        elapsed = int((clock() - start) // 60)
-        print(f"review(s) posted (after {elapsed}m)")
-        return 0
-    print(f"timeout: review(s) still pending after 30m: {', '.join(pending)}", file=sys.stderr)
-    return 2
-
-
-def _pending_names(ctx: PullContext, adapters: list[ReviewerAdapter]) -> list[str]:
-    return [a.name for a in adapters if a.detect(ctx) not in _DONE]
 
 
 # --- show ---------------------------------------------------------------------

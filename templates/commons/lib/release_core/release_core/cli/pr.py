@@ -3,12 +3,14 @@
 This group is the reference implementation for the parallel agents. It shows,
 in one place, every pattern they need:
 
-- a nested subgroup (``pr review`` with ``request``/``cancel``/``wait``/
-  ``show`` — the reviewer-agnostic act surface over the adapter registry),
+- a nested subgroup (``pr review`` with ``request``/``cancel``/``show`` —
+  the reviewer-agnostic act surface over the adapter registry),
 - :func:`~release_core.cli._helpers.wrap_script` for the standalone bash/python
-  tools (``gh-pr-checks-wait``, ``gh-pr-resolve-thread``),
+  tools (``gh-pr-resolve-thread``),
 - :func:`~release_core.cli._helpers.wrap_verb` for a native verb
-  (``pr status`` → the folded PR-state engine, ``prstate.cli.task_status``).
+  (``pr status`` → the folded PR-state engine, ``prstate.cli.task_status``;
+  ``pr wait`` → the engine-owned wait, ``prstate.cli.wait`` — it replaced
+  ``pr review wait`` and ``pr checks-wait`` outright, release#503).
 
 A group module's only contract: define a ``click.Group`` and export it as
 ``group``. ``cli_entry`` imports ``group`` and attaches it to the root.
@@ -25,15 +27,16 @@ import click
 from ..prstate.cli import ready as ready_cli
 from ..prstate.cli import review as review_cli
 from ..prstate.cli import task_status
+from ..prstate.cli import wait as wait_cli
 from ._helpers import wrap_script, wrap_verb
 
 
 @click.group(
     name="review",
-    short_help="Drive the PR's reviews (request/cancel/wait/show).",
+    short_help="Drive the PR's reviews (request/cancel/show).",
 )
 def review() -> None:
-    """Request, cancel, wait on, or read the reviews on a PR.
+    """Request, cancel, or read the reviews on a PR.
 
     Reviewer-agnostic: every command dispatches through the reviewer-adapter
     registry (``prstate.reviewers``). Default scope is all required
@@ -57,13 +60,6 @@ review.add_command(
 )
 review.add_command(
     wrap_verb(
-        review_cli.wait_main,
-        name="wait",
-        short_help="Block in-turn until pending review(s) land on a PR.",
-    )
-)
-review.add_command(
-    wrap_verb(
         review_cli.show_main,
         name="show",
         short_help="Print posted review(s) + all review threads. Read-only.",
@@ -73,24 +69,25 @@ review.add_command(
 
 @click.group(
     name="pr",
-    short_help="PR-loop helpers: reviews, checks-wait, threads, status.",
+    short_help="PR-loop helpers: reviews, wait, threads, status.",
 )
 def group() -> None:
     """Per-project PR-loop helpers.
 
     Everything an agent or human needs to drive a single PR through the
-    review pipeline: request and wait on the required reviews, wait on CI
-    checks, resolve review threads, and read the PR's lifecycle state
-    (``status``).
+    review pipeline: request the required reviews, block until the PR needs
+    the agent again (``wait`` — the engine-owned wait over reviews, checks
+    and mergeability alike), resolve review threads, and read the PR's
+    lifecycle state (``status``).
     """
 
 
 group.add_command(review)
 group.add_command(
-    wrap_script(
-        "gh-pr-checks-wait",
-        name="checks-wait",
-        short_help="Block until a PR's required checks finish.",
+    wrap_verb(
+        wait_cli.main,
+        name="wait",
+        short_help="Block in-turn until the PR needs the agent again.",
     )
 )
 group.add_command(

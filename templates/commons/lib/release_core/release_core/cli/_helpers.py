@@ -11,9 +11,8 @@ group module (and every parallel agent filling one in) does it identically:
   help). The click layer here is a pure passthrough — it never re-parses.
 
 - :func:`wrap_script` — a click command that subprocess-execs an existing
-  ``bin/<script>`` (the standalone bash/python tools: ``gh-pr-checks-wait``,
-  ``gh-pr-resolve-thread``, ``fetch-deps``,
-  ``fetch-artifact``). It forwards args verbatim and propagates the child's
+  ``bin/<script>`` (the standalone bash/python tools: ``gh-pr-resolve-thread``,
+  ``fetch-deps``, ``fetch-artifact``). It forwards args verbatim and propagates the child's
   exit code. The script is resolved off ``$PATH`` by name — these tools are on
   ``$PATH`` in every environment that has them (dodot locally, action_path in
   CI), so we never compute a path relative to the installed wheel.
@@ -138,7 +137,7 @@ def wrap_script(
 ) -> click.Command:
     """Build a passthrough click command that execs the ``bin/<script>`` tool.
 
-    ``script`` is the on-``$PATH`` command name (e.g. ``"gh-pr-checks-wait"``).
+    ``script`` is the on-``$PATH`` command name (e.g. ``"gh-pr-resolve-thread"``).
     Args are forwarded verbatim and the child's exit code is propagated. The
     full ``--help`` is the script's own (``--help`` forwards straight through),
     so the authoritative help is shown, never a click re-statement.

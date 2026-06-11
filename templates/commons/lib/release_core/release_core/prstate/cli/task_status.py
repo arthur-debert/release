@@ -56,17 +56,17 @@ def main(argv: list[str]) -> int:
         print(f"error: PR number must be numeric (got: {pr_arg})", file=sys.stderr)
         return 64
 
-    pr = int(pr_arg) if pr_arg is not None else _current_pr()
+    pr = int(pr_arg) if pr_arg is not None else current_pr()
     if pr is None:
-        _emit(no_pr(), as_json=as_json)
+        emit(no_pr(), as_json=as_json)
         return 0
     ctx = gather(pr)
     status = evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
-    _emit(status, as_json=as_json)
+    emit(status, as_json=as_json)
     return 0
 
 
-def _current_pr() -> int | None:
+def current_pr() -> int | None:
     """Resolve the PR number for the current branch, or None if there is none."""
     try:
         data = json.loads(ghapi._gh(["pr", "view", "--json", "number"]))
@@ -75,7 +75,8 @@ def _current_pr() -> int | None:
     return data.get("number")
 
 
-def _emit(status: TaskStatus, *, as_json: bool) -> None:
+def emit(status: TaskStatus, *, as_json: bool = False) -> None:
+    """Render a TaskStatus — the shared `pr status` / `pr wait` rendering."""
     if as_json:
         print(json.dumps(status.to_dict(), indent=2))
         return

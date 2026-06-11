@@ -36,16 +36,25 @@ def test_toplevel_groups_registered():
 
 def test_pr_group_is_fully_wired():
     grp = pr.group
-    assert set(grp.commands) >= {"review", "checks-wait", "resolve-thread", "status", "ready"}
+    assert set(grp.commands) >= {"review", "wait", "resolve-thread", "status", "ready"}
     review = grp.commands["review"]
     assert isinstance(review, click.Group)
-    assert set(review.commands) == {"request", "cancel", "wait", "show"}
+    assert set(review.commands) == {"request", "cancel", "show"}
 
 
 def test_pr_copilot_group_is_gone():
     # The reviewer-named surface was REMOVED in #555 — no aliases, no shims.
     assert "copilot" not in pr.group.commands
     assert cli_entry.main(["pr", "copilot", "on", "1"]) != 0
+
+
+def test_retired_waits_are_gone():
+    # `pr review wait` + `pr checks-wait` were REPLACED by the engine-owned
+    # `pr wait` in #503 — removed outright, no aliases.
+    assert "checks-wait" not in pr.group.commands
+    assert "wait" not in pr.group.commands["review"].commands
+    assert cli_entry.main(["pr", "checks-wait", "1"]) != 0
+    assert cli_entry.main(["pr", "review", "wait", "1"]) != 0
 
 
 def test_admin_skeleton_registered():
@@ -131,11 +140,18 @@ def test_pr_ready_dispatches_to_ready_verb(capsys):
 
 def test_pr_review_leaves_dispatch_to_review_verbs(capsys):
     # Each leaf forwards --help to its verb's own USAGE (the wrap_verb contract).
-    for leaf in ("request", "cancel", "wait", "show"):
+    for leaf in ("request", "cancel", "show"):
         rc = cli_entry.main(["pr", "review", leaf, "--help"])
         captured = capsys.readouterr()
         assert rc == 0
         assert f"pr review {leaf}" in (captured.out + captured.err)
+
+
+def test_pr_wait_dispatches_to_wait_verb(capsys):
+    rc = cli_entry.main(["pr", "wait", "--help"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "pr wait" in (captured.out + captured.err)
 
 
 # --- stub behavior --------------------------------------------------------
