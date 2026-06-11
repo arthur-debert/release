@@ -74,8 +74,8 @@ Caveats:
   so after `release-core admin release advance-major` a rerun still exercises
   the pre-advance release and proves nothing about the fix (caught live on
   padz, epic #583). Push an empty commit to the consumer's main
-  (`git commit --allow-empty && git push`) or `gh workflow run` to create a
-  run that resolves the new `vN` tip.
+  (`git commit --allow-empty -m "ci: re-resolve @vN" && git push`) or
+  `gh workflow run` to create a run that resolves the new `vN` tip.
 
 ## Onboarding a new repo
 
