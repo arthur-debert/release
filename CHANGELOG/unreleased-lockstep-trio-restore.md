@@ -1,1 +1,0 @@
-- Lockstep trio restored: gh-pr-review-loop rewritten to the reviewer-agnostic, block-in-turn state-machine discipline (pr status/wait/ready); dev-cycle.lex, tooling.lex §3, how-to, and CLAUDE.md swept into agreement; gate-fidelity doctrine note added

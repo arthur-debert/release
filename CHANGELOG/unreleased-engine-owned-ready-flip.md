@@ -1,1 +1,0 @@
-- release-core pr ready: the engine-owned guarded draft->ready flip (refuses unless state is READY; --undo flips back unconditionally)
