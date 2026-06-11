@@ -1,1 +1,0 @@
-- release-core pr wait retries transient gh/network poll failures with backoff instead of dying on the first blip; cut --help no longer shows the retired release-cut flat name (#582)

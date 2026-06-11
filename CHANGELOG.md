@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+## 2.18.0 - 2026-06-11
+
+- consumer-contract manifest generated from sync.py (release-core admin contract dump|check) + assumption lint catching managed-path references in jobs that never materialize (#584, epic #583 WS-A)
+- release-core pr wait retries transient gh/network poll failures with backoff instead of dying on the first blip; cut --help no longer shows the retired release-cut flat name (#582)
+- orc probe now runs the clone's real SessionStart boot (setup-dev-env.sh) before the agent session, with a fail-loud boot-assert and boot report (#578)
+- managed-sync commits and the .release-sync-source marker now carry the resolved release tag (e.g. v2.17.1) instead of the static wheel version (#580)
+- WS-B: synthetic-consumer test/CI surfaces audited to the post-WS7 contract; consumer-contract lint baseline drained to zero (#588); stale repo-shape doc claims fixed; rerun-vs-fresh-event trap documented (epic #583)
+
 ## 2.17.1 - 2026-06-11
 
 - rust-ci.yml e2e + bats-e2e.yml: materialize the managed tree via arm-gate (post-WS7 bin/check-e2e is an untracked mirror; the stale sparse checkout yielded a missing runner, exit 127 on every bats consumer)

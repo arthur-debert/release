@@ -1,1 +1,0 @@
-- managed-sync commits and the .release-sync-source marker now carry the resolved release tag (e.g. v2.17.1) instead of the static wheel version (#580)

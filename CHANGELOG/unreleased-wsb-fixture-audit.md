@@ -1,1 +1,0 @@
-- WS-B: synthetic-consumer test/CI surfaces audited to the post-WS7 contract; consumer-contract lint baseline drained to zero (#588); stale repo-shape doc claims fixed; rerun-vs-fresh-event trap documented (epic #583)

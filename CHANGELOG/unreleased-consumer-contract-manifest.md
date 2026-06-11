@@ -1,1 +1,0 @@
-- consumer-contract manifest generated from sync.py (release-core admin contract dump|check) + assumption lint catching managed-path references in jobs that never materialize (#584, epic #583 WS-A)
