@@ -26,7 +26,7 @@ from enum import StrEnum
 
 from .breakers import DiffSizer, evaluate_breakers
 from .model import PullContext, ReviewLifecycle
-from .reviewers import REGISTRY, ReviewerAdapter
+from .reviewers import REGISTRY, ReviewerAdapter, required_reviewers
 
 _DONE = {ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS}
 
@@ -93,14 +93,26 @@ def evaluate(
     ctx: PullContext,
     registry: list[ReviewerAdapter] | None = None,
     diff_sizer: DiffSizer | None = None,
+    required: list[ReviewerAdapter] | None = None,
 ) -> TaskStatus:
     """Compute the PR's lifecycle state from a snapshot.
 
     Pure except for `diff_sizer`, an optional git-backed callable for the
     diff-trajectory breaker; without it that one breaker is skipped.
+
+    `required` is the gating reviewer SET — by default the config-resolved set
+    (`reviewers.required_reviewers()`: default [copilot, coderabbit] + the
+    per-repo override). A test passes a DIFFERENT set to prove the engine is
+    data-driven, not hard-coded to any reviewer. Every required reviewer gates
+    Ready (parallel-required, release#622); reviewers outside the set are
+    best-effort and never block.
     """
     registry = registry if registry is not None else REGISTRY
-    lifecycles = {r.name: r.detect(ctx) for r in registry}
+    required = required if required is not None else required_reviewers()
+    # Detect over the union of the catalog and the required set so a required
+    # reviewer is always evaluated even if (in a test) it isn't in `registry`.
+    to_detect = {r.name: r for r in (*registry, *required)}.values()
+    lifecycles = {r.name: r.detect(ctx) for r in to_detect}
     reviewers = {name: lc.value for name, lc in lifecycles.items()}
     open_threads = len(ctx.open_threads())
     checks = classify_checks(ctx.checks)
@@ -117,8 +129,11 @@ def evaluate(
         cycles=breaker.cycles,
     )
 
-    # 1. Required reviewers must all be done. Best-effort ones never gate.
-    pending_required = [r for r in registry if r.required and lifecycles[r.name] not in _DONE]
+    # 1. Required reviewers must all be done. Best-effort ones never gate. The
+    #    required SET is config-driven (release#622): every reviewer in it gates,
+    #    so a missing review by ANY required reviewer holds the PR in
+    #    REVIEWS_PENDING and names that reviewer as outstanding.
+    pending_required = [r for r in required if lifecycles[r.name] not in _DONE]
     if pending_required:
         status.state = TaskState.REVIEWS_PENDING
         status.next_action = _reviews_pending_action(ctx, pending_required, lifecycles)

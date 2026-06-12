@@ -29,6 +29,13 @@
       "body": ""
     },
     {
+      "id": 7003,
+      "user": { "login": "coderabbitai[bot]" },
+      "state": "APPROVED",
+      "commit_id": "f00d01",
+      "body": ""
+    },
+    {
       "id": 7002,
       "user": { "login": "gemini-code-assist[bot]" },
       "state": "COMMENTED",

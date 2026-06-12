@@ -22,6 +22,13 @@
       "state": "APPROVED",
       "commit_id": "f00d04",
       "body": ""
+    },
+    {
+      "id": 7302,
+      "user": { "login": "coderabbitai[bot]" },
+      "state": "APPROVED",
+      "commit_id": "f00d04",
+      "body": ""
     }
   ],
   "threads": [],

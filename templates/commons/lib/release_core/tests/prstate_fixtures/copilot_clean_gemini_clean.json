@@ -16,6 +16,13 @@
       "body": "Looks good."
     },
     {
+      "id": 5103,
+      "user": { "login": "coderabbitai[bot]" },
+      "state": "APPROVED",
+      "commit_id": "bbb222",
+      "body": "LGTM."
+    },
+    {
       "id": 5102,
       "user": { "login": "gemini-code-assist[bot]" },
       "state": "COMMENTED",

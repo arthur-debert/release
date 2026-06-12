@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from release_core.prstate.model import PullContext, Review
+from release_core.prstate.reviewers import by_name
 from release_core.prstate.state import (
     ChecksState,
     TaskState,
@@ -136,6 +138,93 @@ def test_reviews_pending_already_requested_says_wait(context):
     assert status.state is TaskState.REVIEWS_PENDING
     assert "wait (already requested on the current head)" in status.next_action
     assert "RE-REQUEST" not in status.next_action
+
+
+# --- parallel-required: BOTH reviewers gate (release#622) -------------------
+
+
+def _green_checks() -> list[dict]:
+    return [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"}]
+
+
+def _ctx_with_reviews(*authors_on_head: str) -> PullContext:
+    """A draft PR, green + mergeable, with an APPROVED review on the head per
+    named author — everything but the review set held constant."""
+    return PullContext(
+        number=1,
+        head_sha="h",
+        is_draft=True,
+        mergeable="MERGEABLE",
+        reviews=[Review(i, a, "APPROVED", "h", "") for i, a in enumerate(authors_on_head, 1)],
+        checks=_green_checks(),
+    )
+
+
+def test_both_required_reviewers_reviewed_reaches_ready():
+    # Copilot AND CodeRabbit both reviewed the current head → READY.
+    status = evaluate(_ctx_with_reviews("Copilot", "coderabbitai[bot]"))
+    assert status.state is TaskState.READY
+    assert status.reviewers["copilot"].startswith("done")
+    assert status.reviewers["coderabbit"].startswith("done")
+
+
+def test_missing_coderabbit_review_is_not_ready_and_names_it_outstanding():
+    # Copilot reviewed but CodeRabbit has not → still REVIEWS_PENDING, and the
+    # engine names CodeRabbit as the outstanding required reviewer (the mocked
+    # single-reviewer-outage case).
+    status = evaluate(_ctx_with_reviews("Copilot"))
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "coderabbit" in status.next_action
+    assert "copilot" not in status.next_action.split("—")[1]  # copilot is done, not pending
+
+
+def test_missing_copilot_review_is_not_ready_and_names_it_outstanding():
+    status = evaluate(_ctx_with_reviews("coderabbitai[bot]"))
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "copilot" in status.next_action
+
+
+# --- the required SET is data-driven, not hard-coded to the two -------------
+
+
+def test_required_set_is_data_driven_single_reviewer():
+    # Drive the engine with a DIFFERENT required set — just CodeRabbit. With
+    # only CodeRabbit's review present (no Copilot), it now reaches READY: the
+    # gate follows the config, not a hard-coded pair.
+    only_coderabbit = [by_name("coderabbit")]
+    status = evaluate(_ctx_with_reviews("coderabbitai[bot]"), required=only_coderabbit)
+    assert status.state is TaskState.READY
+
+
+def test_required_set_is_data_driven_three_reviewers():
+    # A three-reviewer required set (Gemini promoted to required for this PR):
+    # missing Gemini holds it in REVIEWS_PENDING and names gemini outstanding,
+    # proving the engine reads the SET generically — no two-reviewer assumption.
+    three = [by_name("copilot"), by_name("coderabbit"), by_name("gemini")]
+    status = evaluate(_ctx_with_reviews("Copilot", "coderabbitai[bot]"), required=three)
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "gemini" in status.next_action
+
+
+def test_a_push_re_stales_both_required_reviewers():
+    # Both reviewed an EARLIER head; a push moved the head. Both are now stale →
+    # the engine asks to RE-REQUEST both for the current head.
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        mergeable="MERGEABLE",
+        reviews=[
+            Review(1, "Copilot", "APPROVED", "old", ""),
+            Review(2, "coderabbitai[bot]", "APPROVED", "old", ""),
+        ],
+        checks=_green_checks(),
+    )
+    status = evaluate(ctx)
+    assert status.state is TaskState.REVIEWS_PENDING
+    assert "RE-REQUEST" in status.next_action
+    assert "copilot" in status.next_action
+    assert "coderabbit" in status.next_action
 
 
 # --- classify_checks ------------------------------------------------------

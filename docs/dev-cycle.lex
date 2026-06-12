@@ -77,6 +77,39 @@ The Development Life Cycle
         and `release-core pr status` advises RE-REQUEST. That next action
         is authoritative; bot re-reviews are cheap, so comply and move on.
 
+    On the required reviewer set (Copilot AND CodeRabbit, in parallel):
+
+        The default required set is BOTH Copilot and CodeRabbit — they gate
+        in parallel (release#622), not as a primary with a fallback. A PR is
+        `REVIEWED` only when both have a review on the CURRENT head; every
+        push stales both (so `release-core pr review request` re-requests
+        both), and `release-core pr ready` requires both present + resolved.
+        This guarantees always-on dual coverage; the accepted trade-off is
+        availability — if one required reviewer is down, the PR stays at
+        `REVIEWS_PENDING` until it recovers, and the engine names the
+        outstanding reviewer so the stall is visible, never silent.
+
+        The required set is a CONFIG knob, not code — reviewer pricing and
+        availability shift, so changing it is a one-line edit with no engine
+        change. The shipped default `[copilot, coderabbit]` lives in
+        `reviewers_config.DEFAULT_REQUIRED` (carried by the `release_core`
+        wheel). A single repo overrides it with a `required_reviewers:` list
+        in its existing optional `.release-sync.yaml` (the same file that
+        carries `capabilities:` — no new tracked file):
+
+        Override a repo to just CodeRabbit:
+
+            required_reviewers:
+              - coderabbit
+
+        :: yaml ::
+
+        Each name must map to a registered reviewer adapter (`copilot`,
+        `coderabbit`, `gemini`, …); an unknown name fails loud, and an
+        empty/absent list falls back to the default. Adding a NEW reviewer
+        backend is still an adapter in the registry; flipping which existing
+        ones gate is purely this config.
+
 2. Larger features (multiple PRs)
 
     A larger feature — one comprising multiple PRs — is a composition of the

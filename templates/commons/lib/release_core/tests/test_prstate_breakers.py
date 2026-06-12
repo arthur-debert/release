@@ -6,6 +6,7 @@ from itertools import count
 
 from release_core.prstate.breakers import build_cycles, evaluate_breakers
 from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
+from release_core.prstate.reviewers import by_name
 from release_core.prstate.state import TaskState, evaluate
 
 
@@ -178,10 +179,15 @@ def test_disjoint_consecutive_findings_no_stop():
 # --- fold-in to state -----------------------------------------------------
 
 
+# These scenarios model Copilot review CYCLES (the breaker subject); the second
+# required reviewer is irrelevant here, so they pin the required set to Copilot.
+_COPILOT_ONLY = [by_name("copilot")]
+
+
 def test_breaker_overrides_addressing_with_blocked():
     reviews = [review(i, f"c{i}") for i in range(1, 5)]  # 4 cycles -> cap
     c = ctx(reviews, threads=[open_copilot_thread()], head="c4")
-    status = evaluate(c)
+    status = evaluate(c, required=_COPILOT_ONLY)
     assert status.state is TaskState.BLOCKED
     assert status.breaker == "cycle-cap"
     assert "STOP" in status.next_action
@@ -191,7 +197,7 @@ def test_converged_pr_not_stopped_despite_many_cycles():
     # 4 cycles but every thread resolved + green + mergeable -> READY, not BLOCKED.
     reviews = [review(i, f"c{i}") for i in range(1, 5)]
     rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
-    status = evaluate(ctx(reviews, threads=[], head="c4", checks=rollup))
+    status = evaluate(ctx(reviews, threads=[], head="c4", checks=rollup), required=_COPILOT_ONLY)
     assert status.state is TaskState.READY
     assert status.cycles == 4
     assert status.breaker is None
