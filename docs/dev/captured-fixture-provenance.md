@@ -34,13 +34,11 @@ The only oracle for an external surface is captured reality. So:
 ## The convention
 
 **Any fixture representing an external surface carries a machine-readable
-provenance marker.** The marker token is:
-
-```text
-captured-from:
-```
-
-followed by the producing command or source **and a date**. Examples:
+provenance marker.** The marker token is `captured-from`, written in one of
+two surface-dependent forms — a top-level `"captured-from"` JSON key (no
+colon) for JSON file fixtures, or a `captured-from:` comment for inline/YAML
+fixtures. Either form is followed by the producing command or source **and a
+date**. Examples:
 
 - A JSON file fixture — a top-level key:
 
