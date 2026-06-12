@@ -558,8 +558,16 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
         print(f"canary init: {exc}", file=sys.stderr)
         return 2
 
-    # ── converge: secrets (fail-closed) → policy → registration ──────────────
+    # ── converge: registration → secrets (fail-closed) → policy ──────────────
+    # Registration comes FIRST: the secrets converge targets the repo via
+    # `admin secrets token --repos`, which validates against this very
+    # registry — a new canary must be registered before it is targetable
+    # (create+seed already succeeded above, so the entry is never premature).
     try:
+        if _register(manifest, family, repo):
+            print(f"canary init: registered {family}: {repo} in managed-repos.yaml — commit it")
+        else:
+            print(f"canary init: {family} already registered in managed-repos.yaml")
         _converge_secrets(
             repo,
             stdin_is_tty=sys.stdin.isatty(),
@@ -569,10 +577,6 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
         if _apply_policy(dest) != 0:
             raise CanaryError(f"applying the ruleset to {repo} failed")
         print(f"canary init: ruleset applied to {repo}")
-        if _register(manifest, family, repo):
-            print(f"canary init: registered {family}: {repo} in managed-repos.yaml — commit it")
-        else:
-            print(f"canary init: {family} already registered in managed-repos.yaml")
     except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
         print(f"canary init: {exc}", file=sys.stderr)
         return 1

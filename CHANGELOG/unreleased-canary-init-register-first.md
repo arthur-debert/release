@@ -1,0 +1,1 @@
+- fix(canary): init registers a new family before the secrets converge — the token install validates against the registry init itself appends (self-deadlock caught on the first live vscode-ext init); registers the vscode-ext canary

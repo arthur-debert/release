@@ -521,6 +521,28 @@ def test_new_family_is_registered_in_the_manifest(seams, monkeypatch, capsys):
     assert "registered vscode-ext" in capsys.readouterr().out
 
 
+def test_new_family_is_registered_before_the_token_install(seams, monkeypatch, capsys):
+    # Regression (caught live on the first vscode-ext init): the token install
+    # targets the repo via `admin secrets token --repos`, which validates
+    # against managed-repos.yaml — so a NEW canary must be registered before
+    # the secrets converge runs, or init self-deadlocks on its own registry.
+    calls, root = seams
+    fixtures = root / "tests" / "fixtures" / "vscode-ext"
+    fixtures.mkdir()
+    (fixtures / ".canary-family").write_text("vscode-ext\n")
+    monkeypatch.setattr(canary_init, "_repo_exists", lambda repo: False)
+    monkeypatch.setattr(canary_init, "_main_seeded", lambda dest: False)
+    monkeypatch.setattr(canary_init.gh, "secret_list", lambda repo: [])
+    monkeypatch.setattr(sys, "stdin", types.SimpleNamespace(isatty=lambda: False))
+
+    def install_requires_registration(repo):
+        text = (root / "managed-repos.yaml").read_text()
+        return 0 if f"  vscode-ext: {repo}\n" in text else 1
+
+    monkeypatch.setattr(canary_init, "_install_token", install_requires_registration)
+    assert canary_init.main(["--family", "vscode-ext"]) == 0
+
+
 def test_gh_preflight_failure_is_setup_error(seams, monkeypatch, capsys):
     _calls, _root = seams
     monkeypatch.setattr(canary_init, "_gh_preflight", lambda: False)
