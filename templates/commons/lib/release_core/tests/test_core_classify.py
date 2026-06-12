@@ -253,12 +253,14 @@ def test_collect_jobs_gives_up_after_bounded_attempts(monkeypatch):
 
 # ── hermetic-gate FAIL classification (#594) ─────────────────────────────────
 
-# The piped output of THE pinned lefthook (2.1.9, release#567), captured
-# VERBATIM from a live hermetic verify-gate log (lex-fmt/vscode, 2026-06-11):
-# box-drawing banner, per-check sections, then the summary block — `✓` pass
-# lines (U+2713) and `✗` fail lines (U+2717). The earlier `🥊` fixture was a
-# tty-mode guess that never occurs in captured output; this one is ground
-# truth (the glyph mismatch made every npm-artifact FAIL read as unexpected).
+# captured-from: the piped output of THE pinned lefthook (2.1.9, release#567),
+# captured VERBATIM from a live hermetic verify-gate log (lex-fmt/vscode,
+# 2026-06-11): box-drawing banner, per-check sections, then the summary block —
+# `✓` pass lines (U+2713) and `✗` fail lines (U+2717). The earlier `🥊` fixture
+# was a tty-mode guess that never occurs in captured output; this one is ground
+# truth (#619 — the glyph mismatch made every npm-artifact FAIL read as
+# unexpected). This is the WORKED EXAMPLE for the captured-fixture provenance
+# convention (docs/dev/captured-fixture-provenance.md).
 _GATE_LOG = (
     "╭──────────────────────────────────────╮\n"
     "│ lefthook  v2.1.9   hook:  \x1b[1mpre-commit\x1b[m │\n"

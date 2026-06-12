@@ -1,0 +1,77 @@
+# captured-fixture-lint-baseline.yaml — the SHRINK-ONLY baseline for the
+# external-surface fixture provenance lint (#623).
+#
+# Read by release_core.captured_fixtures.load_baseline; enforced by
+# bin-internal/lint-captured-fixtures.sh (release's own lefthook pre-commit +
+# CI gate). Hand-maintained. Each entry grandfathers ONE external-surface
+# fixture (keyed `seam/path`) that lacked a `captured-from:` provenance marker
+# when the lint landed. The ratchet only tightens:
+#   - a NEW unmarked external-surface fixture (not listed here) FAILS the lint;
+#   - an entry that no longer matches any offender ALSO fails the lint
+#     ("stale baseline entry — delete it"); once a fixture gets its marker,
+#     its entry MUST be removed.
+#   - adding an entry is NEVER the fix for a new finding — capture the fixture
+#     from the real producer and add the marker instead (the escape hatch
+#     shrinks, never grows).
+#
+# To DRAIN an entry: re-capture the fixture from the real gh API
+# (`gh pr view --json ...` + `gh api graphql ...` against a live PR — see
+# docs/dev/captured-fixture-provenance.md), add the `captured-from:` key, and
+# delete the matching line below.
+#
+# These are the prstate state-machine scenarios: hand-shaped gh-API PR payloads
+# (synthetic PR numbers 101–204, fabricated headRefOid like `aaa111`) authored
+# to exercise the engine's lifecycle transitions, NOT captured from a real PR.
+# They are the #623 seed debt; the live_*pr342 fixtures already carry provenance
+# and are intentionally absent here.
+known_unmarked_fixtures:
+  - key: "prstate/tests/prstate_fixtures/blocked_checks_failing.json"
+    reason: >-
+      Hand-shaped BLOCKED-with-failing-checks scenario (PR #203). Synthetic
+      statusCheckRollup; recapture from a real failing-check PR to drain.
+  - key: "prstate/tests/prstate_fixtures/blocked_merge_conflict.json"
+    reason: >-
+      Hand-shaped merge-conflict scenario (PR #204, mergeable=CONFLICTING).
+      Synthetic; recapture from a real conflicting PR to drain.
+  - key: "prstate/tests/prstate_fixtures/copilot_changes_requested.json"
+    reason: >-
+      Hand-shaped Copilot CHANGES_REQUESTED scenario (PR #101). Recapture from
+      a live Copilot review to drain.
+  - key: "prstate/tests/prstate_fixtures/copilot_clean_gemini_clean.json"
+    reason: >-
+      Hand-shaped both-bots-approved scenario (PR #102). Recapture from a live
+      dual-bot PR to drain.
+  - key: "prstate/tests/prstate_fixtures/copilot_done_all_resolved.json"
+    reason: >-
+      Hand-shaped all-threads-resolved scenario (PR #105). Recapture to drain.
+  - key: "prstate/tests/prstate_fixtures/copilot_never_requested.json"
+    reason: >-
+      Hand-shaped no-review-requested scenario (PR #106). Recapture to drain.
+  - key: "prstate/tests/prstate_fixtures/copilot_stale_needs_rerequest.json"
+    reason: >-
+      Hand-shaped stale-review-needs-rerequest scenario (PR #105, old commit).
+      Recapture from a real post-push stale review to drain.
+  - key: "prstate/tests/prstate_fixtures/copilot_stale_review.json"
+    reason: >-
+      Hand-shaped stale-review scenario. Recapture to drain.
+  - key: "prstate/tests/prstate_fixtures/gemini_eyes_copilot_requested.json"
+    reason: >-
+      Hand-shaped Gemini-eyes-reaction + Copilot-requested scenario. Recapture
+      from a live PR carrying the 👀 reaction to drain.
+  - key: "prstate/tests/prstate_fixtures/multi_bot_threads.json"
+    reason: >-
+      Hand-shaped after the release#502 REST-vs-GraphQL thread-count
+      regression (PR #502): documents the discrepancy but the bytes were
+      authored, not captured. Recapture from a live 6-thread multi-bot PR to
+      drain.
+  - key: "prstate/tests/prstate_fixtures/ready_checks_green.json"
+    reason: >-
+      Hand-shaped READY-with-green-checks scenario. Recapture to drain.
+  - key: "prstate/tests/prstate_fixtures/reviewed_mergeable_unknown.json"
+    reason: >-
+      Hand-shaped reviewed-but-mergeable-UNKNOWN scenario (GitHub still
+      computing mergeability). Recapture from a freshly-pushed PR to drain.
+  - key: "prstate/tests/prstate_fixtures/validating_checks_pending.json"
+    reason: >-
+      Hand-shaped VALIDATING-with-pending-checks scenario. Recapture from a
+      PR with in-flight checks to drain.
