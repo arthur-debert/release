@@ -354,6 +354,10 @@ jobs:
           PACKAGES: ${{ inputs.wasm-packages }}
         run: |
           set -euo pipefail
+          # `jq` is preinstalled on GitHub-hosted runners, but `runner` is
+          # caller-overridable (a self-hosted runner may lack it) — fail with
+          # a clear, actionable error rather than a bare `jq: command not found`.
+          command -v jq >/dev/null 2>&1 || { echo "::error::jq is required for the wasm jobs but was not found on this runner"; exit 1; }
           # Trim trailing whitespace, drop blank + `#`-comment lines, emit
           # a JSON array. `grep -v` returns 1 when it filters EVERY line
           # (whitespace-only input) — `|| true` keeps pipefail from
@@ -444,6 +448,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # `jq` is preinstalled on GitHub-hosted runners, but `runner` is
+          # caller-overridable (a self-hosted runner may lack it) — fail with
+          # a clear, actionable error rather than a bare `jq: command not found`.
+          command -v jq >/dev/null 2>&1 || { echo "::error::jq is required for the wasm jobs but was not found on this runner"; exit 1; }
           # Resolve the workspace member's dir via cargo metadata so the
           # consumer doesn't encode `crates/<name>/` in the input — same
           # resolution rust-cli.yml's build-wasm uses.
