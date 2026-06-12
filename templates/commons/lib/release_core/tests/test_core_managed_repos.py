@@ -8,9 +8,16 @@ it is covered by the BATS contract test against a stub gh).
 from __future__ import annotations
 
 import os
+import subprocess
 
 import pytest
+from release_core import gh, proc
 from release_core.verbs import managed_repos
+
+
+def _cp(returncode: int = 0, stdout: str = "", stderr: str = ""):
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
+
 
 FIXTURE = """\
 projects:
@@ -167,3 +174,109 @@ def test_validate_repo_targets_structurally_invalid_registry_is_a_message(tmp_pa
     err = managed_repos.validate_repo_targets(["lex-fmt/lex"])
     assert "cannot read the fleet registry" in err
     assert "managed-repos.yaml" in err
+
+
+# --------------------------------------------------------------------------
+# --clone: refresh existing clones UNCONDITIONALLY + name the ref/sha (#624)
+# --------------------------------------------------------------------------
+
+
+class _GitDriver:
+    """Records git/proc.run calls and scripts their returncodes.
+
+    `fail_fetch` / `fail_reset` are sets of abspaths whose fetch/reset should
+    return non-zero, so a test can force a refresh failure for one repo."""
+
+    def __init__(self, fail_fetch=None, fail_reset=None, sha="deadbee"):
+        self.fail_fetch = fail_fetch or set()
+        self.fail_reset = fail_reset or set()
+        self.sha = sha
+        self.calls: list[list[str]] = []
+        self._real_run = proc.run  # delegate non-git calls (yq manifest read)
+
+    def __call__(self, cmd, **kw):
+        # The manifest read goes through yq (yamlio) — pass it to the real
+        # proc.run; this driver only scripts the git fetch/reset/rev-parse.
+        if cmd and cmd[0] != "git":
+            return self._real_run(cmd, **kw)
+        self.calls.append(cmd)
+        # git -C <abspath> <subcmd> ...
+        abspath = cmd[2] if len(cmd) > 2 and cmd[1] == "-C" else None
+        sub = cmd[3] if len(cmd) > 3 else ""
+        if sub == "symbolic-ref":
+            return _cp(0, stdout="refs/remotes/origin/main\n")
+        if sub == "fetch":
+            return _cp(1 if abspath in self.fail_fetch else 0)
+        if sub == "reset":
+            return _cp(1 if abspath in self.fail_reset else 0)
+        if sub == "rev-parse":
+            return _cp(0, stdout=f"{self.sha}\n")
+        raise AssertionError(f"unexpected proc.run: {cmd}")
+
+
+def _git_calls(driver, abspath, subcmd):
+    return [c for c in driver.calls if c[:4] == ["git", "-C", abspath, subcmd]]
+
+
+def test_clone_refreshes_existing_clone_unconditionally(fleet, monkeypatch, capsys):
+    # No --refresh flag anywhere — an EXISTING clone (lex-fmt/lex) must still be
+    # fetched + hard-reset to origin's default branch on a bare --clone (#624).
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    driver = _GitDriver(sha="cafef00")
+    monkeypatch.setattr(proc, "run", driver)
+    # Missing repos would call gh.repo_clone; make it a no-op success so the test
+    # stays focused on the refresh path.
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0
+    # The existing clone was fetched (shallow) and hard-reset — unconditionally.
+    fetch = _git_calls(driver, lex, "fetch")
+    assert fetch and "--depth" in fetch[0] and fetch[0][-2:] == ["origin", "main"]
+    reset = _git_calls(driver, lex, "reset")
+    assert reset and reset[0][-1] == "origin/main"
+    # The readout NAMES the ref/sha the clone now sits at (freshness is visible).
+    err = capsys.readouterr().err
+    assert "lex-fmt/lex: refreshed to main@cafef00" in err
+    assert "exists, skipping" not in err
+
+
+def test_clone_refresh_failure_is_nonzero_and_named(fleet, monkeypatch, capsys):
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    driver = _GitDriver(fail_fetch={lex})
+    monkeypatch.setattr(proc, "run", driver)
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 1
+    assert "lex-fmt/lex: refresh FAILED" in capsys.readouterr().err
+
+
+def test_clone_clones_missing_and_names_sha(fleet, monkeypatch, capsys):
+    # comms is MISSING in the fixture → it gets cloned (gh.repo_clone) and the
+    # readout names the cloned-at sha; the rev-parse runs in the new clone.
+    driver = _GitDriver(sha="abc1234")
+    monkeypatch.setattr(proc, "run", driver)
+    cloned: list[str] = []
+
+    def _fake_clone(repo, dest, **kw):
+        cloned.append(repo)
+        return _cp(0)
+
+    monkeypatch.setattr(gh, "repo_clone", _fake_clone)
+
+    rc = managed_repos.main(["--clone", "lex-fmt/comms"])
+    assert rc == 0
+    assert cloned == ["lex-fmt/comms"]
+    err = capsys.readouterr().err
+    assert "lex-fmt/comms: cloned at abc1234" in err
+
+
+def test_clone_rejects_removed_refresh_flag(fleet, capsys):
+    # #624: --refresh was removed with no tolerated no-op — it is now an unknown
+    # arg, the same usage error as any other bogus flag.
+    rc = managed_repos.main(["--clone", "--refresh"])
+    assert rc == 64
+    assert "unknown arg: --refresh" in capsys.readouterr().err

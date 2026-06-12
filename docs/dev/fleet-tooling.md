@@ -32,9 +32,18 @@ The accessor. Reads the manifest, applies the join, nothing else.
 ```sh
 release-core admin repos list                       # owner/name, one per line
 release-core admin repos list --paths               # owner/name <TAB> abspath <TAB> found|missing
-release-core admin repos list --clone [--refresh]   # clone missing repos into their paths
+release-core admin repos list --clone               # clone missing; refresh existing (see below)
 release-core admin repos list --paths lex-fmt/lex   # trailing owner/name args restrict the set
 ```
+
+`--clone` clones every missing repo and **unconditionally** fetches+resets
+every existing clone to origin's default branch, then names the `ref@sha`
+each clone now sits at (`→ <repo>: refreshed to main@<sha>`). There is no
+opt-out: the old `--refresh` opt-in was **removed** (release#624). Reusing a
+clone without fetching was a quiet-wrong default — the managed surface syncs
+from the candidate ref either way, so a stale clone's consumer-authored half
+made a sweep *look* faithful while it lied. A genuinely frozen-clone use case
+is a manual clone, not a list/verify mode.
 
 `release-core admin repos audit` reads the same manifest (the only other
 consumer).
@@ -53,8 +62,12 @@ release-core admin repos verify --only arthur-debert/padz   # one repo (scopes t
 ```
 
 It is **hermetic**: clones into a throwaway root (default
-`/tmp/release-fleet-verify-$USER`), syncs each consumer from the candidate
-revision, runs `lefthook run pre-commit --all-files`, and reports
+`/tmp/release-fleet-verify-$USER`), **unconditionally fetches+resets every
+existing clone** to the consumer's current main (naming the `ref@sha` per
+repo in the `==> cloning/refreshing fleet` phase — release#624, so the
+pre-flight is faithful by default and never lints frozen-at-clone-time
+content), syncs each consumer from the candidate revision, runs
+`lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
 before `release-core cut` — the cut auto-advances the floating `@vN`
 (release's `release.yml` passes `advance-major: true`), so the sweep must
