@@ -102,6 +102,7 @@ projects:
 # `.canary-family` marker names the family) and appends here on first init.
 canaries:
   rust: arthur-debert/release-canary-rust
+  vscode-ext: arthur-debert/release-canary-vscode-ext
 
 # NOT managed even though they carry the main-branch-protection
 # ruleset (which was applied broadly across arthur-debert/* for
