@@ -256,3 +256,30 @@ repo to `managed-repos.yaml` and verify with
 `release-core audit --repo <owner/repo>` /
 `release-core admin smoke-test <owner/repo>`.
 See `release-core admin --help` for the current commands and flags.
+
+## Sanctioned-bespoke consumer workflows: the `# UNMANAGED` marker
+
+A fleet conformance sweep flags hand-rolled `.github/workflows/*` that bypass
+the shared reusable workflows. Most are debt to normalize onto the spine, but
+a few are **genuinely repo-domain** — a case the shared workflows do not (and
+should not) cover. release#630's gap analysis blessed four: phos-app's
+self-hosted GPU E2E lane (`e2e-gpu.yml`), tree-sitter-lex's quarterly
+grammar-bump cron, supage's Cloud Run `deploy.yml`, and phos-core's `corpus`
+extra-asset release job. (The fifth gap, phos-core's PR-time `wasm.yml`, went
+the other way — it re-implemented logic the spine owns, so it was folded into
+`rust-ci.yml` as the opt-in `wasm-packages` companion; thin callers pass the
+same wasm member list they pass `rust-cli.yml` at release time and drop the
+hand-rolled file.)
+
+To keep a blessed workflow from being re-flagged every sweep, the convention
+is a **`# UNMANAGED`** line in the workflow's top-of-file comment block. It
+declares the file sanctioned-bespoke and exempts it from the
+hand-rolled-bypass finding. phos-app's `e2e-gpu.yml` already self-declares it.
+
+The marker is ONLY the bypass signal — it does NOT suppress the assumption
+lint (`release-core admin contract lint`): an `# UNMANAGED` workflow that
+references a managed ephemeral path still must materialize the managed tree
+first. There is currently no automated fat-workflow linter in this repo (the
+release#569/#630 litmus sweep was a one-time manual analysis), so this is a
+documented convention any sweep must honor; see
+`docs/references/consumer-contract.md` for the full scope/non-scope.

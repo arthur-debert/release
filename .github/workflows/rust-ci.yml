@@ -146,6 +146,47 @@ on:
         required: false
         default: 'false'
 
+      wasm-packages:
+        description: |
+          Multiline list of workspace members with wasm-bindgen crates
+          to VALIDATE on PR CI (one member per line; blank + `#`-comment
+          lines ignored). Empty (default) skips all wasm work, so
+          existing callers are unaffected — this is an opt-in companion.
+
+          When non-empty, two extra `if`-gated jobs run, mirroring the
+          RELEASE-path wasm matrix in `rust-cli.yml` (target
+          `wasm32-unknown-unknown`, `Swatinem/rust-cache`):
+
+            * `wasm-check` — `cargo clippy --target wasm32-unknown-unknown
+              -p <pkg> -- -D warnings` for each listed package. Catches
+              wasm-only lint failures host clippy doesn't see.
+            * `wasm-build` — `wasm-pack build` for each listed package
+              (build-only validation; NO publish on PR — npm publish is
+              the release path's job, not CI's).
+
+          This closes the PR-time gap phos-core's hand-rolled `wasm.yml`
+          filled: `rust-cli.yml` owns wasm on the release path but not on
+          PR. Use the SAME member list here as in your release.yml's
+          `wasm-packages:`.
+
+          Example:
+            wasm-packages: |
+              phos-color-wasm
+              phos-editor-wasm
+              phos-viewer-wasm
+        type: string
+        required: false
+        default: ''
+
+      wasm-pack-target:
+        description: |
+          `wasm-pack build --target` value: bundler|web|nodejs|no-modules.
+          Only consulted when `wasm-packages` is non-empty. Default
+          `bundler` matches `rust-cli.yml`'s release-path default.
+        type: string
+        required: false
+        default: 'bundler'
+
 permissions:
   contents: read
 
@@ -279,3 +320,133 @@ jobs:
             echo "Exposed ${VAR_NAME}=${GITHUB_WORKSPACE}/${BINARY_NAME}"
           fi
           bin/check-e2e
+
+  # -------------------------------------------------------------------
+  # WASM companion (opt-in via `wasm-packages`). PR-time mirror of the
+  # release-path wasm matrix in rust-cli.yml: `rust-cli.yml` validates
+  # wasm on the RELEASE path (build-wasm/publish-npm) but NOT on PR — a
+  # conspicuous asymmetry phos-core hand-rolled a `wasm.yml` to fill
+  # (release#630). These jobs close that gap on the SHARED spine.
+  #
+  # Build-only: no tarball, no GH release attach, no npm publish — those
+  # are the release path's job. This is pure PR validation.
+  # -------------------------------------------------------------------
+  wasm-setup:
+    # Parse `wasm-packages` (multiline) into a JSON array consumed by the
+    # wasm-check + wasm-build matrices. Same parsing recipe as
+    # rust-cli.yml's wasm-setup (strip blank + `#`-comment lines). Skips
+    # everything downstream when the input is empty (the default).
+    if: inputs.wasm-packages != ''
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - name: Build wasm packages list
+        id: list
+        shell: bash
+        env:
+          PACKAGES: ${{ inputs.wasm-packages }}
+        run: |
+          set -euo pipefail
+          # Trim trailing whitespace, drop blank + `#`-comment lines, emit
+          # a JSON array. `grep -v` returns 1 when it filters EVERY line
+          # (whitespace-only input) — `|| true` keeps pipefail from
+          # aborting; the `length == 0` check below catches that with a
+          # clearer error. POSIX `[[:space:]]` (GNU grep BRE has no `\s`).
+          json=$(printf '%s\n' "${PACKAGES}" \
+            | sed 's/[[:space:]]*$//' \
+            | { grep -vE '^[[:space:]]*(#|$)' || true; } \
+            | jq -R . | jq -s -c .)
+          if [ "$(jq 'length' <<<"${json}")" -eq 0 ]; then
+            echo "::error::wasm-packages parsed to empty list — check input formatting"
+            exit 1
+          fi
+          echo "Effective wasm-packages list: ${json}"
+          echo "packages=${json}" >> "$GITHUB_OUTPUT"
+
+  wasm-check:
+    # clippy on the wasm32 target for each listed member — catches
+    # wasm-only lint failures host clippy doesn't see. Matrix over the
+    # wasm-packages list (fail-fast: false so one member's failure
+    # doesn't mask its siblings).
+    if: inputs.wasm-packages != ''
+    needs: wasm-setup
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ${{ fromJSON(needs.wasm-setup.outputs.packages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules }}
+
+      - name: Setup Rust (wasm32 toolchain + cache)
+        # Shared setup-rust composite installs the wasm32 target +
+        # Swatinem/rust-cache (caching mandatory per CLAUDE.md). clippy
+        # component for the lint below.
+        uses: arthur-debert/release/.github/actions/setup-rust@v2
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - name: clippy (wasm32)
+        env:
+          PKG: ${{ matrix.pkg }}
+        run: cargo clippy --target wasm32-unknown-unknown -p "$PKG" -- -D warnings
+
+  wasm-build:
+    # wasm-pack build for each listed member — build-only PR validation
+    # (keeps the WASM distribution path warm). No publish: that's the
+    # release path's job. Matches rust-cli.yml's build-wasm crate-path
+    # resolution via cargo metadata so the consumer needn't encode
+    # `crates/<name>/` in the input.
+    if: inputs.wasm-packages != ''
+    needs: wasm-setup
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: ${{ inputs.timeout }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: ${{ fromJSON(needs.wasm-setup.outputs.packages) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: ${{ inputs.submodules }}
+
+      - name: Setup Rust (wasm32 toolchain + cache)
+        uses: arthur-debert/release/.github/actions/setup-rust@v2
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - name: wasm-pack build
+        env:
+          WASM_PACKAGE: ${{ matrix.pkg }}
+          WASM_TARGET: ${{ inputs.wasm-pack-target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Resolve the workspace member's dir via cargo metadata so the
+          # consumer doesn't encode `crates/<name>/` in the input — same
+          # resolution rust-cli.yml's build-wasm uses.
+          crate_path=$(cargo metadata --no-deps --format-version=1 \
+            | jq -er --arg n "$WASM_PACKAGE" \
+                '.packages[] | select(.name == $n) | .manifest_path' \
+            | xargs dirname)
+          echo "→ wasm-pack build $WASM_PACKAGE ($crate_path) --target $WASM_TARGET"
+          wasm-pack build "$crate_path" --target "$WASM_TARGET" --out-dir pkg
