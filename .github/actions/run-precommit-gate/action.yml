@@ -8,8 +8,14 @@ description: |
   tab-formatted JSON file, awk rewriting a Cargo.toml, etc.).
 
   Detects (in order):
-    1. lefthook  (lefthook.yml / lefthook.yaml / .lefthook.yml)
+    1. lefthook  (managed .release/lefthook.yml / root lefthook.yml /
+                  .lefthook.yml / lefthook.yaml)
     2. husky  (.husky/pre-commit)
+    3. release-core managed-gate fallback — when no root gate config
+       is present but release-core is on PATH, materialize the managed
+       gate from the wheel bundle and run it through the binary
+       (`release-core gate --hook`). This is the post-WS3 path where
+       the gate config lives only in the ephemeral .release/.
 
   No-op when none is configured. Failure exits non-zero so the
   release halts cleanly before pushing a commit the consumer's CI

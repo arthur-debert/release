@@ -2,8 +2,15 @@
 # Run the consumer's own pre-commit gate against staged files.
 #
 # Detects (in order):
-#   1. lefthook  (lefthook.yml / lefthook.yaml / .lefthook.yml)
+#   1. lefthook  (LEFTHOOK_CONFIG / managed .release/lefthook.yml /
+#                 root lefthook.yml / .lefthook.yml / lefthook.yaml)
 #   2. husky  (.husky/pre-commit)
+#   3. release-core managed-gate fallback — when no root gate config is
+#      present but release-core is on PATH, materialize the managed
+#      tree from the wheel bundle and run the gate through the binary
+#      (`release-core gate --hook`). This is the post-WS3 path: the
+#      gate config lives only in the ephemeral .release/, so there is
+#      no root file to detect.
 #
 # No-op when none is configured or nothing is staged.
 # Re-stages auto-fixes (prettier --write, eslint --fix, etc.).
