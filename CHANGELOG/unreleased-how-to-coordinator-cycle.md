@@ -1,0 +1,1 @@
+- release-core how-to now renders the §2 coordinator (complex/multi-PR) discipline; CLAUDE.md stub names it
