@@ -258,6 +258,12 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     if shutil.which("gh") is None:
         print("managed-repos: gh required for --clone", file=sys.stderr)
         return 2
+    # --clone now drives git directly (fetch/reset/rev-parse on existing
+    # clones, #624) — guard it the same as gh so a missing git is a clean
+    # exit 2, never a FileNotFoundError traceback out of proc.run.
+    if shutil.which("git") is None:
+        print("managed-repos: git required for --clone", file=sys.stderr)
+        return 2
     return _clone(pairs, root)
 
 

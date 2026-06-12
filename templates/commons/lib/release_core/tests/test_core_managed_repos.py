@@ -294,6 +294,18 @@ def test_clone_clones_missing_and_names_sha(fleet, monkeypatch, capsys):
     assert "lex-fmt/comms: cloned at abc1234" in err
 
 
+def test_clone_missing_git_is_clean_exit_2(fleet, monkeypatch, capsys):
+    # --clone drives git directly (#624) — a missing git must be a clean exit 2
+    # like the gh/yq guards, never a FileNotFoundError traceback.
+    real_which = managed_repos.shutil.which
+    monkeypatch.setattr(
+        managed_repos.shutil, "which", lambda t: None if t == "git" else real_which(t)
+    )
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 2
+    assert "git required for --clone" in capsys.readouterr().err
+
+
 def test_clone_rejects_removed_refresh_flag(fleet, capsys):
     # #624: --refresh was removed with no tolerated no-op — it is now an unknown
     # arg, the same usage error as any other bogus flag.
