@@ -9,8 +9,7 @@ description: |
 
   Detects (in order):
     1. lefthook  (lefthook.yml / lefthook.yaml / .lefthook.yml)
-    2. pre-commit framework  (.pre-commit-config.yaml / .yml)
-    3. husky  (.husky/pre-commit)
+    2. husky  (.husky/pre-commit)
 
   No-op when none is configured. Failure exits non-zero so the
   release halts cleanly before pushing a commit the consumer's CI
@@ -28,8 +27,8 @@ description: |
   with `jq` / `awk` / `perl`, none of which preserve consumer
   formatting. Per-stack patches (re-running prettier inline, etc.)
   fragment ops across the matrix. This action centralizes the gate:
-  the consumer defines what runs (via their lefthook /
-  pre-commit-config / husky), the workflow just invokes it.
+  the consumer defines what runs (via their lefthook / husky),
+  the workflow just invokes it.
 
   ## Opting out
 

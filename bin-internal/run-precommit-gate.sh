@@ -3,8 +3,7 @@
 #
 # Detects (in order):
 #   1. lefthook  (lefthook.yml / lefthook.yaml / .lefthook.yml)
-#   2. pre-commit framework  (.pre-commit-config.yaml / .yml)
-#   3. husky  (.husky/pre-commit)
+#   2. husky  (.husky/pre-commit)
 #
 # No-op when none is configured or nothing is staged.
 # Re-stages auto-fixes (prettier --write, eslint --fix, etc.).
@@ -65,15 +64,6 @@ run_lefthook() {
   fi
 }
 
-run_precommit_framework() {
-  if command -v pipx >/dev/null 2>&1; then
-    pipx run pre-commit run --files "${staged_arr[@]}"
-  else
-    python3 -m pip install --user --quiet pre-commit
-    "$(python3 -m site --user-base)/bin/pre-commit" run --files "${staged_arr[@]}"
-  fi
-}
-
 run_husky() {
   bash .husky/pre-commit
 }
@@ -92,10 +82,6 @@ gate_ran=0
 if [ -n "${LEFTHOOK_CONFIG:-}" ] || [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
   echo "Detected lefthook config — running gate."
   run_lefthook
-  gate_ran=1
-elif [ -f .pre-commit-config.yaml ] || [ -f .pre-commit-config.yml ]; then
-  echo "Detected pre-commit framework — running gate."
-  run_precommit_framework
   gate_ran=1
 elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
   echo "Detected husky pre-commit — running gate."
@@ -133,7 +119,7 @@ elif command -v release-core >/dev/null 2>&1; then
   release-core gate --hook "${lefthook_file_args[@]}"
   gate_ran=1
 else
-  echo "No pre-commit gate detected (no lefthook / pre-commit / husky config, no release-core) — skipping."
+  echo "No pre-commit gate detected (no lefthook / husky config, no release-core) — skipping."
 fi
 
 if [ "${gate_ran}" = "1" ] && ! git diff --quiet; then
