@@ -1,0 +1,1 @@
+- fix(verify): classify.py parses the real captured lefthook summary glyph (✗, U+2717) — the 🥊 guess made every npm-artifact FAIL read as unexpected

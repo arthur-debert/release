@@ -232,18 +232,24 @@ def collect_jobs(repo: str, run_id: int, *, prefix: str, sleep=time.sleep) -> li
 GATE_DEP_CHECKS = frozenset({"eslint", "prettier", "typecheck"})
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-# A failed check in the pinned lefthook's summary block: `🥊 <name> (<time>)`.
+# A failed check in the pinned lefthook's summary block: `✗ <name> (<time>)`
+# (U+2717; passes are `✓` U+2713). The glyphs are MODE-DEPENDENT: interactive
+# (tty) runs render `🥊` fail / `✔️` pass, captured (piped) runs render `✗`/`✓`.
+# The classifier only ever reads captured logs (verify/poke/canary run the gate
+# through subprocess capture), so the piped glyph is the one format — verified
+# against live verify-gate logs (the tty-glyph guess was this regex's original
+# bug: every npm-artifact FAIL read as unexpected).
 # Parsing this is deterministic, not fragile: the gate runs ONE pinned lefthook
 # everywhere (release#567 — version skew between gate runs is forbidden), so
 # the summary format is fixed until the pin moves (and the pin bump's fleet
 # sweep would surface a format change immediately as unclassifiable FAILs).
-_SUMMARY_FAIL_RE = re.compile(r"^\s*🥊️?\s+(\S+)")
+_SUMMARY_FAIL_RE = re.compile(r"^\s*✗\s+(\S+)")
 
 
 def failed_gate_checks(log_text: str) -> list[str]:
     """The failed check names from a captured `lefthook run pre-commit` log.
 
-    Reads the trailing `summary:` block (one `🥊 <check>` line per failure),
+    Reads the trailing `summary:` block (one `✗ <check>` line per failure),
     ANSI-stripped. Returns [] when no summary/failure lines are found — an
     unparseable log classifies as unexpected (fail toward visibility)."""
     failed: list[str] = []

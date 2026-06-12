@@ -253,33 +253,38 @@ def test_collect_jobs_gives_up_after_bounded_attempts(monkeypatch):
 
 # ── hermetic-gate FAIL classification (#594) ─────────────────────────────────
 
-# The piped output of THE pinned lefthook (2.1.9, release#567), captured live:
-# truecolor box-drawing around the banner (which itself carries a 🥊), per-check
-# sections, then the summary block — ✔️ pass lines and 🥊 fail lines.
+# The piped output of THE pinned lefthook (2.1.9, release#567), captured
+# VERBATIM from a live hermetic verify-gate log (lex-fmt/vscode, 2026-06-11):
+# box-drawing banner, per-check sections, then the summary block — `✓` pass
+# lines (U+2713) and `✗` fail lines (U+2717). The earlier `🥊` fixture was a
+# tty-mode guess that never occurs in captured output; this one is ground
+# truth (the glyph mismatch made every npm-artifact FAIL read as unexpected).
 _GATE_LOG = (
-    "\x1b[38;2;0;0;0m╭──────────────────────────────╮\x1b[m\n"
-    "\x1b[38;2;0;0;0m│\x1b[m 🥊 lefthook v2.1.9  hook:  \x1b[1mpre-commit\x1b[m │\n"
-    "\x1b[38;2;6;6;6m╰──────────────────────────────╯\x1b[m\n"
-    "┃  eslint ❯\n"
-    "\n"
-    "sh: 1: eslint: not found\n"
-    "exit status 127\n"
-    "summary: (done in 0.42 seconds)\n"
-    "✔️ markdownlint (0.10 seconds)\n"
-    "✔️ shellcheck (0.08 seconds)\n"
-    "🥊 eslint (0.01 seconds)\n"
-    "🥊 typecheck (0.02 seconds)\n"
+    "╭──────────────────────────────────────╮\n"
+    "│ lefthook  v2.1.9   hook:  \x1b[1mpre-commit\x1b[m │\n"
+    "╰──────────────────────────────────────╯\n"
+    "ERROR: TS files staged but no 'typecheck' npm script — the gate does not skip.\n"
+    "exit status 1\n"
+    "Error [ERR_MODULE_NOT_FOUND]: Cannot find package '@eslint/js'\n"
+    "exit status 2\n"
+    "summary: (done in 1.78 seconds)\n"
+    "✓ yamllint (0.20 seconds)\n"
+    "✓ markdownlint (0.44 seconds)\n"
+    "✓ shellcheck (1.16 seconds)\n"
+    "✓ prettier (1.66 seconds)\n"
+    "✗ typecheck (0.33 seconds)\n"
+    "✗ eslint (0.82 seconds)\n"
 )
 
 
 def test_failed_gate_checks_parses_the_summary_block():
-    assert classify.failed_gate_checks(_GATE_LOG) == ["eslint", "typecheck"]
+    assert classify.failed_gate_checks(_GATE_LOG) == ["typecheck", "eslint"]
 
 
-def test_failed_gate_checks_ignores_the_banner_glove():
-    # The 🥊 in the lefthook banner is BEFORE the summary block — never a failure.
-    banner_only = _GATE_LOG.split("summary:")[0]
-    assert classify.failed_gate_checks(banner_only) == []
+def test_failed_gate_checks_ignores_pass_lines():
+    # `✓` pass lines in the summary block are never failures.
+    passes_only = _GATE_LOG.replace("✗", "✓")
+    assert classify.failed_gate_checks(passes_only) == []
 
 
 def test_failed_gate_checks_empty_on_unparseable_log():
