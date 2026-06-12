@@ -231,9 +231,10 @@ REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), CodeRabbitAdapter(), Gemini
 # `required_reviewers()` on EVERY poll, so without this a long wait would spawn
 # a yq process each tick — needless overhead, and a transient yq/PATH blip could
 # break an otherwise-healthy wait. The config cannot change mid-command, so
-# caching for the process lifetime is safe; tests reset it via
+# caching for the process lifetime is safe. Held as an IMMUTABLE tuple so a
+# caller mutating the returned list can't corrupt the cache; tests reset it via
 # `_reset_required_cache()`.
-_REQUIRED_CACHE: list[ReviewerAdapter] | None = None
+_REQUIRED_CACHE: tuple[ReviewerAdapter, ...] | None = None
 
 
 def required_reviewers() -> list[ReviewerAdapter]:
@@ -243,7 +244,8 @@ def required_reviewers() -> list[ReviewerAdapter]:
     per-repo `.release-sync.yaml` override), not the registry's structure — so
     swapping/re-ordering required reviewers is a one-line config edit. Names map
     back to these adapters; an unknown name fails loud. Resolved once per
-    process (see `_REQUIRED_CACHE`).
+    process (see `_REQUIRED_CACHE`); each call returns a FRESH list copy, so a
+    caller may mutate it freely without disturbing the cache.
     """
     global _REQUIRED_CACHE
     if _REQUIRED_CACHE is None:
@@ -251,8 +253,8 @@ def required_reviewers() -> list[ReviewerAdapter]:
 
         override = reviewers_config.load_override()
         names = reviewers_config.resolve_required_names(override)
-        _REQUIRED_CACHE = reviewers_config.required_reviewers(names)
-    return _REQUIRED_CACHE
+        _REQUIRED_CACHE = tuple(reviewers_config.required_reviewers(names))
+    return list(_REQUIRED_CACHE)
 
 
 def _reset_required_cache() -> None:

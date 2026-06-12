@@ -17,6 +17,7 @@ import sys
 
 from .. import ghapi, gitstat
 from ..fetch import gather
+from ..reviewers import required_reviewers
 from ..state import TaskState, evaluate
 from .review import _resolve_pr
 from .task_status import emit
@@ -104,7 +105,9 @@ def _undo(pr: int) -> int:
 def _flip(pr: int) -> int:
     """draft->ready, ONLY when the engine reads READY."""
     ctx = gather(pr)
-    status = evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+    status = evaluate(
+        ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required_reviewers()
+    )
     if status.state is not TaskState.READY:
         print(
             f"refusing to flip #{pr}: state is {status.state.value.upper()}, not READY",

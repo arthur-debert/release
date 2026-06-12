@@ -12,6 +12,7 @@ import sys
 
 from .. import ghapi, gitstat
 from ..fetch import gather
+from ..reviewers import required_reviewers
 from ..state import TaskState, TaskStatus, evaluate, no_pr
 
 USAGE = """\
@@ -61,7 +62,9 @@ def main(argv: list[str]) -> int:
         emit(no_pr(), as_json=as_json)
         return 0
     ctx = gather(pr)
-    status = evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+    status = evaluate(
+        ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required_reviewers()
+    )
     emit(status, as_json=as_json)
     return 0
 

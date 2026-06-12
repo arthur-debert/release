@@ -97,15 +97,19 @@ def evaluate(
 ) -> TaskStatus:
     """Compute the PR's lifecycle state from a snapshot.
 
-    Pure except for `diff_sizer`, an optional git-backed callable for the
-    diff-trajectory breaker; without it that one breaker is skipped.
+    Pure when `required` is supplied: a function of `ctx` + the given reviewer
+    set, modulo `diff_sizer` (an optional git-backed callable for the
+    diff-trajectory breaker; without it that one breaker is skipped). The CLI
+    entrypoints resolve the required set once and pass it in, so the production
+    paths stay pure — config resolution lives at the edge, not in the engine.
 
-    `required` is the gating reviewer SET — by default the config-resolved set
-    (`reviewers.required_reviewers()`: default [copilot, coderabbit] + the
-    per-repo override). A test passes a DIFFERENT set to prove the engine is
-    data-driven, not hard-coded to any reviewer. Every required reviewer gates
-    Ready (parallel-required, release#622); reviewers outside the set are
-    best-effort and never block.
+    `required` is the gating reviewer SET; every reviewer in it gates Ready
+    (parallel-required, release#622), reviewers outside it are best-effort and
+    never block. A test passes a DIFFERENT set to prove the engine is
+    data-driven, not hard-coded to any reviewer. The `None` default is a
+    convenience for REPL/ad-hoc callers ONLY — it resolves the config-default
+    set (`reviewers.required_reviewers()`, which reads `.release-sync.yaml`),
+    the one impurity, which is why the CLI never relies on it.
     """
     registry = registry if registry is not None else REGISTRY
     required = required if required is not None else required_reviewers()

@@ -13,7 +13,7 @@ availability, so it must be a one-line config edit with no code change
     NOTHING in the engine changes.
 
 Names map to adapters in the registry (#558); an unknown name fails LOUD
-(`UnknownReviewerError`) rather than silently dropping a required gate.
+(`RequiredReviewersConfigError`) rather than silently dropping a required gate.
 
 `resolve_required_names` takes the override list as data (already parsed),
 keeping THIS module pure and unit-testable; the thin `load_override` seam is
@@ -37,8 +37,11 @@ OVERRIDE_FILE = ".release-sync.yaml"
 OVERRIDE_KEY = "required_reviewers"
 
 
-class UnknownReviewerError(RuntimeError):
-    """A configured required-reviewer name has no adapter in the registry."""
+class RequiredReviewersConfigError(RuntimeError):
+    """The `required_reviewers` config is invalid — any of: an unknown name, a
+    non-requestable reviewer in the required set, a duplicate name, or a
+    wrong-typed override value. One error type for the whole config surface;
+    the message says which."""
 
 
 def resolve_required_names(override: list[str] | None = None) -> tuple[str, ...]:
@@ -70,13 +73,13 @@ def _validate(names: tuple[str, ...]) -> None:
 
     unknown = [n for n in names if n.lower() not in known]
     if unknown:
-        raise UnknownReviewerError(
+        raise RequiredReviewersConfigError(
             f"unknown required reviewer(s) {unknown} in {OVERRIDE_FILE} "
             f"`{OVERRIDE_KEY}` — known adapters: {sorted(known)}"
         )
     not_requestable = [n for n in names if n.lower() not in requestable]
     if not_requestable:
-        raise UnknownReviewerError(
+        raise RequiredReviewersConfigError(
             f"non-requestable reviewer(s) {not_requestable} cannot be required "
             f"in {OVERRIDE_FILE} `{OVERRIDE_KEY}`: a reviewer with no request "
             f"mechanism can never satisfy the gate — requestable adapters: "
@@ -84,7 +87,7 @@ def _validate(names: tuple[str, ...]) -> None:
         )
     duplicates = sorted({n for n in lowered if lowered.count(n) > 1})
     if duplicates:
-        raise UnknownReviewerError(
+        raise RequiredReviewersConfigError(
             f"duplicate required reviewer(s) {duplicates} in {OVERRIDE_FILE} "
             f"`{OVERRIDE_KEY}` — list each reviewer once"
         )
@@ -108,7 +111,7 @@ def load_override(root: str | None = None) -> list[str] | None:
     if value is None:
         return None
     if not isinstance(value, list) or not all(isinstance(x, str) for x in value):
-        raise UnknownReviewerError(
+        raise RequiredReviewersConfigError(
             f"{OVERRIDE_FILE} `{OVERRIDE_KEY}` must be a list of reviewer names"
         )
     return value
@@ -126,6 +129,8 @@ def required_reviewers(names: tuple[str, ...]) -> list[ReviewerAdapter]:
     for n in names:
         adapter = by_name(n)
         if adapter is None:  # unreachable post-_validate — fail loud if it isn't
-            raise UnknownReviewerError(f"required reviewer {n!r} has no adapter after validation")
+            raise RequiredReviewersConfigError(
+                f"required reviewer {n!r} has no adapter after validation"
+            )
         adapters.append(adapter)
     return adapters

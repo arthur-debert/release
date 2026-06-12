@@ -215,9 +215,13 @@ def wait_for_action(
 
 
 def _snapshot(pr: int) -> TaskStatus:
-    """One engine evaluation: fetch the PR context, run `evaluate()`."""
+    """One engine evaluation: fetch the PR context, run `evaluate()`.
+
+    Resolves the required reviewer set here (cached) and passes it in, so the
+    engine call stays pure — config resolution is the entrypoint's job.
+    """
     ctx = gather(pr)
-    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required_reviewers())
 
 
 def _poll_with_retry(

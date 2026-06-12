@@ -12,7 +12,7 @@ import pytest
 from release_core.prstate import reviewers_config
 from release_core.prstate.reviewers_config import (
     DEFAULT_REQUIRED,
-    UnknownReviewerError,
+    RequiredReviewersConfigError,
     resolve_required_names,
 )
 
@@ -38,7 +38,7 @@ def test_override_can_reorder_or_add_within_the_catalog():
 
 
 def test_unknown_reviewer_name_fails_loud():
-    with pytest.raises(UnknownReviewerError, match="gpt5"):
+    with pytest.raises(RequiredReviewersConfigError, match="gpt5"):
         resolve_required_names(["copilot", "gpt5"])
 
 
@@ -46,12 +46,12 @@ def test_non_requestable_reviewer_cannot_be_required():
     # Gemini auto-triggers and has no request mechanism, so it can never satisfy
     # a required gate — configuring it required fails loud at parse time, not as
     # an engine forever advising "request gemini".
-    with pytest.raises(UnknownReviewerError, match="non-requestable"):
+    with pytest.raises(RequiredReviewersConfigError, match="non-requestable"):
         resolve_required_names(["copilot", "gemini"])
 
 
 def test_duplicate_reviewer_names_fail_loud():
-    with pytest.raises(UnknownReviewerError, match="duplicate"):
+    with pytest.raises(RequiredReviewersConfigError, match="duplicate"):
         resolve_required_names(["copilot", "copilot"])
 
 
@@ -61,7 +61,7 @@ def test_required_reviewers_maps_names_to_adapters_in_order():
 
 
 def test_required_reviewers_rejects_unknown_name():
-    with pytest.raises(UnknownReviewerError):
+    with pytest.raises(RequiredReviewersConfigError):
         reviewers_config.required_reviewers(("nope",))
 
 
@@ -76,12 +76,8 @@ def test_load_override_reads_the_key(tmp_path, monkeypatch):
     (tmp_path / ".release-sync.yaml").write_text(
         "capabilities:\n  - rust-quality\nrequired_reviewers:\n  - coderabbit\n"
     )
-    # Stub the yq-backed loader so the test is hermetic (no external `yq`).
-    monkeypatch.setattr(
-        reviewers_config,
-        "load_override",
-        reviewers_config.load_override,  # keep real fn; patch manifest below
-    )
+    # Patch the yq-backed sync-config loader so the test is hermetic (no external
+    # `yq`); load_override still runs for real over the patched seam.
     from release_core import manifest
 
     monkeypatch.setattr(
@@ -97,5 +93,5 @@ def test_load_override_rejects_a_non_list(tmp_path, monkeypatch):
     monkeypatch.setattr(
         manifest, "load_sync_config", lambda d=None: {"required_reviewers": "copilot"}
     )
-    with pytest.raises(UnknownReviewerError, match="must be a list"):
+    with pytest.raises(RequiredReviewersConfigError, match="must be a list"):
         reviewers_config.load_override(str(tmp_path))
