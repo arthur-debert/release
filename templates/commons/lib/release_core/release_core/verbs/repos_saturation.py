@@ -294,7 +294,7 @@ class Condition:
     in this verb is per-item."""
 
     id: str
-    item: str  # the #569 item label, e.g. "1" or "1 (fragment)"
+    item: str  # the #569 item identifier, e.g. "1" or "fragment"
     label: str
     predicate: Predicate
 
@@ -375,7 +375,7 @@ def render_matrix(consumers: list[Consumer], matrix: dict[str, dict[str, tuple[s
     lines.append("")
     width = max((len(c.label) for c in CONDITIONS), default=0)
     col_idx = " ".join(f"{i:>2}" for i in range(1, len(consumers) + 1))
-    lines.append(f"{'#569 item':<{width}}  {col_idx}")
+    lines.append(f"{'sunset condition':<{width}}  {col_idx}")
     for cond in CONDITIONS:
         glyphs = " ".join(f"{_GLYPH[matrix[cond.id][r][0]]:>2}" for r in repos)
         lines.append(f"{cond.label:<{width}}  {glyphs}    [item {cond.item}]")
