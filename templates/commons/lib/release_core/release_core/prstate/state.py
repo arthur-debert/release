@@ -120,7 +120,9 @@ def evaluate(
     reviewers = {name: lc.value for name, lc in lifecycles.items()}
     open_threads = len(ctx.open_threads())
     checks = classify_checks(ctx.checks)
-    breaker = evaluate_breakers(ctx, diff_sizer)
+    # Breakers count cycles against the SAME required set the engine gates on —
+    # passed through so an override repo's breaker math matches its reviewers.
+    breaker = evaluate_breakers(ctx, diff_sizer, required=required)
 
     status = TaskStatus(
         state=TaskState.REVIEWS_PENDING,  # provisional; set below

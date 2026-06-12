@@ -91,6 +91,35 @@ def test_three_cycles_under_cap_no_stop():
     assert not evaluate_breakers(ctx(reviews, findings=findings)).stop
 
 
+def test_two_required_reviewers_across_two_heads_is_two_cycles_not_four():
+    # The release#622 double-count bug: with TWO required reviewers, two human
+    # iteration rounds (heads h1, h2) get four review objects (each reviewer
+    # reviews each head). Cycles are ROUNDS, not reviews — so this is 2 cycles,
+    # well under the cap of 3, and the cycle-cap breaker must NOT fire.
+    reviews = [
+        review(1, "h1", author="Copilot"),
+        review(2, "h1", author="coderabbitai[bot]"),
+        review(3, "h2", author="Copilot"),
+        review(4, "h2", author="coderabbitai[bot]"),
+    ]
+    cycles = build_cycles(ctx(reviews))
+    assert [c.commit_id for c in cycles] == ["h1", "h2"]  # one per head, not per review
+    assert len(cycles) == 2
+    v = evaluate_breakers(ctx(reviews))
+    assert v.cycles == 2
+    assert not v.stop
+
+
+def test_a_cycle_unions_both_reviewers_findings_on_the_same_head():
+    # Both required reviewers flag the same head: the cycle's findings are the
+    # UNION of their thread comments, not one reviewer's.
+    reviews = [review(1, "h1", author="Copilot"), review(2, "h1", author="coderabbitai[bot]")]
+    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
+    cycles = build_cycles(ctx(reviews, findings=findings))
+    assert len(cycles) == 1
+    assert cycles[0].comment_keys == frozenset({("a.py", 1), ("b.py", 2)})
+
+
 # --- diff trajectory ------------------------------------------------------
 
 
