@@ -96,10 +96,19 @@ def test_task_verbs_red_when_build_not_executable(tmp_path, ctx):
     assert "executable" in detail
 
 
-def test_task_verbs_na_on_non_task_kind(tmp_path, ctx):
+def test_task_verbs_na_on_known_non_task_kind(tmp_path, ctx):
     root = _make_repo(tmp_path)
     verdict, _ = sat._p_task_verbs(_consumer(root, "rust-cli"), ctx)
     assert verdict == sat.NA
+
+
+def test_task_verbs_red_on_unknown_kind(tmp_path, ctx):
+    # detect-kind failed → kind '?'. Applicability is indeterminate, so this is
+    # RED, NOT N/A — item 1 must not go REMOVABLE on a kind guess.
+    root = _make_repo(tmp_path)
+    verdict, detail = sat._p_task_verbs(_consumer(root, "?"), ctx)
+    assert verdict == sat.RED
+    assert "indeterminate" in detail
 
 
 # ── item 2: pull-model seeded ────────────────────────────────────────────────
@@ -117,6 +126,14 @@ def test_pull_seeded_red_when_resolver_absent(tmp_path, ctx):
     _track(root, "README.md")
     verdict, _ = sat._p_pull_seeded(_consumer(root, "rust-cli"), ctx)
     assert verdict == sat.RED
+
+
+def test_pull_seeded_red_when_tracked_indeterminate():
+    # git ls-files failed → tracked is None → RED, never a false GREEN/clean read.
+    c = sat.Consumer(repo="o/n", path="/nope", kind="rust-cli", tracked=None)
+    verdict, detail = sat._p_pull_seeded(c, sat.Context(release_home="/x"))
+    assert verdict == sat.RED
+    assert "indeterminate" in detail
 
 
 # ── item 3: resolver vintage (quartet bytes) ─────────────────────────────────
@@ -177,6 +194,14 @@ def test_ws4_ws7_red_when_root_gate_mirror_tracked(tmp_path, ctx):
     assert "lefthook.yml" in detail
 
 
+def test_ws4_ws7_red_when_tracked_indeterminate():
+    # git ls-files failed → tracked is None → RED, not a false "nothing tracked".
+    c = sat.Consumer(repo="o/n", path="/nope", kind="rust-cli", tracked=None)
+    verdict, detail = sat._p_ws4_ws7_complete(c, sat.Context(release_home="/x"))
+    assert verdict == sat.RED
+    assert "indeterminate" in detail
+
+
 # ── item 5: husky core.hooksPath ─────────────────────────────────────────────
 
 
@@ -194,6 +219,17 @@ def test_hooks_path_red_when_set(tmp_path, ctx):
     assert ".husky" in detail
 
 
+def test_hooks_path_red_when_config_unreadable(tmp_path, ctx):
+    # A plain (non-git) dir: `git config --local --get` exits 128, NOT 1. That is
+    # introspection failure, not a real unset → RED, never a false GREEN.
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    c = sat.Consumer(repo="o/n", path=str(plain), kind="rust-cli", tracked=frozenset())
+    verdict, detail = sat._p_hooks_path_unset(c, sat.Context(release_home="/x"))
+    assert verdict == sat.RED
+    assert "indeterminate" in detail
+
+
 # ── fragment model: CHANGELOG/ ───────────────────────────────────────────────
 
 
@@ -209,6 +245,26 @@ def test_fragment_model_red_when_no_changelog_dir(tmp_path, ctx):
     _track(root, "CHANGELOG.md", b"# changelog\n")
     verdict, _ = sat._p_fragment_model(_consumer(root, "rust-cli"), ctx)
     assert verdict == sat.RED
+
+
+# ── _tracked_files: None (introspection failed) vs empty (clean) ─────────────
+
+
+def test_tracked_files_empty_set_when_repo_tracks_nothing(tmp_path):
+    # A real git repo with no commits: git ls-files succeeds, returns nothing →
+    # empty frozenset (introspected, genuinely clean), NOT None.
+    root = _make_repo(tmp_path)
+    tracked = sat._tracked_files(str(root))
+    assert tracked == frozenset()
+    assert tracked is not None
+
+
+def test_tracked_files_none_when_not_a_repo(tmp_path):
+    # A plain dir: git ls-files fails → None (could not introspect), DISTINCT
+    # from the empty-but-introspected case above.
+    plain = tmp_path / "not-a-repo"
+    plain.mkdir()
+    assert sat._tracked_files(str(plain)) is None
 
 
 # ── the condition table is pinned to the sync source of truth ────────────────

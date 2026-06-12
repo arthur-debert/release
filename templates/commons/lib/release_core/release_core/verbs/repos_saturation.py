@@ -99,12 +99,22 @@ _LEGACY_ROOT_GATE_MIRRORS = frozenset(
 class Consumer:
     """One fleet clone under evaluation: its owner/name, on-disk path, kind, and
     the tracked-file set (`git ls-files`, read once and shared by every
-    predicate that asks about committed paths)."""
+    predicate that asks about committed paths).
+
+    ``tracked`` is ``None`` when `git ls-files` could NOT be introspected (not a
+    repo / git failure) — DISTINCT from an empty frozenset, which means the repo
+    was introspected and genuinely tracks nothing. Predicates over committed
+    paths must read the ``None`` case as RED (indeterminate, never a false
+    GREEN); only an actually-empty set is "introspected, nothing found".
+
+    ``kind`` is ``'?'`` when `detect-kind` could not classify the clone; a
+    kind-gated predicate reads that as RED too (applicability unknown), never
+    N/A."""
 
     repo: str
     path: str
     kind: str
-    tracked: frozenset[str]
+    tracked: frozenset[str] | None
 
 
 @dataclass(frozen=True)
@@ -120,6 +130,13 @@ class Context:
 # sunset), RED (still blocks it), or NA (the condition does not apply to this
 # consumer — e.g. a kind-gated row on the wrong kind). NA columns never block a
 # REMOVABLE verdict.
+#
+# THE LOAD-BEARING INVARIANT (#629 review): a predicate that could NOT introspect
+# its input (unknown kind, `git ls-files` unavailable, a `git config` that failed
+# for any reason other than "key genuinely absent") returns RED, never GREEN and
+# never NA. Indeterminate = RED. A false GREEN/REMOVABLE on a clone the meter
+# couldn't actually read is the quiet-wrong "saturated" verdict this verb exists
+# to kill — so every predicate fails toward visibility.
 GREEN, RED, NA = "green", "red", "na"
 
 Predicate = Callable[[Consumer, Context], "tuple[str, str]"]
@@ -132,7 +149,14 @@ def _p_task_verbs(c: Consumer, _ctx: Context) -> tuple[str, str]:
     """#569 item 1 — managed task verbs materialized: `bin/build` present +
     executable in the electron/tauri/vsce kinds (the fallback chains in
     electron-app.yml / tauri-app.yml can be removed once every such consumer
-    carries it). N/A for every other kind."""
+    carries it).
+
+    Applicability hinges on the detected kind, so an UNKNOWN kind ('?', from a
+    failed `detect-kind`) is RED, never N/A: we can't prove this consumer is
+    out-of-scope, and letting item 1 go REMOVABLE on a kind guess is exactly the
+    quiet-wrong saturation verdict. A KNOWN non-task kind is genuinely N/A."""
+    if c.kind == "?":
+        return RED, "kind unknown (detect-kind failed): applicability indeterminate"
     if c.kind not in TASK_VERB_KINDS:
         return NA, f"kind {c.kind}: no managed task verb"
     build = os.path.join(c.path, "bin", "build")
@@ -149,6 +173,8 @@ def _p_pull_seeded(c: Consumer, _ctx: Context) -> tuple[str, str]:
     bootstrap resolver as a REAL tracked file (`bin/install-release-core`) — a
     pre-pull consumer predates it. (The full vintage check is item 3; presence
     alone settles seeded-vs-not.)"""
+    if c.tracked is None:
+        return RED, "git ls-files failed: tracked set indeterminate"
     if "bin/install-release-core" in c.tracked:
         return GREEN, "bootstrap resolver tracked (seeded)"
     return RED, "no bin/install-release-core (pre-pull seed)"
@@ -193,6 +219,8 @@ def _p_ws4_ws7_complete(c: Consumer, _ctx: Context) -> tuple[str, str]:
     are dead for this consumer. A tracked `.release/**` path or a tracked
     managed-copy at a gate-internal dest (lefthook.yml, the lint configs) means
     the consumer predates WS4/WS7."""
+    if c.tracked is None:
+        return RED, "git ls-files failed: tracked set indeterminate"
     tracked_release = sorted(p for p in c.tracked if p == ".release" or p.startswith(".release/"))
     # The gate configs that WS3+WS4 moved into the ephemeral .release/ — a
     # consumer still tracking one at the root committed it pre-migration.
@@ -207,17 +235,27 @@ def _p_hooks_path_unset(c: Consumer, _ctx: Context) -> tuple[str, str]:
     """#569 item 5 — husky residue gone: `core.hooksPath` is unset, so
     setup-dev-env.sh's unset-prior-hook-manager step is unneeded for this
     consumer (a husky/lefthook-managed `core.hooksPath` would shadow the
-    canonical gate hook)."""
+    canonical gate hook).
+
+    `git config --get` exit codes are load-bearing here: exit 0 = the key is set
+    (its value is husky residue → RED); exit 1 = the key is genuinely ABSENT (the
+    real unset → GREEN). ANY OTHER exit (128 not-a-repo, an unreadable config,
+    etc.) means we could not introspect the config → RED, never a false "unset"
+    GREEN. We do NOT collapse all-nonzero to unset. (#629 review.)"""
     result = proc.run(
         ["git", "-C", c.path, "config", "--local", "--get", "core.hooksPath"],
         check=False,
     )
-    # `git config --get` exits 1 with empty stdout when the key is unset — that
-    # is the GREEN state. A set value (exit 0, non-empty) is husky residue.
     value = (result.stdout or "").strip()
-    if result.returncode == 0 and value:
-        return RED, f"core.hooksPath = {value}"
-    return GREEN, "core.hooksPath unset"
+    if result.returncode == 0:
+        if value:
+            return RED, f"core.hooksPath = {value}"
+        # Exit 0 with empty output is anomalous for --get (a set-but-empty key);
+        # treat as introspected-and-effectively-unset.
+        return GREEN, "core.hooksPath unset"
+    if result.returncode == 1:
+        return GREEN, "core.hooksPath unset"
+    return RED, (f"git config failed (exit {result.returncode}): core.hooksPath indeterminate")
 
 
 def _p_fragment_model(c: Consumer, _ctx: Context) -> tuple[str, str]:
@@ -260,14 +298,18 @@ CONDITIONS: list[Condition] = [
 # ── Evaluation ───────────────────────────────────────────────────────────────
 
 
-def _tracked_files(path: str) -> frozenset[str]:
+def _tracked_files(path: str) -> frozenset[str] | None:
     """`git ls-files` for one clone, as a set (the committed-path surface every
-    tracked-file predicate shares). A git failure yields an empty set — the
-    tracked-file predicates then read RED (a clone we can't introspect blocks no
-    sunset on false evidence; fail toward visibility)."""
+    tracked-file predicate shares).
+
+    Returns ``None`` when `git ls-files` FAILED (not a repo / git unavailable /
+    nonzero exit) — DISTINCT from an empty frozenset, which means git ran and the
+    repo genuinely tracks nothing. Tracked-file predicates must collapse the
+    ``None`` case to RED: a false "nothing bad is tracked" GREEN on a clone we
+    couldn't introspect is the quiet-wrong default. (#629 review.)"""
     result = proc.run(["git", "-C", path, "ls-files"], check=False)
     if result.returncode != 0:
-        return frozenset()
+        return None
     return frozenset(line for line in (result.stdout or "").splitlines() if line)
 
 
