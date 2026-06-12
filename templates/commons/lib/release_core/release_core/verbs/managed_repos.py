@@ -308,7 +308,12 @@ def _refresh_one(abspath: str) -> str | None:
         check=False,
     )
     default = head.stdout.strip() if head.returncode == 0 and head.stdout.strip() else "main"
-    default = default.rsplit("/", 1)[-1]  # strip refs/remotes/origin/ → branch name
+    # Strip the fixed `refs/remotes/origin/` prefix ONLY — never rsplit on the
+    # last `/`, which would truncate a branch that legitimately contains slashes
+    # (e.g. `release/v1` → `v1`, then fetch/reset target the wrong ref).
+    prefix = "refs/remotes/origin/"
+    if default.startswith(prefix):
+        default = default[len(prefix) :]
     # Shallow fetch — the verify sweep lints the working tree, never history.
     fetch = proc.run(
         ["git", "-C", abspath, "fetch", "--quiet", "--depth", "1", "origin", default],

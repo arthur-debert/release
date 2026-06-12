@@ -187,10 +187,11 @@ class _GitDriver:
     `fail_fetch` / `fail_reset` are sets of abspaths whose fetch/reset should
     return non-zero, so a test can force a refresh failure for one repo."""
 
-    def __init__(self, fail_fetch=None, fail_reset=None, sha="deadbee"):
+    def __init__(self, fail_fetch=None, fail_reset=None, sha="deadbee", default_branch="main"):
         self.fail_fetch = fail_fetch or set()
         self.fail_reset = fail_reset or set()
         self.sha = sha
+        self.default_branch = default_branch
         self.calls: list[list[str]] = []
         self._real_run = proc.run  # delegate non-git calls (yq manifest read)
 
@@ -204,7 +205,7 @@ class _GitDriver:
         abspath = cmd[2] if len(cmd) > 2 and cmd[1] == "-C" else None
         sub = cmd[3] if len(cmd) > 3 else ""
         if sub == "symbolic-ref":
-            return _cp(0, stdout="refs/remotes/origin/main\n")
+            return _cp(0, stdout=f"refs/remotes/origin/{self.default_branch}\n")
         if sub == "fetch":
             return _cp(1 if abspath in self.fail_fetch else 0)
         if sub == "reset":
@@ -240,6 +241,25 @@ def test_clone_refreshes_existing_clone_unconditionally(fleet, monkeypatch, caps
     err = capsys.readouterr().err
     assert "lex-fmt/lex: refreshed to main@cafef00" in err
     assert "exists, skipping" not in err
+
+
+def test_clone_refresh_preserves_slashed_default_branch(fleet, monkeypatch, capsys):
+    # A default branch may legitimately contain slashes (e.g. `release/v1`).
+    # Stripping only the fixed `refs/remotes/origin/` prefix must keep it whole
+    # — an rsplit('/', 1) would truncate it to `v1` and target the wrong ref.
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    driver = _GitDriver(sha="beef123", default_branch="release/v1")
+    monkeypatch.setattr(proc, "run", driver)
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0
+    fetch = _git_calls(driver, lex, "fetch")
+    assert fetch and fetch[0][-2:] == ["origin", "release/v1"]
+    reset = _git_calls(driver, lex, "reset")
+    assert reset and reset[0][-1] == "origin/release/v1"
+    assert "lex-fmt/lex: refreshed to release/v1@beef123" in capsys.readouterr().err
 
 
 def test_clone_refresh_failure_is_nonzero_and_named(fleet, monkeypatch, capsys):
