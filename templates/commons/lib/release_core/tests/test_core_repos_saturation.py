@@ -151,21 +151,55 @@ def test_resolver_vintage_red_when_bytes_differ(tmp_path, ctx):
     root = _make_repo(tmp_path)
     for dest in sat.BOOTSTRAP_QUARTET:
         _track(root, dest, b"current-" + dest.encode(), executable=True)
-    # Stale one file.
+    # Stale one TRACKED file's bytes (re-write after commit; still tracked).
     (root / "bin" / "install-release-core").write_bytes(b"STALE")
-    c = sat.Consumer(repo="o/n", path=str(root), kind="rust-cli", tracked=frozenset())
-    verdict, detail = sat._p_resolver_vintage(c, ctx)
+    verdict, detail = sat._p_resolver_vintage(_consumer(root, "rust-cli"), ctx)
     assert verdict == sat.RED
     assert "install-release-core" in detail
+    assert "bytes differ" in detail
 
 
 def test_resolver_vintage_red_when_quartet_file_absent(tmp_path, ctx):
     root = _make_repo(tmp_path)
-    # Only one of four present → others absent → RED.
+    # Only one of four tracked → the other three are not tracked → RED.
     _track(root, ".claude/settings.json", b"current-.claude/settings.json")
     verdict, detail = sat._p_resolver_vintage(_consumer(root, "rust-cli"), ctx)
     assert verdict == sat.RED
+    assert "not tracked" in detail
+
+
+def test_resolver_vintage_red_when_tracked_but_file_gone_from_disk(tmp_path, ctx):
+    # A quartet path that IS tracked but whose file was removed from the working
+    # tree → the byte read fails → "absent" → RED (the deployed-but-deleted case).
+    root = _make_repo(tmp_path)
+    for dest in sat.BOOTSTRAP_QUARTET:
+        _track(root, dest, b"current-" + dest.encode(), executable=True)
+    (root / ".claude" / "settings.json").unlink()  # tracked, but gone from disk
+    verdict, detail = sat._p_resolver_vintage(_consumer(root, "rust-cli"), ctx)
+    assert verdict == sat.RED
     assert "absent" in detail
+
+
+def test_resolver_vintage_red_when_quartet_present_but_untracked(tmp_path, ctx):
+    # The quartet bytes match on disk but the files are NOT tracked → a stray
+    # untracked file is not a deployed managed copy → RED (not a false GREEN).
+    root = _make_repo(tmp_path)
+    for dest in sat.BOOTSTRAP_QUARTET:
+        p = root / dest
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"current-" + dest.encode())  # on disk, never `git add`ed
+    # tracked is the real (empty) set — git ran, nothing committed.
+    verdict, detail = sat._p_resolver_vintage(_consumer(root, "rust-cli"), ctx)
+    assert verdict == sat.RED
+    assert "not tracked" in detail
+
+
+def test_resolver_vintage_red_when_tracked_indeterminate(ctx):
+    # git ls-files failed → tracked None → can't prove the quartet deployed → RED.
+    c = sat.Consumer(repo="o/n", path="/nope", kind="rust-cli", tracked=None)
+    verdict, detail = sat._p_resolver_vintage(c, ctx)
+    assert verdict == sat.RED
+    assert "indeterminate" in detail
 
 
 # ── item 4: WS4/WS7 untracked ────────────────────────────────────────────────
@@ -217,6 +251,16 @@ def test_hooks_path_red_when_set(tmp_path, ctx):
     verdict, detail = sat._p_hooks_path_unset(_consumer(root, "rust-cli"), ctx)
     assert verdict == sat.RED
     assert ".husky" in detail
+
+
+def test_hooks_path_red_when_set_empty_value(tmp_path, ctx):
+    # A set-but-EMPTY core.hooksPath: `git config --get` exits 0 (key present),
+    # so by exit-code semantics the key IS present → RED, NOT a false "unset".
+    root = _make_repo(tmp_path)
+    _git(root, "config", "--local", "core.hooksPath", "")
+    verdict, detail = sat._p_hooks_path_unset(_consumer(root, "rust-cli"), ctx)
+    assert verdict == sat.RED
+    assert "set" in detail
 
 
 def test_hooks_path_red_when_config_unreadable(tmp_path, ctx):

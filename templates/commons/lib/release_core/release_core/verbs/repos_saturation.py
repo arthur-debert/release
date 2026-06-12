@@ -185,12 +185,24 @@ def _p_resolver_vintage(c: Consumer, ctx: Context) -> tuple[str, str]:
     bytes match the wheel's CURRENT copy, so its deployed resolver/setup is
     post-cutover (the tolerated no-op flags `init --commit/--force`,
     `install-release-core --user/--break-system-packages` can be removed once no
-    consumer runs a stale resolver). Compares each quartet file's bytes against
-    RELEASE_HOME/templates/commons/<dest>."""
+    consumer runs a stale resolver). Each quartet path must be TRACKED (a stray
+    untracked file on disk is not a deployed managed copy) AND byte-match
+    RELEASE_HOME/templates/commons/<dest>.
+
+    Indeterminate = RED (#629 review): an unintrospectable tracked set
+    (``tracked is None``) can't prove the quartet is deployed, so the vintage is
+    indeterminate — never a false GREEN on a clone we couldn't read."""
+    if c.tracked is None:
+        return RED, "git ls-files failed: tracked set indeterminate"
     stale: list[str] = []
     for dest in BOOTSTRAP_QUARTET:
         deployed = os.path.join(c.path, dest)
         current = os.path.join(ctx.release_home, "templates", "commons", dest)
+        if dest not in c.tracked:
+            # Not a tracked managed copy — a stray/untracked file at the path
+            # must NOT count as a deployed resolver. Vintage can't be GREEN.
+            stale.append(f"{dest} (not tracked)")
+            continue
         try:
             with open(deployed, "rb") as fh:
                 dep_bytes = fh.read()
@@ -237,25 +249,27 @@ def _p_hooks_path_unset(c: Consumer, _ctx: Context) -> tuple[str, str]:
     consumer (a husky/lefthook-managed `core.hooksPath` would shadow the
     canonical gate hook).
 
-    `git config --get` exit codes are load-bearing here: exit 0 = the key is set
-    (its value is husky residue → RED); exit 1 = the key is genuinely ABSENT (the
-    real unset → GREEN). ANY OTHER exit (128 not-a-repo, an unreadable config,
-    etc.) means we could not introspect the config → RED, never a false "unset"
-    GREEN. We do NOT collapse all-nonzero to unset. (#629 review.)"""
+    `git config --get` exit codes are load-bearing, and the EXIT CODE — not the
+    value — decides presence (#629 review):
+      - exit 0 → the key IS present (husky residue) → RED, regardless of value.
+        A set-but-empty `core.hooksPath` still exits 0; treating that as "unset"
+        would contradict git's own presence semantics.
+      - exit 1 → the key is genuinely ABSENT (the real unset) → GREEN.
+      - any other exit (128 not-a-repo, unreadable config, …) → introspection
+        failed → RED, never a false "unset" GREEN. We do NOT collapse
+        all-nonzero to unset."""
     result = proc.run(
         ["git", "-C", c.path, "config", "--local", "--get", "core.hooksPath"],
         check=False,
     )
-    value = (result.stdout or "").strip()
     if result.returncode == 0:
-        if value:
-            return RED, f"core.hooksPath = {value}"
-        # Exit 0 with empty output is anomalous for --get (a set-but-empty key);
-        # treat as introspected-and-effectively-unset.
-        return GREEN, "core.hooksPath unset"
+        # Key present (exit 0) — its mere presence is the husky residue, value
+        # or not. Name the value when there is one for a legible report.
+        value = (result.stdout or "").strip()
+        return RED, f"core.hooksPath set ({value})" if value else "core.hooksPath set (empty)"
     if result.returncode == 1:
         return GREEN, "core.hooksPath unset"
-    return RED, (f"git config failed (exit {result.returncode}): core.hooksPath indeterminate")
+    return RED, f"git config failed (exit {result.returncode}): core.hooksPath indeterminate"
 
 
 def _p_fragment_model(c: Consumer, _ctx: Context) -> tuple[str, str]:
