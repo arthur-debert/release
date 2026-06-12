@@ -10,9 +10,11 @@ checkouts), syncs each from the candidate ref, and runs the canonical gate via
 `release-core gate` (which points lefthook at the materialized
 `.release/lefthook.yml` — there is no tracked root lefthook.yml since WS3
 release#524). It never mutates your working repos. Every sweep fetches+resets
-existing fleet clones to the consumer's current main UNCONDITIONALLY (#624) —
-a stale clone's consumer-authored half makes the pre-flight look faithful
-while it lies — and names the ref/sha each clone now sits at.
+existing fleet clones to the consumer's default branch (resolved from
+`origin/HEAD` — usually `main`, but `master` / a slashed name like
+`release/v1` are honored too) UNCONDITIONALLY (#624) — a stale clone's
+consumer-authored half makes the pre-flight look faithful while it lies — and
+names the ref/sha each clone now sits at.
 
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.
@@ -164,9 +166,10 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     repos_list = [*_SELF_CLI, "admin", "repos", "list"]
 
     # --- Phase 1: materialize the fleet (hermetic — into $root, never ~/h) ---
-    # `--clone` ALWAYS fetches+resets existing clones to the consumer's current
-    # main and names the ref/sha (#624) — a faithful pre-flight never lints a
-    # frozen-at-clone-time working tree. The old `--refresh` opt-in was removed.
+    # `--clone` ALWAYS fetches+resets existing clones to the consumer's default
+    # branch (resolved from origin/HEAD) and names the ref/sha (#624) — a
+    # faithful pre-flight never lints a frozen-at-clone-time working tree. The
+    # old `--refresh` opt-in was removed.
     print("==> cloning/refreshing fleet", file=sys.stderr)
     clone = proc.run(
         [*repos_list, "--clone", *subset],

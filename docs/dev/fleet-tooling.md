@@ -37,8 +37,10 @@ release-core admin repos list --paths lex-fmt/lex   # trailing owner/name args r
 ```
 
 `--clone` clones every missing repo and **unconditionally** fetches+resets
-every existing clone to origin's default branch, then names the `ref@sha`
-each clone now sits at (`→ <repo>: refreshed to main@<sha>`). There is no
+every existing clone to origin's default branch (resolved from `origin/HEAD`,
+so `master` or a slashed name like `release/v1` are honored — not assumed to
+be `main`), then names the `ref@sha` each clone now sits at
+(`→ <repo>: refreshed to <branch>@<sha>`). There is no
 opt-out: the old `--refresh` opt-in was **removed** (release#624). Reusing a
 clone without fetching was a quiet-wrong default — the managed surface syncs
 from the candidate ref either way, so a stale clone's consumer-authored half
@@ -63,10 +65,11 @@ release-core admin repos verify --only arthur-debert/padz   # one repo (scopes t
 
 It is **hermetic**: clones into a throwaway root (default
 `/tmp/release-fleet-verify-$USER`), **unconditionally fetches+resets every
-existing clone** to the consumer's current main (naming the `ref@sha` per
-repo in the `==> cloning/refreshing fleet` phase — release#624, so the
-pre-flight is faithful by default and never lints frozen-at-clone-time
-content), syncs each consumer from the candidate revision, runs
+existing clone** to the consumer's default branch (resolved from
+`origin/HEAD`, naming the `ref@sha` per repo in the
+`==> cloning/refreshing fleet` phase — release#624, so the pre-flight is
+faithful by default and never lints frozen-at-clone-time content), syncs
+each consumer from the candidate revision, runs
 `lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
 before `release-core cut` — the cut auto-advances the floating `@vN`
