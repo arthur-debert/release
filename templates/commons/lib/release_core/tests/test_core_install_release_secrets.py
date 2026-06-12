@@ -31,6 +31,23 @@ def auth_dir(tmp_path):
     return str(d)
 
 
+@pytest.fixture
+def registry(tmp_path, monkeypatch):
+    """A fixture managed-repos.yaml: two fleet repos + one canary (#601)."""
+    manifest = tmp_path / "managed-repos.yaml"
+    manifest.write_text(
+        "projects:\n"
+        "  o:\n"
+        "    - { repo: o/a, path: a }\n"
+        "    - { repo: o/b, path: b }\n"
+        "canaries:\n"
+        "  rust: o/canary\n"
+    )
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(manifest))
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+    return manifest
+
+
 def _full_env():
     return {"CRATES_IO_KEY": "crates-tok", "HOMEBREW_TAP_TOKEN": "brew-tok"}
 
@@ -168,7 +185,7 @@ def _patch_full(monkeypatch, auth_dir, set_calls, *, fail_names=()):
     monkeypatch.setattr(gh, "secret_set", fake_set)
 
 
-def test_main_explicit_repos_sets_seven(monkeypatch, auth_dir, capsys):
+def test_main_explicit_repos_sets_seven(registry, monkeypatch, auth_dir, capsys):
     calls: list = []
     _patch_full(monkeypatch, auth_dir, calls)
     rc = irs.main(["--auth-dir", auth_dir, "--repos", "o/a,o/b"])
@@ -180,7 +197,7 @@ def test_main_explicit_repos_sets_seven(monkeypatch, auth_dir, capsys):
     assert "all 7 secrets set" in out
 
 
-def test_main_dry_run_sets_nothing(monkeypatch, auth_dir, capsys):
+def test_main_dry_run_sets_nothing(registry, monkeypatch, auth_dir, capsys):
     calls: list = []
     _patch_full(monkeypatch, auth_dir, calls)
     rc = irs.main(["--auth-dir", auth_dir, "--repos", "o/a", "--dry-run"])
@@ -190,7 +207,7 @@ def test_main_dry_run_sets_nothing(monkeypatch, auth_dir, capsys):
     assert "[dry] APPLE_CERTIFICATE_P12_BASE64" in out
 
 
-def test_main_npm_present_reports_eight(monkeypatch, auth_dir, capsys):
+def test_main_npm_present_reports_eight(registry, monkeypatch, auth_dir, capsys):
     calls: list = []
     _patch_full(monkeypatch, auth_dir, calls)
     monkeypatch.setenv("NPM_TOKEN", "npm-tok")
@@ -201,7 +218,7 @@ def test_main_npm_present_reports_eight(monkeypatch, auth_dir, capsys):
     assert ("o/a", "NPM_TOKEN") in calls
 
 
-def test_main_npm_absent_prints_skip_notice(monkeypatch, auth_dir, capsys):
+def test_main_npm_absent_prints_skip_notice(registry, monkeypatch, auth_dir, capsys):
     calls: list = []
     _patch_full(monkeypatch, auth_dir, calls)
     irs.main(["--auth-dir", auth_dir, "--repos", "o/a"])
@@ -209,7 +226,7 @@ def test_main_npm_absent_prints_skip_notice(monkeypatch, auth_dir, capsys):
     assert "NPM_TOKEN not in env" in out
 
 
-def test_main_failure_returns_1_and_reports(monkeypatch, auth_dir, capsys):
+def test_main_failure_returns_1_and_reports(registry, monkeypatch, auth_dir, capsys):
     calls: list = []
     _patch_full(monkeypatch, auth_dir, calls, fail_names={"CRATES_IO_KEY"})
     rc = irs.main(["--auth-dir", auth_dir, "--repos", "o/a"])
@@ -228,7 +245,7 @@ def test_main_no_repos_found_returns_1(monkeypatch, auth_dir, capsys):
     assert "no rust repos found" in capsys.readouterr().err
 
 
-def test_main_missing_source_returns_1_before_discovery(monkeypatch, auth_dir, capsys):
+def test_main_missing_source_returns_1_before_discovery(registry, monkeypatch, auth_dir, capsys):
     monkeypatch.delenv("CRATES_IO_KEY", raising=False)
     monkeypatch.setenv("HOMEBREW_TAP_TOKEN", "x")
     called = {"discover": False}
@@ -254,3 +271,40 @@ def test_main_help_exits_0(capsys):
 def test_main_unknown_flag_exits_64(capsys):
     rc = irs.main(["--bogus"])
     assert rc == 64
+
+
+# --------------------------------------------------------------------------
+# --repos — validated against the fleet registry (#601)
+# --------------------------------------------------------------------------
+
+
+def test_main_repos_unknown_repo_hard_errors(registry, monkeypatch, auth_dir, capsys):
+    calls: list = []
+    _patch_full(monkeypatch, auth_dir, calls)
+    rc = irs.main(["--auth-dir", auth_dir, "--repos", "o/a,o/nope"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "managed-repos.yaml" in err
+    assert "o/nope" in err
+    assert calls == []  # nothing written
+
+
+def test_main_repos_unknown_repo_errors_before_sourcing(registry, monkeypatch, capsys, tmp_path):
+    # An empty auth dir would raise SourceError — the registry check fires first.
+    empty = tmp_path / "empty-auth"
+    empty.mkdir()
+    rc = irs.main(["--auth-dir", str(empty), "--repos", "o/nope"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "managed-repos.yaml" in err
+    assert "missing:" not in err
+
+
+def test_main_repos_canary_is_targetable(registry, monkeypatch, auth_dir, capsys):
+    # The motivating case: a canary lives OUTSIDE projects: but must be targetable.
+    calls: list = []
+    _patch_full(monkeypatch, auth_dir, calls)
+    rc = irs.main(["--auth-dir", auth_dir, "--repos", "o/canary"])
+    assert rc == 0
+    assert len(calls) == 7
+    assert {r for r, _ in calls} == {"o/canary"}

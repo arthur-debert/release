@@ -10,6 +10,13 @@ CHANGELOG/
 # them like CHANGELOG. See docs/references/lint-debt-model.md.
 UNRELEASED.md
 CHANGELOG_UNRELEASED.md
+# release-notes.md is written by the prepare-release actions at release-cut
+# (extracted/rolled changelog fragments for the tag annotation + GH release
+# body) and ends up committed in some consumers' `chore: Release vX.Y.Z`
+# commits. Same generated-fragments class as CHANGELOG: leads with a `- `
+# bullet (MD041) and has issue-title-length lines (MD013). Per
+# arthur-debert/release#598.
+release-notes.md
 
 # CLAUDE.md is agent-instruction content, not published prose — the same
 # class as the skills exclude below. release-sync also injects a managed

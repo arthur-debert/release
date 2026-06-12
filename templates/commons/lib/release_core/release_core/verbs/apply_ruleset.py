@@ -10,8 +10,14 @@ Auto-detects:
     isn't a gate — and `paths:`/`paths-ignore:`-filtered workflows, whose
     jobs are conditional and would deadlock unrelated PRs; see release#416).
     This catches matrix expansion (e.g. "Build (aarch64-apple-darwin)") and
-    `name:` overrides that yq can't see. Falls back to yq job IDs if no runs
-    exist yet.
+    `name:` overrides that static parsing can't see. When no runs exist yet
+    (the onboarding case), checks are derived statically from the workflow
+    files themselves: a job that CALLS a reusable workflow
+    (`uses: owner/repo/.github/workflows/x.yml@ref`) is resolved to its
+    nested `<caller-job> / <called-job>` contexts by fetching the called
+    workflow's definition at the pinned ref via the GitHub contents API —
+    the bare caller-job name is never a reported context and would deadlock
+    every PR (release#602).
 Override checks with --checks (comma-separated). Use --dry-run to print the
 payload without sending it.
 
@@ -25,8 +31,10 @@ preserved byte-for-byte.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import re
 import sys
 
 from .. import cli, gh, yamlio
@@ -222,16 +230,137 @@ def _checks_from_runs(repo: str, default_branch: str, paths: list[str]) -> list[
     return sorted(found)
 
 
-def _checks_from_yq(toplevel: str, paths: list[str]) -> list[str]:
-    """Fallback: job IDs (yq `.jobs | keys`) across the workflows, sorted-unique."""
+# Matches the cross-repo reusable-workflow reference form:
+#   owner/repo/.github/workflows/x.yml@ref
+_USES_RE = re.compile(r"^(?P<owner>[^/]+)/(?P<repo>[^/]+)/(?P<path>[^@]+\.ya?ml)@(?P<ref>.+)$")
+
+# GitHub caps reusable-workflow nesting at 4 levels; the same cap bounds the
+# recursion (and breaks any accidental self-reference cycle).
+_MAX_NESTING = 4
+
+
+def job_display_name(job_id: str, job: object) -> str:
+    """The name a job reports its check under: a static `name:` override when
+    present, else the job ID. A `name:` carrying a `${{ … }}` expression can't
+    be resolved statically, so the job ID is used (the runs-based detection is
+    the one that sees rendered names)."""
+    if isinstance(job, dict):
+        name = job.get("name")
+        if isinstance(name, str) and "${{" not in name:
+            return name
+    return job_id
+
+
+def _called_job_included(job: object, with_values: dict) -> bool:
+    """Whether a called workflow's job contributes a required context.
+
+    A job-level `if:` of the exact form `inputs.<key>` (optionally
+    `${{ … }}`-wrapped) is resolved against the caller's `with:` block — the
+    fleet's reusable CI workflows gate their optional jobs precisely this way
+    (`if: inputs.bats` / `if: inputs.e2e`), so a consumer that doesn't enable
+    the feature must not get the context required. Any other `if:` expression
+    is included: a job-level skip still reports a check run (conclusion
+    `skipped`), which satisfies the ruleset — unlike a path-filtered workflow
+    that never reports at all (release#416)."""
+    if not isinstance(job, dict):
+        return True
+    cond = job.get("if")
+    if cond is None:
+        return True
+    if not isinstance(cond, str):
+        return bool(cond)
+    expr = cond.strip()
+    if expr.startswith("${{") and expr.endswith("}}"):
+        expr = expr[3:-2].strip()
+    match = re.fullmatch(r"inputs\.([A-Za-z_][A-Za-z0-9_-]*)", expr)
+    if match is None:
+        return True
+    value = with_values.get(match.group(1))
+    return value is True or (isinstance(value, str) and value.lower() == "true")
+
+
+def _fetch_called_workflow(uses: str, toplevel: str) -> object:
+    """The parsed definition of a `uses:` target.
+
+    ONE read mechanism per reference form, no fallbacks: a repo-local
+    reference (`./.github/workflows/x.yml`) is read from the same working
+    tree the caller workflow was read from; a cross-repo reference
+    (`owner/repo/path@ref`) is fetched at its PINNED ref via the GitHub
+    contents API — the only source that matches what the consumer actually
+    runs (a local release checkout may be ahead of the consumer's `@vN`).
+    Raises GhError/YamlError/ValueError on an unresolvable reference; the
+    caller warns and contributes nothing for that job."""
+    if uses.startswith("./"):
+        return yamlio.load(os.path.join(toplevel, uses[2:]))
+    match = _USES_RE.match(uses)
+    if match is None:
+        raise ValueError(f"unrecognized reusable-workflow reference: {uses!r}")
+    obj = gh.rest("repos/{owner}/{repo}/contents/{path}?ref={ref}".format(**match.groupdict()))
+    if not isinstance(obj, dict) or "content" not in obj:
+        raise ValueError(f"no content for reusable workflow: {uses!r}")
+    text = base64.b64decode(obj["content"]).decode("utf-8")
+    return yamlio.loads(text)
+
+
+def _job_contexts(
+    job_id: str, job: object, *, toplevel: str, cache: dict[str, object], depth: int = 0
+) -> list[str]:
+    """The status-check contexts one workflow job reports.
+
+    A plain job reports its own display name. A job that CALLS a reusable
+    workflow (`uses:`) reports one context per called job, named
+    `<caller-job> / <called-job>` — the bare caller name is never reported
+    (release#602). Recurses through nested reusable calls (`a / b / c`),
+    bounded by GitHub's own nesting cap."""
+    uses = job.get("uses") if isinstance(job, dict) else None
+    display = job_display_name(job_id, job)
+    if not isinstance(uses, str):
+        return [display]
+    if depth >= _MAX_NESTING:
+        print(f"warning: reusable-workflow nesting too deep at job '{job_id}'", file=sys.stderr)
+        return []
+    if uses not in cache:
+        try:
+            cache[uses] = _fetch_called_workflow(uses, toplevel)
+        except (gh.GhError, yamlio.YamlError, ValueError) as exc:
+            print(
+                f"warning: cannot resolve reusable workflow '{uses}' "
+                f"called by job '{job_id}': {exc}",
+                file=sys.stderr,
+            )
+            cache[uses] = None
+    doc = cache[uses]
+    if not isinstance(doc, dict) or not isinstance(doc.get("jobs"), dict):
+        return []
+    with_values = job.get("with") if isinstance(job.get("with"), dict) else {}
+    out: list[str] = []
+    for called_id, called in doc["jobs"].items():
+        if not _called_job_included(called, with_values):
+            continue
+        for ctx in _job_contexts(
+            called_id, called, toplevel=toplevel, cache=cache, depth=depth + 1
+        ):
+            out.append(f"{display} / {ctx}")
+    return out
+
+
+def _checks_from_workflows(toplevel: str, paths: list[str]) -> list[str]:
+    """Static detection: the contexts the workflows report, sorted-unique.
+
+    Used when no default-branch runs exist yet (the onboarding case). Jobs
+    calling reusable workflows are resolved to their nested contexts via
+    `_job_contexts`; plain jobs report their display name."""
     found: set[str] = set()
+    cache: dict[str, object] = {}
     for path in paths:
         try:
             doc = yamlio.load(os.path.join(toplevel, path))
         except yamlio.YamlError:
             continue
-        if isinstance(doc, dict) and isinstance(doc.get("jobs"), dict):
-            found.update(doc["jobs"].keys())
+        if not isinstance(doc, dict) or not isinstance(doc.get("jobs"), dict):
+            continue
+        for job_id, job in doc["jobs"].items():
+            found.update(_job_contexts(job_id, job, toplevel=toplevel, cache=cache))
     return sorted(found)
 
 
@@ -291,7 +420,7 @@ def main(argv: list[str]) -> int:
         default_branch = gh.rest(f"repos/{repo}")["default_branch"]
         checks = _checks_from_runs(repo, default_branch, paths)
         if not checks:
-            checks = _checks_from_yq(toplevel, paths)
+            checks = _checks_from_workflows(toplevel, paths)
 
     # `checks_str` in bash was a newline list; an empty override or no-runs/no-yq
     # leaves it empty → the same error + exit 1.

@@ -1,0 +1,44 @@
+{
+  "name": "canary",
+  "displayName": "Canary",
+  "description": "Synthetic VS Code extension exercised by release's pre-cut canary loop (arthur-debert/release#587). Do not depend on this.",
+  "version": "0.0.0",
+  "publisher": "arthur-debert",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/arthur-debert/release-canary-vscode-ext"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "canary.report",
+        "title": "Canary: Report liveness"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint --max-warnings 0 .",
+    "test": "npm run compile && node --test \"out/**/*.test.js\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}

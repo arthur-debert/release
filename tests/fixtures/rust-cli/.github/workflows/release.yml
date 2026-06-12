@@ -1,0 +1,44 @@
+name: Release
+
+# Thin caller — the canonical pipeline lives at
+# arthur-debert/release/.github/workflows/rust-cli.yml@v2.
+#
+# Canary fencing (arthur-debert/release#587, fail-closed by design):
+# crates.io publish and the brew tap push are DISABLED here, and the
+# matching secrets (CRATES_IO_KEY, HOMEBREW_TAP_TOKEN, NPM_TOKEN) are
+# never installed on this repo. Cuts produce prerelease tags + GH
+# release assets on this repo only.
+#
+# Apple signing is CERT-ONLY (#587 OQ3): the repo carries
+# APPLE_CERTIFICATE_P12_BASE64 + APPLE_CERTIFICATE_PASSWORD (declared
+# in the fixture's .canary-secrets, converged by `canary init`), so
+# every cut exercises sign-mac for real on the darwin build. The ASC_*
+# notarization trio is never installed — and `canary init` refuses it
+# on the repo — so rust-cli.yml skips the notarize step, keeping
+# Apple's 5-15 min round-trip out of the pre-cut loop.
+#
+# The `@v2` ref below is a readable default: `release-core admin canary
+# init` rewrites it to the current floating major at seed time, and
+# `admin canary run` rewrites it to `canary/<sha12>` every round.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.0.1-canary.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v2
+    with:
+      version: ${{ inputs.version }}
+      crates: canaryapp,canary
+      bin-name: canary
+      publish-crates: false
+      brew: false
+    secrets: inherit

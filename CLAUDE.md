@@ -40,12 +40,19 @@ silently dropping managed `bin/` tools).
   (`gh-task-status`, `gh-release-issue`) / `release-core cut`, not synced
   `bin/` shims.
 - **Core fleet loop (PULL only — `orc propagate` was REMOVED):**
-  `release-core admin repos verify` (pre-flight on the candidate main) → cut a
-  release (`release.yml` publishes the `release_core` wheel **and
+  `release-core admin repos verify` (pre-flight on the candidate main) →
+  `release-core admin canary run --ref main` (the pre-ship consumer-life
+  round; posts a `canary/<family>` commit status on the candidate sha) → cut a
+  release (`release-core cut` **REFUSES without a green `canary/<family>`
+  status for every registered family on the exact main HEAD being cut** — no
+  skip flag, #606; exact-sha binding means any new commit on main invalidates
+  the previous round, so re-run the canary after any push. `release.yml`
+  publishes the `release_core` wheel **and
   auto-advances the floating major** — it passes `advance-major: true`, so
-  there is NO separate advance step and the pre-flight must run BEFORE the
-  cut) → fresh-event check on a consumer (empty commit to its main, never
-  `gh run rerun`; #595 tracks the one-command verb). That's it — consumers
+  there is NO separate advance step and verify + canary must run BEFORE the
+  cut) → fresh-event check on a consumer (`release-core admin repos poke
+  <owner/name> --watch` — empty commit to its main + classified verdict, never
+  `gh run rerun`; #595). That's it — consumers
   self-update at SessionStart: `install-release-core` pulls the wheel and a bare
   `release-core init` (the DEFAULT full materialize) re-syncs the whole managed
   tree from the wheel bundle and auto-commits any change. There is **no push
@@ -73,7 +80,7 @@ silently dropping managed `bin/` tools).
   - PR loop: `release-core pr status|wait|ready` (the state machine: one lifecycle state + next action; `pr wait` is the ONE engine-driven in-turn wait — it replaced `pr review wait` + `pr checks-wait` per #503; `pr ready` is the guarded draft→ready flip per #456), `release-core pr review request|cancel|show [--reviewer <name>]` (reviewer-agnostic, dispatches through the adapter registry in `prstate/reviewers.py` — the RETIRED `pr copilot on|off|wait|review` group and the `gh-copilot-*` bin scripts are gone, no aliases, per #555), plus `release-core pr resolve-thread` (bin shim: `gh-pr-resolve-thread`) (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` shim in #476)
 - `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
 - `templates/` — render templates (e.g. Homebrew formula)
-- `tests/` — per-tool BATS suites (one dir per `bin/` / `bin-internal/` tool, run by the matching `.github/workflows/*-tests.yml`). There is NO `tests/fixtures/` tree of per-category synthetic projects: synthetic consumers are fabricated inline where needed (`tests/release-sync/helper.bash` temp repos, the throwaway fixture repos in `pip-bootstrap-smoke.yml`) and must match the CURRENT contract in `docs/references/consumer-contract.yaml` (epic #583 WS-B). A real per-kind canary consumer is WS-C (#587).
+- `tests/` — per-tool BATS suites (one dir per `bin/` / `bin-internal/` tool, run by the matching `.github/workflows/*-tests.yml`). The ONE fixture tree is `tests/fixtures/<kind>/` — the AUTHORED canary seeds (#604): each dir carries a `.canary-family` marker naming its family (rust-cli → `rust`, vscode-ext → `vscode-ext`; optionally a `.canary-secrets` marker declaring the extra secrets `canary init` converges, e.g. rust's cert-only Apple signing pair per #587 OQ3) and holds exactly the consumer-authored content of that family's canary repo (project tree + thin callers; never the init-generated bootstrap quartet / copilot-review.yml / CLAUDE.md). `release-core admin canary init` seeds the canary FROM it, so fixture and canary cannot diverge. Everything else still fabricates synthetic consumers inline (`tests/release-sync/helper.bash` temp repos, the throwaway fixture repos in `pip-bootstrap-smoke.yml`) matching `docs/references/consumer-contract.yaml` (epic #583 WS-B).
 - `docs/` — the four narrative .lex docs + ADRs + references
 - `examples/` — paste-ready consumer release.yml files
 

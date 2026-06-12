@@ -348,11 +348,101 @@ EOF
 # Bump shortcut error paths.
 # ---------------------------------------------------------------------
 
-@test "bump shortcut on unclassifiable dir: detect-kind error" {
+@test "bump shortcut on unclassifiable dir: reads latest git tag (#596)" {
   _write_release_yml
   # No Cargo.toml, no package.json, no go.mod, no plugin layout —
-  # detect-kind exits 1. Bump shortcut surfaces that.
+  # detect-kind can't classify (e.g. the release meta repo itself).
+  # Manifest-less means tag-sourced: the bump reads the latest tag.
+  git add -A
+  git -c user.email=t@t -c user.name=t commit -q -m init
+  git tag v2.18.0
+  _stub_gh
+  run "$BIN/release-core" cut minor
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Bumping minor: 2.18.0 -> 2.19.0"* ]]
+  [[ "$output" == *"gh workflow run release.yml -f version=2.19.0"* ]]
+}
+
+@test "bump shortcut on unclassifiable dir with no tags: informative error" {
+  _write_release_yml
   run "$BIN/release-core" cut minor
   [ "$status" -eq 1 ]
-  [[ "$output" == *"detect-kind could not identify"* ]]
+  [[ "$output" == *"no git tags found"* ]]
+  [[ "$output" == *"no detectable Kind"* ]]
+  [[ "$output" == *"explicit version"* ]]
+}
+
+# ---------------------------------------------------------------------
+# Canary gate (#606): in a repo whose own managed-repos.yaml registers
+# canaries (in practice only the release meta repo), the cut refuses
+# without a green canary/<family> commit status on the exact
+# default-branch HEAD it dispatches. NO skip flag (owner decision, #587).
+# A repo with no registry (every consumer) has no gate — see the existing
+# dispatch tests above, which all run without a managed-repos.yaml.
+# ---------------------------------------------------------------------
+
+_write_canary_registry() {
+  cat > managed-repos.yaml <<EOF
+canaries:
+  rust: arthur-debert/release-canary-rust
+EOF
+}
+
+# A gh stub that also serves the two gate REST endpoints. The canary/rust
+# state is taken from $GH_STUB_CANARY_STATE; unset = no statuses on the sha.
+_stub_gh_api() {
+  mkdir -p bin-stub
+  cat > bin-stub/gh <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "api" ]]; then
+  for arg in "$@"; do last="$arg"; done
+  if [[ "$last" == "repos/{owner}/{repo}" ]]; then
+    echo '{"default_branch": "main"}'
+  elif [[ "$last" == */status ]]; then
+    if [[ -n "${GH_STUB_CANARY_STATE:-}" ]]; then
+      echo '{"sha": "0123456789abcdef0123456789abcdef01234567", "statuses": [{"context": "canary/rust", "state": "'"$GH_STUB_CANARY_STATE"'"}]}'
+    else
+      echo '{"sha": "0123456789abcdef0123456789abcdef01234567", "statuses": []}'
+    fi
+  fi
+  exit 0
+fi
+echo "gh $*"
+EOF
+  chmod +x bin-stub/gh
+  export PATH="$PWD/bin-stub:$PATH"
+}
+
+@test "canary gate: missing status on HEAD refuses, naming context + next action" {
+  _write_release_yml
+  _write_canary_registry
+  _stub_gh_api
+  run "$BIN/release-core" cut 1.2.3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSING to cut"* ]]
+  [[ "$output" == *"canary/rust: missing (no status on this sha)"* ]]
+  [[ "$output" == *"run: release-core admin canary run --ref main"* ]]
+  [[ "$output" != *"gh workflow run"* ]]
+}
+
+@test "canary gate: non-green status refuses" {
+  _write_release_yml
+  _write_canary_registry
+  _stub_gh_api
+  export GH_STUB_CANARY_STATE=failure
+  run "$BIN/release-core" cut 1.2.3
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"canary/rust: failure"* ]]
+  [[ "$output" != *"gh workflow run"* ]]
+}
+
+@test "canary gate: green status on HEAD lets the cut dispatch" {
+  _write_release_yml
+  _write_canary_registry
+  _stub_gh_api
+  export GH_STUB_CANARY_STATE=success
+  run "$BIN/release-core" cut 1.2.3
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Canary gate green on 0123456789ab"* ]]
+  [[ "$output" == *"gh workflow run release.yml -f version=1.2.3"* ]]
 }

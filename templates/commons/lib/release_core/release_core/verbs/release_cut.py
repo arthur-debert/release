@@ -38,15 +38,30 @@ Current-version source by Kind:
   vscode-ext               package.json .version
   tree-sitter              package.json .version
   zed-extension            extension.toml version = "..."
-  nvim-plugin, go-cli      git describe --tags --abbrev=0
-                           (no manifest by design — tag IS the version;
-                            pass an explicit X.Y.Z for the first release)
+  everything else          git describe --tags --abbrev=0
+                           (nvim-plugin, go-cli, any Kind without a
+                            version manifest, and repos detect-kind
+                            can't classify at all — e.g. the release
+                            meta repo itself. No manifest — the tag IS
+                            the version; pass an explicit X.Y.Z for
+                            the first release)
 
 Preconditions (checked by CI before mutating anything):
   - version is MAJOR.MINOR.PATCH[-PRERELEASE]
   - tag vX.Y.Z does not already exist
   - version differs from the manifest's current version
   - CHANGELOG.md has entries under `## [Unreleased]`
+
+Canary gate (#606, checked HERE before dispatching): in a repo whose
+managed-repos.yaml registers canaries (the top-level `canaries:` block —
+in practice only the release meta repo itself), the cut REFUSES unless
+every registered `canary/<family>` context is a green commit status on
+the EXACT default-branch HEAD sha being cut — the sha that
+`release-core admin canary run --ref main` stamps. Exact-sha binding
+makes freshness mechanical: any new commit on main invalidates the
+previous round by construction. There is NO skip flag (owner decision,
+#587 — escape hatches shrink). A repo with no registered canaries
+(every consumer) has no gate — registry-driven inertness, not a skip.
 
 After dispatch:
   gh run watch
@@ -66,8 +81,10 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Callable
 
 from .. import gh, manifest, proc, version
+from . import managed_repos
 from .changelog import _SEMVER_TOOL_RE
 
 USAGE = """\
@@ -79,8 +96,9 @@ pre-release suffix is stripped before bumping; to step from
 
 The current version is read from the canonical source for the
 Consumer's Kind (Cargo.toml, package.json, extension.toml, or the
-latest git tag for Kinds without a manifest). See the script header
-for the per-Kind mapping.
+latest git tag for Kinds without a manifest — including repos with
+no detectable Kind at all, e.g. manifest-less meta repos). See the
+script header for the per-Kind mapping.
 """
 
 # ---------------------------------------------------------------------
@@ -216,22 +234,28 @@ def _read_git_tag_version() -> str | None:
     return tag[1:] if tag.startswith("v") else tag
 
 
-def _read_current_version(kind: str) -> str | None:
-    if kind in ("rust-cli", "rust-lib"):
-        return _read_rust_version()
-    if kind == "tauri-app":
-        return _read_toml_version("src-tauri/Cargo.toml")
-    if kind in ("electron-app", "vscode-ext", "tree-sitter"):
-        return _read_json_version("package.json")
-    if kind == "zed-extension":
-        return _read_toml_version("extension.toml")
-    if kind in ("nvim-plugin", "go-cli"):
-        return _read_git_tag_version()
-    print(
-        f"release-core cut: don't know how to read current version for Kind={kind}",
-        file=sys.stderr,
-    )
-    return None
+# Kinds whose canonical version lives in a manifest file, mapped to their
+# reader. This is the ONE version-source mapping: a Kind listed here reads
+# its manifest; everything else — tag-sourced Kinds (nvim-plugin, go-cli),
+# Kinds with no version manifest, and repos detect-kind can't classify at
+# all (manifest-less meta repos like release itself) — reads the latest
+# git tag, because without a manifest the tag IS the version.
+_MANIFEST_READERS: dict[str, Callable[[], str | None]] = {
+    "rust-cli": _read_rust_version,
+    "rust-lib": _read_rust_version,
+    "tauri-app": lambda: _read_toml_version("src-tauri/Cargo.toml"),
+    "electron-app": lambda: _read_json_version("package.json"),
+    "vscode-ext": lambda: _read_json_version("package.json"),
+    "tree-sitter": lambda: _read_json_version("package.json"),
+    "zed-extension": lambda: _read_toml_version("extension.toml"),
+}
+
+
+def _read_current_version(kind: str | None) -> str | None:
+    reader = _MANIFEST_READERS.get(kind) if kind is not None else None
+    if reader is not None:
+        return reader()
+    return _read_git_tag_version()
 
 
 def _is_valid_literal_version(arg: str) -> bool:
@@ -261,6 +285,82 @@ def _is_valid_literal_version(arg: str) -> bool:
     return bool(_SEMVER_TOOL_RE.match(arg))
 
 
+# ---------------------------------------------------------------------
+# Canary gate (#606): the cut refuses without green canary statuses on
+# the exact HEAD sha being cut.
+# ---------------------------------------------------------------------
+
+_CANARY_NEXT_ACTION = "run: release-core admin canary run --ref main"
+
+
+def _canary_gate() -> int | None:
+    """Refuse the cut unless every registered `canary/<family>` context is a
+    green commit status on the exact sha this cut will run on. Returns None
+    to proceed, or an exit code to refuse.
+
+    The sha checked is the REMOTE default-branch head — `gh workflow run`
+    dispatches release.yml on the default branch at GitHub, so that head (not
+    the local HEAD, which may be ahead/behind) IS what gets cut. It is the
+    same sha `release-core admin canary run --ref main` resolves and stamps,
+    so exact-sha equality is the whole freshness story: a status on any older
+    sha simply isn't on this one.
+
+    Registry-driven inertness, not a skip flag: no `canaries:` registered
+    (every consumer repo — they have no managed-repos.yaml at all) → no gate.
+    There is NO skip flag and no env-var escape (owner decision, #587).
+
+    The registry is read from the manifest of the REPO BEING CUT (main() has
+    already chdir'd to its root) — deliberately NOT managed_repos's
+    script-dir/env resolution, which the bin/release-core shim pins to
+    release's own manifest: a maintainer cutting a *consumer* repo from a
+    release dev shell must not be gated on release's canaries."""
+    try:
+        registry = managed_repos.canaries(os.path.join(os.getcwd(), "managed-repos.yaml"))
+    except Exception as exc:  # a malformed registry must refuse loudly, not crash
+        print(f"release-core cut: cannot read the canaries registry: {exc}", file=sys.stderr)
+        return 1
+    if not registry:
+        return None
+
+    try:
+        repo_info = gh.rest("repos/{owner}/{repo}") or {}
+        default_branch = repo_info["default_branch"]
+        combined = gh.rest(f"repos/{{owner}}/{{repo}}/commits/{default_branch}/status") or {}
+    except (gh.GhError, KeyError, ValueError) as exc:
+        # ValueError covers json.JSONDecodeError: a gh that answers with
+        # non-JSON (proxy page, truncated output) must refuse, never traceback.
+        print(
+            f"release-core cut: canary gate: cannot read commit statuses: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+
+    sha = combined.get("sha") or ""
+    # The combined-status endpoint already collapses to the LATEST status per
+    # context, so this is one state per `canary/<family>`.
+    states = {s.get("context"): s.get("state") for s in combined.get("statuses") or []}
+    not_green: list[str] = []
+    for family in sorted(registry):
+        context = f"canary/{family}"
+        state = states.get(context)
+        if state != "success":
+            detail = state if state is not None else "missing (no status on this sha)"
+            not_green.append(f"  {context}: {detail}")
+    if not not_green:
+        contexts = ", ".join(f"canary/{family}" for family in sorted(registry))
+        print(f"Canary gate green on {sha[:12]} ({default_branch} head): {contexts}.")
+        return None
+
+    print(
+        f"release-core cut: REFUSING to cut — the canary gate is not green on "
+        f"{sha[:12]} (the {default_branch} head this cut runs on):\n"
+        + "\n".join(not_green)
+        + f"\n{_CANARY_NEXT_ACTION}",
+        file=sys.stderr,
+    )
+    return 1
+
+
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash control flow
     if len(argv) != 1:
         print(USAGE, file=sys.stderr, end="")
@@ -286,32 +386,29 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     if arg in ("major", "minor", "patch"):
         # Detect Kind lazily — only needed for bump shortcuts that read the
         # current version. Literal-version dispatches skip this so they work
-        # in any Consumer regardless of Kind.
+        # in any Consumer regardless of Kind. An unclassifiable repo (a
+        # manifest-less meta repo like release itself) is by definition not
+        # a manifest Kind, so it takes the tag-sourced path like every other
+        # Kind without a manifest.
+        kind: str | None
         try:
             kind = manifest.detect_kind(".")
         except manifest.KindError:
-            print(
-                "release-core cut: detect-kind could not identify this repo's Kind",
-                file=sys.stderr,
-            )
-            print(
-                "  (required for bump shortcuts; pass an explicit X.Y.Z to bypass)",
-                file=sys.stderr,
-            )
-            return 1
+            kind = None
         current = _read_current_version(kind)
         if current is None:
-            if kind in ("nvim-plugin", "go-cli"):
-                print(
-                    f"release-core cut: no git tags found — Kind={kind} reads the current version\n"
-                    "  from `git describe --tags --abbrev=0`. Pass an explicit version\n"
-                    "  (e.g. release-core cut 0.1.0) for the first release.",
-                    file=sys.stderr,
-                )
-            else:
+            if kind is not None and kind in _MANIFEST_READERS:
                 print(
                     f"release-core cut: couldn't determine current version for Kind={kind}.\n"
                     "  Expected manifest not found or has no version field.",
+                    file=sys.stderr,
+                )
+            else:
+                source = f"Kind={kind}" if kind is not None else "a repo with no detectable Kind"
+                print(
+                    f"release-core cut: no git tags found — {source} reads the current version\n"
+                    "  from `git describe --tags --abbrev=0`. Pass an explicit version\n"
+                    "  (e.g. release-core cut 0.1.0) for the first release.",
                     file=sys.stderr,
                 )
             return 1
@@ -333,6 +430,10 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
             file=sys.stderr,
         )
         return 1
+
+    gate_rc = _canary_gate()
+    if gate_rc is not None:
+        return gate_rc
 
     print(f"Triggering release.yml for v{new_version}...")
     # proc.run captures; forward gh's own stdout/stderr so the dispatch output

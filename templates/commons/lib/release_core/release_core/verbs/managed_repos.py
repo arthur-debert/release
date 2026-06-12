@@ -101,16 +101,108 @@ def _pairs(manifest: str, filter_set: list[str]) -> list[tuple[str, str]]:
     return pairs
 
 
+def pairs(manifest: str | None = None) -> list[tuple[str, str]]:
+    """Every active ``projects:`` entry as (repo, path) — the public in-process
+    accessor over the fleet registry (the CLI's ``--list``/``--paths`` modes
+    print the same set). Used by verbs that resolve a repo without spawning
+    the accessor subprocess (``admin repos poke``)."""
+    return _pairs(manifest or _manifest_path(), [])
+
+
+def expect_verify_fail(manifest: str | None = None) -> dict[str, str]:
+    """The optional per-entry ``expect-verify-fail: <reason>`` annotations
+    (#594), as repo → reason.
+
+    An annotated repo's gate FAIL in the hermetic ``admin repos verify`` sweep
+    is EXPECTED for an environmental reason the sweep cannot satisfy (e.g. a
+    sibling checkout) and not mechanically inferable from the failing checks.
+    Shrink-only ratchet: verify flags the annotation as STALE the moment the
+    repo passes — remove it then. npm-deps artifacts need no annotation (they
+    classify mechanically; see release_core.classify)."""
+    data = yamlio.load(manifest or _manifest_path()) or {}
+    projects = data.get("projects") or {}
+    annotated: dict[str, str] = {}
+    for entries in projects.values():
+        for entry in entries or []:
+            reason = entry.get("expect-verify-fail")
+            if reason:
+                annotated[str(entry["repo"])] = str(reason)
+    return annotated
+
+
 def canaries(manifest: str | None = None) -> dict[str, str]:
     """The top-level ``canaries:`` block as family → owner/name (#587).
 
     Canary repos are release-owned synthetic infra, NOT fleet consumers: they
     live OUTSIDE ``projects:`` on purpose so everything built on :func:`_pairs`
     (verify / migrate / inbox / audit, the ``--list``/``--paths`` modes) never
-    sweeps them (owner decision OQ6). This accessor is the only reader."""
-    data = yamlio.load(manifest or _manifest_path()) or {}
+    sweeps them (owner decision OQ6). This accessor is the only reader.
+
+    A missing manifest is an empty registry, not an error: only the release
+    meta repo carries managed-repos.yaml, so in a consumer repo "no manifest"
+    mechanically means "no canaries registered" — which is what keeps the
+    slice-4 cut gate (#606) registry-driven rather than skip-flagged."""
+    path = manifest or _manifest_path()
+    if not os.path.isfile(path):
+        return {}
+    data = yamlio.load(path) or {}
     block = data.get("canaries") or {}
     return {str(family): str(repo) for family, repo in block.items()}
+
+
+def project_repos(manifest: str | None = None) -> set[str]:
+    """Every owner/name under ``projects:`` — the fleet consumers ONLY.
+
+    The canary-side refusal surface (#604): ``canary init`` must hard-refuse
+    to operate on (let alone force-push) a fleet consumer, so it checks its
+    resolved repo against this set. A missing manifest is an empty set, same
+    as :func:`canaries`."""
+    path = manifest or _manifest_path()
+    if not os.path.isfile(path):
+        return set()
+    return {repo for repo, _path in _pairs(path, [])}
+
+
+def known_repos(manifest: str | None = None) -> set[str]:
+    """Every owner/name the registry knows: ``projects:`` entries + ``canaries:``.
+
+    The validation surface for per-repo targeting (#601): a verb that accepts
+    an explicit ``--repos`` list checks each entry against this set —
+    managed-repos.yaml is the ONLY fleet source of truth. Canary repos are
+    included on purpose: they are deliberately excluded from the ``projects:``
+    sweeps (OQ6) but must be individually targetable (e.g. installing
+    RELEASE_TOKEN on arthur-debert/release-canary-rust)."""
+    path = manifest or _manifest_path()
+    repos = {repo for repo, _path in _pairs(path, [])}
+    repos.update(canaries(path).values())
+    return repos
+
+
+def validate_repo_targets(repos: list[str], manifest: str | None = None) -> str:
+    """Check an explicit per-repo target list against the registry (#601).
+
+    Returns the error message to print, or "" when every entry is known.
+    Shared by the ``admin secrets token|install`` ``--repos`` flags: an
+    unknown owner/name is a hard error naming the registry, so a typo can
+    never write a secret to an unmanaged repo. An unreadable registry is the
+    same hard error — surfaced as a message, never a traceback: YamlError
+    (missing yq, missing/unparseable manifest) plus the structural failures a
+    malformed-but-parseable manifest raises out of ``_pairs``/``canaries``
+    (wrong shapes / missing keys → KeyError/TypeError/AttributeError)."""
+    try:
+        known = known_repos(manifest)
+    except (yamlio.YamlError, KeyError, TypeError, AttributeError) as exc:
+        return (
+            "error: cannot read the fleet registry (managed-repos.yaml): "
+            f"{type(exc).__name__}: {exc}"
+        )
+    unknown = sorted(set(repos) - known)
+    if not unknown:
+        return ""
+    return (
+        "error: repo(s) not registered in managed-repos.yaml "
+        f"(projects: or canaries:): {', '.join(unknown)}"
+    )
 
 
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash modes

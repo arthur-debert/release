@@ -8,23 +8,28 @@ into one command.
 
 Usage:
   release-core admin canary run --ref <branch|main>
-      [--family rust,npm]   restrict to these families (default: all registered)
+      [--family rust,vscode-ext]  restrict to these families (default: all
+                            registered in the `canaries:` block)
       [--root DIR]          hermetic workdir (default /tmp/release-canary-$USER)
       [--timeout MIN]       per-family poll budget in minutes (default 40)
       [--keep N]            canary prereleases to retain on cleanup (default 5)
       [--json]              machine-readable report
 
-Per family it: publishes `canary/<sha12>` (a clone of release at the candidate
-SHA with every `uses: arthur-debert/release/...@vN` self-ref rewritten to the
-canary branch, so the composites AND the wheel resolve at the candidate tree);
-seeds the canary repo from source in a sandboxed venv (XDG_* under --root —
-never the operator's real release-core); pushes the seed (push event → CI) and
-dispatches a `0.0.<n>-canary.<runid>` prerelease cut as FRESH events (never
-`gh run rerun`); polls both runs to conclusion with transient-error-tolerant
-backoff; prints a per-job classified report (INFRA = release bug, PROJECT =
-canary-content rot); posts a `canary/<family>` commit status on release@<sha>
-(what the slice-4 cut gate reads); and deletes canary prereleases beyond
---keep. `canary/*` branches on release are KEPT (owner decision OQ5).
+It publishes `canary/<sha12>` ONCE (a clone of release at the candidate SHA
+with every `uses: arthur-debert/release/...@vN` self-ref rewritten to the
+canary branch, so the composites AND the wheel resolve at the candidate
+tree); then, per family: seeds the canary repo from source in a sandboxed
+venv (XDG_* under --root — never the operator's real release-core), pushes
+the seed (push event → CI) and dispatches a `0.0.<n>-canary.<runid>`
+prerelease cut as FRESH events (never `gh run rerun`). EVERY family is
+seeded + dispatched before any polling starts, so the families' rounds run
+concurrently off the same `canary/<sha12>` branch (#605: a multi-family
+round costs one round's wall time). Each family is then polled to
+conclusion with transient-error-tolerant backoff; the verb prints a per-job
+classified report (INFRA = release bug, PROJECT = canary-content rot),
+posts a `canary/<family>` commit status on release@<sha> (what the #606 cut
+gate reads), and deletes canary prereleases beyond --keep. `canary/*`
+branches on release are KEPT (owner decision OQ5).
 
 Exit codes:
   0  — every job green (or fenced-skip)
@@ -44,7 +49,7 @@ import subprocess
 import sys
 import time
 
-from .. import gh, proc
+from .. import classify, gh, proc
 from . import managed_repos
 
 RELEASE_REPO = "arthur-debert/release"
@@ -55,10 +60,6 @@ POLL_INITIAL_S = 15.0
 POLL_MAX_S = 60.0
 POLL_BACKOFF = 1.5
 RESOLVE_POLL_S = 10.0
-RETRY_ATTEMPTS = 3  # bounded transient-error retries around gh calls (#582)
-RETRY_DELAY_S = 5.0
-JOBS_SETTLE_ATTEMPTS = 6  # jobs endpoint lags the run resource — re-poll until settled
-JOBS_SETTLE_DELAY_S = 10.0
 
 USAGE = __doc__ or ""
 
@@ -101,154 +102,18 @@ def next_canary_version(tag_names: list[str], runid: str) -> str:
     return f"0.0.{highest + 1}-canary.{runid}"
 
 
-# Classification is mechanical from job/step names (#587 §3). INFRA = the
-# release-owned plumbing (arm-gate materialize/provision, the boot resolver,
-# init, prepare-release internals); PROJECT = the canary's own content
-# (gate checks, cargo, bats, compilation) — still release-owned, different
-# file set (fixture rot, not pipeline rot).
-INFRA_MARKERS = (
-    "arm the gate",
-    "materialize",
-    "provision",
-    "install-release-core",
-    "release-core init",
-    "resolution probe",
-    "prepare",
-)
-PROJECT_MARKERS = (
-    "bin/check",
-    "canonical checks",
-    "e2e",
-    "bats",
-    "cargo",
-    "pre-test",
-    "build",
-    "compile",
-    "clippy",
-    "test",
-)
-_MATERIALIZE_MARKERS = ("arm the gate", "materialize")
-
-
-def classify_failure(failed_step: str, steps: list[dict]) -> str:
-    """INFRA vs PROJECT for a failed job, from its step names.
-
-    One refinement beyond the marker tables: a PROJECT-looking step that ran
-    WITHOUT a successful materialize step before it failed on an un-armed
-    tree — the #579 class (`bin/check-e2e` exit 127 on a sparse post-WS7
-    checkout, the managed mirrors never composed). That is release's bug, so
-    it classifies INFRA. Unknown failures default to INFRA: everything in a
-    canary is release-owned, so unattributed breakage escalates here."""
-    name = (failed_step or "").lower()
-    if any(marker in name for marker in INFRA_MARKERS):
-        return "INFRA"
-    if any(marker in name for marker in PROJECT_MARKERS):
-        armed = any(
-            s.get("conclusion") == "success"
-            and any(m in (s.get("name") or "").lower() for m in _MATERIALIZE_MARKERS)
-            for s in steps
-        )
-        return "PROJECT" if armed else "INFRA"
-    return "INFRA"
-
-
-def job_rows(
-    family: str, workflow: str, jobs: list[dict], run_conclusion: str | None = None
-) -> tuple[list[dict], bool]:
-    """Per-job report rows for one completed run. Returns (rows, any_failure).
-
-    Skipped jobs are annotated: `skipped (fenced)` when nothing failed before
-    them (a designed fence, e.g. publish-crates: false), `skipped (cascade)`
-    when an earlier failure cancelled the chain.
-
-    ``run_conclusion`` is the backstop for an UNSETTLED jobs listing (the
-    endpoint lags the run resource): a job still reporting in_progress under a
-    run whose conclusion is success is a stale snapshot, not a failure — it is
-    annotated, never counted as failed."""
-    rows: list[dict] = []
-    any_failure = False
-    for job in jobs:
-        conclusion = job.get("conclusion") or job.get("status") or "?"
-        status = job.get("status")
-        if status is not None and status != "completed" and run_conclusion == "success":
-            rows.append(_row(family, workflow, job, "unsettled (run green)", "-", "-"))
-            continue
-        if conclusion == "success":
-            rows.append(_row(family, workflow, job, "success", "-", "-"))
-        elif conclusion == "skipped":
-            note = "skipped (cascade)" if any_failure else "skipped (fenced)"
-            rows.append(_row(family, workflow, job, note, "-", "-"))
-        else:
-            any_failure = True
-            steps = job.get("steps") or []
-            failed_step = next(
-                (
-                    s.get("name") or ""
-                    for s in steps
-                    if s.get("conclusion") not in (None, "success", "skipped")
-                ),
-                "",
-            )
-            klass = classify_failure(failed_step or job.get("name") or "", steps)
-            rows.append(_row(family, workflow, job, conclusion.upper(), klass, failed_step or "-"))
-    return rows, any_failure
-
-
-def _row(family: str, workflow: str, job: dict, conclusion: str, klass: str, step: str) -> dict:
-    return {
-        "family": family,
-        "workflow": workflow,
-        "job": job.get("name") or "?",
-        "conclusion": conclusion,
-        "class": klass,
-        "step": step,
-        "url": job.get("html_url") or "",
-    }
-
-
-_COLUMNS = ("family", "workflow", "job", "conclusion", "class", "step")
-_HEADERS = ("family", "workflow", "job", "conclusion", "class", "step (first failure)")
-
-
-def render_report(header: str, rows: list[dict], footer_lines: list[str]) -> str:
-    """The human report: header line, aligned per-job table, per-family + verdict lines."""
-    widths = [len(h) for h in _HEADERS]
-    for row in rows:
-        for i, col in enumerate(_COLUMNS):
-            widths[i] = max(widths[i], len(str(row[col])))
-    lines = [header, ""]
-    lines.append("  ".join(h.ljust(widths[i]) for i, h in enumerate(_HEADERS)).rstrip())
-    for row in rows:
-        lines.append(
-            "  ".join(str(row[col]).ljust(widths[i]) for i, col in enumerate(_COLUMNS)).rstrip()
-        )
-    lines.append("")
-    lines.extend(footer_lines)
-    return "\n".join(lines)
+# INFRA/PROJECT classification, the per-job report rows, and the report
+# renderer live in release_core.classify — THE shared failing-step classifier
+# (#594/#595; extracted from this verb). For a canary, PROJECT means
+# canary-content rot — still release-owned, just a different file set.
 
 
 # ── gh/git seams ─────────────────────────────────────────────────────────────
 
 
-def _retry(fn, *, what: str, attempts: int = RETRY_ATTEMPTS, sleep=time.sleep):
-    """Bounded retry with linear backoff around a gh call (the #582 lesson:
-    one transient blip — TLS handshake timeout, a 5xx — must not kill a
-    40-minute round). Re-raises the last error once attempts are exhausted."""
-    last: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            return fn()
-        except (gh.GhError, proc.ProcError) as exc:
-            last = exc
-            if attempt < attempts:
-                print(
-                    f"canary run: transient {what} error "
-                    f"(attempt {attempt}/{attempts}, retrying): {exc}",
-                    file=sys.stderr,
-                )
-                sleep(RETRY_DELAY_S * attempt)
-    assert last is not None
-    raise last
+def _retry(fn, *, what: str, attempts: int = classify.RETRY_ATTEMPTS, sleep=time.sleep):
+    """classify.retry with this verb's stderr prefix."""
+    return classify.retry(fn, what=what, prefix="canary run", attempts=attempts, sleep=sleep)
 
 
 def _resolve_ref(release_dir: str, ref: str) -> str:
@@ -492,34 +357,6 @@ def _poll_to_completion(
     return done
 
 
-def _collect_jobs(repo: str, run_id: int, *, sleep=time.sleep) -> list[dict]:
-    """The completed run's jobs, re-polled until the listing settles.
-
-    The jobs endpoint is eventually consistent with the run resource: a
-    just-completed run can briefly list a job as still in_progress (caught
-    live on the first green round — an all-green cut reported one macOS
-    build job as IN_PROGRESS/INFRA). Re-poll until every job reports
-    completed, bounded; return the last snapshot if it never settles (the
-    run-conclusion backstop in main still decides pass/fail)."""
-    jobs: list[dict] = []
-    for attempt in range(JOBS_SETTLE_ATTEMPTS):
-        data = _retry(
-            lambda: gh.rest(f"repos/{repo}/actions/runs/{run_id}/jobs?per_page=100"),
-            what="job collection",
-        )
-        jobs = (data or {}).get("jobs", [])
-        if jobs and all(job.get("status") == "completed" for job in jobs):
-            return jobs
-        if attempt + 1 < JOBS_SETTLE_ATTEMPTS:
-            print(
-                f"canary run: jobs listing for run {run_id} not settled yet "
-                f"(attempt {attempt + 1}/{JOBS_SETTLE_ATTEMPTS}), re-polling",
-                file=sys.stderr,
-            )
-            sleep(JOBS_SETTLE_DELAY_S)
-    return jobs
-
-
 def _post_commit_status(
     sha: str, family: str, *, success: bool, target_url: str, description: str
 ) -> None:
@@ -699,6 +536,12 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
     any_failure = False
     setup_error = False
 
+    # Phase 2/3 — seed + dispatch EVERY family before any polling, so the
+    # families' rounds run concurrently on GitHub off the same canary/<sha12>
+    # branch (#605): a multi-family round costs one round's wall time. A
+    # family that fails to dispatch is recorded as a setup error and the rest
+    # proceed.
+    dispatched: dict[str, dict] = {}
     for family in families:
         repo = registry[family]
         try:
@@ -725,8 +568,30 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
                 f"canary run: {family}: seed {seed_sha[:12]} pushed, release {version} dispatched",
                 file=sys.stderr,
             )
+            dispatched[family] = {
+                "version": version,
+                "seed_sha": seed_sha,
+                "before_ids": before_ids,
+            }
+        except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
+            # Same error classes as the poll phase below: clone/boot/rewrite
+            # failures, the _retry'd gh calls past their bounded attempts, git
+            # plumbing, filesystem errors — all family-level setup errors.
+            print(f"canary run: {family}: {exc}", file=sys.stderr)
+            footer.append(f"{family}: SETUP ERROR — {exc}")
+            payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}
+            setup_error = True
+
+    # Phase 4-6 — poll each dispatched family to conclusion. The runs are
+    # already executing concurrently; the per-family --timeout budget starts
+    # at its poll, so a later family never pays an earlier family's wait.
+    for family, disp in dispatched.items():
+        repo = registry[family]
+        version = disp["version"]
+        seed_sha = disp["seed_sha"]
+        try:
             deadline = time.time() + opts["timeout_min"] * 60.0
-            runs = _resolve_runs(repo, seed_sha, before_ids, deadline)
+            runs = _resolve_runs(repo, seed_sha, disp["before_ids"], deadline)
             done = _poll_to_completion(repo, runs, deadline)
 
             family_rows: list[dict] = []
@@ -736,8 +601,11 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
                 run = done[key]
                 run_urls[key] = run.get("html_url", "")
                 workflow = "ci" if key == "ci" else "release"
-                rows, failed = job_rows(
-                    family, workflow, _collect_jobs(repo, run["id"]), run.get("conclusion")
+                rows, failed = classify.job_rows(
+                    family,
+                    workflow,
+                    classify.collect_jobs(repo, run["id"], prefix="canary run"),
+                    run.get("conclusion"),
                 )
                 # A run can fail with zero failed jobs visible (e.g. startup
                 # failure); trust the run conclusion as the backstop.
@@ -799,10 +667,10 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
             }
         except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:
             # GhError/ProcError/OSError too: _retry re-raises after the
-            # bounded attempts, the git wrappers raise directly, and the
-            # caller-rewrite/fragment writes can hit filesystem errors — any
-            # of them is a family-level setup error; record it and continue
-            # to the next family rather than aborting the whole round.
+            # bounded attempts, the git wrappers raise directly, the status
+            # post and cleanup hit the network — any of them is a
+            # family-level setup error; record it and continue to the next
+            # family rather than aborting the whole round.
             print(f"canary run: {family}: {exc}", file=sys.stderr)
             footer.append(f"{family}: SETUP ERROR — {exc}")
             payload["families"][family] = {"repo": repo, "verdict": "ERROR", "error": str(exc)}
@@ -826,7 +694,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
         print(json.dumps(payload, indent=2))
     else:
         header = f"canary run: release@{sha12} ({opts['ref']}) → {branch}"
-        print(render_report(header, all_rows, footer))
+        print(classify.render_report(header, all_rows, footer))
 
     if setup_error:
         return 2

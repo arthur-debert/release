@@ -8,6 +8,7 @@ set-then-relist verification, and the summary lines.
 
 from __future__ import annotations
 
+import pytest
 from release_core import gh
 from release_core.verbs import install_release_token as irt
 
@@ -224,3 +225,81 @@ def test_main_help_exits_0(capsys):
 def test_main_unknown_flag_exits_64(capsys):
     rc = irt.main(["--bogus"])
     assert rc == 64
+
+
+# --------------------------------------------------------------------------
+# --repos — explicit per-repo targeting, validated against the registry (#601)
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def registry(tmp_path, monkeypatch):
+    """A fixture managed-repos.yaml: two fleet repos + one canary."""
+    manifest = tmp_path / "managed-repos.yaml"
+    manifest.write_text(
+        "projects:\n"
+        "  o:\n"
+        "    - { repo: o/a, path: a }\n"
+        "    - { repo: o/b, path: b }\n"
+        "canaries:\n"
+        "  rust: o/canary\n"
+    )
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(manifest))
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+    return manifest
+
+
+def test_main_repos_targets_only_the_given_repo(registry, monkeypatch, capsys):
+    monkeypatch.setattr(irt.sys, "stdin", _FakeStdin("ghp_xxx"))
+    _patch_validation(monkeypatch)
+    monkeypatch.setattr(
+        irt, "discover_onboarded_repos", lambda o: pytest.fail("discovery must be skipped")
+    )
+    set_calls = []
+    monkeypatch.setattr(gh, "secret_set", lambda n, v, *, repo: set_calls.append((repo, n)))
+    monkeypatch.setattr(gh, "secret_list", lambda repo: ["RELEASE_TOKEN"])
+    rc = irt.main(["--repos", "o/a"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert set_calls == [("o/a", "RELEASE_TOKEN")]
+    assert "discovering onboarded repos" not in out
+    assert "1 repos, 1 verified set, 0 failure(s)" in out
+
+
+def test_main_repos_canary_is_targetable(registry, monkeypatch, capsys):
+    # The motivating case: a canary lives OUTSIDE projects: but must be targetable.
+    monkeypatch.setattr(irt.sys, "stdin", _FakeStdin("ghp_xxx"))
+    _patch_validation(monkeypatch)
+    set_calls = []
+    monkeypatch.setattr(gh, "secret_set", lambda n, v, *, repo: set_calls.append((repo, n)))
+    monkeypatch.setattr(gh, "secret_list", lambda repo: ["RELEASE_TOKEN"])
+    rc = irt.main(["--repos", "o/canary"])
+    assert rc == 0
+    assert set_calls == [("o/canary", "RELEASE_TOKEN")]
+
+
+def test_main_repos_comma_list_sets_each(registry, monkeypatch, capsys):
+    monkeypatch.setattr(irt.sys, "stdin", _FakeStdin("ghp_xxx"))
+    _patch_validation(monkeypatch)
+    set_calls = []
+    monkeypatch.setattr(gh, "secret_set", lambda n, v, *, repo: set_calls.append((repo, n)))
+    monkeypatch.setattr(gh, "secret_list", lambda repo: ["RELEASE_TOKEN"])
+    # entries tolerate surrounding whitespace (stripped, like canary_run's lists)
+    rc = irt.main(["--repos", "o/a, o/canary"])
+    assert rc == 0
+    assert set_calls == [("o/a", "RELEASE_TOKEN"), ("o/canary", "RELEASE_TOKEN")]
+
+
+def test_main_repos_unknown_repo_hard_errors_before_stdin(registry, monkeypatch, capsys):
+    # tty stdin would normally exit 64 with the pipe-the-PAT message; the
+    # registry check fires first — nothing is read, validated, or written.
+    monkeypatch.setattr(irt.sys, "stdin", _FakeStdin("", tty=True))
+    monkeypatch.setattr(
+        gh, "secret_set", lambda n, v, *, repo: pytest.fail("must not set a secret")
+    )
+    rc = irt.main(["--repos", "o/a,o/nope"])
+    err = capsys.readouterr().err
+    assert rc == 64
+    assert "managed-repos.yaml" in err
+    assert "o/nope" in err
+    assert "pipe the PAT" not in err

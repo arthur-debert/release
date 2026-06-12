@@ -7,6 +7,7 @@ Flat ``wrap_verb`` leaves over the existing fleet verbs (← old name)::
   scripts   ← list-repo-scripts       release_core.verbs.list_repo_scripts.main
   audit     ← audit-portfolio         release_core.verbs.audit_portfolio.main
   verify    ← release-verify-fleet    release_core.verbs.release_verify_fleet.main
+  poke      (new, #595)               release_core.verbs.repos_poke.main
 
 The module exports a ``group`` (a ``click.Group``); the ``admin`` assembler
 imports and attaches it. Each leaf is a faithful passthrough — argv and
@@ -24,20 +25,21 @@ from ...verbs import (
     managed_repos,
     release_verify_fleet,
     repos_migrate,
+    repos_poke,
 )
 from .._helpers import wrap_verb
 
 
 @click.group(
     name="repos",
-    short_help="Fleet-repo views: list / prs / scripts / audit / verify.",
+    short_help="Fleet-repo views: list / prs / scripts / audit / verify / poke.",
 )
 def group() -> None:
     """Views over the managed fleet repos.
 
     Read-only-ish lenses on the fleet: the repo roster, open PRs and
-    per-repo scripts across it, a whole-portfolio audit, and the hermetic
-    pre-flight verify sweep.
+    per-repo scripts across it, a whole-portfolio audit, the hermetic
+    pre-flight verify sweep, and the fresh-event poke.
     """
 
 
@@ -74,6 +76,13 @@ group.add_command(
         release_verify_fleet.main,
         name="verify",
         short_help="Hermetic pre-flight fleet sweep.",
+    )
+)
+group.add_command(
+    wrap_verb(
+        repos_poke.main,
+        name="poke",
+        short_help="Fresh-event poke: empty commit to a consumer's main, resolve + classify.",
     )
 )
 group.add_command(
