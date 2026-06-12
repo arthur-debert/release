@@ -185,25 +185,33 @@ class _GitDriver:
     """Records git/proc.run calls and scripts their returncodes.
 
     `fail_fetch` / `fail_reset` are sets of abspaths whose fetch/reset should
-    return non-zero, so a test can force a refresh failure for one repo."""
+    return non-zero, so a test can force a refresh failure for one repo.
+    `dirty` is a set of abspaths whose `git status --porcelain` reports
+    uncommitted changes (the data-loss guard's input)."""
 
-    def __init__(self, fail_fetch=None, fail_reset=None, sha="deadbee", default_branch="main"):
+    def __init__(
+        self, fail_fetch=None, fail_reset=None, sha="deadbee", default_branch="main", dirty=None
+    ):
         self.fail_fetch = fail_fetch or set()
         self.fail_reset = fail_reset or set()
         self.sha = sha
         self.default_branch = default_branch
+        self.dirty = dirty or set()
         self.calls: list[list[str]] = []
         self._real_run = proc.run  # delegate non-git calls (yq manifest read)
 
     def __call__(self, cmd, **kw):
         # The manifest read goes through yq (yamlio) — pass it to the real
-        # proc.run; this driver only scripts the git fetch/reset/rev-parse.
+        # proc.run; this driver only scripts the git status/fetch/reset/rev-parse.
         if cmd and cmd[0] != "git":
             return self._real_run(cmd, **kw)
         self.calls.append(cmd)
         # git -C <abspath> <subcmd> ...
         abspath = cmd[2] if len(cmd) > 2 and cmd[1] == "-C" else None
         sub = cmd[3] if len(cmd) > 3 else ""
+        if sub == "status":
+            # --porcelain: non-empty stdout ⇒ dirty.
+            return _cp(0, stdout=" M file.txt\n" if abspath in self.dirty else "")
         if sub == "symbolic-ref":
             return _cp(0, stdout=f"refs/remotes/origin/{self.default_branch}\n")
         if sub == "fetch":
@@ -241,6 +249,45 @@ def test_clone_refreshes_existing_clone_unconditionally(fleet, monkeypatch, caps
     err = capsys.readouterr().err
     assert "lex-fmt/lex: refreshed to main@cafef00" in err
     assert "exists, skipping" not in err
+
+
+def test_clone_skips_dirty_existing_clone_with_warning(fleet, monkeypatch, capsys):
+    # DATA-LOSS GUARD: an existing clone with uncommitted changes must NOT be
+    # hard-reset — it is skipped with a loud warning and the sweep continues.
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    driver = _GitDriver(dirty={lex})
+    monkeypatch.setattr(proc, "run", driver)
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0  # a protected dirty tree is not a failure
+    # No fetch and no reset ran against the dirty clone — its work is untouched.
+    assert _git_calls(driver, lex, "fetch") == []
+    assert _git_calls(driver, lex, "reset") == []
+    err = capsys.readouterr().err
+    assert "lex-fmt/lex: uncommitted changes — skipping refresh" in err
+
+
+def test_clone_refreshes_clean_clone_when_a_sibling_is_dirty(fleet, monkeypatch, capsys):
+    # The guard is per-repo: a clean clone still refreshes even if another in
+    # the same sweep is dirty. (dodot is the other "found" repo in the fixture.)
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    dodot = os.path.join(root, "dodot")
+    driver = _GitDriver(dirty={lex}, sha="c1ean99")
+    monkeypatch.setattr(proc, "run", driver)
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex", "arthur-debert/dodot"])
+    assert rc == 0
+    # dirty lex: skipped; clean dodot: fetched + reset + named.
+    assert _git_calls(driver, lex, "reset") == []
+    assert _git_calls(driver, dodot, "fetch")
+    assert _git_calls(driver, dodot, "reset")
+    err = capsys.readouterr().err
+    assert "lex-fmt/lex: uncommitted changes — skipping refresh" in err
+    assert "arthur-debert/dodot: refreshed to main@c1ean99" in err
 
 
 def test_clone_refresh_preserves_slashed_default_branch(fleet, monkeypatch, capsys):

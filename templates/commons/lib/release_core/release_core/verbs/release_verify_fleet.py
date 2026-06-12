@@ -14,7 +14,10 @@ existing fleet clones to the consumer's default branch (resolved from
 `origin/HEAD` — usually `main`, but `master` / a slashed name like
 `release/v1` are honored too) UNCONDITIONALLY (#624) — a stale clone's
 consumer-authored half makes the pre-flight look faithful while it lies — and
-names the ref/sha each clone now sits at.
+names the ref/sha each clone now sits at. The reset is a hard reset, so a
+clone with uncommitted work is skipped-with-warning rather than discarded (the
+data-loss guard); the throwaway /tmp clones are always clean, so they always
+refresh.
 
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.

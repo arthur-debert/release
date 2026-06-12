@@ -20,6 +20,12 @@ Existing clones are ALWAYS refreshed — there is no opt-out mode (the old
 clone, not a verify/list mode). The readout names the fetched ref/sha so the
 sweep's freshness is visible, never assumed.
 
+DESTRUCTIVE on a non-disposable root: the refresh is a `git reset --hard`, so
+$REPOS_ROOT should be a DISPOSABLE dir (e.g. /tmp/...) for hermetic clones.
+A clone with UNCOMMITTED work is detected and SKIPPED-with-warning rather than
+reset (the data-loss guard), so a clean/hermetic clone refreshes safely while
+a live ~/h checkout's uncommitted work is never silently discarded.
+
 Any mode accepts trailing owner/name args to restrict to that subset:
   managed-repos --clone arthur-debert/padz lex-fmt/lex
 
@@ -273,13 +279,34 @@ def _clone(pairs: list[tuple[str, str]], root: str) -> int:
 
     Reusing a clone without fetching is a quiet-wrong default: the managed
     surface gets synced from the candidate ref either way, so a stale clone's
-    consumer-authored half makes the sweep *look* faithful while it lies. There
-    is no skip path — the readout names the ref/sha each clone now sits at so
-    the freshness is visible, never assumed."""
+    consumer-authored half makes the sweep *look* faithful while it lies. The
+    readout names the ref/sha each clone now sits at so the freshness is
+    visible, never assumed.
+
+    One exception, and it is a DATA-LOSS guard not a freshness opt-out: an
+    existing clone with a DIRTY working tree is skipped-with-warning rather
+    than hard-reset, so pointing REPOS_ROOT at live ~/h checkouts can never
+    silently discard uncommitted work (:func:`_is_dirty`). Hermetic /tmp
+    clones are always clean, so they always refresh."""
     rc = 0
     for repo, path in pairs:
         abspath = os.path.join(root, path)
         if os.path.isdir(os.path.join(abspath, ".git")):
+            # DATA-LOSS GUARD: the refresh hard-resets the working tree, which
+            # would silently discard uncommitted work if REPOS_ROOT points at a
+            # live checkout (default ~/h). A dirty tree is SKIPPED with a loud
+            # warning — never reset — and the sweep continues. This is not the
+            # forbidden `--refresh` opt-out (#624): hermetic /tmp clones are
+            # always clean, so the guard never fires there and they always
+            # refresh; it only protects a human's real working tree.
+            if _is_dirty(abspath):
+                print(
+                    f"⚠ {repo}: uncommitted changes — skipping refresh to protect "
+                    "your work (point REPOS_ROOT at a disposable dir for hermetic "
+                    f"clones) ({abspath})",
+                    file=sys.stderr,
+                )
+                continue
             ref_sha = _refresh_one(abspath)
             if ref_sha is None:
                 print(f"→ {repo}: refresh FAILED ({abspath})", file=sys.stderr)
@@ -302,6 +329,22 @@ def _clone(pairs: list[tuple[str, str]], root: str) -> int:
                 sha = head.stdout.strip() if head.returncode == 0 else "?"
                 print(f"→ {repo}: cloned at {sha}", file=sys.stderr)
     return rc
+
+
+def _is_dirty(abspath: str) -> bool:
+    """True if the clone's working tree has uncommitted changes.
+
+    `git status --porcelain` prints one line per changed/untracked path and
+    nothing for a clean tree — so non-empty stdout means dirty. A git failure
+    (e.g. not really a repo) is treated as dirty: fail toward PROTECTING the
+    tree, never toward a hard reset we can't justify."""
+    status = proc.run(
+        ["git", "-C", abspath, "status", "--porcelain"],
+        check=False,
+    )
+    if status.returncode != 0:
+        return True
+    return bool(status.stdout.strip())
 
 
 def _refresh_one(abspath: str) -> str | None:
