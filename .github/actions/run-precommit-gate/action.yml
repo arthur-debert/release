@@ -8,9 +8,15 @@ description: |
   tab-formatted JSON file, awk rewriting a Cargo.toml, etc.).
 
   Detects (in order):
-    1. lefthook  (lefthook.yml / lefthook.yaml / .lefthook.yml)
-    2. pre-commit framework  (.pre-commit-config.yaml / .yml)
-    3. husky  (.husky/pre-commit)
+    1. lefthook  (config discovered via an explicit LEFTHOOK_CONFIG, else
+                  managed .release/lefthook.yml / root lefthook.yml /
+                  .lefthook.yml / lefthook.yaml)
+    2. husky  (.husky/pre-commit)
+    3. release-core managed-gate fallback — when no root gate config
+       is present but release-core is on PATH, materialize the managed
+       gate from the wheel bundle and run it through the binary
+       (`release-core gate --hook`). This is the post-WS3 path where
+       the gate config lives only in the ephemeral .release/.
 
   No-op when none is configured. Failure exits non-zero so the
   release halts cleanly before pushing a commit the consumer's CI
@@ -28,8 +34,8 @@ description: |
   with `jq` / `awk` / `perl`, none of which preserve consumer
   formatting. Per-stack patches (re-running prettier inline, etc.)
   fragment ops across the matrix. This action centralizes the gate:
-  the consumer defines what runs (via their lefthook /
-  pre-commit-config / husky), the workflow just invokes it.
+  the consumer defines what runs (via their lefthook / husky),
+  the workflow just invokes it.
 
   ## Opting out
 

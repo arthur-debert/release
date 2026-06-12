@@ -222,14 +222,15 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-            # Roll changelog + extract notes. Four branches:
+            # Roll changelog + extract notes. Three branches:
             #   1. CHANGELOG input empty → user opted out; write stub.
             #   2. Fragment-dir (per #201): CHANGELOG/ sibling dir exists
             #      → delegate to the `changelog` console-script (cut +
             #      render).
-            #   3. Single-file Keep-a-Changelog: extract from
-            #      `## [Unreleased]` and roll into a versioned section.
-            #   4. CHANGELOG specified but file missing → stub.
+            #   3. CHANGELOG specified but no CHANGELOG/ dir → stub.
+            #      (The legacy single-file `## [Unreleased]` detection
+            #      branch was removed in #569 — every consumer is on the
+            #      fragment-dir model.)
             if [ -z "${CHANGELOG:-}" ]; then
               echo "Release ${TAG}" > release-notes.md
             else
@@ -259,24 +260,10 @@ jobs:
                     echo "Release ${TAG}" > release-notes.md
                   fi
                 fi
-              elif [ -f "${CHANGELOG}" ]; then
-                # Single-file Keep-a-Changelog branch.
-                awk '/^## \[Unreleased\]/{c=1;next} c&&/^## \[/{exit} c&&/\S/{print}' \
-                  "${CHANGELOG}" > release-notes.md
-                if [ "${IS_PRERELEASE}" != "true" ]; then
-                  # Bump the [Unreleased] header in-place. printf '\n'
-                  # (not sed's \n) keeps the substitution portable
-                  # across GNU + BSD sed.
-                  today=$(date -u +%F)
-                  replacement="## [Unreleased]"$'\n\n'"## [${NEW_VERSION}] - ${today}"
-                  awk -v repl="${replacement}" '
-                    /^## \[Unreleased\]/ { print repl; next } { print }
-                  ' "${CHANGELOG}" > "${CHANGELOG}.tmp"
-                  mv "${CHANGELOG}.tmp" "${CHANGELOG}"
-                  git add "${CHANGELOG}"
-                fi
               else
-                # CHANGELOG specified but neither file nor dir on disk.
+                # CHANGELOG specified but no CHANGELOG/ fragment dir on
+                # disk — write a stub. (Legacy single-file detection
+                # removed in #569; the fragment-dir model is the only path.)
                 echo "Release ${TAG}" > release-notes.md
               fi
             fi
