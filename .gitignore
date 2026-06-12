@@ -43,3 +43,4 @@ templates/commons/lib/release_core/release_core/_bundled_templates/
 # is the source repo and doesn't always materialize the tree, so ignore it here
 # explicitly too.
 .release/
+.claude/worktrees
