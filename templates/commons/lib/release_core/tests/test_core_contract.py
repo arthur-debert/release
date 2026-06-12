@@ -56,8 +56,8 @@ def test_manifest_contains_the_contract_anchors():
     assert data["managed_path_prefixes"] == [".release/", "bin/check", "lib/release_core/"]
     # Tombstones come from the retired sets, not a re-statement.
     assert data["tombstones"]["blob"] == sorted(sync.RETIRED_BLOB_FILES)
-    assert data["tombstones"]["marker"] == sorted(sync.RETIRED_MARKER_FILES)
     assert data["tombstones"]["fingerprint"] == sorted(sync.RETIRED_FINGERPRINT_FILES)
+    assert "marker" not in data["tombstones"]
 
 
 def test_manifest_never_lists_release_internal_or_skipped_sources():

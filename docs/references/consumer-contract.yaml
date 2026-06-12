@@ -148,8 +148,6 @@ tombstones:
     - "vendor/semver-tool/LICENSE"
     - "vendor/semver-tool/README.md"
     - "vendor/semver-tool/semver"
-  marker:
-    - ".release-sync-state.yaml"
   fingerprint:
     - "bin/release"
     - "scripts/setup-dev-env.sh"

@@ -1227,15 +1227,12 @@ def test_full_init_migrates_bootstrap_symlinks_and_replaces_atomically(
 @_needs_git
 def test_full_removes_retired_tombstoned_files_in_managed_commit(tmp_path, monkeypatch, capsys):
     """WS6 (release#527): a pre-pull consumer carries retired release-distributed
-    real files (the release-sync state manifest, the release-cut shim). A bare
-    init removes them — provenance-gated — and the deletions ride the managed
-    auto-commit; consumer-owned files are untouched."""
+    real files (e.g. the release-cut shim). A bare init removes them —
+    provenance-gated — and the deletions ride the managed auto-commit;
+    consumer-owned files are untouched."""
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
-    (repo / ".release-sync-state.yaml").write_text(
-        "# Managed by release-sync. Do not edit.\nsha: deadbeef\n"
-    )
     (repo / "bin").mkdir(exist_ok=True)
     (repo / "bin" / "release").write_text(
         "#!/usr/bin/env bash\n"
@@ -1249,16 +1246,14 @@ def test_full_removes_retired_tombstoned_files_in_managed_commit(tmp_path, monke
     out = capsys.readouterr().out
     assert "committed" in out
 
-    assert not (repo / ".release-sync-state.yaml").exists()
     assert not (repo / "bin" / "release").exists()
     assert (repo / "bin" / "deploy").exists()
 
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
-    assert ".release-sync-state.yaml" in committed
     assert "bin/release" in committed
     assert "bin/deploy" not in committed
     # The removals are real deletions in the index, not stray edits.
-    assert _git(repo, "status", "--porcelain", ".release-sync-state.yaml", "bin/release") == ""
+    assert _git(repo, "status", "--porcelain", "bin/release") == ""
 
 
 @_needs_yq

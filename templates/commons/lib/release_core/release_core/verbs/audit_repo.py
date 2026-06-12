@@ -31,20 +31,14 @@ Checks performed:
                          configure git insteadOf with RELEASE_TOKEN
 
 Conformance checks (WARN-only — don't fail; surface adoption gaps):
-  9. release_sync       — .release-sync-state.yaml present (Component-model
-                           adoption signal)
- 10. scripts_inventory  — what's left in scripts/ beyond the canonical
+  9. scripts_inventory  — what's left in scripts/ beyond the canonical
                            setup-dev-env.sh + project extras
- 11. workflows_canonical — count of workflows that are NOT thin callers of
+ 10. workflows_canonical — count of workflows that are NOT thin callers of
                            arthur-debert/release/* (legacy / bespoke surface)
- 12. ci_calls_bin_check    — does ANY workflow file (typically ci.yml /
+ 11. ci_calls_bin_check    — does ANY workflow file (typically ci.yml /
                              test.yml) actually invoke `bin/check`? If not,
                              the Component-supplied canonical interface is
                              dead weight on disk — CI bypasses it.
- 13. changelog_handling    — which changelog convention is in use:
-                             fragment-dir (canonical, PASS) / single-file
-                             (WARN, migrate per #201) / two-file (WARN) /
-                             none (WARN) / mixed (FAIL).
 
 Shell→Python migration: the base64/jq/grep
 YAML gymnastics moved into Python (gh.rest → parsed dicts + base64-decoded file
@@ -70,8 +64,6 @@ _ECOSYSTEM_RE = re.compile(r"^[ \t]*-[ \t]*package-ecosystem:[ \t]*(.+?)[ \t]*$"
 # go.mod private-dep refs (skip the repo's own `module …` line).
 _GOMOD_DEP_RE = re.compile(r"^\s*(?:require\s+)?github\.com/arthur-debert/", re.MULTILINE)
 _GOMOD_MODULE_RE = re.compile(r"^\s*module\s+")
-# CHANGELOG.md single-file convention: a `## Unreleased` / `## [Unreleased]` head.
-_UNRELEASED_RE = re.compile(r"^##[ \t]+\[?Unreleased\]?", re.MULTILINE)
 # Workflow canonicality: thin caller of a release/ reusable workflow.
 _CANONICAL_USE_RE = re.compile(r"uses:.*arthur-debert/release/\.github/workflows/")
 # CI runs bin/check directly (umbrella), not bin/check-fmt alone.
@@ -190,53 +182,6 @@ def classify_copilot_pointer(body: str) -> str:
     if "arthur-debert/gh-dagentic/.github/workflows/copilot-review.yml@" in body:
         return "gh-dagentic"
     return "unknown"
-
-
-def classify_changelog(has_dir: bool, has_block: bool, has_two_file: bool) -> tuple[str, str]:
-    """Map changelog signals → (status, message). Mirrors the bash precedence."""
-    active = sum((has_dir, has_block, has_two_file))
-    if active > 1:
-        present = ""
-        if has_dir:
-            present += " fragment-dir"
-        if has_block:
-            present += " single-file"
-        if has_two_file:
-            present += " two-file"
-        return "FAIL", f"mixed conventions:{present} — pick one (#201)"
-    if has_dir:
-        return "PASS", "fragment-dir (canonical)"
-    if has_block:
-        return "WARN", "single-file (## Unreleased) — migrate per #201"
-    if has_two_file:
-        return "WARN", "two-file (CHANGELOG_UNRELEASED.md) — migrate per #201"
-    return "WARN", "none — no recognized changelog convention detected"
-
-
-def parse_release_sync_state(body: str) -> tuple[str, str]:
-    """Extract (sha, components-csv) from .release-sync-state.yaml text.
-
-    Mirrors the bash awk/grep extraction (NOT a YAML parse — the bash walked the
-    raw lines, and we preserve that to match byte-for-byte). `sha:` value and
-    the `- ` list items under a top-level `components:` key.
-    """
-    sha = ""
-    components: list[str] = []
-    in_components = False
-    for line in body.splitlines():
-        if sha == "" and line.startswith("sha:"):
-            parts = line.split()
-            if len(parts) > 1:
-                sha = parts[1]
-        if line.startswith("components:"):
-            in_components = True
-            continue
-        if in_components:
-            if re.match(r"^[a-z_]+:", line):
-                in_components = False
-            elif re.match(r"^ *- ", line):
-                components.append(re.sub(r"^ *- ", "", line))
-    return sha, ",".join(components)
 
 
 # --------------------------------------------------------------------------
@@ -447,25 +392,6 @@ def _check_private_mod_auth(repo: str, results: list) -> None:
     )
 
 
-def _check_release_sync(repo: str, results: list) -> None:
-    body = _file_content(repo, ".release-sync-state.yaml")
-    if not body:
-        _record(
-            results,
-            "WARN",
-            "release_sync",
-            "no .release-sync-state.yaml — Component model not adopted",
-        )
-        return
-    sha, components = parse_release_sync_state(body)
-    _record(
-        results,
-        "PASS",
-        "release_sync",
-        f"adopted (sha={sha[:7]}, components: {components or 'none'})",
-    )
-
-
 def _check_scripts_inventory(repo: str, results: list) -> None:
     listing = _file_names(repo, "scripts")
     if not listing:
@@ -550,15 +476,6 @@ def _check_ci_calls_bin_check(repo: str, results: list) -> None:
         )
 
 
-def _check_changelog_handling(repo: str, results: list) -> None:
-    has_dir = _dir_listing(repo, "CHANGELOG") is not None
-    body = _file_content(repo, "CHANGELOG.md")
-    has_block = bool(body and _UNRELEASED_RE.search(body))
-    has_two_file = _exists(repo, "CHANGELOG_UNRELEASED.md")
-    status, msg = classify_changelog(has_dir, has_block, has_two_file)
-    _record(results, status, "changelog_handling", msg)
-
-
 _CHECKS = (
     _check_ruleset,
     _check_release_token,
@@ -568,11 +485,9 @@ _CHECKS = (
     _check_dep_policy,
     _check_ci_main_green,
     _check_private_mod_auth,
-    _check_release_sync,
     _check_scripts_inventory,
     _check_workflows_canonical,
     _check_ci_calls_bin_check,
-    _check_changelog_handling,
 )
 
 

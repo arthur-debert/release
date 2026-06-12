@@ -162,7 +162,6 @@ def build_manifest(repo_root: str) -> dict:
         "gate_internal": sorted(sync.GATE_INTERNAL_FILES),
         "tombstones": {
             "blob": sorted(sync.RETIRED_BLOB_FILES),
-            "marker": sorted(sync.RETIRED_MARKER_FILES),
             "fingerprint": sorted(sync.RETIRED_FINGERPRINT_FILES),
         },
         "managed_path_prefixes": list(MANAGED_PATH_PREFIXES),
