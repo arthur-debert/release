@@ -879,16 +879,17 @@ def test_full_errors_when_source_lacks_kind_tree(tmp_path, monkeypatch, capsys):
 def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     # A "removals-only" managed update (a symlink whose .release target is gone in
     # a later sync) must not be left dangling. Post-WS7 (release#528) the mirror
-    # was never tracked, so the sweep is a pure filesystem op (no commit) — but a
-    # PRE-WS7 seed's TRACKED swept symlink must still commit its deletion.
+    # is normally never tracked, so the sweep is a pure filesystem op — but a
+    # TRACKED swept symlink must still commit its deletion via the managed
+    # pathspec (the swept link rides `written`).
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     assert init.main([]) == 0
     capsys.readouterr()
     assert (repo / "bin" / "check").is_symlink()
-    # Simulate the pre-WS7 seed: the consumer committed the mirror symlink.
+    # A tracked mirror symlink (force-added).
     _git(repo, "add", "-f", "bin/check")
-    _git(repo, "commit", "-q", "-m", "pre-WS7 seed: tracked mirror")
+    _git(repo, "commit", "-q", "-m", "tracked mirror")
 
     # Drop the bin/check tool from the source, re-run: the managed symlink +
     # its .release/ target must be removed AND the tracked deletion committed.
@@ -908,47 +909,6 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
     assert "bin/check" in last
     assert _git(repo, "status", "--porcelain") == ""
-
-
-@_needs_yq
-@_needs_git
-def test_full_migration_untracks_previously_committed_release(tmp_path, monkeypatch, capsys):
-    """WS4 one-time migration (release#521): a consumer that COMMITTED its `.release/`
-    under the old model must, on the first init, have the whole tree untracked —
-    INCLUDING paths that survive recomposition (e.g. `.release/bin/check`). The
-    trap: a pathspec commit re-reads the work tree, so a naive `git commit --
-    .release` resurrects the still-present recomposed files instead of deleting
-    them. After init: zero tracked `.release/**`, a clean tree, and `.release/`
-    still materialized on disk + the symlinks resolving."""
-    src = _full_source_tree(tmp_path / "src")
-    repo = _setup_full_repo(tmp_path, monkeypatch, src)
-    # Simulate a pre-WS4 consumer: commit a `.release/` tree, including a path the
-    # recompose will REGENERATE (bin/check) and one it will NOT (lib/foo.py).
-    (repo / ".release" / "bin").mkdir(parents=True)
-    (repo / ".release" / "lib").mkdir(parents=True)
-    (repo / ".release" / "bin" / "check").write_text("old committed check\n")
-    (repo / ".release" / "lib" / "foo.py").write_text("stale\n")
-    _git(repo, "add", "-f", ".release")
-    _git(repo, "commit", "-q", "-m", "pre-WS4: committed .release/")
-    assert len(_git(repo, "ls-files", "--", ".release").splitlines()) == 2
-
-    rc = init.main([])  # default full materialize + auto-commit
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "committed" in out
-    # No `.release/**` tracked anymore — the whole ephemeral tree is untracked.
-    assert _git(repo, "ls-files", "--", ".release") == ""
-    # The migration commit recorded the surviving path as a DELETION, not a modify.
-    names = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
-    assert "D\t.release/bin/check" in names
-    assert "D\t.release/lib/foo.py" in names
-    # Tree is clean; `.release/` is still on disk (ephemeral) and the symlink resolves.
-    assert _git(repo, "status", "--porcelain") == ""
-    assert (repo / ".release" / "bin" / "check").is_file()
-    assert (repo / "bin" / "check").is_symlink()
-    assert (repo / "bin" / "check").resolve().is_file()
-    # No untrack-commit stash left behind.
-    assert not (repo / ".release.untrack-commit.tmp").exists()
 
 
 # --------------------------------------------------------------------------
@@ -1393,41 +1353,6 @@ def test_full_sweeps_retired_smoke_hook_shipped_bytes(tmp_path, monkeypatch, cap
 
 @_needs_yq
 @_needs_git
-def test_full_untracks_pre_ws7_committed_mirrors(tmp_path, monkeypatch, capsys):
-    """WS7 (release#528): a pre-WS7 seed committed the symlink mirrors. A bare
-    init untracks them — the commit records the deletions while the symlinks
-    stay LIVE on disk (excluded via .git/info/exclude), and the tree is clean."""
-    src = _full_source_tree(tmp_path / "src")
-    repo = _setup_full_repo(tmp_path, monkeypatch, src)
-    assert init.main([]) == 0
-    capsys.readouterr()
-    # Simulate the pre-WS7 seed: commit the mirrors (and bypass the exclude).
-    _git(repo, "add", "-f", "bin/check", ".editorconfig")
-    _git(repo, "commit", "-q", "-m", "pre-WS7 seed: tracked mirrors")
-    assert _git(repo, "ls-files", "bin/check") == "bin/check"
-
-    # Byte-identical tree, but the migration must still fire (changes == 0).
-    rc = init.main([])
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "committed" in out
-    last = _git(repo, "show", "--name-status", "--pretty=format:", "HEAD")
-    assert "D\tbin/check" in last
-    assert "D\t.editorconfig" in last
-    # The symlinks are still live on disk — only the INDEX let go of them.
-    assert (repo / "bin" / "check").is_symlink()
-    assert (repo / ".editorconfig").is_symlink()
-    assert _git(repo, "ls-files", "bin/check") == ""
-    assert _git(repo, "status", "--porcelain") == ""
-
-    # And the run after the migration is a true no-op.
-    assert init.main([]) == 0
-    out = capsys.readouterr().out
-    assert "already current (no changes)" in out
-
-
-@_needs_yq
-@_needs_git
 def test_full_writes_mirror_excludes_idempotently(tmp_path, monkeypatch, capsys):
     """The ephemeral mirrors are listed in .git/info/exclude (NOT the consumer's
     .gitignore — zero tracked footprint), in a managed block rewritten wholesale
@@ -1451,26 +1376,13 @@ def test_full_writes_mirror_excludes_idempotently(tmp_path, monkeypatch, capsys)
     assert ex.read_text().count(init._EXCLUDE_BEGIN) == 1  # rewritten, not appended
 
 
-def test_tracked_release_symlinks_detects_only_release_mirrors(tmp_path):
-    repo = _init_git_repo(tmp_path / "r")
-    (repo / "bin").mkdir()
-    os.symlink("../.release/bin/check", repo / "bin" / "check")
-    os.symlink("/usr/bin/true", repo / "bin" / "other")  # not a .release/ mirror
-    (repo / "bin" / "real").write_text("x\n")
-    _git(repo, "add", "-f", "bin")
-    _git(repo, "commit", "-q", "-m", "seed")
-    links = init._tracked_release_symlinks(str(repo))
-    assert links == [("bin/check", "../.release/bin/check")]
-
-
 @_needs_yq
 @_needs_git
 def test_full_retired_tracked_skill_swept_not_resurrected(tmp_path, monkeypatch, capsys):
-    """A pre-WS7 seed tracks a symlink for a skill release has since RETIRED
-    (release-issue-relay class). The sweep removes it from disk during apply, so
-    the WS7 untrack pass — which recreates LIVE mirrors after the commit — must
-    not resurrect it as a dangling link; its empty dir is pruned; the deletion
-    commits; the tree ends clean."""
+    """A seed tracks a symlink for a skill release has since RETIRED
+    (release-issue-relay class). The sweep removes it from disk during apply; it
+    must not be resurrected as a dangling link; its empty dir is pruned; the
+    deletion commits; the tree ends clean."""
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     assert init.main([]) == 0
