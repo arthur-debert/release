@@ -205,7 +205,16 @@ def load_baseline(lib_root: str | None = None) -> list[dict]:
     path = os.path.join(root, BASELINE_RELPATH)
     if not os.path.isfile(path):
         return []
-    data = yamlio.load(path)
+    # yamlio.load shells out to yq: a missing yq / parse failure raises
+    # yamlio.YamlError, and a non-JSON yq emission raises ValueError. Surface
+    # both as CapturedFixtureError so the verb's single except yields a clean,
+    # actionable gate message instead of an unhandled traceback.
+    try:
+        data = yamlio.load(path)
+    except (yamlio.YamlError, ValueError) as exc:
+        raise CapturedFixtureError(
+            f"captured-fixtures: cannot read baseline {BASELINE_RELPATH}: {exc}"
+        ) from exc
     if not isinstance(data, dict):
         raise CapturedFixtureError(f"captured-fixtures: malformed baseline {BASELINE_RELPATH}")
     entries = data.get("known_unmarked_fixtures") or []

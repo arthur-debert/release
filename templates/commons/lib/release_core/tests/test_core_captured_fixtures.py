@@ -9,6 +9,7 @@ repo), so they pin behaviour independent of how the live baseline drains.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from release_core import captured_fixtures as cf
@@ -81,9 +82,10 @@ def test_scan_flags_only_unmarked_json_fixtures(seam_tree):
     assert keys == {"demo/tests/fx/unmarked.json"}
 
 
-def test_scan_flags_unmarked_inline_seam(seam_tree, tmp_path):
-    # Strip the marker from the inline seam → it becomes an offender.
-    (tmp_path / "tests" / "test_inline.py").write_text("_X = '...'\n")
+def test_scan_flags_unmarked_inline_seam(seam_tree):
+    # Strip the marker from the inline seam → it becomes an offender. Write under
+    # seam_tree (the lib root the scan runs against), not a separate tmp_path.
+    (Path(seam_tree) / "tests" / "test_inline.py").write_text("_X = '...'\n")
     offenders = cf.scan(lib_root=seam_tree)
     keys = {o.key for o in offenders}
     assert "demo_inline/tests/test_inline.py" in keys
@@ -128,6 +130,21 @@ def test_apply_baseline_flags_stale_entry():
     assert [e["key"] for e in stale] == ["s/gone.json"]
 
 
+def test_load_baseline_wraps_yaml_errors(tmp_path, monkeypatch):
+    # A yq failure (yamlio.YamlError) or non-JSON emission (ValueError) must
+    # surface as CapturedFixtureError, not bubble as an unhandled traceback —
+    # so the verb's single except yields a clean gate message.
+    (tmp_path / cf.BASELINE_RELPATH).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / cf.BASELINE_RELPATH).write_text("known_unmarked_fixtures: []\n")
+
+    def boom(_path):
+        raise cf.yamlio.YamlError("yq parse failure")
+
+    monkeypatch.setattr(cf.yamlio, "load", boom)
+    with pytest.raises(cf.CapturedFixtureError, match="cannot read baseline"):
+        cf.load_baseline(lib_root=str(tmp_path))
+
+
 # ── the verb (gate entrypoint) ───────────────────────────────────────────────
 
 
@@ -142,10 +159,11 @@ def test_verb_lint_passes_clean_tree(seam_tree, monkeypatch, capsys):
     assert "0 new unmarked" in capsys.readouterr().out
 
 
-def test_verb_lint_fails_on_new_unmarked_fixture(seam_tree, tmp_path, monkeypatch, capsys):
+def test_verb_lint_fails_on_new_unmarked_fixture(seam_tree, monkeypatch, capsys):
     # The acceptance criterion: drop a NEW unmarked fixture into the seam → the
-    # gate (verb) fails. Empty baseline so nothing is grandfathered.
-    (tmp_path / "tests" / "fx" / "brand_new.json").write_text(json.dumps({"surprise": 1}))
+    # gate (verb) fails. Empty baseline so nothing is grandfathered. The fixture
+    # goes under seam_tree (the lib root the scan runs against).
+    (Path(seam_tree) / "tests" / "fx" / "brand_new.json").write_text(json.dumps({"surprise": 1}))
     monkeypatch.setattr(cf, "_lib_root", lambda start=None: seam_tree)
     monkeypatch.setattr(cf, "load_baseline", lambda lib_root=None: [])
     rc = cf_verb.main(["lint"])
