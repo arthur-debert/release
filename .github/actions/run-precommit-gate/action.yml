@@ -8,7 +8,8 @@ description: |
   tab-formatted JSON file, awk rewriting a Cargo.toml, etc.).
 
   Detects (in order):
-    1. lefthook  (managed .release/lefthook.yml / root lefthook.yml /
+    1. lefthook  (config discovered via an explicit LEFTHOOK_CONFIG, else
+                  managed .release/lefthook.yml / root lefthook.yml /
                   .lefthook.yml / lefthook.yaml)
     2. husky  (.husky/pre-commit)
     3. release-core managed-gate fallback — when no root gate config
