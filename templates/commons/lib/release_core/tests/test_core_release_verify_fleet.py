@@ -347,13 +347,23 @@ def test_only_is_split_and_forwarded_to_both_managed_repos_calls(env, monkeypatc
         assert kw["env"]["REPOS_ROOT"] == root
 
 
-def test_refresh_adds_flag_to_clone(env, monkeypatch):
+def test_clone_never_passes_refresh_flag(env, monkeypatch):
+    # #624: the accessor now refreshes existing clones unconditionally, so the
+    # sweep just calls `--clone` — it must NEVER forward a `--refresh` flag
+    # (the flag was removed; passing it would be an accessor usage error).
     root = "/fleetroot"
     driver = _Driver(_row("o/a", root) + "\n")
     monkeypatch.setattr(proc, "run", driver)
-    rvf.main(["--root", root, "--refresh"])
+    rvf.main(["--root", root])
     clone = next(c for c in driver.calls if "--clone" in c[0])
-    assert "--refresh" in clone[0]
+    assert "--refresh" not in clone[0]
+
+
+def test_refresh_flag_is_now_an_unknown_arg(env, capsys):
+    # #624: `--refresh` was removed entirely — no tolerated no-op. It must hit
+    # the unknown-arg usage error like any other bogus flag.
+    assert rvf.main(["--refresh"]) == 64
+    assert "unknown arg: --refresh" in capsys.readouterr().err
 
 
 def test_sync_pins_ref_sha_and_release_home(env, monkeypatch):

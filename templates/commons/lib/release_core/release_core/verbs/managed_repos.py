@@ -9,10 +9,22 @@ $REPOS_ROOT defaults to ~/h (a dev machine). Point it at an empty dir
 and use --clone for a fresh, self-contained fleet checkout.
 
 Usage:
-  managed-repos [--list]             # owner/name, one per line (default)
-  managed-repos --paths              # owner/name <TAB> abspath <TAB> found|missing
-  managed-repos --clone [--refresh]  # clone missing repos into their paths
-                                     # (--refresh: also fetch+reset existing ones)
+  managed-repos [--list]   # owner/name, one per line (default)
+  managed-repos --paths    # owner/name <TAB> abspath <TAB> found|missing
+  managed-repos --clone    # clone missing repos; fetch+reset existing ones
+                           # to origin's default branch UNCONDITIONALLY, then
+                           # name the ref/sha each clone now sits at (#624).
+
+Existing clones are ALWAYS refreshed — there is no opt-out mode (the old
+`--refresh` flag was removed in #624: a frozen-clone use case is a manual
+clone, not a verify/list mode). The readout names the fetched ref/sha so the
+sweep's freshness is visible, never assumed.
+
+DESTRUCTIVE on a non-disposable root: the refresh is a `git reset --hard`, so
+$REPOS_ROOT should be a DISPOSABLE dir (e.g. /tmp/...) for hermetic clones.
+A clone with UNCOMMITTED work is detected and SKIPPED-with-warning rather than
+reset (the data-loss guard), so a clean/hermetic clone refreshes safely while
+a live ~/h checkout's uncommitted work is never silently discarded.
 
 Any mode accepts trailing owner/name args to restrict to that subset:
   managed-repos --clone arthur-debert/padz lex-fmt/lex
@@ -207,7 +219,6 @@ def validate_repo_targets(repos: list[str], manifest: str | None = None) -> str:
 
 def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the bash modes
     mode = "list"
-    refresh = False
     filter_set: list[str] = []
 
     for arg in argv:
@@ -217,8 +228,6 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
             mode = "paths"
         elif arg == "--clone":
             mode = "clone"
-        elif arg == "--refresh":
-            refresh = True
         elif arg in ("-h", "--help"):
             _help()
             return 0
@@ -255,21 +264,55 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     if shutil.which("gh") is None:
         print("managed-repos: gh required for --clone", file=sys.stderr)
         return 2
-    return _clone(pairs, root, refresh)
+    # --clone now drives git directly (fetch/reset/rev-parse on existing
+    # clones, #624) — guard it the same as gh so a missing git is a clean
+    # exit 2, never a FileNotFoundError traceback out of proc.run.
+    if shutil.which("git") is None:
+        print("managed-repos: git required for --clone", file=sys.stderr)
+        return 2
+    return _clone(pairs, root)
 
 
-def _clone(pairs: list[tuple[str, str]], root: str, refresh: bool) -> int:
+def _clone(pairs: list[tuple[str, str]], root: str) -> int:
+    """Clone every missing repo and UNCONDITIONALLY fetch+reset every existing
+    one to origin's default branch (#624).
+
+    Reusing a clone without fetching is a quiet-wrong default: the managed
+    surface gets synced from the candidate ref either way, so a stale clone's
+    consumer-authored half makes the sweep *look* faithful while it lies. The
+    readout names the ref/sha each clone now sits at so the freshness is
+    visible, never assumed.
+
+    One exception, and it is a DATA-LOSS guard not a freshness opt-out: an
+    existing clone with a DIRTY working tree is skipped-with-warning rather
+    than hard-reset, so pointing REPOS_ROOT at live ~/h checkouts can never
+    silently discard uncommitted work (:func:`_is_dirty`). Hermetic /tmp
+    clones are always clean, so they always refresh."""
     rc = 0
     for repo, path in pairs:
         abspath = os.path.join(root, path)
         if os.path.isdir(os.path.join(abspath, ".git")):
-            if refresh:
-                print(f"→ {repo}: refreshing {abspath}", file=sys.stderr)
-                if not _refresh_one(repo, abspath):
-                    print(f"→ {repo}: refresh FAILED", file=sys.stderr)
-                    rc = 1
+            # DATA-LOSS GUARD: the refresh hard-resets the working tree, which
+            # would silently discard uncommitted work if REPOS_ROOT points at a
+            # live checkout (default ~/h). A dirty tree is SKIPPED with a loud
+            # warning — never reset — and the sweep continues. This is not the
+            # forbidden `--refresh` opt-out (#624): hermetic /tmp clones are
+            # always clean, so the guard never fires there and they always
+            # refresh; it only protects a human's real working tree.
+            if _is_dirty(abspath):
+                print(
+                    f"⚠ {repo}: uncommitted changes — skipping refresh to protect "
+                    "your work (point REPOS_ROOT at a disposable dir for hermetic "
+                    f"clones) ({abspath})",
+                    file=sys.stderr,
+                )
+                continue
+            ref_sha = _refresh_one(abspath)
+            if ref_sha is None:
+                print(f"→ {repo}: refresh FAILED ({abspath})", file=sys.stderr)
+                rc = 1
             else:
-                print(f"→ {repo}: exists, skipping ({abspath})", file=sys.stderr)
+                print(f"→ {repo}: refreshed to {ref_sha} ({abspath})", file=sys.stderr)
         else:
             print(f"→ {repo}: cloning into {abspath}", file=sys.stderr)
             os.makedirs(os.path.dirname(abspath), exist_ok=True)
@@ -278,24 +321,64 @@ def _clone(pairs: list[tuple[str, str]], root: str, refresh: bool) -> int:
             if gh.repo_clone(repo, abspath).returncode != 0:
                 print(f"→ {repo}: clone FAILED", file=sys.stderr)
                 rc = 1
+            else:
+                head = proc.run(
+                    ["git", "-C", abspath, "rev-parse", "--short", "HEAD"],
+                    check=False,
+                )
+                sha = head.stdout.strip() if head.returncode == 0 else "?"
+                print(f"→ {repo}: cloned at {sha}", file=sys.stderr)
     return rc
 
 
-def _refresh_one(repo: str, abspath: str) -> bool:
-    """fetch+reset to origin's default branch. Returns False on any failure."""
+def _is_dirty(abspath: str) -> bool:
+    """True if the clone's working tree has uncommitted changes.
+
+    `git status --porcelain` prints one line per changed/untracked path and
+    nothing for a clean tree — so non-empty stdout means dirty. A git failure
+    (e.g. not really a repo) is treated as dirty: fail toward PROTECTING the
+    tree, never toward a hard reset we can't justify."""
+    status = proc.run(
+        ["git", "-C", abspath, "status", "--porcelain"],
+        check=False,
+    )
+    if status.returncode != 0:
+        return True
+    return bool(status.stdout.strip())
+
+
+def _refresh_one(abspath: str) -> str | None:
+    """fetch+reset an existing clone to origin's default branch.
+
+    Returns the ``<branch>@<short-sha>`` the clone now sits at (so the sweep
+    readout can name its freshness), or ``None`` on any failure."""
     head = proc.run(
         ["git", "-C", abspath, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
         check=False,
     )
     default = head.stdout.strip() if head.returncode == 0 and head.stdout.strip() else "main"
-    default = default.rsplit("/", 1)[-1]  # strip refs/remotes/origin/ → branch name
-    fetch = proc.run(["git", "-C", abspath, "fetch", "--quiet", "origin", default], check=False)
-    if fetch.returncode != 0:
-        return False
-    return (
-        proc.run(
-            ["git", "-C", abspath, "reset", "--quiet", "--hard", f"origin/{default}"],
-            check=False,
-        ).returncode
-        == 0
+    # Strip the fixed `refs/remotes/origin/` prefix ONLY — never rsplit on the
+    # last `/`, which would truncate a branch that legitimately contains slashes
+    # (e.g. `release/v1` → `v1`, then fetch/reset target the wrong ref).
+    prefix = "refs/remotes/origin/"
+    if default.startswith(prefix):
+        default = default[len(prefix) :]
+    # Shallow fetch — the verify sweep lints the working tree, never history.
+    fetch = proc.run(
+        ["git", "-C", abspath, "fetch", "--quiet", "--depth", "1", "origin", default],
+        check=False,
     )
+    if fetch.returncode != 0:
+        return None
+    reset = proc.run(
+        ["git", "-C", abspath, "reset", "--quiet", "--hard", f"origin/{default}"],
+        check=False,
+    )
+    if reset.returncode != 0:
+        return None
+    rev = proc.run(
+        ["git", "-C", abspath, "rev-parse", "--short", "HEAD"],
+        check=False,
+    )
+    sha = rev.stdout.strip() if rev.returncode == 0 and rev.stdout.strip() else "?"
+    return f"{default}@{sha}"

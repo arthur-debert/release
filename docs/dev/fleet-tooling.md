@@ -32,9 +32,31 @@ The accessor. Reads the manifest, applies the join, nothing else.
 ```sh
 release-core admin repos list                       # owner/name, one per line
 release-core admin repos list --paths               # owner/name <TAB> abspath <TAB> found|missing
-release-core admin repos list --clone [--refresh]   # clone missing repos into their paths
+release-core admin repos list --clone               # clone missing; refresh existing (see below)
 release-core admin repos list --paths lex-fmt/lex   # trailing owner/name args restrict the set
 ```
+
+`--clone` clones every missing repo and **unconditionally** fetches+resets
+every existing clone to origin's default branch (resolved from `origin/HEAD`,
+so `master` or a slashed name like `release/v1` are honored — not assumed to
+be `main`), then names the `ref@sha` each clone now sits at
+(`→ <repo>: refreshed to <branch>@<sha> (<abspath>)`). There is no
+opt-out: the old `--refresh` opt-in was **removed** (release#624). Reusing a
+clone without fetching was a quiet-wrong default — the managed surface syncs
+from the candidate ref either way, so a stale clone's consumer-authored half
+made a sweep *look* faithful while it lied. A genuinely frozen-clone use case
+is a manual clone, not a list/verify mode.
+
+> **Destructive to UNCOMMITTED work in a non-disposable root.** The refresh is
+> a `git reset --hard`, so point `$REPOS_ROOT` at a **disposable** dir (e.g.
+> `/tmp/...`) for hermetic clones. As a data-loss guard, a clone with
+> uncommitted changes is detected (`git status --porcelain`) and
+> **skipped-with-warning** (`⚠ <repo>: uncommitted changes — skipping refresh
+> …`) rather than reset, and the sweep continues — so clean/hermetic clones
+> refresh safely while a live `~/h` checkout's uncommitted work is never
+> silently discarded. (This guard is universal on dirtiness, not the forbidden
+> `--refresh` opt-out: the verify path's `/tmp` clones are always clean, so
+> they always refresh.)
 
 `release-core admin repos audit` reads the same manifest (the only other
 consumer).
@@ -53,8 +75,14 @@ release-core admin repos verify --only arthur-debert/padz   # one repo (scopes t
 ```
 
 It is **hermetic**: clones into a throwaway root (default
-`/tmp/release-fleet-verify-$USER`), syncs each consumer from the candidate
-revision, runs `lefthook run pre-commit --all-files`, and reports
+`/tmp/release-fleet-verify-$USER`), **unconditionally fetches+resets every
+existing clone** to the consumer's default branch (resolved from
+`origin/HEAD`, naming the `ref@sha` per repo in the
+`==> cloning/refreshing fleet` phase — release#624, so the pre-flight is
+faithful by default and never lints frozen-at-clone-time content; the
+throwaway clones are always clean, so the dirty-tree data-loss guard above
+never fires here), syncs each consumer from the candidate revision, runs
+`lefthook run pre-commit --all-files`, and reports
 `repo / kind / sync / gate`. It never touches your `~/h` checkouts. Run it
 before `release-core cut` — the cut auto-advances the floating `@vN`
 (release's `release.yml` passes `advance-major: true`), so the sweep must

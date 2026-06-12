@@ -9,8 +9,15 @@ It is HERMETIC: it clones the fleet into a throwaway root (NOT your ~/h
 checkouts), syncs each from the candidate ref, and runs the canonical gate via
 `release-core gate` (which points lefthook at the materialized
 `.release/lefthook.yml` — there is no tracked root lefthook.yml since WS3
-release#524). It never mutates your working repos. Re-runs reuse the clones
-(pass --refresh to update them).
+release#524). It never mutates your working repos. Every sweep fetches+resets
+existing fleet clones to the consumer's default branch (resolved from
+`origin/HEAD` — usually `main`, but `master` / a slashed name like
+`release/v1` are honored too) UNCONDITIONALLY (#624) — a stale clone's
+consumer-authored half makes the pre-flight look faithful while it lies — and
+names the ref/sha each clone now sits at. The reset is a hard reset, so a
+clone with uncommitted work is skipped-with-warning rather than discarded (the
+data-loss guard); the throwaway /tmp clones are always clean, so they always
+refresh.
 
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.
@@ -27,14 +34,13 @@ the annotation). The operator only sees deviations: logs and a non-zero exit
 are reserved for UNEXPECTED failures.
 
 Usage:
-  release-verify-fleet [--ref <ref>] [--root <dir>] [--refresh] [--only <owner/name,...>]
+  release-verify-fleet [--ref <ref>] [--root <dir>] [--only <owner/name,...>]
 
   --ref <ref>     release revision to sync FROM (default: HEAD of this
                   release checkout). Tests the code you have right here.
   --root <dir>    where to clone the fleet (default:
                   /tmp/release-fleet-verify-$USER, per-user to avoid
                   permission clashes on shared machines).
-  --refresh       fetch+reset existing fleet clones before syncing.
   --only <list>   restrict to a comma-separated subset of owner/name.
 
 Exit codes:
@@ -100,7 +106,6 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     ref = "HEAD"
     user = os.environ.get("USER") or "shared"
     root = f"/tmp/release-fleet-verify-{user}"  # noqa: S108 — matches the bash default path
-    refresh = False
     only = ""
 
     i = 0
@@ -116,8 +121,6 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
                 return _usage_error("release-verify-fleet: --root needs a value")
             i += 1
             root = argv[i]
-        elif arg == "--refresh":
-            refresh = True
         elif arg == "--only":
             if i + 1 >= len(argv):
                 return _usage_error("release-verify-fleet: --only needs a value")
@@ -166,12 +169,13 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     repos_list = [*_SELF_CLI, "admin", "repos", "list"]
 
     # --- Phase 1: materialize the fleet (hermetic — into $root, never ~/h) ---
+    # `--clone` ALWAYS fetches+resets existing clones to the consumer's default
+    # branch (resolved from origin/HEAD) and names the ref/sha (#624) — a
+    # faithful pre-flight never lints a frozen-at-clone-time working tree. The
+    # old `--refresh` opt-in was removed.
     print("==> cloning/refreshing fleet", file=sys.stderr)
-    clone_args = ["--clone"]
-    if refresh:
-        clone_args.append("--refresh")
     clone = proc.run(
-        [*repos_list, *clone_args, *subset],
+        [*repos_list, "--clone", *subset],
         env={"REPOS_ROOT": root},
         check=False,
         capture_output=False,
