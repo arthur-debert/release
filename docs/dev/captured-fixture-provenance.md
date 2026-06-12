@@ -102,8 +102,12 @@ The ratchet is modelled byte-for-byte on the consumer-contract lint
   delete it"): once a fixture gets its marker, its baseline entry must be
   removed.
 
-**The baseline only ever shrinks.** Adding an entry is never the fix for a new
-finding — capture the fixture from the real producer and add the marker instead.
+**For already-registered seams the baseline only ever shrinks.** Once a seam is
+registered, adding a baseline entry is never the fix for a new finding — capture
+the fixture from the real producer and add the marker instead. The one moment
+the baseline *grows* is the deliberate, reviewed one-shot when a NEW seam is
+registered (below): its pre-existing unmarked fixtures are grandfathered in the
+same PR. After that, the ratchet for that seam is monotonically downward.
 
 ### The registered seams
 

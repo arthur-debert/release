@@ -58,9 +58,10 @@ def _lint() -> int:
         print(
             f"captured-fixtures: VIOLATION: {o.key} represents an external surface "
             f"({o.surface}) but carries no {cf.MARKER!r} provenance marker. "
-            "Capture it from the real producer and add a `captured-from:` line "
-            "(see docs/dev/captured-fixture-provenance.md). Adding a baseline "
-            "entry is NOT the fix.",
+            "Capture it from the real producer and add the marker — a top-level "
+            f'"{cf.MARKER}" key for JSON fixtures, or a `{cf.MARKER}:` comment '
+            "for inline/YAML seams (see docs/dev/captured-fixture-provenance.md). "
+            "Adding a baseline entry is NOT the fix.",
             file=sys.stderr,
         )
         rc = 1

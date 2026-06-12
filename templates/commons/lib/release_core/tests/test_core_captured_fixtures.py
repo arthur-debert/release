@@ -82,6 +82,15 @@ def test_scan_flags_only_unmarked_json_fixtures(seam_tree):
     assert keys == {"demo/tests/fx/unmarked.json"}
 
 
+def test_offender_keys_are_posix_across_platforms(seam_tree):
+    # The seam/relpath key is POSIX-joined (never OS-native), so a fixture's key
+    # matches a `/`-authored baseline entry even on Windows. No backslashes.
+    offenders = cf.scan(lib_root=seam_tree)
+    for o in offenders:
+        assert "\\" not in o.key
+        assert "\\" not in o.path
+
+
 def test_scan_flags_unmarked_inline_seam(seam_tree):
     # Strip the marker from the inline seam → it becomes an offender. Write under
     # seam_tree (the lib root the scan runs against), not a separate tmp_path.

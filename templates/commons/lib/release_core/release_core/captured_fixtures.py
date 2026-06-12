@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 from dataclasses import dataclass
 
 from . import yamlio
@@ -176,11 +177,14 @@ def scan(lib_root: str | None = None) -> list[Offender]:
         for fname in sorted(os.listdir(d)):
             if not fname.endswith(seam.suffixes):
                 continue
-            fpath = os.path.join(d, fname)
+            fpath = os.path.join(d, fname)  # filesystem access — OS-native sep
             with open(fpath, encoding="utf-8") as fh:
                 text = fh.read()
             if not _has_marker(text, is_json=fname.endswith(".json")):
-                rel = os.path.join(seam.fixture_dir, fname)
+                # The key/relpath is POSIX-joined so offender keys are stable
+                # across platforms and match the baseline (which is authored with
+                # `/`). seam.fixture_dir is already a POSIX literal in SEAMS.
+                rel = posixpath.join(seam.fixture_dir, fname)
                 offenders.append(Offender(seam=seam.name, path=rel, surface=seam.surface))
 
     for name, relpath, surface in INLINE_SEAMS:
