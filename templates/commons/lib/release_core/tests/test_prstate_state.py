@@ -197,13 +197,28 @@ def test_required_set_is_data_driven_single_reviewer():
 
 
 def test_required_set_is_data_driven_three_reviewers():
-    # A three-reviewer required set (Gemini promoted to required for this PR):
-    # missing Gemini holds it in REVIEWS_PENDING and names gemini outstanding,
-    # proving the engine reads the SET generically — no two-reviewer assumption.
-    three = [by_name("copilot"), by_name("coderabbit"), by_name("gemini")]
+    # A three-reviewer required set proves the engine reads the SET generically
+    # — no two-reviewer assumption. The third is a tiny FAKE requestable adapter
+    # (not Gemini, which is non-requestable and may never be required): with no
+    # review from it, the PR stays REVIEWS_PENDING and names it outstanding.
+    from release_core.prstate.model import ReviewLifecycle
+    from release_core.prstate.reviewers import ReviewerAdapter
+
+    class _Falcon(ReviewerAdapter):
+        name = "falcon"
+        requestable = True
+
+        def matches(self, login: str) -> bool:
+            return "falcon" in login.lower()
+
+        def detect(self, ctx) -> ReviewLifecycle:
+            on_head = any(self.matches(r.author) for r in ctx.reviews_on_head())
+            return ReviewLifecycle.DONE_CLEAN if on_head else ReviewLifecycle.NOT_REQUESTED
+
+    three = [by_name("copilot"), by_name("coderabbit"), _Falcon()]
     status = evaluate(_ctx_with_reviews("Copilot", "coderabbitai[bot]"), required=three)
     assert status.state is TaskState.REVIEWS_PENDING
-    assert "gemini" in status.next_action
+    assert "falcon" in status.next_action
 
 
 def test_a_push_re_stales_both_required_reviewers():

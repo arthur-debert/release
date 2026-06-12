@@ -226,19 +226,39 @@ class GeminiAdapter(ReviewerAdapter):
 REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), CodeRabbitAdapter(), GeminiAdapter()]
 
 
+# Process-lifetime cache of the resolved required set. Resolving reads the
+# consumer's `.release-sync.yaml` via yq (a subprocess); `pr wait` calls
+# `required_reviewers()` on EVERY poll, so without this a long wait would spawn
+# a yq process each tick — needless overhead, and a transient yq/PATH blip could
+# break an otherwise-healthy wait. The config cannot change mid-command, so
+# caching for the process lifetime is safe; tests reset it via
+# `_reset_required_cache()`.
+_REQUIRED_CACHE: list[ReviewerAdapter] | None = None
+
+
 def required_reviewers() -> list[ReviewerAdapter]:
-    """The currently-required reviewer adapters, resolved from config.
+    """The currently-required reviewer adapters, resolved from config (cached).
 
     The required SET is data (`reviewers_config`: a shipped default plus a
     per-repo `.release-sync.yaml` override), not the registry's structure — so
     swapping/re-ordering required reviewers is a one-line config edit. Names map
-    back to these adapters; an unknown name fails loud.
+    back to these adapters; an unknown name fails loud. Resolved once per
+    process (see `_REQUIRED_CACHE`).
     """
-    from . import reviewers_config
+    global _REQUIRED_CACHE
+    if _REQUIRED_CACHE is None:
+        from . import reviewers_config
 
-    override = reviewers_config.load_override()
-    names = reviewers_config.resolve_required_names(override)
-    return reviewers_config.required_reviewers(names)
+        override = reviewers_config.load_override()
+        names = reviewers_config.resolve_required_names(override)
+        _REQUIRED_CACHE = reviewers_config.required_reviewers(names)
+    return _REQUIRED_CACHE
+
+
+def _reset_required_cache() -> None:
+    """Clear the resolved-required-set cache — for tests that vary the config."""
+    global _REQUIRED_CACHE
+    _REQUIRED_CACHE = None
 
 
 def by_name(name: str) -> ReviewerAdapter | None:

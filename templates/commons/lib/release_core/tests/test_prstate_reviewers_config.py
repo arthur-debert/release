@@ -42,6 +42,19 @@ def test_unknown_reviewer_name_fails_loud():
         resolve_required_names(["copilot", "gpt5"])
 
 
+def test_non_requestable_reviewer_cannot_be_required():
+    # Gemini auto-triggers and has no request mechanism, so it can never satisfy
+    # a required gate — configuring it required fails loud at parse time, not as
+    # an engine forever advising "request gemini".
+    with pytest.raises(UnknownReviewerError, match="non-requestable"):
+        resolve_required_names(["copilot", "gemini"])
+
+
+def test_duplicate_reviewer_names_fail_loud():
+    with pytest.raises(UnknownReviewerError, match="duplicate"):
+        resolve_required_names(["copilot", "copilot"])
+
+
 def test_required_reviewers_maps_names_to_adapters_in_order():
     adapters = reviewers_config.required_reviewers(("coderabbit", "copilot"))
     assert [a.name for a in adapters] == ["coderabbit", "copilot"]

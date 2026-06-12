@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import os
 
-from .reviewers import REGISTRY
+from .reviewers import REGISTRY, ReviewerAdapter, by_name
 
 # The shipped default: both required, in order. Changing the required set for
 # ALL consumers is editing this one line; a single consumer overrides it in its
@@ -55,12 +55,38 @@ def resolve_required_names(override: list[str] | None = None) -> tuple[str, ...]
 
 
 def _validate(names: tuple[str, ...]) -> None:
+    """A required set is valid only if every name is a REQUESTABLE adapter and
+    no name repeats.
+
+    Requestable is load-bearing: a reviewer with no request mechanism (Gemini)
+    can never satisfy a required gate — the engine would forever advise
+    "request gemini" while `pr review request` only no-ops. Rejecting it here,
+    at parse time, turns that silent dead-end into a loud config error. A
+    duplicate name is also rejected — a repeated gate is always a typo, never
+    intent."""
+    requestable = {r.name for r in REGISTRY if r.requestable}
     known = {r.name for r in REGISTRY}
+    lowered = [n.lower() for n in names]
+
     unknown = [n for n in names if n.lower() not in known]
     if unknown:
         raise UnknownReviewerError(
             f"unknown required reviewer(s) {unknown} in {OVERRIDE_FILE} "
             f"`{OVERRIDE_KEY}` — known adapters: {sorted(known)}"
+        )
+    not_requestable = [n for n in names if n.lower() not in requestable]
+    if not_requestable:
+        raise UnknownReviewerError(
+            f"non-requestable reviewer(s) {not_requestable} cannot be required "
+            f"in {OVERRIDE_FILE} `{OVERRIDE_KEY}`: a reviewer with no request "
+            f"mechanism can never satisfy the gate — requestable adapters: "
+            f"{sorted(requestable)}"
+        )
+    duplicates = sorted({n for n in lowered if lowered.count(n) > 1})
+    if duplicates:
+        raise UnknownReviewerError(
+            f"duplicate required reviewer(s) {duplicates} in {OVERRIDE_FILE} "
+            f"`{OVERRIDE_KEY}` — list each reviewer once"
         )
 
 
@@ -88,9 +114,18 @@ def load_override(root: str | None = None) -> list[str] | None:
     return value
 
 
-def required_reviewers(names: tuple[str, ...]) -> list:
-    """Map required names → their registry adapters, preserving config order."""
-    from .reviewers import by_name
+def required_reviewers(names: tuple[str, ...]) -> list[ReviewerAdapter]:
+    """Map required names → their registry adapters, preserving config order.
 
+    `_validate` guarantees every name resolves, so `by_name` never returns None
+    here; the explicit guard turns any future registry/validation drift into a
+    loud error instead of a None leaking to callers (keeps the return type a
+    clean `list[ReviewerAdapter]`)."""
     _validate(names)
-    return [by_name(n) for n in names]
+    adapters: list[ReviewerAdapter] = []
+    for n in names:
+        adapter = by_name(n)
+        if adapter is None:  # unreachable post-_validate — fail loud if it isn't
+            raise UnknownReviewerError(f"required reviewer {n!r} has no adapter after validation")
+        adapters.append(adapter)
+    return adapters
