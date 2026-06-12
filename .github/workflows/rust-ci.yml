@@ -405,6 +405,10 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: clippy (wasm32)
+        # Pin bash: `runner` is caller-overridable (a Windows self-hosted
+        # runner defaults `run:` to pwsh), and this step relies on bash
+        # `"$PKG"` expansion. Deterministic shell across all runners.
+        shell: bash
         env:
           PKG: ${{ matrix.pkg }}
         run: cargo clippy --target wasm32-unknown-unknown -p "$PKG" -- -D warnings
@@ -455,9 +459,12 @@ jobs:
           # Resolve the workspace member's dir via cargo metadata so the
           # consumer doesn't encode `crates/<name>/` in the input — same
           # resolution rust-cli.yml's build-wasm uses.
-          crate_path=$(cargo metadata --no-deps --format-version=1 \
+          # Capture the manifest path into a var and dirname it directly —
+          # `xargs dirname` splits on whitespace and would mishandle a
+          # manifest path containing spaces.
+          manifest_path=$(cargo metadata --no-deps --format-version=1 \
             | jq -er --arg n "$WASM_PACKAGE" \
-                '.packages[] | select(.name == $n) | .manifest_path' \
-            | xargs dirname)
+                '.packages[] | select(.name == $n) | .manifest_path')
+          crate_path=$(dirname "$manifest_path")
           echo "→ wasm-pack build $WASM_PACKAGE ($crate_path) --target $WASM_TARGET"
           wasm-pack build "$crate_path" --target "$WASM_TARGET" --out-dir pkg
