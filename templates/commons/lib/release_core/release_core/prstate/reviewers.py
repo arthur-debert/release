@@ -119,14 +119,19 @@ class CopilotAdapter(ReviewerAdapter):
 
 class CodeRabbitAdapter(ReviewerAdapter):
     """CodeRabbit is a requestable GitHub App that posts a discrete review on the
-    PR head SHA — structurally the same model as Copilot, and the second
-    REQUIRED reviewer (release#622).
+    PR head SHA — structurally the same model as Copilot. It is in the DEFAULT
+    required set alongside Copilot (release#622), but whether it gates is a
+    config decision, not an adapter property: the required set is config-driven
+    (`reviewers_config`) and a repo can override it via `.release-sync.yaml`.
+    This adapter only declares CodeRabbit *requestable* (it has a real request
+    edge + the #614 attach-verification, so it is ELIGIBLE to be required).
 
-    Parallel-required, not fallback: Copilot and CodeRabbit each gate Ready, so
-    a PR is reviewed only when BOTH have a fresh review on the current head. The
-    accepted trade-off is availability — one required reviewer's outage holds
-    Ready until it recovers — in exchange for always-on dual coverage and no
-    single point of failure on review *quality*.
+    Default policy is parallel-required, not fallback: when both Copilot and
+    CodeRabbit are required, each gates Ready, so a PR is reviewed only when BOTH
+    have a fresh review on the current head. The accepted trade-off is
+    availability — one required reviewer's outage holds Ready until it recovers —
+    in exchange for always-on dual coverage and no single point of failure on
+    review *quality*.
 
     Like Copilot, CodeRabbit re-reviews each push, so it is head-strict: a
     review against an earlier commit is stale and must not count as done for the

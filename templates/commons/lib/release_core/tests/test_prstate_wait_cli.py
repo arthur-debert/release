@@ -123,6 +123,23 @@ def test_best_effort_reviewer_never_forces_a_request():
     assert wait._agent_action_needed(status, REQUIRED) is False
 
 
+def test_injected_required_set_flows_to_the_engine_evaluation(monkeypatch):
+    # The injected required set must reach BOTH the request-vs-wait classifier
+    # AND the engine evaluation (`_snapshot`) — one source, no disagreement.
+    # With NO snapshot injected, the default `_snapshot(pr, required)` runs;
+    # capture the `required` it receives and confirm it is the injected set.
+    seen: dict = {}
+
+    def fake_snapshot(pr, required=None):
+        seen["required"] = required
+        return READY  # READY exits immediately
+
+    monkeypatch.setattr(wait, "_snapshot", fake_snapshot)
+    rc = wait.wait_for_action(5, registry=REQUIRED, sleep=lambda s: None, clock=lambda: 0.0)
+    assert rc == 0
+    assert seen["required"] is REQUIRED
+
+
 # --- the waiting loop ----------------------------------------------------------
 
 
@@ -425,7 +442,7 @@ def test_gh_failure_resolving_the_pr_is_exit_1_not_no_pr(monkeypatch, capsys):
 
 
 def test_gh_failure_is_exit_1(monkeypatch, capsys):
-    def boom(pr: int) -> TaskStatus:
+    def boom(pr: int, required=None) -> TaskStatus:
         raise GhError("gh exploded")
 
     monkeypatch.setattr(wait, "_snapshot", boom)

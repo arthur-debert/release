@@ -151,12 +151,16 @@ def wait_for_action(
 
     `poll` fixes the interval (no backoff); default is the module cadence.
     `registry`/`snapshot`/`sleep`/`clock` are injectable for tests. `registry`
-    is the required-reviewer classifier set the request-vs-wait split reads —
-    default the config-resolved required set (release#622), a test injects its
-    own to drive the split off arbitrary reviewers.
+    is the required-reviewer set — default the config-resolved one (release#622),
+    a test injects its own. It is resolved ONCE here and used for BOTH the engine
+    evaluation (via `_snapshot`) and the request-vs-wait classifier, so an
+    injected set flows to both and they can never disagree.
     """
     required = registry if registry is not None else required_reviewers()
-    take = snapshot if snapshot is not None else _snapshot
+    # The default snapshot is bound to the SAME resolved `required` set, so the
+    # engine evaluation and the classifier below read one source. A test that
+    # injects its own `snapshot` owns that wiring itself.
+    take = snapshot if snapshot is not None else (lambda pr: _snapshot(pr, required))
     deadline_cap = MAX_WAIT_S if timeout is None else timeout
     fixed = poll is not None
     interval: float = poll if poll is not None else POLL_INITIAL_S
@@ -214,14 +218,18 @@ def wait_for_action(
 # --- snapshot + classification ------------------------------------------------
 
 
-def _snapshot(pr: int) -> TaskStatus:
+def _snapshot(pr: int, required: list[ReviewerAdapter] | None = None) -> TaskStatus:
     """One engine evaluation: fetch the PR context, run `evaluate()`.
 
-    Resolves the required reviewer set here (cached) and passes it in, so the
-    engine call stays pure — config resolution is the entrypoint's job.
+    `required` is the gating reviewer set to evaluate against — passed in by
+    `wait_for_action` so the engine and the request-vs-wait classifier share
+    ONE resolved set. None resolves the config default (cached), the seam a
+    direct caller uses; config resolution stays at the entrypoint, keeping the
+    engine call pure.
     """
+    required = required if required is not None else required_reviewers()
     ctx = gather(pr)
-    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required_reviewers())
+    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required)
 
 
 def _poll_with_retry(
