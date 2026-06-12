@@ -123,6 +123,63 @@ Caveats:
   padz, epic #583). That fresh event is one command now:
   `release-core admin repos poke` (below).
 
+## `release-core admin repos saturation` — the #569 sunset meter
+
+Release's source carries deliberately scoped **transitional** machinery, tracked
+as the sunset list in [#569](https://github.com/arthur-debert/release/issues/569):
+pre-adoption fallbacks in the reusable workflows, the one-shot pull-model seeder
+(`repos migrate`), tolerated no-op flags, the pre-WS4/WS7 migration tolerance,
+the husky `core.hooksPath` unset, and the roll-changelog fragment-model
+rejection path. Each item is load-bearing **until its named condition is
+verified across the whole fleet** — and every one of those conditions reads
+"every consumer verified X". Nothing could *measure* that, so the sunset epic
+could never close on evidence, only assertion (the knowledge-in-prose trap
+[#595](https://github.com/arthur-debert/release/issues/595) closed for
+fresh-event verification). This verb is that meter.
+
+```sh
+release-core admin repos saturation                  # clone/refresh + matrix
+release-core admin repos saturation --only arthur-debert/padz   # subset
+release-core admin repos saturation --no-clone       # re-read an already-refreshed root
+release-core admin repos saturation --json           # machine-readable matrix
+```
+
+It **rides the same hermetic, refreshed clones the verify sweep uses** — the
+per-user `/tmp/release-fleet-verify-$USER` root, populated by the identical
+`release-core admin repos list --clone` (the unconditional fetch+reset of
+release#624). So a `repos verify` immediately followed by
+`repos saturation --no-clone` measures the exact tree the gate just swept; no
+second clone mechanism.
+
+The heart is **one condition table** (`CONDITIONS` in
+`release_core/verbs/repos_saturation.py`). Each row is a #569 sunset item plus a
+mechanical predicate evaluated per consumer clone:
+
+| # | #569 item | predicate (per clone) |
+|---|---|---|
+| 1 | managed task verbs | `bin/build` present + executable (electron/tauri/vsce kinds; N/A elsewhere) |
+| 2 | pull-model seeded | `bin/install-release-core` is tracked (a pre-pull consumer predates it ⇒ `repos migrate` dead) |
+| 3 | resolver vintage | the deployed bootstrap quartet bytes match the wheel's current `templates/commons/<dest>` copy |
+| 4 | WS4/WS7 complete | no `.release/**` and no root gate-mirror (`lefthook.yml`, the lint configs) in `git ls-files` |
+| 5 | husky residue | `core.hooksPath` is unset |
+| fragment | fragment model | a `CHANGELOG/` dir is present (the roll-changelog legacy-rejection path) |
+
+The output is a **per-item × per-consumer matrix**. An item whose column is
+green across every consumer it applies to (no reds, at least one green — an
+all-N/A row is *not* evidence of disuse) is reported **`REMOVABLE — see #569
+item N`**: the sunset is closeable on that evidence. Reds name the consumers
+still blocking it, so a migration-race trap (the phos-editor/app#207 class — a
+branch that committed a baked `lefthook.yml` because it raced its own WS7
+migration) is visible *before* it bites.
+
+It is **informational**: saturation is a ratchet that *closes* #569 items, it
+never fails CI. Exit `0` whether or not the fleet is saturated; a non-zero exit
+is reserved for "the meter couldn't run" (a missing tool, an unreadable
+manifest, or no clone to measure).
+
+**Adding a future sunset surface is ONE new `Condition` row** — the table is the
+single definition, and #569's prose points *at* this verb, never the reverse.
+
 ## `release-core admin repos poke` — the one-command fresh event
 
 The rerun trap as a verb (release#595): instead of the five-step hand ritual

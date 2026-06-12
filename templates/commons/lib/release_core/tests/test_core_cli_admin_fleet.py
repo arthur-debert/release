@@ -13,7 +13,7 @@ from release_core import cli_entry
 from release_core.cli import admin
 from release_core.cli.admin import release_cmds, repos
 
-REPOS_LEAVES = {"list", "prs", "scripts", "audit", "verify", "migrate", "poke"}
+REPOS_LEAVES = {"list", "prs", "scripts", "audit", "verify", "saturation", "migrate", "poke"}
 RELEASE_LEAVES = {"advance-major", "betas", "lex"}
 
 
@@ -69,6 +69,14 @@ def test_repos_verify_help_reaches_verify_fleet(capsys):
     text = "".join(capsys.readouterr())
     assert rc == 0
     assert "verify" in text.lower()
+
+
+def test_repos_saturation_help_reaches_verb(capsys):
+    rc = cli_entry.main(["admin", "repos", "saturation", "--help"])
+    text = "".join(capsys.readouterr())
+    assert rc == 0
+    assert "saturation" in text.lower()
+    assert "#569" in text
 
 
 def test_release_advance_major_help_reaches_verb(capsys):

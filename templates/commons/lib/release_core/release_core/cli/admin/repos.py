@@ -26,13 +26,14 @@ from ...verbs import (
     release_verify_fleet,
     repos_migrate,
     repos_poke,
+    repos_saturation,
 )
 from .._helpers import wrap_verb
 
 
 @click.group(
     name="repos",
-    short_help="Fleet-repo views: list / prs / scripts / audit / verify / poke.",
+    short_help="Fleet-repo views: list / prs / scripts / audit / verify / saturation / poke.",
 )
 def group() -> None:
     """Views over the managed fleet repos.
@@ -76,6 +77,13 @@ group.add_command(
         release_verify_fleet.main,
         name="verify",
         short_help="Hermetic pre-flight fleet sweep.",
+    )
+)
+group.add_command(
+    wrap_verb(
+        repos_saturation.main,
+        name="saturation",
+        short_help="Measure #569's per-consumer sunset conditions (informational matrix).",
     )
 )
 group.add_command(
