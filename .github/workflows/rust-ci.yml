@@ -153,10 +153,13 @@ on:
           lines ignored). Empty (default) skips all wasm work, so
           existing callers are unaffected — this is an opt-in companion.
 
-          When non-empty, two extra `if`-gated jobs run, mirroring the
+          When non-empty, three extra `if`-gated jobs run, mirroring the
           RELEASE-path wasm matrix in `rust-cli.yml` (target
           `wasm32-unknown-unknown`, `Swatinem/rust-cache`):
 
+            * `wasm-setup` — parse this multiline list into a JSON matrix
+              consumed by the two jobs below (same recipe as
+              `rust-cli.yml`'s `wasm-setup`).
             * `wasm-check` — `cargo clippy --target wasm32-unknown-unknown
               -p <pkg> -- -D warnings` for each listed package. Catches
               wasm-only lint failures host clippy doesn't see.
