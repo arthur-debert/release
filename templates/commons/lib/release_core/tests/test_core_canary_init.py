@@ -526,7 +526,7 @@ def test_new_family_is_registered_before_the_token_install(seams, monkeypatch, c
     # targets the repo via `admin secrets token --repos`, which validates
     # against managed-repos.yaml — so a NEW canary must be registered before
     # the secrets converge runs, or init self-deadlocks on its own registry.
-    calls, root = seams
+    _calls, root = seams
     fixtures = root / "tests" / "fixtures" / "vscode-ext"
     fixtures.mkdir()
     (fixtures / ".canary-family").write_text("vscode-ext\n")
