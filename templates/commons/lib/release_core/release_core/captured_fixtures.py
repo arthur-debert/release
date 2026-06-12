@@ -33,6 +33,7 @@ fixture for real instead).
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
@@ -129,8 +130,31 @@ def _lib_root(start: str | None = None) -> str:
     return os.path.abspath(os.path.join(pkg, _LIB_ROOT_FROM_PKG))
 
 
-def _has_marker(text: str) -> bool:
-    return MARKER in text
+def _has_marker(text: str, *, is_json: bool) -> bool:
+    """Whether ``text`` carries the provenance marker.
+
+    A bare substring search would false-positive — a hand-shaped JSON fixture
+    could mention the token in a prose ``_note`` value without actually
+    declaring provenance. So the check is structural per content type:
+
+      JSON fixtures  — parse and require a TOP-LEVEL ``"captured-from"`` key
+                       (a non-empty string value). A token buried in a `_note`
+                       does not count.
+      everything else (inline test files, YAML) — require the marker *form*
+                       ``captured-from:`` (token immediately followed by a
+                       colon), the documented comment shape, not a stray
+                       mention of the bare word.
+    """
+    if is_json:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(data, dict):
+            return False
+        val = data.get(MARKER)
+        return isinstance(val, str) and val.strip() != ""
+    return f"{MARKER}:" in text
 
 
 def scan(lib_root: str | None = None) -> list[Offender]:
@@ -155,7 +179,7 @@ def scan(lib_root: str | None = None) -> list[Offender]:
             fpath = os.path.join(d, fname)
             with open(fpath, encoding="utf-8") as fh:
                 text = fh.read()
-            if not _has_marker(text):
+            if not _has_marker(text, is_json=fname.endswith(".json")):
                 rel = os.path.join(seam.fixture_dir, fname)
                 offenders.append(Offender(seam=seam.name, path=rel, surface=seam.surface))
 
@@ -168,7 +192,7 @@ def scan(lib_root: str | None = None) -> list[Offender]:
             )
         with open(fpath, encoding="utf-8") as fh:
             text = fh.read()
-        if not _has_marker(text):
+        if not _has_marker(text, is_json=False):
             offenders.append(Offender(seam=name, path=relpath, surface=surface))
 
     return offenders

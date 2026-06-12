@@ -22,11 +22,25 @@ def test_marker_token_is_machine_readable():
     assert cf.MARKER == "captured-from"
 
 
-def test_has_marker_detects_any_form():
-    assert cf._has_marker('{"captured-from": "gh pr view #1 (2026-06-12)"}')
-    assert cf._has_marker("# captured-from: lefthook 2.1.9 piped log\n")
-    assert not cf._has_marker('{"meta": {"number": 1}}')
-    assert not cf._has_marker("# hand-shaped scenario\n")
+def test_has_marker_json_requires_top_level_key():
+    # JSON fixtures: a top-level "captured-from" key with a non-empty value.
+    assert cf._has_marker('{"captured-from": "gh pr view #1 (2026-06-12)"}', is_json=True)
+    assert not cf._has_marker('{"meta": {"number": 1}}', is_json=True)
+    # A prose mention buried in a note value is NOT provenance (the false
+    # positive the substring check would have allowed — Copilot #626 thread).
+    assert not cf._has_marker(
+        '{"_note": "this is captured-from a hand-shape, not real"}', is_json=True
+    )
+    assert not cf._has_marker('{"captured-from": ""}', is_json=True)  # empty value
+    assert not cf._has_marker("not even json", is_json=True)
+
+
+def test_has_marker_non_json_requires_colon_form():
+    # Inline test files / YAML: the documented `captured-from:` comment form.
+    assert cf._has_marker("# captured-from: lefthook 2.1.9 piped log\n", is_json=False)
+    assert not cf._has_marker("# hand-shaped scenario\n", is_json=False)
+    # The bare word without the colon is a stray mention, not the marker form.
+    assert not cf._has_marker("# this was captured from a real log\n", is_json=False)
 
 
 # ── scan over a synthetic seam tree ──────────────────────────────────────────

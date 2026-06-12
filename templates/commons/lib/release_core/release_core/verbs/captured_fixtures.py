@@ -1,6 +1,15 @@
 """captured-fixtures — the external-surface fixture provenance lint verb (#623).
 
-Subcommand (also reachable as `release-core admin captured-fixtures lint`):
+This is release's OWN dev gate over release_core's tests/ — like lint-skills it
+has NO consumer-facing CLI surface (it is not wired into the `release-core admin`
+tree and not synced to consumers). The gate invokes it via the module
+entrypoint, never via a click command:
+
+  python3 -m release_core.verbs.captured_fixtures lint
+  # in practice through the working-tree wrapper:
+  bin-internal/lint-captured-fixtures.sh
+
+Subcommand:
 
   lint    Sweep the registered external-surface seams (prstate gh-API payload
           dir + the classify / apply_ruleset inline-constant test files) for
@@ -11,9 +20,8 @@ Subcommand (also reachable as `release-core admin captured-fixtures lint`):
           entry (a fixture that since got a marker — delete the entry, the
           baseline only shrinks).
 
-This is release's OWN dev gate over release_core's tests/ — it runs the WORKING
-TREE release_core via PYTHONPATH (bin-internal/lint-captured-fixtures.sh), never
-the installed wheel, so a PR adding a fixture lints against the PR's own seam
+The wrapper runs the WORKING-TREE release_core via PYTHONPATH, never the
+installed wheel, so a PR adding a fixture lints against the PR's own seam
 registry. See docs/dev/captured-fixture-provenance.md for the convention.
 
 Exit codes:
