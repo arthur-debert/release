@@ -204,17 +204,18 @@ def test_paths_line_with_extra_tab_does_not_crash(env, monkeypatch, capsys):
 
 # ── expected-FAIL classification (#594) ───────────────────────────────────────
 
-# A failing pinned-lefthook gate log whose failed checks are ALL npm-deps ones.
+# A failing pinned-lefthook gate log whose failed checks are ALL npm-deps ones
+# (captured-output summary glyphs: `✓` pass / `✗` fail — see classify.py).
 _NPM_DEPS_LOG = (
     "summary: (done in 0.42 seconds)\n"
-    "✔️ markdownlint (0.10 seconds)\n"
-    "🥊 eslint (0.01 seconds)\n"
-    "🥊 typecheck (0.02 seconds)\n"
+    "✓ markdownlint (0.10 seconds)\n"
+    "✗ eslint (0.01 seconds)\n"
+    "✗ typecheck (0.02 seconds)\n"
 )
 
 # A failing log with a toolset-provided check in the failed set — real debt.
 _MIXED_LOG = (
-    "summary: (done in 0.42 seconds)\n🥊 eslint (0.01 seconds)\n🥊 markdownlint (0.10 seconds)\n"
+    "summary: (done in 0.42 seconds)\n✗ eslint (0.01 seconds)\n✗ markdownlint (0.10 seconds)\n"
 )
 
 
