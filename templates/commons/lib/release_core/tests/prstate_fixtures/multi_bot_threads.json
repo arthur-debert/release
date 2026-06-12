@@ -1,5 +1,5 @@
 {
-  "_source": "hand-shaped after the release#502 regression: REST /pulls/{n}/comments surfaced only 3 of these 6 inline comments; GraphQL reviewThreads is the source of truth (release#515/#455)",
+  "_note": "HAND-SHAPED after the release#502 regression (NOT captured reality — see the captured-fixture baseline): REST /pulls/{n}/comments surfaced only 3 of these 6 inline comments; GraphQL reviewThreads is the source of truth (release#515/#455). Re-capture from a live multi-bot PR to drop the baseline entry.",
   "meta": {
     "number": 502,
     "headRefOid": "f00d15600d",

@@ -4,6 +4,16 @@ The byte-for-byte parity with the old `yq|jq` payload is the load-bearing
 guarantee, so the template is loaded from the real rulesets/main-protection.json.tmpl
 and the built dict is asserted field-by-field. The gh hops are exercised by
 monkeypatching gh.rest with recorded JSON (mock at the data layer — never live).
+
+captured-from: the inline `{"on": ...}` workflow-trigger dicts below are the
+parsed shapes `yamlio.load` (yq -o=json) returns for a workflow YAML read via
+the GitHub contents API — the external surface `_pr_workflow_paths` consumes.
+They mirror real consumer workflows: an always-run PR gate (`on: {pull_request:
+null}`, the `ci.yml` shape) and a path-filtered bats suite (`on: {pull_request:
+{paths: [...]}}`) — the release#416 conditional-check deadlock case. yq emits a
+bare-key map value (`pull_request:`) as JSON `null` and a string scalar `on:
+push` as `"push"`; both shapes are pinned here. See
+docs/dev/captured-fixture-provenance.md.
 """
 
 from __future__ import annotations

@@ -1,0 +1,160 @@
+"""captured_fixtures — the external-surface fixture provenance lint (#623).
+
+Covers the design core (the marker predicate + the shrink-only ratchet) and the
+load-bearing acceptance criterion: a deliberately unmarked NEW fixture fails the
+gate. The tests run the engine against a synthetic seam tree (not the real
+repo), so they pin behaviour independent of how the live baseline drains.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from release_core import captured_fixtures as cf
+from release_core.verbs import captured_fixtures as cf_verb
+
+# ── the marker predicate ─────────────────────────────────────────────────────
+
+
+def test_marker_token_is_machine_readable():
+    # The convention's contract: the token a fixture must carry.
+    assert cf.MARKER == "captured-from"
+
+
+def test_has_marker_detects_any_form():
+    assert cf._has_marker('{"captured-from": "gh pr view #1 (2026-06-12)"}')
+    assert cf._has_marker("# captured-from: lefthook 2.1.9 piped log\n")
+    assert not cf._has_marker('{"meta": {"number": 1}}')
+    assert not cf._has_marker("# hand-shaped scenario\n")
+
+
+# ── scan over a synthetic seam tree ──────────────────────────────────────────
+
+
+@pytest.fixture
+def seam_tree(tmp_path, monkeypatch):
+    """A throwaway lib root with one file-fixture seam dir + one inline seam,
+    wired into the registry via monkeypatch so the engine sweeps it instead of
+    the real repo."""
+    fixtures = tmp_path / "tests" / "fx"
+    fixtures.mkdir(parents=True)
+    (fixtures / "marked.json").write_text(
+        json.dumps({"captured-from": "gh api graphql #1 (2026-06-12)", "x": 1})
+    )
+    (fixtures / "unmarked.json").write_text(json.dumps({"x": 2}))
+    (fixtures / "ignore.txt").write_text("not a json fixture")
+
+    inline = tmp_path / "tests" / "test_inline.py"
+    inline.write_text("# captured-from: a real log\n_X = '...'\n")
+
+    monkeypatch.setattr(
+        cf,
+        "SEAMS",
+        (cf.Seam(name="demo", fixture_dir="tests/fx", suffixes=(".json",), surface="demo gh API"),),
+    )
+    monkeypatch.setattr(
+        cf, "INLINE_SEAMS", (("demo_inline", "tests/test_inline.py", "demo lefthook log"),)
+    )
+    return str(tmp_path)
+
+
+def test_scan_flags_only_unmarked_json_fixtures(seam_tree):
+    offenders = cf.scan(lib_root=seam_tree)
+    keys = {o.key for o in offenders}
+    # marked.json carries the marker; ignore.txt is not a .json fixture; the
+    # inline seam file carries its marker comment — so only unmarked.json fails.
+    assert keys == {"demo/tests/fx/unmarked.json"}
+
+
+def test_scan_flags_unmarked_inline_seam(seam_tree, tmp_path):
+    # Strip the marker from the inline seam → it becomes an offender.
+    (tmp_path / "tests" / "test_inline.py").write_text("_X = '...'\n")
+    offenders = cf.scan(lib_root=seam_tree)
+    keys = {o.key for o in offenders}
+    assert "demo_inline/tests/test_inline.py" in keys
+
+
+def test_scan_raises_on_missing_seam_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        cf,
+        "SEAMS",
+        (cf.Seam(name="gone", fixture_dir="tests/nope", suffixes=(".json",), surface="x"),),
+    )
+    monkeypatch.setattr(cf, "INLINE_SEAMS", ())
+    with pytest.raises(cf.CapturedFixtureError, match="registered seam dir missing"):
+        cf.scan(lib_root=str(tmp_path))
+
+
+# ── the shrink-only ratchet ──────────────────────────────────────────────────
+
+
+def _off(key):
+    seam, _, path = key.partition("/")
+    return cf.Offender(seam=seam, path=path, surface="x")
+
+
+def test_apply_baseline_grandfathers_listed_fails_new():
+    offenders = [_off("s/a.json"), _off("s/b.json")]
+    baseline = [{"key": "s/a.json", "reason": "known"}]
+    failing, grandfathered, stale = cf.apply_baseline(offenders, baseline)
+    assert [o.key for o in failing] == ["s/b.json"]  # NEW unmarked → fails
+    assert [o.key for o in grandfathered] == ["s/a.json"]  # listed → grandfathered
+    assert stale == []
+
+
+def test_apply_baseline_flags_stale_entry():
+    # A baseline entry with no matching offender = the fixture got its marker;
+    # the baseline only shrinks, so the stale entry must be deleted.
+    offenders: list[cf.Offender] = []
+    baseline = [{"key": "s/gone.json", "reason": "drained"}]
+    failing, grandfathered, stale = cf.apply_baseline(offenders, baseline)
+    assert failing == []
+    assert grandfathered == []
+    assert [e["key"] for e in stale] == ["s/gone.json"]
+
+
+# ── the verb (gate entrypoint) ───────────────────────────────────────────────
+
+
+def test_verb_lint_passes_clean_tree(seam_tree, monkeypatch, capsys):
+    # Baseline covers the one offender → lint exits 0.
+    monkeypatch.setattr(cf, "_lib_root", lambda start=None: seam_tree)
+    monkeypatch.setattr(
+        cf, "load_baseline", lambda lib_root=None: [{"key": "demo/tests/fx/unmarked.json"}]
+    )
+    rc = cf_verb.main(["lint"])
+    assert rc == 0
+    assert "0 new unmarked" in capsys.readouterr().out
+
+
+def test_verb_lint_fails_on_new_unmarked_fixture(seam_tree, tmp_path, monkeypatch, capsys):
+    # The acceptance criterion: drop a NEW unmarked fixture into the seam → the
+    # gate (verb) fails. Empty baseline so nothing is grandfathered.
+    (tmp_path / "tests" / "fx" / "brand_new.json").write_text(json.dumps({"surprise": 1}))
+    monkeypatch.setattr(cf, "_lib_root", lambda start=None: seam_tree)
+    monkeypatch.setattr(cf, "load_baseline", lambda lib_root=None: [])
+    rc = cf_verb.main(["lint"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "VIOLATION" in err
+    assert "brand_new.json" in err
+
+
+def test_verb_lint_fails_on_stale_baseline_entry(seam_tree, monkeypatch, capsys):
+    monkeypatch.setattr(cf, "_lib_root", lambda start=None: seam_tree)
+    monkeypatch.setattr(
+        cf,
+        "load_baseline",
+        lambda lib_root=None: [
+            {"key": "demo/tests/fx/unmarked.json"},
+            {"key": "demo/tests/fx/already_marked.json"},  # no matching offender
+        ],
+    )
+    rc = cf_verb.main(["lint"])
+    assert rc == 1
+    assert "STALE baseline entry" in capsys.readouterr().err
+
+
+def test_verb_rejects_unknown_subcommand(capsys):
+    assert cf_verb.main(["bogus"]) == cf_verb.EXIT_USAGE

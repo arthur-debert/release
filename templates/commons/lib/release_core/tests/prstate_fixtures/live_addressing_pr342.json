@@ -1,5 +1,5 @@
 {
-  "_source": "captured live from arthur-debert/release#342 (release#337)",
+  "captured-from": "gh pr view + gh api graphql on arthur-debert/release#342, a throwaway probe PR driven through real Copilot+Gemini reviews (release#337, 2026-06-11)",
   "meta": {
     "number": 342,
     "headRefOid": "cb17ff490e3af59cc26e7706e8caac04aed31a88",

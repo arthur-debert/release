@@ -179,6 +179,29 @@ pre-commit:
         fi
         bin-internal/lint-consumer-contract.sh
 
+    captured-fixtures-lint:
+      # The external-surface fixture provenance lint (#623): every fixture under
+      # a registered seam (prstate gh-API payloads + the classify/apply_ruleset
+      # inline-constant test files) must carry a `captured-from:` provenance
+      # marker. A NEW unmarked fixture fails; a shrink-only baseline grandfathers
+      # today's synthetic offenders; a now-marked fixture's stale baseline entry
+      # also fails. Kills the green-suite/wrong-world defect class (#619/#620/#612)
+      # for covered seams. Runs the WORKING-TREE release_core (never the wheel).
+      # See docs/dev/captured-fixture-provenance.md.
+      glob:
+        - "templates/commons/lib/release_core/release_core/captured_fixtures.py"
+        - "templates/commons/lib/release_core/release_core/verbs/captured_fixtures.py"
+        - "templates/commons/lib/release_core/tests/prstate_fixtures/**"
+        - "templates/commons/lib/release_core/tests/test_core_classify.py"
+        - "templates/commons/lib/release_core/tests/test_core_apply_ruleset.py"
+        - "templates/commons/lib/release_core/tests/captured-fixture-lint-baseline.yaml"
+      run: |
+        if ! command -v python3 >/dev/null 2>&1; then
+          echo "ERROR: python3 not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          exit 1
+        fi
+        bin-internal/lint-captured-fixtures.sh
+
     lint-skills:
       # Markdownlint our OWN skill docs. Vendored skills (those carrying
       # an .upstream provenance marker) are skipped by the script — we
