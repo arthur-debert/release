@@ -19,14 +19,19 @@ from release_core.prstate.state import TaskState, TaskStatus
 
 
 class _Reviewer:
-    """The two adapter fields the wait classifier reads: name + required."""
+    """The one adapter field the wait classifier reads: name. Whether a reviewer
+    GATES is no longer a per-adapter flag — it is the config-resolved required
+    SET passed into the classifier (release#622), so the test injects that set
+    directly rather than tagging adapters required/best-effort."""
 
-    def __init__(self, name: str, *, required: bool = True):
+    def __init__(self, name: str):
         self.name = name
-        self.required = required
 
 
-REGISTRY = [_Reviewer("alpha"), _Reviewer("beta", required=False)]
+# The injected REQUIRED set: only `alpha` gates. `beta` models a best-effort
+# reviewer by simply NOT being in the required set — exactly how the config
+# knob expresses it.
+REQUIRED = [_Reviewer("alpha")]
 
 
 def _status(state: TaskState, *, reviewers: dict[str, str] | None = None) -> TaskStatus:
@@ -72,7 +77,7 @@ class _Harness:
     def run(self, **kwargs) -> int:
         return wait.wait_for_action(
             5,
-            registry=REGISTRY,
+            registry=REQUIRED,
             snapshot=self.snapshot,
             sleep=self.sleep,
             clock=self.clock,
@@ -105,7 +110,7 @@ def test_done_required_reviewer_does_not_read_as_needs_request():
     # alpha done + nothing pending: not REVIEWS_PENDING territory at all, but
     # the classifier must also not trip on the done lifecycle value.
     status = _status(TaskState.REVIEWS_PENDING, reviewers={"alpha": "done_clean"})
-    assert wait._needs_request(status, REGISTRY) is False
+    assert wait._needs_request(status, REQUIRED) is False
 
 
 def test_best_effort_reviewer_never_forces_a_request():
@@ -114,8 +119,25 @@ def test_best_effort_reviewer_never_forces_a_request():
         TaskState.REVIEWS_PENDING,
         reviewers={"alpha": "in_progress", "beta": "not_requested"},
     )
-    assert wait._needs_request(status, REGISTRY) is False
-    assert wait._agent_action_needed(status, REGISTRY) is False
+    assert wait._needs_request(status, REQUIRED) is False
+    assert wait._agent_action_needed(status, REQUIRED) is False
+
+
+def test_injected_required_set_flows_to_the_engine_evaluation(monkeypatch):
+    # The injected required set must reach BOTH the request-vs-wait classifier
+    # AND the engine evaluation (`_snapshot`) — one source, no disagreement.
+    # With NO snapshot injected, the default `_snapshot(pr, required)` runs;
+    # capture the `required` it receives and confirm it is the injected set.
+    seen: dict = {}
+
+    def fake_snapshot(pr, required=None):
+        seen["required"] = required
+        return READY  # READY exits immediately
+
+    monkeypatch.setattr(wait, "_snapshot", fake_snapshot)
+    rc = wait.wait_for_action(5, registry=REQUIRED, sleep=lambda s: None, clock=lambda: 0.0)
+    assert rc == 0
+    assert seen["required"] is REQUIRED
 
 
 # --- the waiting loop ----------------------------------------------------------
@@ -306,7 +328,7 @@ def test_clock_drift_past_deadline_clamps_sleep_at_zero(capsys):
     sleeps: list[float] = []
     rc = wait.wait_for_action(
         5,
-        registry=REGISTRY,
+        registry=REQUIRED,
         snapshot=lambda pr: VALIDATING,
         sleep=sleeps.append,
         clock=clock,
@@ -331,7 +353,7 @@ def test_wait_catches_state_landing_during_final_sleep(capsys):
     assert (
         wait.wait_for_action(
             5,
-            registry=REGISTRY,
+            registry=REQUIRED,
             snapshot=snapshot,
             sleep=h.sleep,
             clock=h.clock,
@@ -420,7 +442,7 @@ def test_gh_failure_resolving_the_pr_is_exit_1_not_no_pr(monkeypatch, capsys):
 
 
 def test_gh_failure_is_exit_1(monkeypatch, capsys):
-    def boom(pr: int) -> TaskStatus:
+    def boom(pr: int, required=None) -> TaskStatus:
         raise GhError("gh exploded")
 
     monkeypatch.setattr(wait, "_snapshot", boom)

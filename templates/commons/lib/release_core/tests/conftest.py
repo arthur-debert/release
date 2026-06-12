@@ -43,3 +43,15 @@ def load_context(name: str) -> PullContext:
 def context():
     """Return the loader so a test can pick its scenario: `context('name')`."""
     return load_context
+
+
+@pytest.fixture(autouse=True)
+def _reset_required_reviewer_cache():
+    """Clear the process-lifetime required-reviewer cache around every test, so a
+    test that resolves the required set (which reads `.release-sync.yaml`) never
+    leaks its result into the next."""
+    from release_core.prstate import reviewers
+
+    reviewers._reset_required_cache()
+    yield
+    reviewers._reset_required_cache()

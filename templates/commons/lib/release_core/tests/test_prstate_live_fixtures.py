@@ -10,14 +10,26 @@ resolved-thread transition to READY.
 
 from __future__ import annotations
 
+from release_core.prstate.reviewers import by_name
 from release_core.prstate.state import TaskState, evaluate
+
+# These payloads were captured before CodeRabbit was added as a second required
+# reviewer (release#622), so they carry only Copilot + Gemini. Drive the engine
+# with the required SET that was in effect then — just Copilot — which is itself
+# the data-driven config the parallel-required design rests on: the same engine,
+# a different required set, no code change.
+_COPILOT_ONLY = [by_name("copilot")]
 
 
 def test_live_addressing_real_payload(context):
-    status = evaluate(context("live_addressing_pr342"))
+    status = evaluate(context("live_addressing_pr342"), required=_COPILOT_ONLY)
     assert status.state is TaskState.ADDRESSING
     # Both bots reviewed and left a comment; real login variants matched.
-    assert status.reviewers == {"copilot": "done_comments", "gemini": "done_comments"}
+    assert status.reviewers == {
+        "copilot": "done_comments",
+        "coderabbit": "not_requested",
+        "gemini": "done_comments",
+    }
     assert status.open_threads == 2
     assert status.cycles == 1
     assert status.breaker is None
@@ -25,7 +37,7 @@ def test_live_addressing_real_payload(context):
 
 def test_live_ready_real_payload(context):
     # Same PR after replying + resolving both threads — drives to READY.
-    status = evaluate(context("live_ready_pr342"))
+    status = evaluate(context("live_ready_pr342"), required=_COPILOT_ONLY)
     assert status.state is TaskState.READY
     assert status.open_threads == 0
     assert status.checks.value == "green"

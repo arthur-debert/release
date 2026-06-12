@@ -14,6 +14,13 @@
       "state": "COMMENTED",
       "commit_id": "eee555",
       "body": "One note, since addressed."
+    },
+    {
+      "id": 5302,
+      "user": { "login": "coderabbitai[bot]" },
+      "state": "APPROVED",
+      "commit_id": "eee555",
+      "body": "Approved."
     }
   ],
   "threads": [

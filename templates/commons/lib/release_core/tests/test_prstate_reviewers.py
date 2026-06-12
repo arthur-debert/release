@@ -10,20 +10,30 @@ from __future__ import annotations
 from release_core.prstate.model import ReviewLifecycle
 from release_core.prstate.reviewers import (
     REGISTRY,
+    CodeRabbitAdapter,
     CopilotAdapter,
     GeminiAdapter,
     required_reviewers,
 )
 
 COPILOT = CopilotAdapter()
+CODERABBIT = CodeRabbitAdapter()
 GEMINI = GeminiAdapter()
 
 
-def test_registry_is_copilot_required_gemini_best_effort():
-    assert [r.name for r in REGISTRY] == ["copilot", "gemini"]
-    assert [r.name for r in required_reviewers()] == ["copilot"]
-    assert COPILOT.required is True
-    assert GEMINI.required is False
+def test_registry_catalogs_copilot_coderabbit_and_gemini():
+    # The registry is the CATALOG; which entries gate is the config knob.
+    assert [r.name for r in REGISTRY] == ["copilot", "coderabbit", "gemini"]
+    # `requestable` marks eligibility to be a required gate (a real request
+    # edge + the #614 attach-verification), NOT the current required set.
+    assert COPILOT.requestable is True
+    assert CODERABBIT.requestable is True
+    assert GEMINI.requestable is False
+
+
+def test_default_required_set_is_copilot_and_coderabbit():
+    # The shipped default config: both gate Ready (parallel-required, #622).
+    assert [r.name for r in required_reviewers()] == ["copilot", "coderabbit"]
 
 
 def test_copilot_done_with_open_comment(context):
@@ -125,7 +135,8 @@ def test_by_name_resolves_registry_adapters():
 
     assert by_name("copilot") is not None and by_name("copilot").name == "copilot"
     assert by_name("GEMINI") is not None and by_name("GEMINI").name == "gemini"
-    assert by_name("coderabbit") is None  # no adapter while on trial (#555)
+    assert by_name("coderabbit") is not None and by_name("coderabbit").name == "coderabbit"
+    assert by_name("nosuchbot") is None
 
 
 def test_copilot_request_goes_through_gh_pr_edit_graphql(monkeypatch):
@@ -173,4 +184,77 @@ def test_adapters_declare_their_instruction_files():
     # Structure only (#555): the adapter declares where its review-instruction
     # file lives; shipping content there is a separate onboarding decision.
     assert COPILOT.instruction_files == (".github/copilot-instructions.md",)
+    assert CODERABBIT.instruction_files == (".coderabbit.yaml",)
     assert GEMINI.instruction_files == (".gemini/styleguide.md",)
+
+
+# --- CodeRabbit adapter (release#622) ---------------------------------------
+
+
+def test_coderabbit_matches_its_bot_login():
+    assert CODERABBIT.matches("coderabbitai[bot]") is True
+    assert CODERABBIT.matches("CodeRabbit") is True
+    assert CODERABBIT.matches("Copilot") is False
+
+
+def test_coderabbit_done_on_head_with_open_comment():
+    # Head-strict + leaves a thread → DONE_COMMENTS, with the open thread tracked.
+    from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
+
+    thread = Thread(
+        thread_id="PRT_cr1",
+        is_resolved=False,
+        comments=(ReviewComment(1, "a.py", 3, "nit", "coderabbitai[bot]"),),
+    )
+    ctx = PullContext(
+        number=1,
+        head_sha="h",
+        is_draft=True,
+        reviews=[Review(1, "coderabbitai[bot]", "COMMENTED", "h", "")],
+        threads=[thread],
+    )
+    assert CODERABBIT.detect(ctx) == ReviewLifecycle.DONE_COMMENTS
+    assert len(CODERABBIT.open_threads(ctx)) == 1
+
+
+def test_coderabbit_is_head_strict_like_copilot():
+    # A review on an earlier head is stale — must NOT read as done on this head.
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "coderabbitai[bot]", "COMMENTED", "old", "")],
+        requested_logins=["coderabbitai[bot]"],
+    )
+    assert CODERABBIT.detect(ctx) == ReviewLifecycle.REQUESTED
+
+
+def test_dismissed_coderabbit_review_does_not_count_done():
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="h",
+        is_draft=True,
+        reviews=[Review(1, "coderabbitai[bot]", "DISMISSED", "h", "")],
+        requested_logins=["coderabbitai[bot]"],
+    )
+    assert CODERABBIT.detect(ctx) == ReviewLifecycle.REQUESTED
+
+
+def test_coderabbit_request_and_cancel_go_through_gh_pr_edit(monkeypatch):
+    # The same GraphQL add-reviewer path Copilot uses — it creates a real
+    # review_requested edge, so the generic #614 attach-verification applies.
+    from release_core.prstate import ghapi
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        ghapi,
+        "pr_edit_reviewer",
+        lambda pr, reviewer, remove=False: calls.append((pr, reviewer, remove)),
+    )
+    assert CODERABBIT.request(55) is True
+    assert CODERABBIT.cancel(55) is True
+    assert calls == [(55, "coderabbitai[bot]", False), (55, "coderabbitai[bot]", True)]

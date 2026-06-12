@@ -1,0 +1,1 @@
+- prstate: CodeRabbit as a second required reviewer; engine tracks both reviewers against current head

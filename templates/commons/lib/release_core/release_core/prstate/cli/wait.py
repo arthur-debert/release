@@ -42,7 +42,7 @@ from .. import ghapi, gitstat
 from ..fetch import gather
 from ..ghapi import GhError
 from ..model import ReviewLifecycle
-from ..reviewers import REGISTRY, ReviewerAdapter
+from ..reviewers import ReviewerAdapter, required_reviewers
 from ..state import TaskState, TaskStatus, evaluate, no_pr
 from .task_status import emit
 
@@ -150,10 +150,17 @@ def wait_for_action(
     """Poll the state engine until the snapshot calls for agent action.
 
     `poll` fixes the interval (no backoff); default is the module cadence.
-    `registry`/`snapshot`/`sleep`/`clock` are injectable for tests.
+    `registry`/`snapshot`/`sleep`/`clock` are injectable for tests. `registry`
+    is the required-reviewer set — default the config-resolved one (release#622),
+    a test injects its own. It is resolved ONCE here and used for BOTH the engine
+    evaluation (via `_snapshot`) and the request-vs-wait classifier, so an
+    injected set flows to both and they can never disagree.
     """
-    registry = registry if registry is not None else REGISTRY
-    take = snapshot if snapshot is not None else _snapshot
+    required = registry if registry is not None else required_reviewers()
+    # The default snapshot is bound to the SAME resolved `required` set, so the
+    # engine evaluation and the classifier below read one source. A test that
+    # injects its own `snapshot` owns that wiring itself.
+    take = snapshot if snapshot is not None else (lambda pr: _snapshot(pr, required))
     deadline_cap = MAX_WAIT_S if timeout is None else timeout
     fixed = poll is not None
     interval: float = poll if poll is not None else POLL_INITIAL_S
@@ -175,7 +182,7 @@ def wait_for_action(
     # transient (TLS handshake timeout, API blip) — those go through
     # _poll_with_retry below.
     status = take(pr)
-    if _agent_action_needed(status, registry):
+    if _agent_action_needed(status, required):
         emit(status)
         return 0
     print(_cadence_line(poll=poll, timeout=deadline_cap))
@@ -186,7 +193,7 @@ def wait_for_action(
         if not fixed:
             interval = min(interval * POLL_BACKOFF, POLL_MAX_S)
         status = _poll_with_retry(take, pr, sleep=sleep)
-        if _agent_action_needed(status, registry):
+        if _agent_action_needed(status, required):
             print(f"-- agent action available after {_fmt(clock() - start)} --")
             emit(status)
             return 0
@@ -196,7 +203,7 @@ def wait_for_action(
     # sleep that carries the clock past the deadline, and exiting on the stale
     # snapshot would falsely report a timeout.
     status = _poll_with_retry(take, pr, sleep=sleep)
-    if _agent_action_needed(status, registry):
+    if _agent_action_needed(status, required):
         print(f"-- agent action available after {_fmt(clock() - start)} --")
         emit(status)
         return 0
@@ -211,10 +218,18 @@ def wait_for_action(
 # --- snapshot + classification ------------------------------------------------
 
 
-def _snapshot(pr: int) -> TaskStatus:
-    """One engine evaluation: fetch the PR context, run `evaluate()`."""
+def _snapshot(pr: int, required: list[ReviewerAdapter] | None = None) -> TaskStatus:
+    """One engine evaluation: fetch the PR context, run `evaluate()`.
+
+    `required` is the gating reviewer set to evaluate against — passed in by
+    `wait_for_action` so the engine and the request-vs-wait classifier share
+    ONE resolved set. None resolves the config default (cached), the seam a
+    direct caller uses; config resolution stays at the entrypoint, keeping the
+    engine call pure.
+    """
+    required = required if required is not None else required_reviewers()
     ctx = gather(pr)
-    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required)
 
 
 def _poll_with_retry(
@@ -252,7 +267,7 @@ def _poll_with_retry(
             sleep(backoff)
 
 
-def _agent_action_needed(status: TaskStatus, registry: list[ReviewerAdapter]) -> bool:
+def _agent_action_needed(status: TaskStatus, required: list[ReviewerAdapter]) -> bool:
     """True when the snapshot calls for agent action NOW — nothing to wait on.
 
     Every non-waiting state is agent action. REVIEWS_PENDING splits: a pending
@@ -264,14 +279,16 @@ def _agent_action_needed(status: TaskStatus, registry: list[ReviewerAdapter]) ->
         return True
     if status.state is not TaskState.REVIEWS_PENDING:
         return False
-    return _needs_request(status, registry)
+    return _needs_request(status, required)
 
 
-def _needs_request(status: TaskStatus, registry: list[ReviewerAdapter]) -> bool:
-    """A pending required reviewer is not requested on the head -> request it."""
-    for adapter in registry:
-        if not adapter.required:
-            continue
+def _needs_request(status: TaskStatus, required: list[ReviewerAdapter]) -> bool:
+    """A pending required reviewer is not requested on the head -> request it.
+
+    Reads the config-resolved required SET (release#622), not the whole
+    registry — a best-effort reviewer never drives a (re-)request.
+    """
+    for adapter in required:
         lifecycle = status.reviewers.get(adapter.name)
         if lifecycle is None or lifecycle in _DONE_VALUES:
             continue

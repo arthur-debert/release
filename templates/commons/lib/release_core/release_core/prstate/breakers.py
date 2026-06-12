@@ -1,13 +1,18 @@
 """Circuit breakers — detect a diverging review loop and STOP before iterating.
 
-Heuristics for the review-loop circuit breakers. A *cycle* is one review by a
-REQUIRED reviewer; its findings are the review-thread comments attached to
-that review (GraphQL `reviewThreads`, the single source of truth for inline
-comments — the REST `/pulls/{n}/comments` fetch surfaced only a subset and is
-gone; release#515). All inputs derive from gh review history, except diff
-sizes, which come from git and are injected via `diff_sizer` — omitted in pure
-evaluation, in which case the diff-trajectory breaker is skipped rather than
-guessed.
+Heuristics for the review-loop circuit breakers. A *cycle* is one ITERATION
+ROUND — one head SHA that got re-reviewed — NOT one review object. This is the
+load-bearing distinction once there are multiple required reviewers
+(release#622): N required reviewers each reviewing a head would otherwise count
+as N cycles, so two normal review rounds with two reviewers would read as four
+and trip the cycle cap. A cycle is keyed by commit SHA: every required
+reviewer's findings on the same head fold into ONE cycle. Its findings are the
+review-thread comments attached to those reviews (GraphQL `reviewThreads`, the
+single source of truth for inline comments — the REST `/pulls/{n}/comments`
+fetch surfaced only a subset and is gone; release#515). All inputs derive from
+gh review history, except diff sizes, which come from git and are injected via
+`diff_sizer` — omitted in pure evaluation, in which case the diff-trajectory
+breaker is skipped rather than guessed.
 
 The verdict folds into the state machine as the STOP form of BLOCKED, and only
 when the loop would otherwise iterate (open threads remain). A converged PR is
@@ -20,7 +25,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from .model import PullContext
-from .reviewers import required_reviewers
+from .reviewers import ReviewerAdapter, required_reviewers
 
 CYCLE_CAP = 3
 DIFF_GROWTH_TOLERANCE = 1.1  # allow 10% jitter before calling it "growing"
@@ -47,34 +52,59 @@ class BreakerVerdict:
     cycles: int
 
 
-def build_cycles(ctx: PullContext, diff_sizer: DiffSizer | None = None) -> list[Cycle]:
-    """One Cycle per required-reviewer review, chronological, with its findings.
+def build_cycles(
+    ctx: PullContext,
+    diff_sizer: DiffSizer | None = None,
+    required: list[ReviewerAdapter] | None = None,
+) -> list[Cycle]:
+    """One Cycle per HEAD SHA reviewed by a required reviewer, chronological.
 
-    Findings come from the thread comments (resolved or not — a resolved
-    finding was still a finding of that cycle), keyed by the review each
-    comment was submitted with (`ReviewComment.review_id`). Login matching is
-    the adapter's job — never re-roll an author filter here (a reviewer's
-    review login and comment author can render differently; release#455).
+    Cycles are iteration ROUNDS, not review objects: all required reviewers'
+    reviews on the same head fold into a single cycle, so N required reviewers
+    don't multiply the cycle count (release#622 — that double-count tripped the
+    cap on normal PRs). A cycle's findings are the UNION of those reviews'
+    thread comments (resolved or not — a resolved finding was still a finding of
+    that round), keyed by the review each comment was submitted with
+    (`ReviewComment.review_id`). Login matching is the adapter's job — never
+    re-roll an author filter here (a reviewer's review login and comment author
+    can render differently; release#455).
+
+    `required` is the gating set; defaults to the config-resolved one but the
+    engine threads its own set in so breakers count against the SAME reviewers
+    everything else gates on (keeps `evaluate` honest under an override).
     """
-    required = required_reviewers()
+    required = required if required is not None else required_reviewers()
     reviews = sorted(
         (r for r in ctx.reviews if any(a.matches(r.author) for a in required)),
         key=lambda r: r.review_id,
     )
     thread_comments = [c for t in ctx.threads for c in t.comments]
+
+    # Group by head SHA, preserving first-seen (chronological) order. Each head
+    # is one cycle; its findings union every required review on that head.
+    review_ids_by_head: dict[str, list[int]] = {}
+    for review in reviews:
+        review_ids_by_head.setdefault(review.commit_id, []).append(review.review_id)
+
     cycles: list[Cycle] = []
-    for index, review in enumerate(reviews, start=1):
-        keys = frozenset(
-            (c.path, c.line) for c in thread_comments if c.review_id == review.review_id
-        )
-        size = diff_sizer(review.commit_id) if diff_sizer else None
-        cycles.append(Cycle(index, review.commit_id, keys, size))
+    for index, (commit_id, review_ids) in enumerate(review_ids_by_head.items(), start=1):
+        id_set = set(review_ids)
+        keys = frozenset((c.path, c.line) for c in thread_comments if c.review_id in id_set)
+        size = diff_sizer(commit_id) if diff_sizer else None
+        cycles.append(Cycle(index, commit_id, keys, size))
     return cycles
 
 
-def evaluate_breakers(ctx: PullContext, diff_sizer: DiffSizer | None = None) -> BreakerVerdict:
-    """Run the breaker stack (priority order); first to fire wins."""
-    cycles = build_cycles(ctx, diff_sizer)
+def evaluate_breakers(
+    ctx: PullContext,
+    diff_sizer: DiffSizer | None = None,
+    required: list[ReviewerAdapter] | None = None,
+) -> BreakerVerdict:
+    """Run the breaker stack (priority order); first to fire wins.
+
+    `required` is threaded through to `build_cycles` so cycle counting uses the
+    SAME required set the engine gates on (release#622)."""
+    cycles = build_cycles(ctx, diff_sizer, required=required)
     n = len(cycles)
 
     if n > CYCLE_CAP:

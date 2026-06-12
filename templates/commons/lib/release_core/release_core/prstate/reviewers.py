@@ -20,7 +20,13 @@ class ReviewerAdapter:
     reviewer's per-repo code-review instructions live."""
 
     name: str = ""
-    required: bool = False
+    # Whether this adapter HAS a request mechanism (a real `review_requested`
+    # edge it can place + the #614 attach-verification). Best-effort
+    # auto-triggering backends (Gemini) set this False and can never be a
+    # required, gating reviewer. WHICH requestable adapters are *currently*
+    # required is NOT decided here — it is the config knob in
+    # `reviewers_config` (release#622); this flag only marks eligibility.
+    requestable: bool = False
     # Repo-relative path(s) of this reviewer's code-review instruction file(s).
     # Structure only: the adapter declares the location; whether content ships
     # there is a per-reviewer onboarding decision.
@@ -83,7 +89,7 @@ class CopilotAdapter(ReviewerAdapter):
     """
 
     name = "copilot"
-    required = True
+    requestable = True
     instruction_files = (".github/copilot-instructions.md",)
 
     def matches(self, login: str) -> bool:
@@ -111,6 +117,61 @@ class CopilotAdapter(ReviewerAdapter):
         return ReviewLifecycle.NOT_REQUESTED
 
 
+class CodeRabbitAdapter(ReviewerAdapter):
+    """CodeRabbit is a requestable GitHub App that posts a discrete review on the
+    PR head SHA — structurally the same model as Copilot. It is in the DEFAULT
+    required set alongside Copilot (release#622), but whether it gates is a
+    config decision, not an adapter property: the required set is config-driven
+    (`reviewers_config`) and a repo can override it via `.release-sync.yaml`.
+    This adapter only declares CodeRabbit *requestable* (it has a real request
+    edge + the #614 attach-verification, so it is ELIGIBLE to be required).
+
+    Default policy is parallel-required, not fallback: when both Copilot and
+    CodeRabbit are required, each gates Ready, so a PR is reviewed only when BOTH
+    have a fresh review on the current head. The accepted trade-off is
+    availability — one required reviewer's outage holds Ready until it recovers —
+    in exchange for always-on dual coverage and no single point of failure on
+    review *quality*.
+
+    Like Copilot, CodeRabbit re-reviews each push, so it is head-strict: a
+    review against an earlier commit is stale and must not count as done for the
+    current head. The request goes through `gh pr edit --add-reviewer` (the
+    GraphQL path that resolves the App's real node id and creates a real
+    `review_requested` edge) — so the generic #614 attach-verification in
+    `pr review request` applies unchanged: a silently dropped attach fails loud.
+    """
+
+    name = "coderabbit"
+    requestable = True
+    instruction_files = (".coderabbit.yaml",)
+    # The reviewer handle `gh pr edit --add-reviewer` resolves to the App's node
+    # id. CodeRabbit's bot login on submitted reviews / pending requests is
+    # `coderabbitai[bot]`; `matches` keys off the stable `coderabbit` substring.
+    _REVIEWER_HANDLE = "coderabbitai[bot]"
+
+    def matches(self, login: str) -> bool:
+        return "coderabbit" in login.lower()
+
+    def request(self, pr: int) -> bool:
+        # Same GraphQL add-reviewer path Copilot uses: it resolves the App's
+        # real node id and creates a real review_requested edge (the REST
+        # requested_reviewers POST silently no-ops for App reviewers).
+        ghapi.pr_edit_reviewer(pr, self._REVIEWER_HANDLE)
+        return True
+
+    def cancel(self, pr: int) -> bool:
+        ghapi.pr_edit_reviewer(pr, self._REVIEWER_HANDLE, remove=True)
+        return True
+
+    def detect(self, ctx: PullContext) -> ReviewLifecycle:
+        # Head-strict, DISMISSED-aware — identical lifecycle shape to Copilot.
+        if any(self.matches(r.author) and r.state != "DISMISSED" for r in ctx.reviews_on_head()):
+            return self._done_state(ctx)
+        if any(self.matches(login) for login in ctx.requested_logins):
+            return ReviewLifecycle.REQUESTED
+        return ReviewLifecycle.NOT_REQUESTED
+
+
 class GeminiAdapter(ReviewerAdapter):
     """Gemini signals weakly and is best-effort.
 
@@ -129,7 +190,7 @@ class GeminiAdapter(ReviewerAdapter):
     """
 
     name = "gemini"
-    required = False
+    requestable = False  # auto-triggers; no request edge, so never a required gate
     # Declared location only — no content shipped until Gemini is onboarded
     # as a required reviewer.
     instruction_files = (".gemini/styleguide.md",)
@@ -163,12 +224,48 @@ class GeminiAdapter(ReviewerAdapter):
         )
 
 
-# The canonical, uniform reviewer set for every consumer. Defined once, here.
-REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), GeminiAdapter()]
+# The adapter CATALOG: every reviewer the engine knows how to read/request. This
+# is the registry (#558) — adding a backend is adding an adapter here. WHICH of
+# these gate Ready is NOT decided here: that is the config knob in
+# `reviewers_config` (release#622), default [copilot, coderabbit].
+REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), CodeRabbitAdapter(), GeminiAdapter()]
+
+
+# Process-lifetime cache of the resolved required set. Resolving reads the
+# consumer's `.release-sync.yaml` via yq (a subprocess); `pr wait` calls
+# `required_reviewers()` on EVERY poll, so without this a long wait would spawn
+# a yq process each tick — needless overhead, and a transient yq/PATH blip could
+# break an otherwise-healthy wait. The config cannot change mid-command, so
+# caching for the process lifetime is safe. Held as an IMMUTABLE tuple so a
+# caller mutating the returned list can't corrupt the cache; tests reset it via
+# `_reset_required_cache()`.
+_REQUIRED_CACHE: tuple[ReviewerAdapter, ...] | None = None
 
 
 def required_reviewers() -> list[ReviewerAdapter]:
-    return [r for r in REGISTRY if r.required]
+    """The currently-required reviewer adapters, resolved from config (cached).
+
+    The required SET is data (`reviewers_config`: a shipped default plus a
+    per-repo `.release-sync.yaml` override), not the registry's structure — so
+    swapping/re-ordering required reviewers is a one-line config edit. Names map
+    back to these adapters; an unknown name fails loud. Resolved once per
+    process (see `_REQUIRED_CACHE`); each call returns a FRESH list copy, so a
+    caller may mutate it freely without disturbing the cache.
+    """
+    global _REQUIRED_CACHE
+    if _REQUIRED_CACHE is None:
+        from . import reviewers_config
+
+        override = reviewers_config.load_override()
+        names = reviewers_config.resolve_required_names(override)
+        _REQUIRED_CACHE = tuple(reviewers_config.required_reviewers(names))
+    return list(_REQUIRED_CACHE)
+
+
+def _reset_required_cache() -> None:
+    """Clear the resolved-required-set cache — for tests that vary the config."""
+    global _REQUIRED_CACHE
+    _REQUIRED_CACHE = None
 
 
 def by_name(name: str) -> ReviewerAdapter | None:

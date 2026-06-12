@@ -14,6 +14,13 @@
       "state": "COMMENTED",
       "commit_id": "aaa111",
       "body": "Left a few inline notes."
+    },
+    {
+      "id": 5002,
+      "user": { "login": "coderabbitai[bot]" },
+      "state": "APPROVED",
+      "commit_id": "aaa111",
+      "body": "No blocking concerns."
     }
   ],
   "threads": [
