@@ -103,3 +103,20 @@ The Development Life Cycle
         cycle for its part — implement, then shepherd its own PR through review
         and CI to READY — and reports back to the coordinating agent, which
         integrates the parts and keeps the overall feature on track.
+
+        The coordinating agent will drive the merging (including the go no-go) of
+        each subagent workstream into the epic branch, without user approval.
+
+        When all initial workstreams are merged into the epic branch, the coordinating agent will
+        look for fallouts either in gh issues created during execution as well as things come up During the implementation period the coordinating agent will then create a final work stream and assign it to a sub-agent to handle these fallouts. This is critical because during a complex execution often it's the case that we don't perfectly plan or don't realize that things need to be done ahead of time. During the implementation we run into this.
+
+        Now it's actually a good thing that the work stream agents do not side-quest every little thing they find because else they wouldn't get anything done. This is a right thing but it's a bad thing if the epic execution piles up fallouts and follow-ups and things like that that are decoupled from the actual epic. We want to have this final conversion step where we get this done and we don't leave anything behind.
+
+        Now the only obvious caveat for this is these things have to be under the scope. If it's a related but not directly involved feature you don't want to do it but if it's during the normal development it becomes obvious it's part of it and should be done. 
+
+        When that branch merges to the epic branch, the coordinating agent will delegate an exploration agent to check what in the documentation needs updating, fixing, removing and then this agent will do it on a final PR. This includes both our of code docs/ (be it dev, user, reference documents) and doc strings, specially module levels ones that go over the design, trade-offs, pointers, head-ups, etc.
+
+        When that is done, the coordinating agent will create the final pr, double checking which issues it does close or not, write a high level description of the full epic, pointing to the related issues. It will then Sheppard the PR through the same process (manage reviewers, checks, mergeability) and finally flip to ready for the user's final merge.
+
+        When that PR is merged the coordinating agent will cut new releases, using the epic realized as a guide weather to bump minor or patch versions (only users should request major version bumps). If the project has chained deps to be released (i.e. multiple repos, with one being a cli that the next, a desktop app bundles), than this means doing the release cascade all the way. 
+
