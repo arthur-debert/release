@@ -1,1 +1,0 @@
-- pr review request now verifies the review_requested edge actually attached — a request GitHub silently drops (service stall / quota) fails loud with exit 1 instead of stalling the loop (#614)

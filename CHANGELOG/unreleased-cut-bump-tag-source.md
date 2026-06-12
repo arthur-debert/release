@@ -1,1 +1,0 @@
-- fix(cut): bump shortcuts (major|minor|patch) resolve the current version from the latest git tag in manifest-less repos — including repos with no detectable Kind, like release itself (#596)

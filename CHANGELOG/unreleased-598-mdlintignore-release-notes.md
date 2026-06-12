@@ -1,1 +1,0 @@
-- managed .markdownlintignore exempts generated release-notes.md (same class as CHANGELOG) — fixes full-tree markdownlint reds in consumers that cut releases (#598)

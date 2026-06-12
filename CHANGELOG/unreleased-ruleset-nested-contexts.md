@@ -1,1 +1,0 @@
-- admin policy ruleset: auto-detection resolves reusable-workflow caller jobs to their nested '<caller> / <job>' contexts (gh contents API at the pinned ref) instead of proposing the never-reported bare caller name (#602)

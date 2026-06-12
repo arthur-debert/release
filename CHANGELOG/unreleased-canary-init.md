@@ -1,1 +1,0 @@
-- release-core admin canary init: idempotent create/reset of a family's canary repo from its tests/fixtures/<kind>/ seed — public create, fixture seed + from-source boot, fail-closed secrets (RELEASE_TOKEN only, publish trio refused), ruleset, registry append; --reset force-push sanctioned only for registered canaries (#604)
