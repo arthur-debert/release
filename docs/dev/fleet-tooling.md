@@ -127,15 +127,24 @@ Caveats:
 
 Release's source carries deliberately scoped **transitional** machinery, tracked
 as the sunset list in [#569](https://github.com/arthur-debert/release/issues/569):
-pre-adoption fallbacks in the reusable workflows, the one-shot pull-model seeder
-(`repos migrate`), tolerated no-op flags, the pre-WS4/WS7 migration tolerance,
-the husky `core.hooksPath` unset, and the roll-changelog fragment-model
-rejection path. Each item is load-bearing **until its named condition is
-verified across the whole fleet** — and every one of those conditions reads
-"every consumer verified X". Nothing could *measure* that, so the sunset epic
-could never close on evidence, only assertion (the knowledge-in-prose trap
+the one-shot pull-model seeder (`repos migrate`), tolerated no-op flags, the
+pre-WS4/WS7 migration tolerance, the husky `core.hooksPath` unset, and the
+roll-changelog fragment-model rejection path. Each item is load-bearing **until
+its named condition is verified across the whole fleet** — and every one of
+those conditions reads "every consumer verified X". Nothing could *measure*
+that, so the sunset epic could never close on evidence, only assertion (the
+knowledge-in-prose trap
 [#595](https://github.com/arthur-debert/release/issues/595) closed for
 fresh-event verification). This verb is that meter.
+
+The meter measures **#569 items 2-5 + the fragment-model surface**. It does NOT
+measure **item 1** (managed task verbs / `bin/build`): that sunset is already
+done — the `if [ -x bin/build ]` fallbacks were removed from the reusable
+workflows (#588/#590), post-WS7 `bin/build` is an untracked ephemeral mirror, and
+app-specific build moved to bespoke `app-bin/*`. `app-bin/*` is per-app runnable
+code with no sound mechanical valid/violation predicate (a future
+`release-core run` supersedes much of it), so there is deliberately no app-bin
+condition.
 
 ```sh
 release-core admin repos saturation                  # clone/refresh + matrix
@@ -157,7 +166,6 @@ mechanical predicate evaluated per consumer clone:
 
 | # | #569 item | predicate (per clone) |
 |---|---|---|
-| 1 | managed task verbs | `bin/build` present + executable (electron/tauri/vsce kinds; N/A elsewhere) |
 | 2 | pull-model seeded | `bin/install-release-core` is tracked (a pre-pull consumer predates it ⇒ `repos migrate` dead) |
 | 3 | resolver vintage | the deployed bootstrap quartet bytes match the wheel's current `templates/commons/<dest>` copy |
 | 4 | WS4/WS7 complete | no `.release/**` and no root gate-mirror (`lefthook.yml`, the lint configs) in `git ls-files` |

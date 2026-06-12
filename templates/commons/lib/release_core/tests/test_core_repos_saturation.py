@@ -71,44 +71,15 @@ def ctx(tmp_path):
     return sat.Context(release_home=str(home))
 
 
-# ── item 1: managed task verbs ───────────────────────────────────────────────
+# ── kind is a display-only roster label ──────────────────────────────────────
 
 
-def test_task_verbs_green_when_build_present_and_executable(tmp_path, ctx):
+def test_kind_is_carried_as_display_field(tmp_path):
+    # No condition gates on kind anymore (#569 item 1's predicate was removed);
+    # kind survives only as the matrix roster label, mirroring the verify sweep.
     root = _make_repo(tmp_path)
-    _track(root, "bin/build", b"#!/bin/sh\n", executable=True)
-    verdict, _ = sat._p_task_verbs(_consumer(root, "electron-app"), ctx)
-    assert verdict == sat.GREEN
-
-
-def test_task_verbs_red_when_build_missing(tmp_path, ctx):
-    root = _make_repo(tmp_path)
-    verdict, detail = sat._p_task_verbs(_consumer(root, "tauri-app"), ctx)
-    assert verdict == sat.RED
-    assert "missing" in detail
-
-
-def test_task_verbs_red_when_build_not_executable(tmp_path, ctx):
-    root = _make_repo(tmp_path)
-    _track(root, "bin/build", b"#!/bin/sh\n", executable=False)
-    verdict, detail = sat._p_task_verbs(_consumer(root, "vscode-ext"), ctx)
-    assert verdict == sat.RED
-    assert "executable" in detail
-
-
-def test_task_verbs_na_on_known_non_task_kind(tmp_path, ctx):
-    root = _make_repo(tmp_path)
-    verdict, _ = sat._p_task_verbs(_consumer(root, "rust-cli"), ctx)
-    assert verdict == sat.NA
-
-
-def test_task_verbs_red_on_unknown_kind(tmp_path, ctx):
-    # detect-kind failed → kind '?'. Applicability is indeterminate, so this is
-    # RED, NOT N/A — item 1 must not go REMOVABLE on a kind guess.
-    root = _make_repo(tmp_path)
-    verdict, detail = sat._p_task_verbs(_consumer(root, "?"), ctx)
-    assert verdict == sat.RED
-    assert "indeterminate" in detail
+    c = _consumer(root, "electron-app")
+    assert c.kind == "electron-app"
 
 
 # ── item 2: pull-model seeded ────────────────────────────────────────────────
@@ -319,9 +290,17 @@ def test_bootstrap_quartet_matches_sync_engine():
 
 
 def test_one_row_per_569_item():
-    # All five #569 items + the fragment surface, no more, no fewer.
+    # #569 items 2-5 + the fragment surface. Item 1 (managed task verbs) is NOT
+    # measured: its sunset is already done (fallbacks removed in #588/#590,
+    # bin/build is now an untracked ephemeral mirror, app build moved to app-bin).
     items = [c.item for c in sat.CONDITIONS]
-    assert items == ["1", "2", "3", "4", "5", "fragment"]
+    assert items == ["2", "3", "4", "5", "fragment"]
+
+
+def test_task_verbs_predicate_is_gone():
+    # The #569 item-1 predicate + its kind-gating constant were removed entirely.
+    assert not hasattr(sat, "_p_task_verbs")
+    assert not hasattr(sat, "TASK_VERB_KINDS")
 
 
 # ── removable() verdict semantics ────────────────────────────────────────────
@@ -361,7 +340,6 @@ def _two_consumers():
 def test_render_matrix_reports_removable_and_blocked():
     consumers = _two_consumers()
     matrix = {
-        "task-verbs": {"o/green": (sat.NA, ""), "o/red": (sat.NA, "")},
         "pull-seeded": {"o/green": (sat.GREEN, ""), "o/red": (sat.GREEN, "")},
         "resolver-vintage": {"o/green": (sat.GREEN, ""), "o/red": (sat.RED, "stale")},
         "ws4-ws7": {"o/green": (sat.GREEN, ""), "o/red": (sat.GREEN, "")},

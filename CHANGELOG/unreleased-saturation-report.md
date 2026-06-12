@@ -1,1 +1,1 @@
-- admin repos saturation: per-consumer #569 sunset-condition matrix
+- admin repos saturation: per-consumer matrix of #569's five sunset conditions

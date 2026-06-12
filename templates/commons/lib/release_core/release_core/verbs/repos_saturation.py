@@ -1,13 +1,19 @@
 """repos saturation — measure #569's per-consumer sunset conditions, mechanically.
 
 Release's source carries deliberately scoped *transitional* machinery (issue
-#569): pre-adoption fallbacks, the one-shot pull-model seeder, tolerated no-op
-flags, pre-WS4/WS7 migration tolerance, husky residue unsetting, and the
-fragment-model legacy-rejection path. Each item is load-bearing *until its named
-condition is verified across the whole fleet* — and until this verb, nothing
-could MEASURE that. Prose conditions + no meter = #569 could never close
-honestly (the exact knowledge-in-prose trap #595 closed for fresh-event
-verification).
+#569): the one-shot pull-model seeder, tolerated no-op flags, pre-WS4/WS7
+migration tolerance, husky residue unsetting, and the fragment-model
+legacy-rejection path. Each item is load-bearing *until its named condition is
+verified across the whole fleet* — and until this verb, nothing could MEASURE
+that. Prose conditions + no meter = #569 could never close honestly (the exact
+knowledge-in-prose trap #595 closed for fresh-event verification).
+
+The meter measures #569 items 2-5 + the fragment-model surface. #569 item 1
+(managed task verbs / `bin/build`) is NOT measured: its sunset is already DONE —
+the `if [ -x bin/build ]` fallbacks were removed from the reusable workflows
+(#588/#590), post-WS7 `bin/build` is an untracked ephemeral mirror, and
+app-specific build moved to bespoke `app-bin/*` (no sound mechanical predicate;
+a future `release-core run` supersedes it).
 
 This verb is the meter. It rides the SAME hermetic, refreshed clones the verify
 sweep uses (`release-core admin repos list --clone` into the per-user /tmp root,
@@ -59,11 +65,6 @@ _SELF_CLI = [sys.executable, "-m", "release_core"]
 
 USAGE = __doc__ or ""
 
-# Kinds whose managed task verbs (bin/build) are the #569 item-1 condition. A
-# row gated on these kinds reports N/A for every other kind (a rust-cli has no
-# bin/build to materialize, so it can never block item 1's removal).
-TASK_VERB_KINDS = frozenset({"electron-app", "tauri-app", "vscode-ext"})
-
 # The bootstrap quartet (sync.BOOTSTRAP_REAL_FILES) — the SessionStart chain
 # written as REAL tracked copies, so the deployed bytes are directly comparable
 # against the wheel's current copy under RELEASE_HOME/templates/commons/<dest>.
@@ -107,9 +108,10 @@ class Consumer:
     paths must read the ``None`` case as RED (indeterminate, never a false
     GREEN); only an actually-empty set is "introspected, nothing found".
 
-    ``kind`` is ``'?'`` when `detect-kind` could not classify the clone; a
-    kind-gated predicate reads that as RED too (applicability unknown), never
-    N/A."""
+    ``kind`` is the detected consumer kind (``'?'`` when `detect-kind` could not
+    classify the clone). It is DISPLAY-ONLY — the roster label ``[{kind}]`` in
+    the matrix header, mirroring the verify sweep — no current condition gates on
+    it."""
 
     repo: str
     path: str
@@ -128,43 +130,22 @@ class Context:
 
 # A predicate verdict: GREEN (condition met — this consumer no longer blocks the
 # sunset), RED (still blocks it), or NA (the condition does not apply to this
-# consumer — e.g. a kind-gated row on the wrong kind). NA columns never block a
-# REMOVABLE verdict.
+# consumer). NA columns never block a REMOVABLE verdict. (No current condition
+# emits NA — it is retained for a future kind-gated row; the matrix renderer +
+# removable() already handle it.)
 #
 # THE LOAD-BEARING INVARIANT (#629 review): a predicate that could NOT introspect
-# its input (unknown kind, `git ls-files` unavailable, a `git config` that failed
-# for any reason other than "key genuinely absent") returns RED, never GREEN and
-# never NA. Indeterminate = RED. A false GREEN/REMOVABLE on a clone the meter
-# couldn't actually read is the quiet-wrong "saturated" verdict this verb exists
-# to kill — so every predicate fails toward visibility.
+# its input (`git ls-files` unavailable, a `git config` that failed for any
+# reason other than "key genuinely absent") returns RED, never GREEN and never
+# NA. Indeterminate = RED. A false GREEN/REMOVABLE on a clone the meter couldn't
+# actually read is the quiet-wrong "saturated" verdict this verb exists to kill —
+# so every predicate fails toward visibility.
 GREEN, RED, NA = "green", "red", "na"
 
 Predicate = Callable[[Consumer, Context], "tuple[str, str]"]
 
 
 # ── Predicates (each returns (verdict, detail)) ──────────────────────────────
-
-
-def _p_task_verbs(c: Consumer, _ctx: Context) -> tuple[str, str]:
-    """#569 item 1 — managed task verbs materialized: `bin/build` present +
-    executable in the electron/tauri/vsce kinds (the fallback chains in
-    electron-app.yml / tauri-app.yml can be removed once every such consumer
-    carries it).
-
-    Applicability hinges on the detected kind, so an UNKNOWN kind ('?', from a
-    failed `detect-kind`) is RED, never N/A: we can't prove this consumer is
-    out-of-scope, and letting item 1 go REMOVABLE on a kind guess is exactly the
-    quiet-wrong saturation verdict. A KNOWN non-task kind is genuinely N/A."""
-    if c.kind == "?":
-        return RED, "kind unknown (detect-kind failed): applicability indeterminate"
-    if c.kind not in TASK_VERB_KINDS:
-        return NA, f"kind {c.kind}: no managed task verb"
-    build = os.path.join(c.path, "bin", "build")
-    if not os.path.isfile(build):
-        return RED, "bin/build missing"
-    if not os.access(build, os.X_OK):
-        return RED, "bin/build not executable"
-    return GREEN, "bin/build present + executable"
 
 
 def _p_pull_seeded(c: Consumer, _ctx: Context) -> tuple[str, str]:
@@ -300,7 +281,6 @@ class Condition:
 
 
 CONDITIONS: list[Condition] = [
-    Condition("task-verbs", "1", "managed task verbs (bin/build)", _p_task_verbs),
     Condition("pull-seeded", "2", "pull-model seeded", _p_pull_seeded),
     Condition("resolver-vintage", "3", "resolver vintage (quartet bytes)", _p_resolver_vintage),
     Condition("ws4-ws7", "4", "WS4/WS7 untracked", _p_ws4_ws7_complete),
