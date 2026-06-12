@@ -158,6 +158,20 @@ def _has_marker(text: str, *, is_json: bool) -> bool:
     return f"{MARKER}:" in text
 
 
+def _read_fixture(fpath: str, relpath: str) -> str:
+    """Read a fixture file, wrapping read failures (missing file, permissions,
+    non-UTF-8 bytes) as CapturedFixtureError so the verb's single except yields
+    a clean gate message instead of a raw OSError / UnicodeDecodeError
+    traceback — symmetric with load_baseline's error wrapping."""
+    try:
+        with open(fpath, encoding="utf-8") as fh:
+            return fh.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CapturedFixtureError(
+            f"captured-fixtures: cannot read fixture {relpath}: {exc}"
+        ) from exc
+
+
 def scan(lib_root: str | None = None) -> list[Offender]:
     """Sweep every registered seam; return the fixtures missing the marker.
 
@@ -178,13 +192,12 @@ def scan(lib_root: str | None = None) -> list[Offender]:
             if not fname.endswith(seam.suffixes):
                 continue
             fpath = os.path.join(d, fname)  # filesystem access — OS-native sep
-            with open(fpath, encoding="utf-8") as fh:
-                text = fh.read()
+            # The key/relpath is POSIX-joined so offender keys are stable across
+            # platforms and match the baseline (which is authored with `/`).
+            # seam.fixture_dir is already a POSIX literal in SEAMS.
+            rel = posixpath.join(seam.fixture_dir, fname)
+            text = _read_fixture(fpath, rel)
             if not _has_marker(text, is_json=fname.endswith(".json")):
-                # The key/relpath is POSIX-joined so offender keys are stable
-                # across platforms and match the baseline (which is authored with
-                # `/`). seam.fixture_dir is already a POSIX literal in SEAMS.
-                rel = posixpath.join(seam.fixture_dir, fname)
                 offenders.append(Offender(seam=seam.name, path=rel, surface=seam.surface))
 
     for name, relpath, surface in INLINE_SEAMS:
@@ -194,8 +207,7 @@ def scan(lib_root: str | None = None) -> list[Offender]:
                 f"captured-fixtures: registered inline seam file missing: {relpath} "
                 f"(seam {name!r}) — fix INLINE_SEAMS in captured_fixtures.py"
             )
-        with open(fpath, encoding="utf-8") as fh:
-            text = fh.read()
+        text = _read_fixture(fpath, relpath)
         if not _has_marker(text, is_json=False):
             offenders.append(Offender(seam=name, path=relpath, surface=surface))
 

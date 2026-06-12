@@ -111,6 +111,17 @@ def test_scan_raises_on_missing_seam_dir(tmp_path, monkeypatch):
         cf.scan(lib_root=str(tmp_path))
 
 
+def test_scan_wraps_fixture_read_errors(seam_tree, monkeypatch):
+    # A fixture read failure (e.g. non-UTF-8 bytes) surfaces as the lint's own
+    # CapturedFixtureError, not a raw OSError / UnicodeDecodeError traceback.
+    def boom(_fpath, _encoding=None, **_kw):
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+    monkeypatch.setattr("builtins.open", boom)
+    with pytest.raises(cf.CapturedFixtureError, match="cannot read fixture"):
+        cf.scan(lib_root=seam_tree)
+
+
 # ── the shrink-only ratchet ──────────────────────────────────────────────────
 
 

@@ -6,7 +6,9 @@ would, minus the network.
 
 prstate_fixtures/ is a registered EXTERNAL-SURFACE seam (these bytes are the gh
 / GitHub API payloads the engine consumes), so every fixture must carry a
-`captured-from:` provenance marker — enforced by the shrink-only captured-fixture
+provenance marker — for these JSON fixtures, a top-level `"captured-from"` key
+naming the producing command + date (the `captured-from:` colon form is the
+equivalent for inline/YAML seams). Enforced by the shrink-only captured-fixture
 lint (release_core.captured_fixtures; docs/dev/captured-fixture-provenance.md).
 The live_*pr342.json files are captured from a real probe PR (#337) and carry
 their marker; the synthetic lifecycle scenarios are grandfathered in
