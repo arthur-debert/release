@@ -78,6 +78,21 @@ def test_how_to_always_states_the_one_gate_and_draft_first_cycle():
         assert "changelog add" in body
 
 
+def test_how_to_coordinator_section_teaches_the_shepherd_split():
+    # The §2 coordinator discipline splits the per-PR loop across roles so no
+    # one context carries it all: the implementer STOPS at PR-open, the
+    # coordinator owns `pr wait` + the `pr ready` flip, and a FRESH shepherd
+    # subagent handles each ADDRESSING round (an author-shepherd balloons
+    # context and defends its own choices). Pin those invariants.
+    body = how_to._render("rust-cli")
+    assert "coordinating an epic" in body
+    assert "STOPS AT PR-OPEN" in body
+    assert "## Context" in body
+    assert "FRESH shepherd" in body
+    assert "release-core pr wait" in body
+    assert "release-core pr ready" in body
+
+
 def test_how_to_dev_cycle_branches_from_origin_not_local_main():
     # release#566: SessionStart may have auto-committed a managed sync on the
     # clone's LOCAL default branch; branching there carries that alien commit

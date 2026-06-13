@@ -89,15 +89,36 @@ ever see the deny, that is the guard doing its job: arm and retry.
 Open as a **live** PR only when the human explicitly asks for one in this
 session.
 
+## Who runs which step (coordinated execution)
+
+A solo agent on a simple one-PR task runs this whole loop itself. Under a
+coordinating agent (a multi-PR feature — dev-cycle §2), the loop is **split
+across roles** so no one context carries all of it: an implementer that also
+shepherds its own review rounds drags the full implementation context through
+every round (single agents have ballooned past ~700k tokens) and judges
+comments by defending remembered choices instead of reading the diff cold.
+
+- **Implementer subagent — stops at PR-open.** Implement, gate, push, open the
+  draft PR with the `## Context` note (below), report back, terminate. It
+  never sees a review round.
+- **Coordinator — owns every wait and the flip.** It blocks on
+  `release-core pr wait` (a subagent that yields to wait terminates and is
+  never re-woken) and runs the guarded `release-core pr ready` at READY.
+- **A fresh shepherd subagent per ADDRESSING round.** Brief: the PR number +
+  the Context note. Triage the threads (A/B/C below), fix or reply, resolve,
+  push, re-request the review, hand the wait back, terminate. Fresh per round:
+  a fraction of the tokens, and a cleaner read of each reviewer point.
+
 ## Leave a handoff note when you open the PR
 
 Drop a short note capturing the **non-obvious reasoning** behind the change —
 the decisions a reviewer (or a later fixer agent) couldn't re-derive from the
 diff: why this approach, what's deliberately out of scope, what *not* to "fix."
 Put it in the PR body under a `## Context` heading (or generate one with the
-`/handoff` skill). A later agent addressing review comments has the code but
-not your reasoning; the note is the cheap carrier of it. Skip it only for
-trivial chore/CI PRs.
+`/handoff` skill). Write it for a stranger — under the coordinated split above,
+a stranger (the per-round shepherd) is exactly who addresses the review rounds
+with the code but not your reasoning; the note is the cheap carrier of it. Skip
+it only for trivial chore/CI PRs.
 
 ## The changelog fragment
 

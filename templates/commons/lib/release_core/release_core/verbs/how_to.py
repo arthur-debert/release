@@ -13,9 +13,14 @@ annotated with what each resolves to — so it can't assert a command the repo
 doesn't have (release#507). The ``how-to <kind>`` arg path is the abstract
 "explain this Kind" documentation mode (no specific repo to read).
 
-The dev-cycle section is the single canonical statement of the draft-first
-lifecycle — keep it in lockstep with the `gh-pr-review-loop` skill; this is the
-text the stub and the skill both defer to.
+The dev-cycle section is the runtime-rendered statement of the draft-first
+lifecycle — the §1 single-PR cycle (kept in lockstep with the `gh-pr-review-loop`
+skill) plus the §2 coordinator discipline for a complex / multi-PR feature
+(condensed from `dev-cycle.lex` §2). `dev-cycle.lex` is the model; this renders
+the operational form, and the CLAUDE.md stub points here. Keep all three in
+lockstep — there is deliberately NO second distributed skill for §2; coordination
+is taught here, on the reliable orient-time channel, not via a spotty skill
+trigger.
 
 Usage:
   release-core how-to            (playbook for the current repo — real commands)
@@ -250,6 +255,70 @@ def _dev_cycle_section() -> list[str]:
     return lines
 
 
+def _complex_cycle_section() -> list[str]:
+    """The §2 coordinator discipline — a larger feature is a composition of the
+    single-PR cycle under ONE coordinating agent. Condensed operational form of
+    `dev-cycle.lex` §2; keep the two in lockstep."""
+    lines: list[str] = []
+    lines.append("When the task spans multiple PRs (coordinating an epic)")
+    lines.append(
+        "  A larger feature is a composition of the single-PR cycle above under "
+        "ONE coordinating agent. The coordinator does NOT implement — it "
+        "delegates, integrates, and keeps the whole on track (implementing "
+        "itself burns its context and forces compaction)."
+    )
+    lines.append("  1. Cut ONE epic branch; the feature lands via an umbrella PR at the end.")
+    lines.append(
+        "  2. Delegate one IMPLEMENTER subagent per workstream — ideally each "
+        "scoped by its own issue. The implementer STOPS AT PR-OPEN: implement → "
+        "gate → draft PR targeting the EPIC branch, with a `## Context` note in "
+        "the PR body carrying the non-obvious reasoning (why this approach, "
+        "what's out of scope, what NOT to 'fix') written for a stranger — then "
+        "it reports back and terminates. It never shepherds its own review "
+        "rounds: an author-shepherd drags the whole implementation context "
+        "through every round (expensive — single agents have hit ~700k tokens) "
+        "and judges review comments by defending its past choices instead of "
+        "on the diff's merits."
+    )
+    lines.append(
+        "  3. The coordinator owns every wait and every flip: block in-turn on "
+        "`release-core pr wait` (a subagent that yields to wait terminates and "
+        "is never re-woken). When the wait returns ADDRESSING, spawn a FRESH "
+        "shepherd subagent — brief: just the PR number + the Context note — to "
+        "triage the threads, fix or reply, resolve, push, re-request the "
+        "review, then hand the wait back and terminate. One fresh shepherd PER "
+        "round; at READY the coordinator runs the guarded `release-core pr "
+        "ready`."
+    )
+    lines.append(
+        "  4. Integrate: the coordinator drives the go/no-go merge of each "
+        "workstream PR into the epic branch — no user approval for these "
+        "intra-epic merges (the user's gate is the umbrella PR, step 7)."
+    )
+    lines.append(
+        "  5. Converge: once the planned workstreams land, open ONE final "
+        "workstream for the fallouts — follow-up issues filed during the build "
+        "plus things that surfaced mid-implementation. In scope only; the epic "
+        "must not merge with a pile of decoupled follow-ups trailing behind it."
+    )
+    lines.append(
+        "  6. Docs pass: delegate a final PR that updates the docs and docstrings "
+        "the feature changed (dev/user/reference + module-level design notes)."
+    )
+    lines.append(
+        "  7. Umbrella PR: verify which issues it actually closes, write the "
+        "epic-level summary linking the related issues, drive it through the "
+        "same split (coordinator waits + flips; fresh shepherd per round), and "
+        "flip to READY for the user's final merge."
+    )
+    lines.append(
+        "  8. Release: after the user merges, cut the release — MINOR or PATCH "
+        "per what the epic realized (only the user requests a MAJOR). Cascade "
+        "dependent repos in dependency order if the project has chained deps."
+    )
+    return lines
+
+
 def _render_repo(root: str, kind: str) -> str:
     """Playbook for the current repo, with real resolved commands."""
     lines: list[str] = []
@@ -266,6 +335,8 @@ def _render_repo(root: str, kind: str) -> str:
     lines.extend(_ci_jobs_section())
     lines.append("")
     lines.extend(_dev_cycle_section())
+    lines.append("")
+    lines.extend(_complex_cycle_section())
     return "\n".join(lines)
 
 
@@ -285,6 +356,8 @@ def _render(kind: str) -> str:
     lines.extend(_ci_jobs_section())
     lines.append("")
     lines.extend(_dev_cycle_section())
+    lines.append("")
+    lines.extend(_complex_cycle_section())
     return "\n".join(lines)
 
 
