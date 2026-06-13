@@ -35,10 +35,6 @@ Conformance checks (WARN-only — don't fail; surface adoption gaps):
                            setup-dev-env.sh + project extras
  10. workflows_canonical — count of workflows that are NOT thin callers of
                            arthur-debert/release/* (legacy / bespoke surface)
- 11. ci_calls_bin_check    — does ANY workflow file (typically ci.yml /
-                             test.yml) actually invoke `bin/check`? If not,
-                             the Component-supplied interface is
-                             dead weight on disk — CI bypasses it.
 
 Shell→Python migration: the base64/jq/grep
 YAML gymnastics moved into Python (gh.rest → parsed dicts + base64-decoded file
@@ -66,13 +62,6 @@ _GOMOD_DEP_RE = re.compile(r"^\s*(?:require\s+)?github\.com/arthur-debert/", re.
 _GOMOD_MODULE_RE = re.compile(r"^\s*module\s+")
 # A thin caller of a release/ reusable workflow.
 _CANONICAL_USE_RE = re.compile(r"uses:.*arthur-debert/release/\.github/workflows/")
-# CI runs bin/check directly (umbrella), not bin/check-fmt alone.
-_RUN_BIN_CHECK_RE = re.compile(r"^[ \t]*run:[ \t]*bin/check([ \t]|$)", re.MULTILINE)
-# CI thin-calls a release/ reusable that runs bin/check internally.
-_CANONICAL_CALLEE_RE = re.compile(
-    r"uses:[ \t]*arthur-debert/release/\.github/workflows/"
-    r"(?:rust-ci|go-ci|electron-ci|tauri-ci|bats-e2e|mkdocs)\.yml"
-)
 # git insteadOf + RELEASE_TOKEN, the private-module auth signal.
 _INSTEADOF_RE = re.compile(r"insteadOf.*github\.com")
 
@@ -435,47 +424,6 @@ def _check_workflows_canonical(repo: str, results: list) -> None:
         )
 
 
-def _check_ci_calls_bin_check(repo: str, results: list) -> None:
-    sync_body = _file_content(repo, ".release-sync-state.yaml")
-    if not sync_body:
-        _record(results, "SKIP", "ci_calls_bin_check", "no Component model — N/A")
-        return
-    listing = _file_names(repo, ".github/workflows")
-    if not listing:
-        _record(results, "SKIP", "ci_calls_bin_check", "no .github/workflows/")
-        return
-    found: list[str] = []
-    via_reusable: list[str] = []
-    for f in listing:
-        body = _file_content(repo, f".github/workflows/{f}") or ""
-        if _RUN_BIN_CHECK_RE.search(body):
-            found.append(f)
-        elif _CANONICAL_CALLEE_RE.search(body):
-            via_reusable.append(f)
-    found_csv = ", ".join(found)
-    via_csv = ", ".join(via_reusable)
-    if found and via_reusable:
-        _record(
-            results, "PASS", "ci_calls_bin_check", f"direct: {found_csv}; via reusable: {via_csv}"
-        )
-    elif found:
-        _record(results, "PASS", "ci_calls_bin_check", f"called in: {found_csv}")
-    elif via_reusable:
-        _record(
-            results,
-            "PASS",
-            "ci_calls_bin_check",
-            f"via release/ reusable workflow in: {via_csv}",
-        )
-    else:
-        _record(
-            results,
-            "WARN",
-            "ci_calls_bin_check",
-            "Component model adopted but no workflow calls bin/check (CI duplicates invocation)",
-        )
-
-
 _CHECKS = (
     _check_ruleset,
     _check_release_token,
@@ -487,7 +435,6 @@ _CHECKS = (
     _check_private_mod_auth,
     _check_scripts_inventory,
     _check_workflows_canonical,
-    _check_ci_calls_bin_check,
 )
 
 

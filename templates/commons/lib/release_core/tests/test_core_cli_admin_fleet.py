@@ -13,7 +13,7 @@ from release_core import cli_entry
 from release_core.cli import admin
 from release_core.cli.admin import release_cmds, repos
 
-REPOS_LEAVES = {"list", "prs", "scripts", "audit", "verify", "migrate", "poke"}
+REPOS_LEAVES = {"list", "prs", "scripts", "audit", "verify", "poke"}
 RELEASE_LEAVES = {"advance-major", "betas", "lex"}
 
 

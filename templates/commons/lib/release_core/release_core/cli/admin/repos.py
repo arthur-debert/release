@@ -24,7 +24,6 @@ from ...verbs import (
     list_repo_scripts,
     managed_repos,
     release_verify_fleet,
-    repos_migrate,
     repos_poke,
 )
 from .._helpers import wrap_verb
@@ -83,12 +82,5 @@ group.add_command(
         repos_poke.main,
         name="poke",
         short_help="Fresh-event poke: empty commit to a consumer's main, resolve + classify.",
-    )
-)
-group.add_command(
-    wrap_verb(
-        repos_migrate.main,
-        name="migrate",
-        short_help="Seed the fleet onto the pull model (one managed-sync PR per repo).",
     )
 )
