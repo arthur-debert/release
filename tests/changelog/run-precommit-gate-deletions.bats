@@ -20,8 +20,10 @@ GATE="$BATS_TEST_DIRNAME/../../bin-internal/run-precommit-gate.sh"
 
 # Stage the orphan-deletion scenario: roll a changelog with 2 fragments
 # (→ staged deletions) plus a real modified file, leaving the index in the
-# exact shape the gate sees mid-release. Writes a lefthook.yml whose
-# prettier command chokes on a missing file (matching the real gate).
+# exact shape the gate sees mid-release. Writes the managed .release/lefthook.yml
+# (the post-WS3 location the gate detects via LEFTHOOK_CONFIG — the pre-WS3 root
+# lefthook.yml fallback was removed in #569 B4) whose prettier command chokes on
+# a missing file (matching the real gate).
 _stage_changelog_roll() {
   "$BIN/changelog-add" aaa "- fix: alpha" >/dev/null
   "$BIN/changelog-add" bbb "- feat: beta" >/dev/null
@@ -31,7 +33,8 @@ _stage_changelog_roll() {
   # `--diff-filter=ACMR` would WRONGLY drop it (T not in the whitelist) even
   # though it still exists; `--diff-filter=d` keeps it.
   echo "typechange" > TYPECHANGE.txt
-  cat > lefthook.yml <<'EOF'
+  mkdir -p .release
+  cat > .release/lefthook.yml <<'EOF'
 pre-commit:
   commands:
     prettier:

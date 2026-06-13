@@ -76,22 +76,41 @@ STUB
   grep -q 'lefthook run pre-commit --file bumped.txt \[cfg=.release/lefthook.yml\]' "$CALLS"
 }
 
-@test "root lefthook.yml takes precedence: the legacy path runs, not the binary route" {
-  # A pre-migration consumer still tracks its root gate config; the existing
-  # lefthook path must keep winning (no behavior change for working flows).
-  printf 'pre-commit:\n  commands: {}\n' > lefthook.yml
-  # a lefthook stub so run_lefthook succeeds without npm
+# NOTE: the pre-WS3 "root lefthook.yml takes precedence" test was removed in
+# #569 B4 along with the root-config fallback it exercised — 0/19 consumers track
+# a root config, and the LEFTHOOK_CONFIG path above already covers the managed
+# (.release/lefthook.yml) case.
+
+@test "an explicit caller LEFTHOOK_CONFIG is authoritative over the managed .release/ copy" {
+  # #569 B4: a caller-provided config wins (matching the release-core gate verb);
+  # we do NOT clobber it with .release/lefthook.yml when both are present.
+  mkdir -p .release && : > .release/lefthook.yml
+  printf 'pre-commit:\n  commands: {}\n' > caller.yml
   cat > "$STUB/lefthook" <<'STUB'
 #!/usr/bin/env bash
-printf 'lefthook %s\n' "$*" >> "$CALLS"
+printf 'lefthook %s [cfg=%s]\n' "$*" "${LEFTHOOK_CONFIG:-}" >> "$CALLS"
 exit 0
 STUB
   chmod +x "$STUB/lefthook"
   _stage_a_file
-  PATH="$STUB:$PATH" run bash "$GATE"
+  PATH="$STUB:$PATH" LEFTHOOK_CONFIG=caller.yml run bash "$GATE"
   [ "$status" -eq 0 ]
-  grep -q '^lefthook run pre-commit' "$CALLS"
-  ! grep -q 'release-core gate' "$CALLS"
+  grep -q 'lefthook run pre-commit --file bumped.txt \[cfg=caller.yml\]' "$CALLS"
+}
+
+@test "a whitespace-only LEFTHOOK_CONFIG counts as unset (falls back to the managed copy)" {
+  # #569 B4: don't let a blank LEFTHOOK_CONFIG send lefthook down default discovery.
+  mkdir -p .release && : > .release/lefthook.yml
+  cat > "$STUB/lefthook" <<'STUB'
+#!/usr/bin/env bash
+printf 'lefthook %s [cfg=%s]\n' "$*" "${LEFTHOOK_CONFIG:-}" >> "$CALLS"
+exit 0
+STUB
+  chmod +x "$STUB/lefthook"
+  _stage_a_file
+  PATH="$STUB:$PATH" LEFTHOOK_CONFIG="   " run bash "$GATE"
+  [ "$status" -eq 0 ]
+  grep -q 'lefthook run pre-commit --file bumped.txt \[cfg=.release/lefthook.yml\]' "$CALLS"
 }
 
 @test "no config and no release-core: loud skip, exit 0" {
