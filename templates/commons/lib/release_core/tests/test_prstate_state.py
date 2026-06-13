@@ -141,6 +141,14 @@ def test_reviews_pending_already_requested_says_wait(context):
 
 
 # --- parallel-required: BOTH reviewers gate (release#622) -------------------
+#
+# The dual set is no longer the shipped default (coderabbit is a phos-org
+# pilot, opted in per-repo), so these tests pass the pair explicitly — the
+# both-gate BEHAVIOR they prove is unchanged for any repo that requires both.
+
+
+def _both_required():
+    return [by_name("copilot"), by_name("coderabbit")]
 
 
 def _green_checks() -> list[dict]:
@@ -162,7 +170,7 @@ def _ctx_with_reviews(*authors_on_head: str) -> PullContext:
 
 def test_both_required_reviewers_reviewed_reaches_ready():
     # Copilot AND CodeRabbit both reviewed the current head → READY.
-    status = evaluate(_ctx_with_reviews("Copilot", "coderabbitai[bot]"))
+    status = evaluate(_ctx_with_reviews("Copilot", "coderabbitai[bot]"), required=_both_required())
     assert status.state is TaskState.READY
     assert status.reviewers["copilot"].startswith("done")
     assert status.reviewers["coderabbit"].startswith("done")
@@ -172,14 +180,14 @@ def test_missing_coderabbit_review_is_not_ready_and_names_it_outstanding():
     # Copilot reviewed but CodeRabbit has not → still REVIEWS_PENDING, and the
     # engine names CodeRabbit as the outstanding required reviewer (the mocked
     # single-reviewer-outage case).
-    status = evaluate(_ctx_with_reviews("Copilot"))
+    status = evaluate(_ctx_with_reviews("Copilot"), required=_both_required())
     assert status.state is TaskState.REVIEWS_PENDING
     assert "coderabbit" in status.next_action
     assert "copilot" not in status.next_action.split("—")[1]  # copilot is done, not pending
 
 
 def test_missing_copilot_review_is_not_ready_and_names_it_outstanding():
-    status = evaluate(_ctx_with_reviews("coderabbitai[bot]"))
+    status = evaluate(_ctx_with_reviews("coderabbitai[bot]"), required=_both_required())
     assert status.state is TaskState.REVIEWS_PENDING
     assert "copilot" in status.next_action
 
@@ -235,7 +243,7 @@ def test_a_push_re_stales_both_required_reviewers():
         ],
         checks=_green_checks(),
     )
-    status = evaluate(ctx)
+    status = evaluate(ctx, required=_both_required())
     assert status.state is TaskState.REVIEWS_PENDING
     assert "RE-REQUEST" in status.next_action
     assert "copilot" in status.next_action

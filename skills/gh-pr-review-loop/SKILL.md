@@ -15,14 +15,17 @@ human or any bot (Copilot, Gemini, CodeRabbit, …). Bot names and mechanics liv
 in the reviewer adapter registry behind `release-core pr review`, not in this
 skill.
 
-**Two required reviewers, in parallel.** The default required set is **Copilot
-AND CodeRabbit** — both gate (release#622), not a primary-plus-fallback. A PR is
-`REVIEWED` only when **both** have a review on the **current head**; every push
-stales both, so you re-request both; `release-core pr ready` requires both.
-This buys always-on dual coverage at the cost of availability: if one required
-reviewer is down, the PR stays blocked at `REVIEWS_PENDING` until it recovers —
-that is the accepted trade-off, not a bug. The engine names the outstanding
-reviewer in the next action, so a single-reviewer stall is visible, not silent.
+**The required reviewer set.** The default required set is **Copilot**.
+CodeRabbit is a second requestable reviewer being piloted on the phos-org repos
+(the only place its GitHub App is installed); a pilot repo opts in via
+`required_reviewers:` in its `.release-sync.yaml`. Where a repo requires several
+reviewers they gate **in parallel** (release#622), not primary-plus-fallback: a
+PR is `REVIEWED` only when **every** required reviewer has a review on the
+**current head**; every push stales them all, so you re-request them all;
+`release-core pr ready` requires all of them. The trade-off is availability: one
+required reviewer's outage holds the PR at `REVIEWS_PENDING` until it recovers —
+accepted, not a bug. The engine names the outstanding reviewer in the next
+action, so a single-reviewer stall is visible, not silent.
 
 ## The loop
 
@@ -127,31 +130,34 @@ release-core pr review request [<pr>] [--reviewer <name>]
 ```
 
 Reviewer-agnostic: it dispatches through the adapter registry, defaulting to
-all required reviewers — so a bare `release-core pr review request` requests
-**both** Copilot and CodeRabbit. `--reviewer <name>` narrows to one. `pr review
-cancel|show` follow the same shape (`--help` for details). The done-signal
-for a review round is **zero unresolved review threads** — the engine computes
-it; you never count a particular bot's comments.
+all required reviewers — a bare `release-core pr review request` requests every
+reviewer in the repo's required set. `--reviewer <name>` narrows to one.
+`pr review cancel|show` follow the same shape (`--help` for details). The
+done-signal for a review round is **zero unresolved review threads** — the
+engine computes it; you never count a particular bot's comments.
 
 ### Changing the required reviewer set (a config knob, not code)
 
 Which reviewers gate is **data**, not code — reviewer pricing/availability
 shifts, so swapping the set is a one-line edit, no engine change:
 
-- **Default (shipped, all consumers):** `[copilot, coderabbit]`, baked into
+- **Default (shipped, all consumers):** `[copilot]`, baked into
   `reviewers_config.DEFAULT_REQUIRED` and carried by the `release_core` wheel.
 - **Per-repo override:** add a `required_reviewers:` list to the repo's existing
   optional `.release-sync.yaml` (the same file that carries `capabilities:` — no
   new tracked file). Examples:
 
   ```yaml
-  # just CodeRabbit gates this repo
+  # the phos pilot: CodeRabbit gates alongside Copilot
   required_reviewers:
-    - coderabbit
-  # or a different pair / ordering
-  required_reviewers:
-    - coderabbit
     - copilot
+    - coderabbit
+  ```
+
+  ```yaml
+  # or just CodeRabbit
+  required_reviewers:
+    - coderabbit
   ```
 
   Each name must map to a registered adapter (`copilot`, `coderabbit`, `gemini`,

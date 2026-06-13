@@ -1,7 +1,8 @@
 """The required-reviewer SET is a config knob, not code (release#622).
 
-Proves the set is data-driven: a shipped default ([copilot, coderabbit]), a
-per-repo `.release-sync.yaml` override, and an unknown name that fails LOUD.
+Proves the set is data-driven: a shipped default ([copilot] — coderabbit is a
+phos-org pilot, opted in per-repo), a per-repo `.release-sync.yaml` override,
+and an unknown name that fails LOUD.
 The engine-side proof (a DIFFERENT set drives a DIFFERENT verdict) lives in
 test_prstate_state.py::test_required_set_is_data_driven_*.
 """
@@ -17,18 +18,21 @@ from release_core.prstate.reviewers_config import (
 )
 
 
-def test_default_is_copilot_and_coderabbit():
-    assert DEFAULT_REQUIRED == ("copilot", "coderabbit")
-    assert resolve_required_names(None) == ("copilot", "coderabbit")
+def test_default_is_copilot_only():
+    # CodeRabbit is a phos-org pilot: the App is only installed there, so
+    # requiring it by default would park every other repo at REVIEWS_PENDING.
+    assert DEFAULT_REQUIRED == ("copilot",)
+    assert resolve_required_names(None) == ("copilot",)
 
 
 def test_empty_override_falls_back_to_default():
     # `required_reviewers: []` is "unset", never "disable all review gating".
-    assert resolve_required_names([]) == ("copilot", "coderabbit")
+    assert resolve_required_names([]) == ("copilot",)
 
 
 def test_override_swaps_the_set_with_a_one_line_change():
-    # A single consumer narrows to just CodeRabbit — only config changed.
+    # A pilot repo opts into CodeRabbit (or any other set) — only config changed.
+    assert resolve_required_names(["copilot", "coderabbit"]) == ("copilot", "coderabbit")
     assert resolve_required_names(["coderabbit"]) == ("coderabbit",)
 
 

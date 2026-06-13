@@ -112,10 +112,12 @@ def test_two_required_reviewers_across_two_heads_is_two_cycles_not_four():
 
 def test_a_cycle_unions_both_reviewers_findings_on_the_same_head():
     # Both required reviewers flag the same head: the cycle's findings are the
-    # UNION of their thread comments, not one reviewer's.
+    # UNION of their thread comments, not one reviewer's. The dual set is the
+    # opt-in (phos pilot) config, not the default, so pass it explicitly.
+    both = [by_name("copilot"), by_name("coderabbit")]
     reviews = [review(1, "h1", author="Copilot"), review(2, "h1", author="coderabbitai[bot]")]
     findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
-    cycles = build_cycles(ctx(reviews, findings=findings))
+    cycles = build_cycles(ctx(reviews, findings=findings), required=both)
     assert len(cycles) == 1
     assert cycles[0].comment_keys == frozenset({("a.py", 1), ("b.py", 2)})
 
