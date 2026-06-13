@@ -75,6 +75,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -320,37 +321,38 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> 
         return 1
     passed: list[str] = []
     failed: list[str] = []
-    # quiet → spool to memory-then-disk (SpooledTemporaryFile rolls over past 1 MiB)
-    # so a verbose failing gate can't grow output unboundedly in RAM.
-    spool = (
-        tempfile.SpooledTemporaryFile(max_size=1 << 20, mode="w+", encoding="utf-8")
-        if quiet
-        else None
-    )
     last_line = ""
     assert proc.stdout is not None
-    for line in proc.stdout:
-        clean = _ANSI_RE.sub("", line)
-        pm = _GATE_PASS_RE.match(clean)
-        fm = _GATE_FAIL_RE.match(clean)
-        if pm:
-            passed.append(pm.group(1))
-        elif fm:
-            failed.append(fm.group(1))
-        if spool is not None:
-            spool.write(line)
-        else:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-        last_line = line
-    rc = proc.wait()
-    emitted = spool is None  # non-quiet always streamed to stdout
-    if spool is not None:
-        if rc != 0:
+    with contextlib.ExitStack() as stack:
+        # quiet → spool to memory-then-disk (SpooledTemporaryFile rolls over past
+        # 1 MiB) so a verbose failing gate can't grow output unboundedly in RAM.
+        spool = (
+            stack.enter_context(
+                tempfile.SpooledTemporaryFile(max_size=1 << 20, mode="w+", encoding="utf-8")
+            )
+            if quiet
+            else None
+        )
+        for line in proc.stdout:
+            clean = _ANSI_RE.sub("", line)
+            pm = _GATE_PASS_RE.match(clean)
+            fm = _GATE_FAIL_RE.match(clean)
+            if pm:
+                passed.append(pm.group(1))
+            elif fm:
+                failed.append(fm.group(1))
+            if spool is not None:
+                spool.write(line)
+            else:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            last_line = line
+        rc = proc.wait()
+        emitted = spool is None  # non-quiet always streamed to stdout
+        if spool is not None and rc != 0:
             spool.seek(0)
             shutil.copyfileobj(spool, sys.stdout)
             emitted = True
-        spool.close()
     # Guarantee the verdict stands on its own line, even if lefthook's last chunk
     # had no trailing newline (it would otherwise be glued onto the prior output).
     if emitted and last_line and not last_line.endswith("\n"):
