@@ -173,13 +173,38 @@ def _publish_candidate(release_dir: str, sha: str, branch: str, ref: str) -> int
     return rewritten
 
 
+# Vars STRIPPED from the sandbox env so the boot is hermetic — the sandbox must
+# exercise the CANDIDATE wheel, never the operator's checkout or live engine:
+#   RELEASE_HOME / RELEASE_REF — init would materialize from a maintainer
+#     checkout instead of the candidate wheel bundle.
+#   PYTHONPATH — the bin/release-core checkout shim re-execs under the venv
+#     python with PYTHONPATH pinned to the checkout lib; inherited by the
+#     sandbox venv's python it shadows the candidate wheel's package, and the
+#     checkout never carries _bundled_templates (the build hook stages it
+#     transiently and removes it), so the sandbox init dies with "no bundled
+#     templates" while every manual repro (a shell without PYTHONPATH) passes.
+#     Caught live as a deterministic canary setup failure pre-v3.
+#   _RELEASE_CORE_REEXEC + the *_SCRIPT_DIR vars — the same shim's process
+#     markers; stale pointers into the operator's checkout.
+_SANDBOX_STRIP = frozenset(
+    {
+        "RELEASE_HOME",
+        "RELEASE_REF",
+        "PYTHONPATH",
+        "_RELEASE_CORE_REEXEC",
+        "MANAGED_REPOS_SCRIPT_DIR",
+        "AUDIT_PORTFOLIO_SCRIPT_DIR",
+        "VERIFY_FLEET_SCRIPT_DIR",
+    }
+)
+
+
 def _sandbox_env(root: str) -> dict[str, str]:
     """A full child env for the sandboxed boot: XDG_DATA_HOME/XDG_BIN_HOME under
     --root and PATH prefixed with the sandbox bin — the operator's real
-    release-core venv (~/.local/...) is never touched. RELEASE_HOME/RELEASE_REF
-    are STRIPPED so init materializes from the candidate wheel bundle, not a
-    maintainer checkout."""
-    env = {k: v for k, v in os.environ.items() if k not in ("RELEASE_HOME", "RELEASE_REF")}
+    release-core venv (~/.local/...) is never touched. ``_SANDBOX_STRIP``
+    documents each var removed for hermeticity."""
+    env = {k: v for k, v in os.environ.items() if k not in _SANDBOX_STRIP}
     xdg = os.path.join(root, "xdg")
     env["XDG_DATA_HOME"] = os.path.join(xdg, "data")
     env["XDG_BIN_HOME"] = os.path.join(xdg, "bin")

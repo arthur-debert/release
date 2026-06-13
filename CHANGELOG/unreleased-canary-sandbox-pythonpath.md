@@ -1,0 +1,1 @@
+- canary run: strip PYTHONPATH and checkout-shim vars from the sandbox env so the round exercises the candidate wheel, not the operator checkout
