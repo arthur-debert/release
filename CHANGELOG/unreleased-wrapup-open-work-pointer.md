@@ -1,0 +1,1 @@
+- Point CLAUDE.md's open-work section at the live #569 tracker (the #348/#349/#350 epics are closed) and remove the transient cleanup-agreement working doc
