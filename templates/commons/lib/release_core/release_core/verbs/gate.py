@@ -285,11 +285,11 @@ def _install_hook(root: str) -> int:
 # detail; the pass/fail verdict itself comes from lefthook's exit code (authoritative),
 # so a format change degrades the detail gracefully without ever lying about pass/fail.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-_GATE_PASS_RE = re.compile(r"^[✓✔]\s+(\S+)")
-_GATE_FAIL_RE = re.compile(r"^[✗✖]\s+(\S+)")
+_GATE_PASS_RE = re.compile(r"^\s*[✓✔]\s+(\S+)")
+_GATE_FAIL_RE = re.compile(r"^\s*[✗✖]\s+(\S+)")
 
 
-def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> int:
+def _run_and_summarize(cmd: list[str], root: str, env: dict[str, str], *, quiet: bool) -> int:
     """Run the gate, tee its output, and print a final greppable verdict line.
 
     release#628: agents/humans habitually pipe `release-core gate` through
