@@ -126,9 +126,6 @@ def _green_routes(repo="o/r"):
         f"repos/{repo}": {"default_branch": "main"},
         f"repos/{repo}/actions/runs": {"workflow_runs": [{"name": "CI", "conclusion": "success"}]},
         # no go.mod → SKIP private_mod_auth
-        f"repos/{repo}/contents/.release-sync-state.yaml": _b64(
-            "sha: deadbeefcafe\ncomponents:\n  - rust-cli\n"
-        ),
         f"repos/{repo}/contents/scripts": [{"type": "file", "name": "setup-dev-env.sh"}],
         f"repos/{repo}/contents/.github/workflows": [
             {"type": "file", "name": "ci.yml"},
@@ -157,9 +154,8 @@ def test_audit_all_green(monkeypatch):
     assert rows["ci_main_green"][0] == "PASS"
     assert rows["private_mod_auth"][0] == "SKIP"  # no go.mod
     assert rows["scripts_inventory"][0] == "PASS"
-    # ci.yml uses rust-ci reusable → workflows_canonical PASS, ci_calls_bin_check PASS via reusable
+    # ci.yml uses rust-ci reusable → workflows_canonical PASS
     assert rows["workflows_canonical"][0] == "PASS"
-    assert rows["ci_calls_bin_check"][0] == "PASS"
 
 
 def test_dep_security_404_is_fail(monkeypatch):
@@ -246,25 +242,6 @@ def test_workflows_bespoke_warns(monkeypatch):
     rows = _rows(monkeypatch, routes)
     assert rows["workflows_canonical"][0] == "WARN"
     assert "bespoke.yml" in rows["workflows_canonical"][1]
-
-
-def test_ci_calls_bin_check_direct(monkeypatch):
-    routes = _green_routes()
-    routes["repos/o/r/contents/.github/workflows/ci.yml"] = _b64(
-        "steps:\n  - name: check\n    run: bin/check\n"
-    )
-    rows = _rows(monkeypatch, routes)
-    assert rows["ci_calls_bin_check"][0] == "PASS"
-    assert "called in: ci.yml" in rows["ci_calls_bin_check"][1]
-
-
-def test_ci_calls_bin_check_warns_when_absent(monkeypatch):
-    routes = _green_routes()
-    routes["repos/o/r/contents/.github/workflows/ci.yml"] = _b64(
-        "jobs:\n  x:\n    runs-on: ubuntu\n"
-    )
-    rows = _rows(monkeypatch, routes)
-    assert rows["ci_calls_bin_check"][0] == "WARN"
 
 
 # --------------------------------------------------------------------------

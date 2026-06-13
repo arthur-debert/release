@@ -1,0 +1,1 @@
+- retire the repos_migrate fleet seeder and the audit_repo ci_calls_bin_check check — both dead-transitional now that the fleet is fully seeded onto the pull model (0/19 carry pre-WS7 markers); part of #569 / #635
