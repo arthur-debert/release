@@ -1,0 +1,1 @@
+- rust-ci.yml: optional wasm-packages companion (PR-time wasm check/build) + sanctioned-bespoke # UNMANAGED marker convention (#630)

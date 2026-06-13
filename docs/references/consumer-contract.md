@@ -66,3 +66,42 @@ finding. The baseline was drained to zero and the file deleted in
 release#588 (a missing file is an empty baseline); the lint now runs with no
 grandfathered jobs, and re-creating the file is never the fix for a new
 finding.
+
+## The `# UNMANAGED` sanctioned-bespoke marker (release#630)
+
+Most hand-rolled consumer `.github/workflows/*` are bypasses to normalize
+onto the shared spine. A few are **genuinely repo-domain** — a case the
+shared workflows do not (and should not) cover, so there is nothing to
+migrate onto. release#630's gap analysis blessed four such workflows across
+the fleet: phos-app's self-hosted GPU E2E lane (`e2e-gpu.yml`),
+tree-sitter-lex's quarterly grammar-bump cron, supage's Cloud Run
+`deploy.yml`, and phos-core's `corpus` extra-asset release job. (A fifth gap,
+phos-core's PR-time `wasm.yml`, was the opposite verdict — it re-implemented
+logic the spine owns, so it was folded into `rust-ci.yml` as the opt-in
+`wasm-packages` companion rather than blessed.)
+
+To stop a periodic conformance sweep from re-flagging a blessed-bespoke
+workflow on every pass, the convention is a header marker: a consumer
+workflow whose top-of-file comment block carries a **`# UNMANAGED`** line
+declares itself sanctioned-bespoke and is **exempt from the hand-rolled-bypass
+finding**. phos-app's `e2e-gpu.yml` already self-declares this
+(`# UNMANAGED workflow (owned by this repo, NOT by arthur-debert/release).`).
+
+Scope and non-scope, deliberately:
+
+- The marker is **only** the bypass/conformance signal — "this is bespoke on
+  purpose; do not propose migrating it onto a shared workflow." It is NOT a
+  blanket lint-suppression token.
+- It does **not** exempt the workflow from the **assumption lint**
+  (`release-core admin contract lint`): an `# UNMANAGED` workflow that
+  references a managed ephemeral path (`.release/`, `bin/check`,
+  `lib/release_core/`, an untracked mirror) still must materialize first.
+  Being domain-bespoke does not license assuming the old managed-tree shape.
+- There is currently **no automated fat-workflow / bypass linter** in this
+  repo — the release#569/#630 "litmus sweep" was a one-time manual fleet
+  analysis, not a gate. So this marker is, today, a **documented convention**
+  any future conformance sweep (manual or automated) MUST honor; when such a
+  sweep is mechanized, it reads the `# UNMANAGED` header and skips the file
+  for the bypass finding (the same shape the assumption lint's
+  `lint_workflow_dir` consumer sweep would grow if the bypass check is ever
+  added there).
