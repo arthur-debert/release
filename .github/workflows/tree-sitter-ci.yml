@@ -107,6 +107,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash "${{ inputs.pre-check }}"
 
+      - name: Set up Python (gate linters ruff/yamllint)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Arm the gate toolset (materialize bin/check + lint toolset)
+        # tree-sitter-ci ran the umbrella check (default `bin/check`) WITHOUT
+        # materializing it first — unlike rust-ci/electron-ci/tauri-ci/go-ci/
+        # vscode-ext-ci/zed-extension-ci, which all arm-gate. A consumer that
+        # doesn't carry a committed bin/check therefore failed with
+        # `bin/check: No such file or directory` (exit 127) — caught on
+        # lex-fmt/tree-sitter-lex#72. arm-gate materializes the managed tree
+        # (incl. bin/check) and installs the gate toolset, matching the siblings.
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
+
       - name: Run umbrella check
         shell: bash
         run: ${{ inputs.check-command }}

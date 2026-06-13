@@ -1,0 +1,1 @@
+- tree-sitter-ci and nvim-plugin-ci: arm the gate toolset (materialize bin/check) before the umbrella check, matching the other *-ci workflows — fixes exit-127 when a consumer lacks a committed bin/check
