@@ -122,26 +122,97 @@ The Development Life Cycle
 2. Larger features (multiple PRs)
 
     A larger feature — one comprising multiple PRs — is a composition of the
-    single-task cycle ([#1]). There is one overarching agent, branch, and
-    umbrella PR for the feature; its execution is a series of single-task PRs.
+    single-task cycle ([#1]) under one coordinating agent. There is one
+    overarching feature branch (the *epic branch*) and one umbrella PR; the
+    feature's execution is a series of single-task PRs that merge into the epic
+    branch, and the umbrella PR finally merges the epic branch to `main`. The
+    phases below run in order.
 
     2.1. Information gathering
 
-        A supervising agent is started and, as in [#1.1], given the task via a
-        GitHub issue, a product spec, or a chat with the user. It does general
-        reading/research, creates a feature branch for the work, and asks the
-        user for decisions/clarifications as needed.
+        A coordinating agent is started and, as in [#1.1], given the task via a
+        GitHub issue, a product spec, or a chat with the user. It does the
+        general reading/research, cuts the epic branch, and asks the user for
+        decisions/clarifications as needed.
 
-    2.2. Execution
+    2.2. Delegation, not implementation
 
-        The coordinating agent does NOT do the implementation. Its role is to
-        keep the execution of the smaller parts correct, cohesive, and on track.
-        If it implements itself, it spends its context on that and either
-        degrades its own performance as the context window fills or forces
-        compaction; delegating also keeps token usage (and cost) down.
+        The coordinating agent does NOT implement. Its job is to keep the
+        execution of the parts correct, cohesive, and on track. If it
+        implements, it spends its own context on the work and either degrades
+        as the context window fills or forces compaction; delegating also keeps
+        token usage (and cost) down.
 
-        The agent spins subagents, assigning each its own part (ideally from a
-        GitHub issue for that part). Each subagent runs the full single-task
-        cycle for its part — implement, then shepherd its own PR through review
-        and CI to READY — and reports back to the coordinating agent, which
-        integrates the parts and keeps the overall feature on track.
+        It spins one subagent per part — ideally each scoped by its own GitHub
+        issue. Each subagent:
+
+        1. runs the full single-task cycle for its part ([#1]) — implement,
+           run `release-core gate`, then shepherd its own PR through the
+           `gh-pr-review-loop` skill to READY;
+        2. targets the epic branch, not `main`;
+        3. reports back to the coordinating agent.
+
+    2.3. Integration
+
+        The coordinating agent drives the merge — including the go/no-go — of
+        each subagent's workstream PR into the epic branch. This is the
+        coordinator's call; it does NOT need user approval for these
+        intra-epic merges. The user's approval gate is the umbrella PR ([#2.6]),
+        not the individual workstreams.
+
+    2.4. Convergence — clearing the fallouts
+
+        Once the initial workstreams are merged into the epic branch, the
+        coordinating agent gathers the fallouts: follow-ups filed as GitHub
+        issues during execution, plus things that surfaced while implementing.
+        It opens one final workstream and assigns a subagent to clear them.
+
+        Why this is a distinct phase:
+
+        - Workstream agents deliberately do NOT side-quest every little thing
+          they find — if they did, they would never finish. That restraint is
+          correct.
+        - But the epic must not merge with a pile of decoupled follow-ups
+          trailing behind it. This convergence step is where they get done, so
+          nothing is left behind.
+
+        The one caveat is scope. Clear only what belongs to this epic:
+
+        - Surfaced as obviously part of the feature during normal development →
+          do it now, in the convergence workstream.
+        - A related-but-separate feature → leave it as a filed issue; it is not
+          this epic's job.
+
+    2.5. Documentation pass
+
+        When the convergence workstream merges to the epic branch, the
+        coordinating agent delegates an exploration agent to find what the
+        feature changed in the docs — what needs updating, fixing, or removing —
+        and to make those changes on a dedicated PR. This covers both:
+
+        - out-of-code docs under `docs/` (dev, user, and reference); and
+        - docstrings, especially module-level ones that capture design,
+          trade-offs, pointers, and head-ups.
+
+    2.6. The umbrella PR
+
+        With the work and docs in, the coordinating agent opens the feature's
+        umbrella PR. It:
+
+        1. double-checks which issues the PR actually closes (and which it does
+           not);
+        2. writes a high-level description of the whole epic, pointing to the
+           related issues;
+        3. shepherds the PR through the same `gh-pr-review-loop` discipline
+           ([#1.3]) — manage reviewers, checks, mergeability — then flips it to
+           READY for the user's final merge.
+
+    2.7. Release
+
+        When the user merges the umbrella PR, the coordinating agent cuts the
+        release(s) (`release-core cut`), using the realized epic as the guide
+        for whether to bump MINOR or PATCH — only the user requests a MAJOR (see
+        the versioning contract). If the project has chained dependencies — e.g.
+        a CLI that a downstream desktop app bundles — the cascade runs all the
+        way through: release each repo in dependency order.
+
