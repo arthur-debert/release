@@ -84,7 +84,14 @@ run_husky() {
 # consumers track a root config, this script never runs against release's own repo
 # (it self-releases via gh-action.yml), and an un-materialized managed consumer is
 # handled by the release-core branch below.
-if [ -f .release/lefthook.yml ]; then
+#
+# An explicit caller-provided LEFTHOOK_CONFIG is authoritative (matching the
+# release-core gate verb); an empty/whitespace value counts as unset. Only when no
+# real config is provided do we point lefthook at the managed .release/ copy.
+if [ -n "${LEFTHOOK_CONFIG:-}" ] && [ -z "$(printf '%s' "${LEFTHOOK_CONFIG}" | tr -d '[:space:]')" ]; then
+  unset LEFTHOOK_CONFIG
+fi
+if [ -z "${LEFTHOOK_CONFIG:-}" ] && [ -f .release/lefthook.yml ]; then
   export LEFTHOOK_CONFIG=.release/lefthook.yml
 fi
 
