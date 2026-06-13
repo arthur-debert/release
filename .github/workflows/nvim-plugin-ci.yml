@@ -101,6 +101,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash "${{ inputs.pre-check }}"
 
+      - name: Set up Node (gate linters lefthook/prettier/markdownlint)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Set up Python (gate linters ruff/yamllint)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Arm the gate toolset (materialize bin/check + lint toolset)
+        # Same gap as tree-sitter-ci: the umbrella check (default `bin/check`)
+        # ran without materializing it, so a consumer lacking a committed
+        # bin/check would fail `No such file` (exit 127). arm-gate materializes
+        # the managed tree (incl. bin/check) + installs the gate toolset,
+        # matching rust-ci.yml et al.
+        uses: arthur-debert/release/.github/actions/arm-gate@v2
+
       - name: Run umbrella check
         shell: bash
         run: ${{ inputs.check-command }}
