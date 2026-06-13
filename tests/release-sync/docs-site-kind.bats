@@ -45,7 +45,7 @@ teardown() {
 }
 
 @test "detect-kind classifies a root mkdocs.yml as docs-site" {
-  run "$BIN/detect-kind"
+  run "$BIN/release-core" detect-kind
   [ "$status" -eq 0 ]
   [ "$output" = "docs-site" ]
 }
@@ -54,7 +54,7 @@ teardown() {
   # Mid-migration repos can carry both; mkdocs.yml is the discriminator.
   mkdir -p docs
   touch docs/_config.yml _config.yml
-  run "$BIN/detect-kind"
+  run "$BIN/release-core" detect-kind
   [ "$status" -eq 0 ]
   [ "$output" = "docs-site" ]
 }

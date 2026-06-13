@@ -10,31 +10,28 @@ name: release-sync + fleet tests
 #     resolution against a fixture manifest, and `release-core admin inbox`
 #     clustering over a stub-gh inbox (offline; no gh/network). The flat
 #     managed-repos / release-inbox names were retired in the CLI cutover (#468).
-#   tests/detect-kind  — the shell→Python migration canary: the detect-kind
-#     shim's CLI contract (kind strings + exit codes) over inline fixtures.
 # Regressions surface here before riding out to consumers.
+# (detect_kind classification is covered by test_core_manifest.py; the old
+# bin/detect-kind shim + its bats canary were retired once the shell->Python
+# migration completed.)
 
 on:
   push:
     branches: ['**']
     paths:
-      - 'bin/detect-kind'
       - 'bin/release-core'
       - 'managed-repos.yaml'
       - 'templates/**'
       - 'tests/release-sync/**'
       - 'tests/fleet/**'
-      - 'tests/detect-kind/**'
       - '.github/workflows/release-sync-tests.yml'
   pull_request:
     paths:
-      - 'bin/detect-kind'
       - 'bin/release-core'
       - 'managed-repos.yaml'
       - 'templates/**'
       - 'tests/release-sync/**'
       - 'tests/fleet/**'
-      - 'tests/detect-kind/**'
       - '.github/workflows/release-sync-tests.yml'
 
 permissions:
@@ -76,4 +73,4 @@ jobs:
           sudo chmod +x /usr/local/bin/yq
           yq --version
       - name: Run BATS suites
-        run: bats tests/release-sync/ tests/fleet/ tests/detect-kind/
+        run: bats tests/release-sync/ tests/fleet/
