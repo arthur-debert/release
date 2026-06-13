@@ -68,6 +68,36 @@ PY
     [ ! -e "$GD/pr-loop-armed" ]
 }
 
+@test "chained relative cds fold left: cd a && cd b lands in cwd/a/b" {
+    # release#632: the second relative target must resolve against the FIRST
+    # cd's result (cwd/a/b), not the original payload cwd (cwd/b).
+    NESTED="$BATS_TEST_TMPDIR/work/a/b"
+    mkdir -p "$NESTED"
+    git -C "$NESTED" init -q
+    NGD="$(git -C "$NESTED" rev-parse --git-dir)"
+    case "$NGD" in /*) : ;; *) NGD="$NESTED/$NGD" ;; esac
+    touch "$NGD/pr-loop-armed"
+    guard "cd a && cd b && gh pr create --fill" "$BATS_TEST_TMPDIR/work"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$NGD/pr-loop-armed" ]
+}
+
+@test "an absolute cd target resets the fold-left accumulator" {
+    # After `cd /abs`, a following relative cd resolves against /abs, and the
+    # earlier accumulated path is irrelevant.
+    BASE="$BATS_TEST_TMPDIR/abs-base"
+    mkdir -p "$BASE/sub"
+    git -C "$BASE/sub" init -q
+    SGD="$(git -C "$BASE/sub" rev-parse --git-dir)"
+    case "$SGD" in /*) : ;; *) SGD="$BASE/sub/$SGD" ;; esac
+    touch "$SGD/pr-loop-armed"
+    guard "cd elsewhere && cd $BASE && cd sub && gh pr create --fill" "$REPO"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$SGD/pr-loop-armed" ]
+}
+
 @test "deny reason lists the absolute sentinel paths checked (payload + cd target)" {
     TARGET="$BATS_TEST_TMPDIR/target"
     mkdir -p "$TARGET"
