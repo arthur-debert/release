@@ -152,6 +152,9 @@ shifts, so swapping the set is a one-line edit, no engine change:
   required_reviewers:
     - copilot
     - coderabbit
+  ```
+
+  ```yaml
   # or just CodeRabbit
   required_reviewers:
     - coderabbit
