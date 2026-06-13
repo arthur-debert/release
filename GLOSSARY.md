@@ -22,7 +22,10 @@ the map; `release-core how-to` is the task playbook.
 **Kind** — A repo's primary type: `rust-cli`, `rust-lib`, `tauri-app`,
 `electron-app`, `vscode-ext`, `nvim-plugin`, `go-cli`, `zed-extension`,
 `tree-sitter`, `python-pkg`, `gh-action`. The Kind decides how the generic verbs
-resolve and which release pipeline runs. Detect it with `release-core detect-kind`.
+resolve and which release pipeline runs. `release-core detect-kind` gives a
+filesystem-based guess (a heuristic — it doesn't separate every Kind, e.g. rust-lib
+vs rust-cli); the **definitive** release-pipeline Kind is whichever `<kind>.yml`
+reusable workflow a repo's `release.yml` thin caller invokes.
 We either support a Kind or we don't — there is **no per-repo special-casing** (a
 single Tauri app is as fully supported as ten Rust CLIs).
 
@@ -151,7 +154,7 @@ capability belongs *in* `release-core` and CI should call it directly.
 
 **`app-bin/`** (in a consumer) — Legitimate home for app-specific hooks and runnables
 (npm post-build, vscode theme generation, a phos golden-image run) — work outside the
-generic check/build/test/release verbs. It is **not** a place to duplicate, shim, or
+generic check/build/test/release verbs. It is **not** a place to duplicate, wrap, or
 fork release-core functionality.
 
 > In a *consumer*, `scripts/*` and `bin/*` are smoking guns: `scripts/*` held

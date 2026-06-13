@@ -57,7 +57,7 @@ A **Kind** template now consists of three things:
    `tauri.conf.json` parses).
 3. `templates/<kind>/**` — any other Kind-specific files (CI workflow
    ref isn't actually composed into the tree; consumers reference
-   `arthur-debert/release/.github/workflows/<kind>.yml@v2` directly).
+   `arthur-debert/release/.github/workflows/<kind>.yml@v3` directly).
 
 Most of what used to live in a Kind template (the hand-maintained
 `lefthook.yml`, language-specific lint configs) moves to Components.
