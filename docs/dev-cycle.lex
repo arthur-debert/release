@@ -214,7 +214,7 @@ The Development Life Cycle
 
         - out-of-code docs under `docs/` (dev, user, and reference); and
         - docstrings, especially module-level ones that capture design,
-          trade-offs, pointers, and head-ups.
+          trade-offs, pointers, and heads-ups.
 
     2.6. The umbrella PR
 
