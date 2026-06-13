@@ -20,11 +20,12 @@ consumer-specific), the reproduce-once → consult-the-dogfood-oracle → route
 loop, and the traps (`lefthook-local.yml` shadows; a consumer `.gitignore`
 silently dropping managed `bin/` tools).
 
-- **What's open / next:** the GitHub issue tracker is the task list — epic
-  **#348** (self-improving loop: consumer orientation is shipped + propagated to
-  all consumers; Phase A3 skill-reach + Phases C/D remain), **#349 / #350**
-  (`orc watch` shake-out + cloud transport). The roadmap in `docs/tooling.lex`
-  is the *directional* arc (the why), explicitly not a task tracker.
+- **What's open / next:** the GitHub issue tracker is the task list. The live
+  cleanup tracker is **#569** (the legacy / transitional-cruft inventory +
+  per-consumer sweep). The earlier epics — **#348** (self-improving loop) and
+  **#349 / #350** (`orc watch` shake-out + cloud transport) — are now **closed**.
+  The roadmap in `docs/tooling.lex` is the *directional* arc (the why),
+  explicitly not a task tracker.
 - **The CLI is the interface:** all infra/fleet tasks go through the
   `release-core <group> <command>` tree — `release-core --help` is the map,
   `release-core admin --help` is the fleet/meta-release subtree. The flat
