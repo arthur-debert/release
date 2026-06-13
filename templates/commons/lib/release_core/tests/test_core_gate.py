@@ -103,3 +103,12 @@ def test_glyph_parsing_tolerates_ansi_escapes(tmp_path, capsys):
     _run(tmp_path, stdout=stdout, exit_code=0)
     out = capsys.readouterr().out
     assert out.strip().splitlines()[-1] == "GATE: OK (1 check)"
+
+
+def test_verdict_is_standalone_when_output_lacks_trailing_newline(tmp_path, capsys):
+    # lefthook's final chunk without a trailing newline must not get the verdict
+    # glued onto it — release#628 review.
+    _run(tmp_path, stdout="✓ ruff (0.00 seconds)\nno trailing newline here", exit_code=0)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[-1] == "GATE: OK (1 check)"
+    assert lines[-2] == "no trailing newline here"

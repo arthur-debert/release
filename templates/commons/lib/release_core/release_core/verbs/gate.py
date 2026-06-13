@@ -77,9 +77,11 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from collections.abc import Iterator
 
 USAGE = __doc__ or ""
@@ -295,12 +297,22 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> 
     line — `GATE: OK (N checks)` / `GATE: FAILED (name, ...)` — derived from
     lefthook's exit code, which survives any `| tail` view.
 
-    quiet: buffer lefthook's output and print it ONLY on failure; on success print
+    quiet: spool lefthook's output and print it ONLY on failure; on success print
     just the verdict line — removing the incentive to pipe through tail at all.
     """
     try:
+        # Force UTF-8 with a non-fatal handler: lefthook's NO_COLOR summary carries
+        # ✓/✗ glyphs, and the locale default (e.g. LANG=C → ascii) would raise
+        # UnicodeDecodeError and crash before the verdict line is printed.
         proc = subprocess.Popen(
-            cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            cmd,
+            cwd=root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except FileNotFoundError:
         print("error: lefthook not found — the gate does not skip.", file=sys.stderr)
@@ -308,7 +320,14 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> 
         return 1
     passed: list[str] = []
     failed: list[str] = []
-    buffered: list[str] = []
+    # quiet → spool to memory-then-disk (SpooledTemporaryFile rolls over past 1 MiB)
+    # so a verbose failing gate can't grow output unboundedly in RAM.
+    spool = (
+        tempfile.SpooledTemporaryFile(max_size=1 << 20, mode="w+", encoding="utf-8")
+        if quiet
+        else None
+    )
+    last_line = ""
     assert proc.stdout is not None
     for line in proc.stdout:
         clean = _ANSI_RE.sub("", line)
@@ -318,14 +337,24 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> 
             passed.append(pm.group(1))
         elif fm:
             failed.append(fm.group(1))
-        if quiet:
-            buffered.append(line)
+        if spool is not None:
+            spool.write(line)
         else:
             sys.stdout.write(line)
             sys.stdout.flush()
+        last_line = line
     rc = proc.wait()
-    if quiet and rc != 0:
-        sys.stdout.write("".join(buffered))
+    emitted = spool is None  # non-quiet always streamed to stdout
+    if spool is not None:
+        if rc != 0:
+            spool.seek(0)
+            shutil.copyfileobj(spool, sys.stdout)
+            emitted = True
+        spool.close()
+    # Guarantee the verdict stands on its own line, even if lefthook's last chunk
+    # had no trailing newline (it would otherwise be glued onto the prior output).
+    if emitted and last_line and not last_line.endswith("\n"):
+        sys.stdout.write("\n")
     if rc == 0:
         n = len(passed)
         detail = f"{n} check{'' if n == 1 else 's'}" if n else "all checks"
