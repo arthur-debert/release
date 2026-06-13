@@ -1,0 +1,1 @@
+- Add GLOSSARY.md, rewrite README around the four pillars, and sweep banned terminology (materialize/canonical/doctrine/tombstone/drift/shim) from docs, skills, and help-strings

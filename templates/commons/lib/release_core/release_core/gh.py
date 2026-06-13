@@ -410,7 +410,7 @@ def git_show_bytes(rev_path: str, *, cwd: str) -> bytes:
     """`git -C <cwd> show <rev>:<path>` → the blob's RAW bytes.
 
     Bytes, not text: managed content (scripts, YAML, the harness lib) must be
-    materialized byte-for-byte. proc/`out` would strip and re-encode, so this
+    built byte-for-byte. proc/`out` would strip and re-encode, so this
     runs subprocess directly in binary mode through the same no-shell discipline."""
     import subprocess
 

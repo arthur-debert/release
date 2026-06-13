@@ -1,6 +1,6 @@
 # Lint debt: the three-case model
 
-**Status:** doctrine
+**Status:** principle
 **Date:** 2026-05-30
 
 Markdown-lint friction came from re-deciding the same question per file, forever.

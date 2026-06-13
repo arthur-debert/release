@@ -4,7 +4,7 @@ repo chain (comms -> lex/tree-sitter-lex -> vscode/nvim/lexed).
 Layer 1 of the cross-repo release automation (lex-fmt/lex#640). Walks the
 dependency chain and drives each repo's release by invoking `release-cut`
 (resolved from the MAINTAINER's PATH — the release repo's bin/) directly in each
-repo's cwd. It no longer calls each repo's `bin/release` shim: that shim just
+repo's cwd. It no longer calls each repo's `bin/release` script: that script just
 `exec`s the same `release-cut`, and it is missing on stale chain repos
 (tree-sitter-lex, nvim — mains behind), which stalled the cascade. release-cut
 reads cwd's manifest + dispatches cwd's release.yml, so a cwd-local call is
@@ -36,7 +36,7 @@ derived from that same latest final tag (TAG-AUTHORITATIVE — see below):
                             workflow) does the actual bump + CHANGELOG roll +
                             commit + tag + build + GitHub Release. We call
                             release-cut directly rather than the repo's
-                            `bin/release` shim (which only execs release-cut and
+                            `bin/release` script (which only execs release-cut and
                             is missing on stale chain repos) so the maintainer-run
                             cascade is self-contained.
 
@@ -44,11 +44,11 @@ TAG-AUTHORITATIVE version (why we dispatch an explicit X.Y.Z, not a bump-kind):
 release-lex already DECIDES off the latest final git tag (generic git, no per-repo
 tooling). If we instead dispatched `release-cut <bump-kind>`, release-cut would
 recompute the new version from the repo's MANIFEST — which is wrong wherever the
-manifest has drifted from the tag. The vscode case: package.json froze at
+manifest has fallen out of sync with the tag. The vscode case: package.json froze at
 0.4.1-rc.1 ~25 releases ago while the real version is the tag v0.10.8, so a
 manifest-driven `patch` bump yields 0.4.2 (wrong) instead of 0.10.9. So we apply
 the bump-kind to the TAG via release_core.version and dispatch the explicit result,
-making the cascade robust to manifest drift fleet-wide. Same self-contained pattern
+making the cascade robust to an out-of-sync manifest fleet-wide. Same self-contained pattern
 as dropping per-repo diff-since-release / bin/release. An explicit-X.Y.Z bump-kind
 passes through unchanged (no tag math).
 
@@ -109,7 +109,7 @@ from .. import gh, proc, version
 # release clone, so `release-core` is on the maintainer's PATH (the release
 # repo's bin/ dir), and `release-core cut` is the cut command (the flat
 # `release-cut` console-script was retired in the B2 cutover; #468). We invoke it
-# DIRECTLY in each repo's cwd rather than the repo's `bin/release` shim —
+# DIRECTLY in each repo's cwd rather than the repo's `bin/release` script —
 # `release-core cut` reads cwd's manifest + dispatches cwd's release.yml, so
 # calling it per-repo-cwd is per-repo-correct, and it drops the dependency on
 # each target repo carrying a current `bin/release` (which is missing on stale
@@ -291,7 +291,8 @@ def next_version(bump_kind: str, tag: str) -> str:
     This is the tag-authoritative fix (release#... option A): release-lex DECIDES
     off the latest final tag, so it must also DERIVE the next version from that
     same tag and dispatch it explicitly. Letting `release-cut <bump-kind>` recompute
-    from the manifest is wrong wherever the manifest has drifted from the tag — the
+    from the manifest is wrong wherever the manifest has fallen out of sync with the
+    tag — the
     vscode case, where `package.json` froze at 0.4.1-rc.1 ~25 releases ago while the
     real version is the tag v0.10.8, so a manifest-driven `patch` bump yields 0.4.2
     instead of 0.10.9.
@@ -498,7 +499,7 @@ def _release_one(key: str, cfg: dict) -> int:
 
     New model (post scripts/release retirement): the bump + CHANGELOG roll +
     commit + tag all happen IN CI, dispatched by the maintainer's `release-cut`
-    (run in the repo's cwd — NOT the repo's `bin/release` shim, which is missing
+    (run in the repo's cwd — NOT the repo's `bin/release` script, which is missing
     on stale chain repos). There is no local file mutation to
     branch/commit/PR/admin-merge anymore, so this is now: refresh main -> decide
     generically via git (commits since the last final release tag) ->
@@ -545,7 +546,7 @@ def _release_one(key: str, cfg: dict) -> int:
     # bump-kind to the latest final TAG decide_release already computed — NOT from
     # the repo's manifest. We then dispatch `release-cut <X.Y.Z>` (the exact
     # version) rather than `release-cut <bump-kind>`, so the cascade is robust to
-    # manifest drift fleet-wide (vscode's package.json froze at 0.4.1-rc.1 ~25
+    # an out-of-sync manifest fleet-wide (vscode's package.json froze at 0.4.1-rc.1 ~25
     # releases ago while its real version is the tag v0.10.8 → patch must be
     # 0.10.9, not the manifest-driven 0.4.2). An explicit-X.Y.Z bump-kind passes
     # through unchanged.
@@ -567,7 +568,7 @@ def _release_one(key: str, cfg: dict) -> int:
     # `release-core cut <X.Y.Z>` (maintainer's PATH tool, run in the repo cwd)
     # dispatches cwd's release.yml with the EXACT version we computed. CI does the
     # bump + CHANGELOG roll + commit + tag + build + GitHub Release. We call it
-    # directly rather than the repo's `bin/release` shim so the cascade doesn't
+    # directly rather than the repo's `bin/release` script so the cascade doesn't
     # depend on each target repo's tooling being current.
     if dry_run:
         print(f"  $ {RELEASE_CORE} {CUT_SUBCOMMAND} {cut_version}")

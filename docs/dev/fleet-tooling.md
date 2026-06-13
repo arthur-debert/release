@@ -11,7 +11,7 @@ layout is data, not logic.** Both live under `release-core admin repos`.
 project. Two hard rules:
 
 - **No discovery.** There is no ruleset / `gh api` auto-discovery path. It
-  produced recurring bugs (repos drifting in/out of scope silently). The
+  produced recurring bugs (repos slipping in/out of scope silently). The
   manifest is edited by hand; that's the feature.
 - **Zero layout logic.** A repo's location is `$REPOS_ROOT/<path>` — a pure
   join. No single-vs-multi-repo heuristics, no org-vs-project-name guessing,
@@ -142,14 +142,14 @@ its default branch (message defaults to
 push triggered **by HEAD SHA** — never `gh run rerun` — and, with `--watch`,
 polls them to conclusion and prints the per-job classified report (the shared
 classifier, `release_core.classify`): **INFRA** = release/upstream (arm-gate
-materialize/provision, boot, init) vs **PROJECT** = consumer-side
+tree-build/provision, boot, init) vs **PROJECT** = consumer-side
 (build/test/deps). Exit 0 green / 1 failures / 2 setup error.
 
 ## `release-core admin canary run` — the pre-ship consumer-life round
 
 Where `repos verify` is the fast, fleet-wide *gate* sweep, the canary round
 is the slow, deep *workflow* test (release#587, epic #583): it makes a real
-synthetic consumer live its full life — boot from source, materialize,
+synthetic consumer live its full life — boot from source, build the managed tree,
 `bin/check`, e2e/bats, and a genuine prerelease cut — against an
 **unreleased** candidate ref, before `release-core cut` moves the fleet.
 Different instruments; run both before cutting (the canary half is
@@ -178,7 +178,7 @@ verify/migrate/inbox sweeps never include the canary repos) it:
    off the same `canary/<sha12>` branch and costs one round's wall time.
 4. Polls both runs to conclusion (transient-tolerant backoff, `--timeout`).
 5. Prints a per-job classified report — **INFRA** (arm-gate
-   materialize/provision, install-release-core, init, prepare internals —
+   tree-build/provision, install-release-core, init, prepare internals —
    a release bug) vs **PROJECT** (bin/check, cargo, bats, compilation —
    canary-content rot) — and posts a `canary/<family>` commit status on
    `release@<sha>`. Exit 0 green / 1 failures / 2 setup error.
@@ -210,7 +210,7 @@ per-kind seed under `tests/fixtures/<kind>/`:
 ```sh
 release-core admin canary init --family rust                  # converge
 pbpaste | release-core admin canary init --family rust        # + set/rotate RELEASE_TOKEN
-release-core admin canary init --family rust --reset          # force-push the canonical seed
+release-core admin canary init --family rust --reset          # force-push the authored seed
 ```
 
 Run from inside release. One run converges everything: `gh repo create`
@@ -230,11 +230,11 @@ the `canaries:` registry entry (appended once).
   changes.
 - **Fail-closed secrets (#587).** The canary gets only what its family
   needs: `RELEASE_TOKEN` via the per-repo-targeted token verb (#601; pipe
-  the canonical PAT on stdin to set/rotate), plus whatever the fixture's
+  the shared PAT on stdin to set/rotate), plus whatever the fixture's
   optional `.canary-secrets` marker declares — the rust family declares
   the cert-only Apple signing pair (`APPLE_CERTIFICATE_P12_BASE64`,
   `APPLE_CERTIFICATE_PASSWORD`, sourced from `--auth-dir`, the same
-  canonical files `install-release-secrets` reads), so every canary cut
+  shared files `install-release-secrets` reads), so every canary cut
   exercises sign-mac for real (OQ3). The publish trio
   (`CRATES_IO_KEY`, `HOMEBREW_TAP_TOKEN`, `NPM_TOKEN`) is never installed
   and its presence on the repo *fails the run* until removed; the same
@@ -278,7 +278,7 @@ hand-rolled-bypass finding. phos-app's `e2e-gpu.yml` already self-declares it.
 
 The marker is ONLY the bypass signal — it does NOT suppress the assumption
 lint (`release-core admin contract lint`): an `# UNMANAGED` workflow that
-references a managed ephemeral path still must materialize the managed tree
+references a managed ephemeral path still must build the managed tree
 first. There is currently no automated fat-workflow linter in this repo (the
 release#569/#630 litmus sweep was a one-time manual analysis), so this is a
 documented convention any sweep must honor; see

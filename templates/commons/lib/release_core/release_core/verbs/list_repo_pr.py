@@ -25,7 +25,7 @@ from .. import gh
 
 USAGE = __doc__ or ""
 
-# repo|local-path — the canonical "managed by arthur-debert/release" set. NOT
+# repo|local-path — the one "managed by arthur-debert/release" set. NOT
 # auto-discovered (the ruleset signal includes unrelated repos). Kept verbatim
 # from the bash so the contract is byte-identical.
 REPOS = [

@@ -1,11 +1,11 @@
 """enable-dependabot-security — enable Dependabot security updates on onboarded repos.
 
 Enable Dependabot security updates (alerts + automated fixes) on every repo
-onboarded to the canonical main-branch-protection ruleset.
+onboarded to the shared main-branch-protection ruleset.
 
 Why: per the release/README.md "Dependabot policy", security updates are the
 only flow worth automating across the portfolio. They're toggled via the
-GitHub API, not the dependabot.yml file — so this script is the canonical
+GitHub API, not the dependabot.yml file — so this script is the one
 way to apply the policy.
 
 Endpoints used:

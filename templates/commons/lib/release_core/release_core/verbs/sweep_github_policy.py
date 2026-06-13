@@ -1,6 +1,6 @@
-"""sweep-github-policy — drop the canonical policy + setup files into a repo.
+"""sweep-github-policy — drop the shared policy + setup files into a repo.
 
-Drop the canonical policy + setup files into the current repo, based on
+Drop the shared policy + setup files into the current repo, based on
 its detected stack.
 
 Usage:

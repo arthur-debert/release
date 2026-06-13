@@ -1,4 +1,4 @@
-"""init — materialize the managed tree into a consumer repo (the pull-model boot).
+"""init — build the managed tree into a consumer repo (the pull-model boot).
 
 Usage:
   release-core init [--dry-run] [--no-commit] [--push]
@@ -14,18 +14,18 @@ opt-in plain `git push` of the LOCAL managed auto-commit.
 A bare `release-core init` runs the COMPLETE release-sync pipeline (build_plan +
 materialize + compute_mirror + apply) sourced from the wheel bundle — the whole
 `.release/` build dir + every working-tree mirror (skills, configs,
-per-Kind/Capability files, real-file workflow copies, the CLAUDE.md managed
+per-Kind/Component files, real-file workflow copies, the CLAUDE.md managed
 block) — then AUTO-COMMITS ONLY the managed paths iff they actually changed.
 Byte-identical result → no commit, so churn tracks release cadence, not session
 count. This is what SessionStart runs; it is "release-sync sourced from the
 wheel". This is the ONLY mode: the `--config-only` escape hatch (the pre-#476
-config-subset behavior) was REMOVED in release#532 — post-WS3 it materialized
+config-subset behavior) was REMOVED in release#532 — post-WS3 it built
 root configs whose gate referenced a `.release/` it never created, an
 internally inconsistent path nothing on the fleet used.
 
 Flags:
   --dry-run    compute + report the change count, write nothing.
-  --no-commit  materialize but skip the auto-commit (tests / CI inspection —
+  --no-commit  build but skip the auto-commit (tests / CI inspection —
                CI must never auto-commit the managed tree into a checkout).
   --push       fast-forward push the managed commit ONLY when on the repo's
                default branch with an otherwise-clean tree; on a feature
@@ -37,10 +37,10 @@ Flags:
   deployed SessionStart resolver in a not-yet-migrated consumer still calls
   `init --commit`, and that stale call performs the first cutover pull —
   failing it would stall the fleet (the resolver can't update the tree that
-  updates the resolver). The auto-commit is automatic and the materialize
+  updates the resolver). The auto-commit is automatic and the build
   overwrites unconditionally, so both flags are redundant in this mode.
 
-Auto-commit (the pull-model commit-hygiene seam): after a materialize, if (and
+Auto-commit (the pull-model commit-hygiene seam): after a build, if (and
 only if) managed content actually changed, init commits ONLY the exact managed
 paths it wrote (never `git add -A`, never folding in a user's other staged or
 unstaged work) with a deterministic message, on whatever branch is checked out
@@ -49,7 +49,7 @@ message: on a pushed branch it would block a required-checks ruleset forever.
 Conservative by construction: no changes → no commit; --dry-run → no commit; an
 unborn branch or any git error makes the commit step a quiet no-op.
 
-Source resolution: the canonical content is composed from the wheel-bundled
+Source resolution: the content is composed from the wheel-bundled
 templates (release_core/_bundled_templates/, staged at build time by
 hatch_build.py) so init is self-contained — no release clone, no network. This
 is the DEFAULT and the only path a pip-installed consumer ever takes.
@@ -93,7 +93,7 @@ def _bundle_root() -> str | None:
     This is the BundleSource root: its layout mirrors the repo —
     <root>/templates/… and <root>/skills/… — so a sync ``subtree`` like
     "templates/commons" or "skills/tdd" resolves directly. The full-tree
-    materialize reads through this.
+    build reads through this.
     """
     here = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))  # release_core/
     root = os.path.join(here, "_bundled_templates")
@@ -108,22 +108,22 @@ def _read_sync_yaml(repo_root: str) -> str | None:
     return None
 
 
-# ── Full materialize: the whole managed tree, from the bundle ────────────────
+# ── Full build: the whole managed tree, from the bundle ──────────────────────
 #
-# The full materialize is the SAME engine pipeline the retired release-sync verb
+# The full build is the SAME engine pipeline the retired release-sync verb
 # ran (build_plan + materialize + diff + compute_mirror + decide_claude + apply),
 # now sourced from the wheel bundle and driven by init: BundleSource by default,
 # or GitSource when a
 # real $RELEASE_HOME clone is present (release-dev override, mirroring how the
-# config path prefers $RELEASE_HOME over the bundle). It materializes the full
+# config path prefers $RELEASE_HOME over the bundle). It builds the full
 # .release/ build dir plus all working-tree mirrors (symlinks, real-file copies,
 # the CLAUDE.md orientation block) — everything release-sync produces.
 
 
 def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, str, list[str]]:
-    """Pick the sync Source for a full materialize and resolve Kind + capabilities.
+    """Pick the sync Source for a full build and resolve Kind + components.
 
-    Returns (source, kind, capability_names). DEFAULT: BundleSource over the
+    Returns (source, kind, component_names). DEFAULT: BundleSource over the
     wheel bundle (self-contained, no clone). A real $RELEASE_HOME git checkout
     OVERRIDES it (release-dev's live-templates path), exactly as the config path
     does. May raise manifest.KindError / sync.SyncError / yamlio.YamlError —
@@ -162,7 +162,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
 
     # Guard the Kind tree exists in the source — same early error release-sync
     # raises. Without it a wheel/ref missing templates/<kind>/ would silently
-    # materialize only commons/components/skills and still report success,
+    # build only commons/components/skills and still report success,
     # leaving an incomplete managed tree.
     if not source.exists(f"templates/{kind}"):
         raise sync.SyncError(
@@ -179,12 +179,12 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
     removed — the ONLY paths --commit stages (never `git add -A`).
 
     Covers: each symlink removed (swept from disk — the deletion must commit);
-    each real-file copy written or removed; each retired tombstoned file removed
+    each real-file copy written or removed; each retired file removed
     (WS6, release#527); and CLAUDE.md when the orientation block was
     created/injected/refreshed. Deterministic order, de-duplicated.
 
     Notably NOT the created symlink mirrors: since WS7 (release#528) they are
-    EPHEMERAL — materialized every init, excluded via .git/info/exclude, never
+    EPHEMERAL — built every init, excluded via .git/info/exclude, never
     tracked. Staging one (git add -f) would re-track it.
 
     And NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
@@ -264,7 +264,7 @@ def _run_full_sync(
 
         # Consumer-side tripwire (#581): warn — never fail — when a workflow job
         # references one of the ephemeral mirror dests this sync owns without
-        # materializing the managed tree first. Every init runs it (a consumer
+        # building the managed tree first. Every init runs it (a consumer
         # can add a bad job any day), dry-run included (read-only scan).
         _warn_unmaterialized_workflow_refs(repo_root, mirror.mirror_dests)
 
@@ -306,7 +306,7 @@ def _warn_unmaterialized_workflow_refs(repo_root: str, mirror_dests: set[str]) -
 
     Post-WS7 the mirror dests (``bin/check*``, ``lib/release_core/``, …) are
     EPHEMERAL — untracked, recomposed by every init — so a consumer-authored
-    workflow job that invokes one WITHOUT materializing the managed tree first
+    workflow job that invokes one WITHOUT building the managed tree first
     goes red on a fresh CI checkout ("No such file or directory", exit 127).
     Scan the consumer's ``.github/workflows/**`` with the SAME assumption-lint
     scanner the release-side contract lint uses (contract.lint_workflow_dir —
@@ -331,7 +331,7 @@ def _warn_unmaterialized_workflow_refs(repo_root: str, mirror_dests: set[str]) -
         return
     print(
         "WARNING: consumer workflow job(s) invoke managed ephemeral paths without\n"
-        "materializing the managed tree first. Post-WS7 these paths are untracked\n"
+        "building the managed tree first. Post-WS7 these paths are untracked\n"
         "(recomposed by `release-core init`), so they DO NOT EXIST on a fresh CI\n"
         "checkout — each job below will fail with 'No such file or directory':",
         file=sys.stderr,
@@ -339,11 +339,11 @@ def _warn_unmaterialized_workflow_refs(repo_root: str, mirror_dests: set[str]) -
     for v in violations:
         print(f"  {v.file} -> {v.job} -> {v.step}  (references {v.matched})", file=sys.stderr)
     print(
-        "Each listed job must materialize the managed tree first — add, BEFORE the\n"
+        "Each listed job must build the managed tree first — add, BEFORE the\n"
         "referencing step:\n"
         "  - uses: arthur-debert/release/.github/actions/arm-gate@v2\n"
         "    with:\n"
-        "      toolset: 'false'   # materialize-only; drop to also arm the lint gate\n"
+        "      toolset: 'false'   # build-only; drop to also arm the lint gate\n"
         "See `release-core how-to`.",
         file=sys.stderr,
     )
@@ -413,7 +413,7 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     for f in mirror.copies_to_remove:
         os.remove(f)
 
-    # Remove retired tombstoned files (WS6, release#527) — provenance-verified
+    # Remove retired files (WS6, release#527) — provenance-verified
     # in sync._find_retired_files, so only release's own retired copies land here.
     # Prune the now-empty parent dirs too (release#563): a fully-swept
     # vendor/semver-tool/ or .claude/skills/<name>/ must not linger as an empty
@@ -423,7 +423,7 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
         _rm_f(f)
         _prune_empty_parents(os.path.dirname(f))
 
-    # WS7 (release#528): the symlink mirrors are EPHEMERAL — materialized above,
+    # WS7 (release#528): the symlink mirrors are EPHEMERAL — built above,
     # never tracked. Keep `git status` clean by listing them in the local
     # .git/info/exclude (NOT the consumer's .gitignore: zero tracked footprint,
     # and info/exclude is per-clone, recomposed by every init just like the
@@ -603,7 +603,7 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
 
     # Report the REAL number of files in the commit, not len(written): `written`
     # is a list of pathspecs (".release" is ONE entry that git expands to every
-    # materialized file), so len(written) badly under-counts a full sync.
+    # built file), so len(written) badly under-counts a full sync.
     n = gh.git_commit_file_count(cwd=repo_root) or len(written)
     print(f"committed {n} managed file(s): {message}")
 
@@ -650,7 +650,7 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
 def _main_full(
     repo_root: str, repo_name: str, *, dry_run: bool, no_commit: bool, push: bool
 ) -> int:
-    """The default init path: full managed-tree materialize + auto-commit-on-change.
+    """The default init path: full managed-tree build + auto-commit-on-change.
 
     Runs the complete release-sync pipeline (build_plan + materialize +
     compute_mirror + apply), sourced from the wheel bundle by default (or a real
@@ -743,12 +743,12 @@ def main(argv: list[str] | None = None) -> int:
         print("release-core init: --push and --no-commit are mutually exclusive", file=sys.stderr)
         return 64
     # The commit is automatic (auto-commit-on-change; --no-commit to skip) and
-    # the materialize overwrites unconditionally — so an explicit --commit is
+    # the build overwrites unconditionally — so an explicit --commit is
     # redundant and --force a no-op. TOLERATE them (warn, don't fail): the
     # deployed SessionStart resolver in not-yet-migrated consumers still calls
     # `release-core init --commit`, and that stale invocation is exactly what
     # performs the FIRST cutover pull. Failing it would stall the whole fleet —
-    # the resolver can't materialize the new tree that would in turn update the
+    # the resolver can't build the new tree that would in turn update the
     # resolver (bootstrap chicken-and-egg). After the first successful pull the
     # managed resolver no longer passes --commit, so the warning self-clears.
     if values["commit"] or force:

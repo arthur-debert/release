@@ -184,7 +184,7 @@ def _changelog_group() -> click.Group:
     behavior matches today's ``changelog`` (it prints the orchestrator usage
     on stderr and exits 2). The add/cut/render subcommands are registered as
     discoverable ``wrap_verb`` leaves over the dedicated ``*_main`` functions, so
-    ``changelog add ...`` is byte-identical to ``changelog add ...`` via the shim.
+    ``changelog add ...`` is byte-identical to ``changelog add ...`` via the wrapper.
     """
 
     @click.group(
@@ -237,7 +237,7 @@ def _issue_group() -> click.Group:
         """Issue helpers.
 
         Escalate infrastructure friction (workflow failures, broken policy
-        templates, helper-script bugs) from this repo up to the canonical
+        templates, helper-script bugs) from this repo up to the
         arthur-debert/release tracker.
         """
 

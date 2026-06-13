@@ -1,7 +1,7 @@
 release-core, the gate, distribution, and workflows
 
     The machinery layer of `release/`: one CLI an agent drives, one quality
-    gate it runs, one sync engine that materializes managed files into a
+    gate it runs, one sync engine that builds managed files into a
     consumer, and one set of reusable GitHub Actions workflows. This document
     is the single home for all four — it absorbs the former `tooling`,
     `distribution`, `workflows`, and the mechanism half of `injected-files`,
@@ -35,7 +35,7 @@ release-core, the gate, distribution, and workflows
           build / release / run + the draft-first dev cycle). The single source
           of procedural truth — see `harness.lex` and `dev-cycle.lex`.
         - `release-core gate` — run the quality gate (see [#2]).
-        - `release-core init` — materialize the managed tree from the wheel
+        - `release-core init` — build the managed tree from the wheel
           bundle: the gitignored, ephemeral `.release/` build dir plus the
           working-tree mirrors ([#5]). What SessionStart runs; the only mode
           (the `--config-only` escape hatch was removed in #532). Auto-commits
@@ -82,8 +82,8 @@ release-core, the gate, distribution, and workflows
         :: table ::
 
         These reach a consumer's PATH as `release_core` pip console-scripts
-        (from the installed wheel), not as synced `bin/` shims. The old
-        `release` shim was retired in #476 — cut a release with `release-core
+        (from the installed wheel), not as synced `bin/` scripts. The old
+        `release` caller was retired in #476 — cut a release with `release-core
         cut`.
 
 2. The quality gate — release-core gate
@@ -194,33 +194,35 @@ release-core, the gate, distribution, and workflows
       `.claude/settings.json`, `bin/install-release-core`,
       `bin/setup-dev-env.sh`, `bin/pr-loop-guard` — the boot chain can't
       depend on what it boots.
-    - Optionally `.release-sync.yaml` — the one per-repo knob (capability
+    - Optionally `.release-sync.yaml` — the one per-repo knob (component
       override).
 
     Everything else is EPHEMERAL, recomposed by every `init`: the `.release/`
     build dir is gitignored (WS4, #521), and the working-tree mirrors (the
     `bin/` task symlinks, `.editorconfig`, the distributed skill) are
     untracked, listed in a managed `.git/info/exclude` block (WS7, #528).
-    Drift is impossible by construction — there is nothing tracked to drift.
+    Nothing can fall out of sync by construction — there is nothing tracked to
+    fall out of sync.
 
     The managed AUTO-COMMIT therefore fires only for real-file changes (the
-    quartet, workflow copies, the CLAUDE.md stub) and for one-time migrations
-    (untracking what an older seed committed; removing tombstoned retired
+    quartet, workflow copies, the CLAUDE.md managed block) and for one-time
+    migrations (untracking what an older seed committed; removing retired
     files, #527). Pathspec-scoped, never `git add -A`, byte-identical → no
     commit. `--no-commit` skips it (CI); `--push` additionally fast-forwards
     on a clean default branch.
 
 5. Distribution — the compose engine (init → ephemeral tree + mirrors)
 
-    `release-core init` is the one materializer (the standalone `release-sync`
-    verb and the drift-check subsystem were retired in WS4, #521 — with the
-    tree ephemeral there is nothing to drift). The engine lives in
-    `release_core/sync.py` (`build_plan` / `materialize` / `compute_mirror`);
+    `release-core init` is the one builder (the standalone `release-sync`
+    verb and the `release-drift-check` subsystem were retired in WS4, #521 —
+    with the tree ephemeral there is nothing to fall out of sync). The engine
+    lives in `release_core/sync.py` (`build_plan` / `materialize` /
+    `compute_mirror`);
     init is its only driver. Read this before adding anything consumers should
     receive.
 
     The guiding rule: a consumer repo contains as little release-owned state
-    as possible, and nothing mixed-ownership. The binary is the carrier; files
+    as possible, and nothing mixed-ownership. The wheel carries it; files
     appear at session start and never enter git.
 
     5.1. What init composes
@@ -228,7 +230,7 @@ release-core, the gate, distribution, and workflows
         Three template subtrees, low to high precedence (last write wins):
 
         - `templates/commons/` — the universal set; every consumer.
-        - `templates/components/<capability>/` — one per Capability the
+        - `templates/components/<component>/` — one per Component the
           consumer declares (Kind manifest default, or a `.release-sync.yaml`
           override).
         - `templates/<kind>/` — the consumer's Kind subtree.
@@ -279,9 +281,9 @@ release-core, the gate, distribution, and workflows
           dir pruned).
         - Stale managed copies: marker-carrying workflow files absent from the
           plan.
-        - Retired tombstoned files (WS6, #527): real files release once
+        - Retired files (WS6, #527): real files release once
           distributed and has since retired (`bin/check-fmt`,
-          `bin/changelog*`, the old `bin/release` shim,
+          `bin/changelog*`, the old `bin/release` caller,
           `.release-sync-state.yaml`), removed only under provenance (exact
           historical blob, managed marker, or verbatim header) so consumer-
           authored work is never touched.
@@ -289,7 +291,7 @@ release-core, the gate, distribution, and workflows
           pre-WS7 committed mirrors are untracked in one managed commit, with
           the ephemeral content kept live on disk.
 
-    5.4. The canonical-home pattern for tools
+    5.4. The single-home pattern for tools
 
         A tool that ships to consumers has its single source of truth inside
         `templates/commons/bin/` (or the relevant subtree) — never repo-root
@@ -299,17 +301,17 @@ release-core, the gate, distribution, and workflows
 
         Python tooling (`changelog`, `semver`, `detect-kind`,
         `gh-task-status`, `gh-release-issue`, and `release-core` itself)
-        ships as pip console-scripts from the wheel — never synced shims
+        ships as pip console-scripts from the wheel — never synced scripts
         (#476).
 
-    :: note :: To make something reach consumers: put its canonical copy under
+    :: note :: To make something reach consumers: put its single source copy under
     a template subtree, decide its placement class (prefer binary output >
     ephemeral > tracked), and add a `tests/release-sync/` case plus a
     `test_core_sync.py` lock.
 
 6. Reusable workflows
 
-    `release/` ships reusable GitHub Actions workflows: one canonical pipeline
+    `release/` ships reusable GitHub Actions workflows: one shared pipeline
     per artifact category. A consumer doesn't copy a pipeline — it calls one
     with a thin `with:` block. The logic stays here; the consumer's workflow
     file is a few lines.
@@ -429,15 +431,15 @@ release-core, the gate, distribution, and workflows
     - `orc watch <pr>` — poll PR lifecycle state and act on transitions.
     - `orc sessions list|clear` — manage stored sessions.
 
-    The canonical fleet loop is PULL-only: cut a release (`release.yml` publishes
+    The fleet loop is PULL-only: cut a release (`release.yml` publishes
     the `release_core` wheel) → `release-core admin release advance-major`
     (fast-forward the floating major). Run `release-core admin repos verify`
     (hermetic pre-flight) before advancing. Consumers self-update at their next
     SessionStart — `install-release-core` pulls the wheel and a bare
-    `release-core init` re-materializes the whole managed tree — so there is NO
+    `release-core init` rebuilds the whole managed tree — so there is NO
     push step. (Seeding a pre-pull consumer is a one-time `bash
     bin/install-release-core` run in that repo, then open the resulting
-    managed-sync PR — one repo at a time.) For the full doctrine and the
+    managed-sync PR — one repo at a time.) For the full principle and the
     upstream-vs-consumer routing rule, see the `release-fleet-ops` skill.
 
 8. Roadmap (directional, not a task tracker)
@@ -446,9 +448,10 @@ release-core, the gate, distribution, and workflows
     why, not the what's-next.
 
     Done:
-        - Vocabulary + sync redesign: Stack→Kind, Component→Capability, client→
-          Consumer; the build-dir + symlinks architecture (ADR-0001/0002) that
-          makes removals and renames detectable instead of lingering.
+        - Vocabulary + sync redesign: settled on Kind, Component, and Consumer
+          (Stack and client were the older names); the build-dir + symlinks
+          architecture (ADR-0001/0002) that makes removals and renames
+          detectable instead of lingering.
         - Reliable dev cycle (epic #332): the reviewer-agnostic `gh-task-status`
           state engine (`release_core.prstate`) + `orc watch`, distributed and
           review-hardened. Residual in #349 (orc watch live shake-out), #350
@@ -461,12 +464,13 @@ release-core, the gate, distribution, and workflows
           orientation via the CLAUDE.md stub + `how-to`; the escalation
           contract (`release-core issue file`) and the maintainer inbox
           (`admin inbox` / `notify-source`).
-        - Minimal footprint (epic #501, ADR-0005, closed 2026-06): the binary
+        - Minimal footprint (epic #501, ADR-0005, closed 2026-06): the wheel
           is the sole carrier. `.release/` ephemeral (WS4), bootstrap quartet
-          as real files (WS5), retired-file tombstones (WS6), ephemeral
+          as real files (WS5), retired-file cleanup (WS6), ephemeral
           mirrors + the machinery keep/fold/drop (WS7,
-          `docs/references/self-improving-machinery.md`). The drift/sync
-          subsystem is gone; a consumer tracks only the irreducible set.
+          `docs/references/self-improving-machinery.md`). The old sync and
+          out-of-sync-check subsystem is gone; a consumer tracks only the
+          irreducible set.
 
     In progress:
         - Dev-cycle fine-tuning (epic #547): thread-state-driven done-signal,

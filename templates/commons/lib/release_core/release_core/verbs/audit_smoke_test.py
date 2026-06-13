@@ -1,4 +1,4 @@
-"""audit-smoke-test — smoke-test the canonical PR loop end-to-end on a real repo.
+"""audit-smoke-test — smoke-test the shared PR loop end-to-end on a real repo.
 
 Opens a no-op PR, verifies that the loop *starts*:
   - Copilot Review workflow run is created within 90s
@@ -256,7 +256,7 @@ def main(argv: list[str]) -> int:  # noqa: C901 — linear orchestration mirrors
 
         body = (
             "Automated smoke test from `bin/audit-smoke-test`. This PR will be "
-            "closed automatically.\n\nVerifies the canonical PR loop starts: "
+            "closed automatically.\n\nVerifies the shared PR loop starts: "
             "Copilot Review workflow fires + required checks trigger."
         )
         create = gh.pr_create(

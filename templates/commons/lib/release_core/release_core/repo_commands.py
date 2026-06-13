@@ -32,7 +32,7 @@ The dispatch shape is deliberately ASYMMETRIC (release#507, confirmed design):
   exists, independent of the primary Kind.
 
 Package-manager resolution mirrors the per-Kind ``bin/`` wrappers it graduates:
-the lockfile is the canonical signal (``pnpm-lock.yaml``→pnpm, ``yarn.lock``→yarn,
+the lockfile is the one signal (``pnpm-lock.yaml``→pnpm, ``yarn.lock``→yarn,
 else npm). Detection is network-free; the one subprocess is the CI
 ``check-command`` fallback (:func:`_ci_check_command`), which reads the
 consumer's workflow YAML through ``release_core.yamlio`` (a ``yq`` shell-out)
@@ -72,7 +72,7 @@ class Cmd:
 
 
 def detect_pm(root: str) -> str:
-    """npm / pnpm / yarn from the lockfile — the canonical signal a consumer
+    """npm / pnpm / yarn from the lockfile — the one signal a consumer
     commits exactly one of (mirrors every ``bin/`` wrapper's ``detect_pm``)."""
     if os.path.isfile(os.path.join(root, "pnpm-lock.yaml")):
         return "pnpm"
@@ -143,7 +143,7 @@ def _rust_dirs(root: str) -> list[str]:
 def _cargo_test(cwd: str) -> Cmd:
     """``cargo test --all-features`` for one crate dir. ``--all-features``
     matches what the clippy hook lints; the exec layer upgrades to
-    ``cargo nextest run`` when it is installed (the portfolio canonical runner),
+    ``cargo nextest run`` when it is installed (the portfolio's shared runner),
     so the display stays the stable plain-cargo form."""
     where = "" if cwd == "." else f" (in {cwd})"
     return Cmd(
@@ -220,7 +220,7 @@ def _umbrella_test(root: str) -> Cmd | None:
     """The script-runner umbrella test entry. ``None`` when nothing applies.
 
     For nvim plugins this mirrors ``templates/nvim-plugin/bin/check``'s real
-    precedence — ``app-bin/test-all`` (the canonical fleet runner, bats-driven
+    precedence — ``app-bin/test-all`` (the shared fleet runner, bats-driven
     Neovim) → ``busted tests/``. The busted path is gated to an actual nvim
     layout (a ``lua``/``plugin``/… dir) so a generic ``tests/`` dir in some other
     Kind isn't misclassified as a busted suite. A ``Makefile`` ``test:`` target
@@ -250,7 +250,7 @@ def _mkdocs_config(root: str) -> str | None:
 # --- CI caller fallback ---------------------------------------------------
 
 # The reusable-workflow path prefix a consumer's CI caller `uses:` to invoke
-# one of release's canonical category workflows (e.g.
+# one of release's shared category workflows (e.g.
 # `arthur-debert/release/.github/workflows/nvim-plugin.yml@v2`). When a consumer
 # wires its real suite through that caller's `check-command:` input (rather than
 # a manifest script), the manifest probes find nothing — this fallback recovers
@@ -262,7 +262,7 @@ def _ci_check_command(root: str) -> str | None:
     """The first non-empty ``with.check-command`` from a release reusable-workflow
     caller in ``.github/workflows/*.yml``, or ``None``.
 
-    A pure FALLBACK for repos that wire their suite through the canonical caller's
+    A pure FALLBACK for repos that wire their suite through the shared caller's
     ``check-command:`` input instead of a manifest script. Robust to a missing
     dir / non-dict workflow / garbled YAML / no matching job — never raises."""
     wf_dir = os.path.join(root, ".github", "workflows")
@@ -320,7 +320,7 @@ def unit_commands(root: str) -> list[Cmd]:
     if umbrella:
         cmds.append(umbrella)
     # Fallback ONLY when no manifest/script probe found a suite: a consumer may
-    # wire its real, CI-green suite through the canonical reusable-workflow
+    # wire its real, CI-green suite through the shared reusable-workflow
     # caller's `check-command:` input (e.g. lex-fmt/nvim's test/run_tests.sh).
     # Never added alongside a manifest command — that would double-run.
     if not cmds:

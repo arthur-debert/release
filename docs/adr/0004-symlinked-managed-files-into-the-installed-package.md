@@ -22,7 +22,7 @@ it is boring-reliable. **phos-app / phos-core are excluded** until they stabiliz
 After ADR-0003, `release_core` arrives as a pip-installed wheel and the tools are
 console-scripts. But the _per-repo_ surface is still a grab-bag:
 
-- `.release/` and a set of `bin/` shim symlinks are **committed** (ADR-0001);
+- `.release/` and a set of `bin/` tool symlinks are **committed** (ADR-0001);
 - `lefthook.yml` and lint/format configs are **committed real files**;
 - `CLAUDE.md` carries a managed block inside an otherwise per-repo file;
 - skills are committed real files;
@@ -31,12 +31,12 @@ console-scripts. But the _per-repo_ surface is still a grab-bag:
 The committed-real-file parts share one failure mode that has been the dominant
 operational pain: **silent per-repo divergence.** Nothing stops an agent (or a
 human) from editing a managed file in place; nothing detects it; so over time
-every repo drifts differently — one has stale orientation, another is missing a
+every repo diverges differently — one has stale orientation, another is missing a
 binary tool, a third has a hand-edited gate. The files are "present and working"
 in each repo, but the _fleet_ is inconsistent, and the inconsistency is invisible
 until it bites in that repo.
 
-ADR-0001 committed the materialized content on purpose, for **graceful
+ADR-0001 committed the built content on purpose, for **graceful
 degradation / self-containedness**: a repo keeps working if `release` disappears.
 That is a real value — but in practice it has bought us
 stale-but-working, silently-divergent repos, which is exactly the state we most
@@ -53,7 +53,7 @@ bootstrap (`release-core init`, invoked by SessionStart and CI), the installed
 package composes each managed file — centralized parts from the package, plus any
 per-repo `*.part.local` content concatenated in — into a gitignored per-repo dir
 (`.release/`). The repo's managed paths are committed symlinks pointing into it.
-The build dir is **per-repo** (composed output differs by kind/capabilities), so
+The build dir is **per-repo** (composed output differs by kind/components), so
 it cannot live in the shared site-packages dir — it is a gitignored tree in the
 repo, fed _from_ the package.
 
@@ -62,13 +62,13 @@ managed + per-repo content ships a committed `*.part.local` (the only per-repo
 bytes); bootstrap concatenates centralized + local into the composed file. The
 composed file is never committed (its repo path is a symlink, so it _can't_ be).
 
-**4. The symlink invariant is a drift gate.** Because every managed path is a
-symlink into a gitignored tree, drift is no longer invisible:
+**4. The symlink invariant is a divergence gate.** Because every managed path is a
+symlink into a gitignored tree, an out-of-sync file is no longer invisible:
 
 - a managed path that is **not a symlink** → someone edited it in place → violation;
 - the gitignored build dir (or the installed package dir) **appearing in git** → violation.
 
-This is gate-able in pre-commit and CI. Drift goes from _invisible and per-repo_
+This is gate-able in pre-commit and CI. Divergence goes from _invisible and per-repo_
 to _impossible-or-loud and uniform_.
 
 Implementation note for that check: when scanning staged paths, exclude only
@@ -91,7 +91,7 @@ exactly the violation to catch, and `ACMR` would silently drop it.
 
 Symlinked (the ideal case — no at-rest value, consumed only post-bootstrap):
 `lefthook.yml`, lint/format configs (`.markdownlint.json`, `.yamllint`,
-`.prettierignore`, …), skills, and the former `bin/` shims (now subcommands).
+`.prettierignore`, …), skills, and the former `bin/` tool scripts (now subcommands).
 
 **6. The irreducible seed.** The bootstrapper can never be a
 symlink-into-the-package — you cannot symlink the thing that creates the symlinks.
@@ -111,11 +111,11 @@ already invoke the resolver after ADR-0003.
 
 ### What we gain
 
-- **Drift becomes impossible-or-loud and uniform.** The symlink invariant + the
+- **Divergence becomes impossible-or-loud and uniform.** The symlink invariant + the
   "package dir not in git" check, gated in pre-commit/CI, end silent per-repo
   divergence — the dominant pain.
 - **Tiny committed surface.** One seed file + a set of symlinks + the `*.part.local`
-  bytes a repo genuinely owns. No committed `.release/`, no `bin/` shims, no
+  bytes a repo genuinely owns. No committed `.release/`, no `bin/` tool symlinks, no
   committed gate/config bodies.
 - **One way, everywhere.** Every repo gets identical managed content composed the
   same way; the only per-repo bytes are `*.part.local` and the thin workflow
@@ -143,12 +143,12 @@ already invoke the resolver after ADR-0003.
 
 1. Pull model live + proven (ADR-0003): release cut with bundled templates, boot
    resolver seeded fleet-wide (one seed-propagate, skipping phos).
-2. Collapse `bin/` shims → `release-core <verb>` subcommands.
+2. Collapse `bin/` tool scripts → `release-core <verb>` subcommands.
 3. Flip the composed build dir from committed `.release/` to **gitignored**;
    convert managed config/skill paths to symlinks; add the symlink + no-package-in-git
-   drift gate to pre-commit and CI.
+   divergence gate to pre-commit and CI.
 4. Keep workflow callers and `CLAUDE.md` as real committed files.
-5. Retire `release-sync`'s committed-content materialization and the curl
+5. Retire `release-sync`'s committed-content build step and the curl
    bootstrap (epic #416 step 11).
 
 phos remains excluded throughout, folded in once it stabilizes.

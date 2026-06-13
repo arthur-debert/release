@@ -1,6 +1,6 @@
 ---
 name: release-issue-relay
-description: "Escalate infrastructure friction (workflow failures, ruleset misbehaviors, broken policy templates, helper-script bugs) from a consumer repo to the canonical `arthur-debert/release` repo. Files a GitHub issue at release with auto-collected reproduction context (repo, branch, PR, recent workflow run, workaround applied). Searches recent release issues first and comments on a matching one rather than filing a duplicate — the comment count is the signal of recurrence. Use ONLY for infra issues that the consumer cannot fix in place; do not use for code-quality nits, project-specific test failures, or anything fixable inside the consumer repo. Triggered by: 'this workflow fails in a way I can't fix here', 'the release-loop policy is misbehaving', 'an infra script errors', 'the cloud env is missing something it should provide'."
+description: "Escalate infrastructure friction (workflow failures, ruleset misbehaviors, broken policy templates, helper-script bugs) from a consumer repo to the `arthur-debert/release` repo. Files a GitHub issue at release with auto-collected reproduction context (repo, branch, PR, recent workflow run, workaround applied). Searches recent release issues first and comments on a matching one rather than filing a duplicate — the comment count is the signal of recurrence. Use ONLY for infra issues that the consumer cannot fix in place; do not use for code-quality nits, project-specific test failures, or anything fixable inside the consumer repo. Triggered by: 'this workflow fails in a way I can't fix here', 'the release-loop policy is misbehaving', 'an infra script errors', 'the cloud env is missing something it should provide'."
 ---
 
 # release-issue-relay
@@ -9,7 +9,7 @@ Portable port of the `gh-release-issue` / `release-core issue file` escalation t
 
 ## The hard rule about scope
 
-This skill is **only** for infrastructure issues that the consumer repo cannot fix in place. The canonical signal: *"I applied a local workaround to keep working, but the underlying problem is in arthur-debert/release, not here."*
+This skill is **only** for infrastructure issues that the consumer repo cannot fix in place. The signal to watch for: *"I applied a local workaround to keep working, but the underlying problem is in arthur-debert/release, not here."*
 
 | Use it for | Do not use it for |
 |---|---|
@@ -39,7 +39,7 @@ The skill auto-gathers from the current session:
 
 You supply two strings:
 
-- **`COMPONENT`** — one of the canonical buckets (see Components section); free-form is allowed but standardized buckets help triage.
+- **`COMPONENT`** — one of the standard buckets (see Components section); free-form is allowed but standardized buckets help triage.
 - **`SYMPTOM`** — one-line description, used as the issue title suffix.
 
 Plus the agent's own write-up in the body: the workaround applied locally, suspected cause, anything else useful for triage.
@@ -53,7 +53,7 @@ set -euo pipefail
 
 # Set these before running. The snippet doesn't take positional args (avoids
 # `set -u` aborting on bare $1 / $2 when an agent pastes it into a fresh shell).
-COMPONENT="copilot-review"   # one of the canonical buckets — see "Components" below
+COMPONENT="copilot-review"   # one of the standard buckets — see "Components" below
 SYMPTOM="workflow runs SUCCESS but requested_reviewers stays empty"
 
 # Pull the last 30 OPEN issues at release. The maintainer rarely lets the
@@ -205,7 +205,7 @@ Replace the `<...>` placeholders before running.
 
 ## Components
 
-These are the canonical buckets; the title prefix is what step 1's `--search` filters on. Stay within this list when possible — new components should be added deliberately:
+These are the standard buckets; the title prefix is what step 1's `--search` filters on. Stay within this list when possible — new components should be added deliberately:
 
 | Component | Covers |
 |---|---|

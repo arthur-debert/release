@@ -1,41 +1,56 @@
 # release
 
-Shared infrastructure for operating ~20 small projects (Rust libs/CLIs,
-Electron + Tauri apps, editor extensions, tree-sitter grammars, Python
-packages, GH Actions) the same way, locally and on CI. One canonical
+Shared software-development infrastructure for operating ~20 small projects
+(Rust libs/CLIs, Electron + Tauri apps, editor extensions, tree-sitter grammars,
+Python packages, GitHub Actions) the same way — locally and on CI. One shared
 implementation per concern; consumers carry almost nothing.
 
-## The design
+Terms in **bold** are defined in [GLOSSARY.md](GLOSSARY.md).
 
-**The binary is the carrier ("invoke, don't discover").** A consumer repo
-tracks only an irreducible set of files:
+## What it provides
 
-- `.github/**` — thin workflow callers pinned at `@vN` + GitHub-forced
-  policy files (CODEOWNERS, dependabot, copilot-review).
-- The **bootstrap quartet**, real tracked files: `.claude/settings.json`,
-  `bin/install-release-core`, `bin/setup-dev-env.sh`, `bin/pr-loop-guard` —
-  enough for a fresh clone to boot itself.
+1. **Local tools** — lint / format / static checks, tests, changelog, build, run,
+   release — all through one `release-core <command>` CLI that knows a repo's
+   **Kind** and routes the generic verbs to the real tool (cargo, npm, uv, …).
+2. **CI tools** — one **reusable workflow** per Kind that runs the same tools on
+   the server, plus the logic that triggers them.
+3. **Agent harness** — a small pointer in `CLAUDE.md`, one distributed skill, and
+   `release-core how-to`: how an agent orients and asks for help in any repo.
+4. **The dev cycle** — the one standardized way of working
+   ([docs/dev-cycle.lex](docs/dev-cycle.lex)), enacted by the `gh-pr-review-loop`
+   skill.
+
+Internally, release also carries **fleet ops** (`release-core admin …`) — its own
+tools to probe, update, verify, and raise issues against consumers.
+
+## How it reaches consumers (the pull model)
+
+There is **no push.** A consumer's **footprint** is kept minimal and stable so it
+never needs a coordinated edit across 20 repos. A consumer tracks only:
+
+- `.github/**` — **thin callers** pinned at `@vN` + GitHub-forced policy files
+  (CODEOWNERS, dependabot, copilot-review).
+- The **bootstrap quartet** (real tracked files): `.claude/settings.json`,
+  `bin/install-release-core`, `bin/setup-dev-env.sh`, `bin/pr-loop-guard` — enough
+  for a fresh clone to boot itself.
 - Optionally `.release-sync.yaml`, the one per-repo knob.
 
-Everything else arrives at session start and never enters git. The
-SessionStart hook runs `install-release-core`, which pulls the pinned
-`release_core` wheel from this repo's GitHub releases and runs
-`release-core init` — composing the gitignored, ephemeral `.release/` build
-dir (gate definition + tool configs) and the untracked working-tree mirrors
-(`bin/` task verbs, `.editorconfig`, the skill). Recomposed every session,
-drift is impossible by construction.
+Everything else arrives at session start and never enters git. The SessionStart
+hook runs `install-release-core`, which pulls the pinned `release_core` wheel from
+this repo's GitHub releases and runs `release-core init` — which builds the
+gitignored, ephemeral `.release/` tree (gate definition + tool configs) and the
+untracked working-tree mirrors. It's rebuilt every session, so it can't fall out
+of sync.
 
-**Discovery is the CLI, not docs.** An agent landing in a consumer repo
-gets a two-line stub in `CLAUDE.md` pointing at `release-core how-to` —
-the kind-aware playbook for *that* repo (lint/test/build/release + the
-draft-first dev cycle) — and `release-core --help` for the rest. One skill
-ships as a file (`gh-pr-review-loop`, the `/`-triggered PR-loop driver);
-all other guidance is rendered from the binary, version-correct.
+**Discovery is the CLI, not docs.** An agent landing in a consumer gets a small
+managed block in `CLAUDE.md` pointing at `release-core how-to` — the Kind-aware
+playbook for *that* repo — and `release-core --help` for the rest. Exactly **one**
+skill ships as a file (`gh-pr-review-loop`, the `/`-triggered PR-loop driver); all
+other guidance is rendered from the binary, always version-correct.
 
-**Fix once, propagate by pull.** Workflows propagate because `@vN` floats
-to the latest non-breaking tag; managed files propagate because the next
-session pulls the new wheel. There is no push mechanism and nothing to
-edit in 20 repos.
+**Fix once, propagate by pull.** Workflows propagate because `@vN` floats to the
+latest non-breaking tag; managed files propagate because the next session pulls the
+new wheel. Nothing to edit in 20 repos.
 
 ## The two propagation surfaces
 
@@ -43,53 +58,61 @@ edit in 20 repos.
 # A consumer's entire release.yml:
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v2
+    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v3
     with:
       version: ${{ inputs.version }}
     secrets: inherit   # cross-org consumers list secrets explicitly
 ```
 
-One reusable release workflow per Kind (`rust-cli`, `rust-lib`, `go-cli`,
-`electron-app`, `tauri-app`, `vscode-ext`, `nvim-plugin`, `tree-sitter`,
-`zed-extension`, `python-pkg`, `gh-action`, plus `mkdocs`/`mdbook` docs
-sites), each paired with a `<kind>-ci.yml` PR gate where one exists. The
-catalog: [docs/tooling.lex](docs/tooling.lex) §6.
-
-Files a consumer needs locally ride the wheel: `release-core init`
-composes them per-Kind from `templates/` (commons → capabilities → kind;
-see [docs/references/component-model.md](docs/references/component-model.md)).
-
-## Vocabulary
-
-- **Kind** — the repo's language/runtime profile (`rust-cli`,
-  `tauri-app`, …). One per consumer; detected by `detect-kind`.
-- **Capability** — a reusable module a Kind composes (`rust-quality`,
-  `mkdocs`, `bats`, …). Each ships configs + a lefthook fragment.
-- **Consumer** — a repo managed by this one. The authoritative list is
-  `managed-repos.yaml` (`release-core admin repos list`); there is no
-  auto-discovery.
+1. **Reusable workflows** — one release workflow per Kind (`rust-cli`, `rust-lib`,
+   `go-cli`, `electron-app`, `tauri-app`, `vscode-ext`, `nvim-plugin`,
+   `tree-sitter`, `zed-extension`, `python-pkg`, `gh-action`, plus `mkdocs`/`mdbook`
+   docs sites), each paired with a `<kind>-ci.yml` PR gate where one exists. Catalog:
+   [docs/tooling.lex](docs/tooling.lex) §6.
+2. **The wheel** — the files a consumer needs locally ride the wheel; `release-core
+   init` composes them per-Kind from `templates/` (commons → components → Kind; see
+   [docs/references/component-model.md](docs/references/component-model.md)).
 
 ## The quality gate
 
-`release-core gate` is the ONE quality entry: lefthook over the composed
-`.release/lefthook.yml`, identical at session start, on commit (the hook is
-`release-core gate --hook`), and in CI (the `arm-gate` composite). It is a
-HARD gate — a missing tool fails, never skips — and it is one definition:
-to change a check, edit a lefthook fragment in `templates/`, never a CI
-job. Lint debt is classified, not whack-a-moled:
+`release-core gate` is the **gate**: `lefthook` over the composed `.release/lefthook.yml`
+— **check-fast** (lint + format + static). It is one definition, **invoked**
+everywhere it's needed — identical at session start, on commit (the hook is
+`release-core gate --hook`), and in CI (the `arm-gate` composite) — never re-listed
+per environment. It is a **hard** gate: a missing tool fails, never skips. To change
+a check, edit a `lefthook` fragment in `templates/`, never a CI job.
+
+CI runs **check-full** — the gate plus the unit + e2e suites (`release-core
+test-all`) — as required checks. A green gate is necessary but not sufficient. Lint
+debt is classified, not whack-a-moled:
 [docs/references/lint-debt-model.md](docs/references/lint-debt-model.md).
 
 ## The dev cycle
 
 Draft-first, state-machine-driven, human-merged. The model is
-[docs/dev-cycle.lex](docs/dev-cycle.lex); `release-core pr status` computes
-the lifecycle state + next action; the `gh-pr-review-loop` skill drives it
-(a PreToolUse guard enforces going through the skill). Agents stop at
-ready-for-review — a human merges.
+[docs/dev-cycle.lex](docs/dev-cycle.lex); `release-core pr status` computes the
+lifecycle state + next action; the `gh-pr-review-loop` skill drives it (a PreToolUse
+guard enforces going through the skill). Agents stop at ready-for-review — a human
+merges.
 
-Every feature/fix PR adds a changelog fragment (`changelog add <slug>
-"..."`); a release refuses to cut without one. Cut with `release-core cut
-X.Y.Z`; CI builds, publishes the wheel, and advances the floating major.
+Every feature/fix PR adds a changelog fragment (`changelog add <slug> "…"`); a
+release refuses to cut without one.
+
+## The release pipeline
+
+Releasing spans one local stage and four CI stages. **Everything that mutates state
+runs in CI** — the one exception is pure Rust library crates (`cargo publish` from
+anywhere). Per-Kind coverage varies (not every Kind builds, signs, or publishes).
+
+| Stage | Where | What |
+|---|---|---|
+| **0 · Pre-flight** | local (`release-core cut`) | detect Kind, bump + validate version, check the **canary** gate, dispatch the workflow — mutates nothing locally |
+| **1 · Prepare** | CI | validate version, verify changelog fragment + version differs, bump manifest(s), roll changelog, commit + tag + push |
+| **2 · Build** | CI | artifacts across the platform/arch matrix (skipped for pure-source Kinds) |
+| **3 · Sign & Notarize** | CI | macOS binaries only today (rust-cli, go-cli, tauri-app, electron-app) |
+| **4 · Publish** | CI | per-Kind, 0–N channels: crates.io / PyPI / npm / VS Code Marketplace / Open VSX / Homebrew tap / GitHub release |
+
+`release-core cut` auto-advances the **floating major** at the end.
 
 ## Versioning
 
@@ -99,28 +122,27 @@ X.Y.Z`; CI builds, publishes the wheel, and advances the floating major.
 | MINOR | new optional input, opt-in feature, new Kind workflow |
 | MAJOR | required-input rename, default behavior change, removed input |
 
-Tags `vX.Y.Z`; the floating major branch (`v2` today) always points at the
-latest non-breaking tag. Anything forcing every consumer to edit its thin
-caller is a MAJOR, coordinated before cutting. History: `CHANGELOG.md` +
-git tags.
+Tags `vX.Y.Z`; the floating major branch (`v3` today) always points at the latest
+non-breaking tag. Anything forcing every consumer to edit its thin caller is a
+MAJOR, coordinated before cutting. History: `CHANGELOG.md` + git tags.
 
 ## Layout
 
-```
+```text
 .github/workflows/    reusable workflows (one release pipeline per Kind,
                       *-ci.yml PR gates, shared infra)
 .github/actions/      composite actions (arm-gate, prepare-release, …)
-bin/                  maintainer CLI surface; canonical entry is
-                      `release-core <group> <cmd>` (`--help` is the map)
-bin-internal/         CI-side scripts exec'd by actions/workflows
+bin/                  NOT a consumer surface — only what can't be a
+                      release-core subcommand (dev entry, pre-boot scripts,
+                      HTTP-fetched fetchers, fleet-operator tools)
+bin-internal/         CI-glue scripts; they CALL release-core, never reimplement it
 templates/            what `release-core init` composes per consumer:
   commons/            universal set (incl. lib/release_core — the Python
                       package, shipped as the wheel)
-  components/<c>/     one per Capability
+  components/<c>/     one per Component
   <kind>/             Kind recipe: manifest.yaml + fragments + files
-skills/               canonical home for Claude Code skills; one is
-                      distributed (gh-pr-review-loop), rest are
-                      maintainer/release-only (docs/harness.lex)
+skills/               home for Claude Code skills; one is distributed
+                      (gh-pr-review-loop), the rest are release-only
 docs/                 four narrative .lex docs + ADRs + references
 tests/                bats suites + fixtures (python tests live with the
                       package under templates/commons/lib/release_core)
@@ -129,13 +151,14 @@ examples/             paste-ready consumer release.yml files
 
 ## Docs
 
+- [GLOSSARY.md](GLOSSARY.md) — the authoritative vocabulary.
 - [docs/README.lex](docs/README.lex) — the map and reading order.
-- [docs/tooling.lex](docs/tooling.lex) — the CLI, gate, PR state machine,
-  pull model, compose engine, workflow catalog.
-- [docs/harness.lex](docs/harness.lex) — the agent harness: bootstrap,
-  orientation, skills.
+- [docs/tooling.lex](docs/tooling.lex) — the CLI, gate, PR state machine, pull
+  model, compose engine, workflow catalog.
+- [docs/harness.lex](docs/harness.lex) — the agent harness: bootstrap, orientation,
+  skills.
 - [docs/dev-cycle.lex](docs/dev-cycle.lex) — the development lifecycle.
 - [CLAUDE.md](CLAUDE.md) — working on this repo itself.
 
-Per-Kind "how do I build/test this" is `release-core how-to <kind>`
-output, not a doc.
+Per-Kind "how do I build/test this" is `release-core how-to <kind>` output, not a
+doc.

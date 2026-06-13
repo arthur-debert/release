@@ -52,7 +52,7 @@ def _usage_error(msg: str) -> int:
 
 
 def _manifest_path() -> str:
-    """bin/../managed-repos.yaml, resolved via the shim's exported script dir.
+    """bin/../managed-repos.yaml, resolved via the launcher's exported script dir.
 
     Mirrors the bash `script_dir/../managed-repos.yaml`. Falls back to the cwd
     (the repo root in practice, since the verb is release-only)."""

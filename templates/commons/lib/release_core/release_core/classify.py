@@ -220,7 +220,7 @@ def collect_jobs(repo: str, run_id: int, *, prefix: str, sleep=time.sleep) -> li
 
 # ── hermetic-gate FAIL classification (#594) ─────────────────────────────────
 #
-# `admin repos verify` runs the canonical gate in clones WITHOUT the consumer's
+# `admin repos verify` runs the shared gate in clones WITHOUT the consumer's
 # project toolchain (no `npm install` — out of scope by design). The
 # npm-quality checks invoke project-local tools (`npx --no-install eslint` /
 # `prettier`, `npm run typecheck`), so in a hermetic clone they CANNOT run

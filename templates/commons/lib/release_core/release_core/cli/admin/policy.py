@@ -22,7 +22,7 @@ from .._helpers import wrap_verb
 def group() -> None:
     """GitHub policy administration for fleet repos.
 
-    Apply the canonical branch ruleset, sweep / reconcile broader GitHub
+    Apply the shared branch ruleset, sweep / reconcile broader GitHub
     policy, and enable Dependabot security updates on onboarded repos.
     """
 
@@ -31,7 +31,7 @@ group.add_command(
     wrap_verb(
         apply_ruleset.main,
         name="ruleset",
-        short_help="Apply the canonical branch ruleset to a repo.",
+        short_help="Apply the shared branch ruleset to a repo.",
     )
 )
 group.add_command(

@@ -1,13 +1,13 @@
 """release-verify-fleet — pre-flight lint sweep across the whole portfolio.
 
 Verifies that a candidate release revision, once synced into every
-managed consumer, still passes the canonical lint gate. Run this BEFORE
+managed consumer, still passes the shared lint gate. Run this BEFORE
 `release-advance-v1` to catch a commons/lint regression in release's own
 tree instead of discovering it one consumer at a time after @v1 moves.
 
 It is HERMETIC: it clones the fleet into a throwaway root (NOT your ~/h
-checkouts), syncs each from the candidate ref, and runs the canonical gate via
-`release-core gate` (which points lefthook at the materialized
+checkouts), syncs each from the candidate ref, and runs the shared gate via
+`release-core gate` (which points lefthook at the built
 `.release/lefthook.yml` — there is no tracked root lefthook.yml since WS3
 release#524). It never mutates your working repos. Every sweep fetches+resets
 existing fleet clones to the consumer's default branch (resolved from
@@ -62,7 +62,7 @@ from . import managed_repos
 
 # Re-invoke THIS package's CLI in a subprocess: same interpreter, same env, same
 # code as the running process — never a bare-name PATH lookup, which on a dev
-# box resolves to the in-checkout shim and dies on nested dep re-resolution
+# box resolves to the in-checkout launcher and dies on nested dep re-resolution
 # (release#534: `admin repos verify` failed in phase 1 before any clone/gate).
 _SELF_CLI = [sys.executable, "-m", "release_core"]
 
@@ -91,9 +91,9 @@ def _usage_error(msg: str) -> int:
 
 
 def _release_home() -> str:
-    """RELEASE_HOME = <shim bin/>/.. — the script_dir/.. the bash computed.
+    """RELEASE_HOME = <launcher bin/>/.. — the script_dir/.. the bash computed.
 
-    The shim exports VERIFY_FLEET_SCRIPT_DIR (its own realpath'd bin/ dir) so
+    The launcher exports VERIFY_FLEET_SCRIPT_DIR (its own realpath'd bin/ dir) so
     this resolves identically regardless of cwd. Falls back to ~/release."""
     script_dir = os.environ.get("VERIFY_FLEET_SCRIPT_DIR")
     if script_dir:
@@ -168,7 +168,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     # via _SELF_CLI, so the nested call runs THIS process's interpreter+code.
     repos_list = [*_SELF_CLI, "admin", "repos", "list"]
 
-    # --- Phase 1: materialize the fleet (hermetic — into $root, never ~/h) ---
+    # --- Phase 1: set up the fleet (hermetic — into $root, never ~/h) ---
     # `--clone` ALWAYS fetches+resets existing clones to the consumer's default
     # branch (resolved from origin/HEAD) and names the ref/sha (#624) — a
     # faithful pre-flight never lints a frozen-at-clone-time working tree. The
@@ -310,9 +310,9 @@ def _detect_kind(abspath: str) -> str:
 
 
 def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
-    """Materialize the consumer clone's managed tree, env-pinned to the candidate
+    """Build the consumer clone's managed tree, env-pinned to the candidate
     SHA. Runs ``release-core init --no-commit`` (the standalone ``release-sync``
-    verb was retired in WS4, release#521); init's full materialize honors the same
+    verb was retired in WS4, release#521); init's full build honors the same
     RELEASE_HOME/RELEASE_REF pinning. --no-commit: the verify sweep only lints the
     composed tree, it never mutates the clone's git state.
 
@@ -329,11 +329,11 @@ def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
 
 
 def _run_gate(abspath: str) -> tuple[bool, str]:
-    """Run the canonical lint gate in the consumer clone.
+    """Run the shared lint gate in the consumer clone.
 
     Invokes ``release-core gate`` (NOT a bare ``lefthook run``): since WS3
     (release#524) the consumer no longer tracks a root lefthook.yml for lefthook
-    to discover — the gate definition lives in the just-materialized
+    to discover — the gate definition lives in the just-built
     ``.release/lefthook.yml``, and ``release-core gate`` is what points lefthook at
     it (LEFTHOOK_CONFIG) the same way the local hook + CI do. Spawned via
     ``_SELF_CLI`` (this interpreter, ``-m release_core``), never a PATH lookup

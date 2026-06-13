@@ -26,7 +26,7 @@ root; pushes an EMPTY commit to its default branch recording why; resolves the
 run(s) that push triggered by HEAD SHA; and — with --watch — polls them to
 conclusion and reports the classified verdict by failing step via the shared
 classifier (release_core.classify): INFRA = release/upstream (arm-gate
-materialize/provision, boot, init); PROJECT = consumer-side (build/test/deps).
+build/provision, boot, init); PROJECT = consumer-side (build/test/deps).
 
 Exit codes:
   0  — poked (and, with --watch, every triggered run green)

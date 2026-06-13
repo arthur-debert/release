@@ -202,7 +202,7 @@ Three categories:
 missing permissions, actual bugs. Fix, commit, push (CI re-runs on the same
 branch).
 
-**B) Project-ethos drift — push back with rationale, don't change the file.**
+**B) Project-ethos mismatch — push back with rationale, don't change the file.**
 Reply to the comment:
 
 ```sh
@@ -212,7 +212,7 @@ gh api 'repos/{owner}/{repo}/pulls/<PR>/comments/<COMMENT_ID>/replies' \
 
 End the reply with a line like *"Recording for future review passes: don't ask
 us to `<X>`"* so the rationale is searchable later. Typical pushed-back asks:
-pin same-owner reusable workflows to a SHA, de-canonicalize a shared template
+pin same-owner reusable workflows to a SHA, special-case a shared template
 for one repo, flag stacked-PR references to surface that land in a sibling PR.
 
 **C) Cosmetic nits in already-merged style — skip.** Don't reply unless the

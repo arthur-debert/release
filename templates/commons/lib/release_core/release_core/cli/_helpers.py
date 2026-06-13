@@ -182,7 +182,7 @@ def run_root(root: click.Group, argv: list[str] | None = None) -> int:
     """Invoke a click ``root`` group as a ``main(argv) -> int`` entrypoint.
 
     Bridges click (which raises ``SystemExit``) to the ``main(argv) -> int``
-    convention that the console-script wrapper and the local ``bin/`` shim
+    convention that the console-script wrapper and the local ``bin/`` launcher
     expect. ``standalone_mode=False`` lets click return a value / raise its own
     exceptions instead of calling ``sys.exit`` itself; we normalize all the
     exit paths here so the caller always gets an ``int``.

@@ -2,9 +2,10 @@
 
 Per release/ README §States — the contract: a (Stack, Repo) combo is
 *pilot-running* when every applicable verb's local entry point + CI run is
-green AND the most recent release was cut by the canonical `<stack>.yml@v1`
-workflow. The adoption matrix (README) is hand-curated today, easy to drift;
-this tool replaces that with a programmatic read of GitHub state.
+green AND the most recent release was cut by the shared `<stack>.yml@v1`
+workflow. The adoption matrix (README) is hand-curated today, easy to let
+fall out of sync; this tool replaces that with a programmatic read of GitHub
+state.
 
 Usage:
   done-check                       # current git/gh repo
@@ -102,7 +103,7 @@ _RELEASE_WORKFLOW_FOR_STACK = {
     "gh-action": "gh-action.yml",
 }
 
-# `arthur-debert/release/.github/workflows/<name>.yml` — the canonical uses-line.
+# `arthur-debert/release/.github/workflows/<name>.yml` — the shared uses-line.
 _CANONICAL_USES_RE = re.compile(r"arthur-debert/release/\.github/workflows/([a-z-]+\.yml)")
 # `./.github/workflows/<name>.yml` — release/'s own self-call.
 _SELFCALL_USES_RE = re.compile(r"\./\.github/workflows/([a-z-]+\.yml)")
@@ -172,7 +173,7 @@ def _file_exists(repo: str, path: str, *, ref: str | None = None) -> bool:
 # self-call). Fallback: filesystem heuristics (matches bin/detect-kind).
 # ------------------------------------------------------------------
 def _workflow_name_from_release_yml(rel_yml: str) -> str | None:
-    """The first canonical (or self-call) workflow filename referenced, or None."""
+    """The first shared (or self-call) workflow filename referenced, or None."""
     m = _CANONICAL_USES_RE.search(rel_yml)
     if m:
         return m.group(1)
@@ -235,7 +236,7 @@ def check_local(repo: str, verb: str) -> str:
 
 def check_release_local(repo: str) -> str:
     """Local release wiring on the default branch. Cutting goes through the
-    `release-core cut` console-script (the per-repo `bin/release` shim was
+    `release-core cut` console-script (the per-repo `bin/release` script was
     retired in #476), so the local signal is the `.github/workflows/release.yml`
     thin caller, not a `bin/` task."""
     if _file_exists(repo, ".github/workflows/release.yml"):
@@ -276,7 +277,7 @@ def check_ci(repo: str) -> str:
 
 
 def check_release(repo: str, stack: str) -> str:
-    """Latest release was cut by <stack>.yml@v1 (canonical or release/'s self-call)."""
+    """Latest release was cut by <stack>.yml@v1 (shared or release/'s self-call)."""
     stack_wf = _RELEASE_WORKFLOW_FOR_STACK.get(stack)
     if stack_wf is None:
         return "SKIP|stack has no release workflow"
@@ -308,7 +309,7 @@ def check_release(repo: str, stack: str) -> str:
     if re.search(rf"uses:[ \t]+arthur-debert/release/\.github/workflows/{stack_wf_re}@", rel_yml):
         return f"PASS|{latest_tag} via {stack_wf}"
     # release/ itself's release.yml uses gh-action.yml@v1 via its OWN reusable
-    # workflow — still counts as canonical.
+    # workflow — still counts as a shared-workflow release.
     if re.search(rf"uses:[ \t]+\./\.github/workflows/{stack_wf_re}", rel_yml):
         return f"PASS|{latest_tag} via self-call {stack_wf}"
     return f"FAIL|{latest_tag} was NOT cut by {stack_wf}@v1 (release.yml is bespoke)"
@@ -339,7 +340,7 @@ def aggregate(repo: str, stack: str, ci_result: str, per_verb: dict[str, str]) -
         if verb == "release":
             rel_state, _, rel_msg = per_verb["release"].partition("|")
             # The local column for `release` reflects the release.yml thin
-            # caller's presence (the `bin/release` shim was retired in #476),
+            # caller's presence (the `bin/release` script was retired in #476),
             # carried in per_verb under the "release:local" key.
             local_for_release = per_verb["release:local"]
             local_state, _, local_msg = local_for_release.partition("|")

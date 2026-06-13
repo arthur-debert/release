@@ -1,6 +1,6 @@
 # Release token setup
 
-Repos onboarded to the canonical `main-branch-protection` ruleset (via
+Repos onboarded to the shared `main-branch-protection` ruleset (via
 `release-core admin policy ruleset`) require a Personal Access Token (PAT) for any release workflow
 that pushes a version-bump commit to the default branch.
 

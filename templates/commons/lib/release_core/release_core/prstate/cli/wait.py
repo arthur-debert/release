@@ -2,7 +2,7 @@
 
 ONE wait for the whole PR loop. It replaces both `pr review wait` (the
 retired 7m-initial / 2m-poll copilot wait) and `pr checks-wait` (the
-`gh pr checks --watch` shim): instead of waiting on a *named thing*, it polls
+`gh pr checks --watch` wrapper): instead of waiting on a *named thing*, it polls
 the state engine (fetch context -> `evaluate()`) and returns the moment the
 snapshot calls for agent action. The engine knows WHAT is being waited on —
 a requested review, running checks, mergeability computing — and its

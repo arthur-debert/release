@@ -14,7 +14,7 @@ this file — that is what lets parallel agents work without colliding. See
 ``docs/dev/release-core-cli-pattern.md``.
 
 ``main(argv) -> int`` is preserved as the entrypoint signature: it is what both
-the installed console-script and the local ``bin/release-core`` shim call. The
+the installed console-script and the local ``bin/release-core`` launcher call. The
 click→int bridge lives in ``release_core.cli._helpers.run_root``.
 """
 
@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
 
     Signature is preserved (``main(argv) -> int``) so the installed
     console-script (``release_core.cli_entry:main``) and the local
-    ``bin/release-core`` shim both keep working unchanged.
+    ``bin/release-core`` launcher both keep working unchanged.
     """
     return run_root(root, argv)
 

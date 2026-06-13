@@ -36,7 +36,7 @@ Exit codes:
   64 — bad usage
 
 Shell→Python migration: the logic moved to
-this verb; bin/managed-repos is a thin shim. Stdout (the <TAB>-joined --paths /
+this verb; bin/managed-repos is a thin wrapper. Stdout (the <TAB>-joined --paths /
 --list lines) is preserved byte-for-byte — release-verify-fleet and
 audit-portfolio parse it with `IFS=$'\t' read`.
 """
@@ -81,10 +81,10 @@ def _manifest_path() -> str:
 
     1. MANAGED_REPOS_MANIFEST — explicit override (tests point it at a fixture).
     2. <script_dir>/../managed-repos.yaml — the default the bash used, where
-       script_dir is bin/. The shim exports MANAGED_REPOS_SCRIPT_DIR (its own
+       script_dir is bin/. The wrapper exports MANAGED_REPOS_SCRIPT_DIR (its own
        realpath'd bin/ dir) so this resolves identically regardless of cwd.
     3. managed-repos.yaml in the cwd — last-ditch fallback if invoked outside
-       the shim (the verb is release-only, so this is the repo root in practice).
+       the wrapper (the verb is release-only, so this is the repo root in practice).
     """
     override = os.environ.get("MANAGED_REPOS_MANIFEST")
     if override:

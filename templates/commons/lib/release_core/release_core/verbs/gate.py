@@ -2,7 +2,7 @@
 
 ``release-core gate`` is the single, Kind-agnostic entry point for "run the
 checks" that an agent or human reaches for every loop. It runs the SAME
-``lefthook run pre-commit`` gate CI runs — the unified-gate doctrine
+``lefthook run pre-commit`` gate CI runs — the unified-gate principle
 (release#348, CLAUDE.md "The gate is ONE definition, run everywhere").
 
 SCOPE — the gate is the fast lint/format/static-analysis set (fmt, clippy,
@@ -33,14 +33,14 @@ version, skipping ``node_modules`` entries (the consumer-dep skew source: the #5
 probe saw ``release-core gate`` and the git hook run DIFFERENT lefthook versions in
 one session). No pinned binary on PATH is a HARD failure, not a fall-back-to-
 whatever — version skew between gate runs is exactly the silent divergence the
-one-gate doctrine forbids.
+one-gate principle forbids.
 
 Config resolution (#501 / WS3 release#524): the gate definition lives ONLY in the
 ephemeral ``.release/`` build dir now — the root ``lefthook.yml`` discovery symlink
 is gone — so this verb points lefthook at ``.release/lefthook.yml`` explicitly via
 ``LEFTHOOK_CONFIG`` when present, falling back to lefthook's default discovery for a
 release-self / not-yet-migrated repo that still keeps a root config. An
-UNMATERIALIZED gate (no ``.release/lefthook.yml`` AND no root config) is a HARD
+UNBUILT gate (no ``.release/lefthook.yml`` AND no root config) is a HARD
 failure naming ``release-core init`` as the remedy — never lefthook's
 warn-and-pass (release#567: the first commit of a session fired the hook before
 init had composed ``.release/``, printed a "no config files" WARNING and passed,
@@ -62,7 +62,7 @@ Usage:
 Exit codes:
   0  — the gate passed (or the hook was installed)
   1  — the gate failed, the pinned lefthook is not on PATH, or the gate config is
-       not materialized (all HARD failures — the gate never skips)
+       not built (all HARD failures — the gate never skips)
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ _PIN_RE = re.compile(r'^LEFTHOOK_VERSION="\$\{LEFTHOOK_VERSION:-([0-9][0-9A-Za-z
 
 # lefthook's own config-discovery basenames — the release-self / not-yet-migrated
 # root-config case. If NONE of these exists and .release/lefthook.yml is absent,
-# the gate is unmaterialized and must fail loud (release#567), because lefthook
+# the gate is not built and must fail loud (release#567), because lefthook
 # itself treats "no config found" as a WARNING and exits 0.
 _DISCOVERY_NAMES = (
     "lefthook.yml",
@@ -170,10 +170,10 @@ def _iter_path_lefthooks() -> Iterator[str]:
     """Every distinct lefthook on PATH, in PATH order, SKIPPING node_modules
     entries: a consumer's package.json-vendored lefthook is a floating consumer
     dep, never the toolset's — running it is exactly the version-skew source the
-    one-runner doctrine forbids (release#567).
+    one-runner principle forbids (release#567).
 
     ``shutil.which`` per PATH entry (not ``os.access``) so Windows PATHEXT
-    resolution finds a ``lefthook.cmd`` shim too. De-duped by realpath so a
+    resolution finds a ``lefthook.cmd`` wrapper too. De-duped by realpath so a
     symlink chain doesn't probe the same binary twice."""
     from shutil import which
 
@@ -196,7 +196,7 @@ def _resolve_lefthook(pin: str | None) -> str | None:
 
     With a known pin, a candidate at any OTHER version is rejected — the
     provisioners (setup-dev-env.sh / provision-gate-toolset.sh) reconcile every
-    tool TO the pin each session/run, so "present but drifted" means the toolset
+    tool TO the pin each session/run, so "present but out of sync" means the toolset
     is unarmed and the gate must fail loud, not silently run a different runner
     than the last environment did. Without a pin (source-tree dev checkout, no
     versions file) the first non-node_modules PATH lefthook wins — still one
@@ -233,7 +233,7 @@ def _install_hook(root: str) -> int:
         return 0
 
     # A custom core.hooksPath redirects git away from .git/hooks/, where we write
-    # the shim — unset any value so the install actually takes effect. Use
+    # the hook — unset any value so the install actually takes effect. Use
     # --unset-all (a misconfigured hooksPath can be multi-valued, which --unset
     # refuses) and SURFACE a failure: if the unset fails (permissions, etc.) the
     # hook stays shadowed and the install is effectively a no-op — reporting
@@ -319,7 +319,7 @@ def main(argv: list[str]) -> int:
     # repo that still keeps a root config. NO config anywhere is a HARD failure
     # (release#567): lefthook itself warn-and-passes on "no config found", which
     # silently ungated the first commit of a session (the hook fires before init
-    # has materialized .release/). The gate never skips.
+    # has built .release/). The gate never skips.
     managed_cfg = os.path.join(root, ".release", "lefthook.yml")
     # An empty/whitespace LEFTHOOK_CONFIG counts as unset — pop it so it never
     # leaks through to lefthook; the managed/discovery branches then apply.
@@ -340,9 +340,9 @@ def main(argv: list[str]) -> int:
         env["LEFTHOOK_CONFIG"] = managed_cfg
     elif not any(os.path.isfile(os.path.join(root, name)) for name in _DISCOVERY_NAMES):
         print(
-            "error: the gate config is not materialized — .release/lefthook.yml is "
+            "error: the gate config is not built — .release/lefthook.yml is "
             "missing and the repo root has no lefthook config. Run `release-core "
-            "init`, then retry: an unmaterialized gate fails loud, it never "
+            "init`, then retry: an unbuilt gate fails loud, it never "
             "warn-and-passes an ungated commit (release#567).",
             file=sys.stderr,
         )
@@ -350,7 +350,7 @@ def main(argv: list[str]) -> int:
 
     # --no-auto-install: running `lefthook run` otherwise auto-SYNCS hooks — it
     # would back up our binary-driven .git/hooks/pre-commit (release-core gate
-    # --install-hook) to .old and reinstall lefthook's OWN shim, which discovers
+    # --install-hook) to .old and reinstall lefthook's OWN hook, which discovers
     # config from the (now-absent) repo root and so breaks the commit hook. We own
     # the hook now (WS3), so lefthook must never re-manage it.
     scope = [] if hook_mode else ["--all-files"]

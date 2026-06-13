@@ -2,9 +2,10 @@
 
 ``release-core how-to`` is the single entry point a fresh agent (or human) runs
 to learn how to lint / test / build / release / run *in this specific repo*,
-plus the canonical draft-first dev cycle. It is the ONE source of that guidance:
-the consumer CLAUDE.md is a short stub pointing here, so there is no synced
-ORIENTATION.md or per-Kind doc to drift (release#501, "invoke, don't discover").
+plus the draft-first dev cycle. It is the ONE source of that guidance:
+the consumer CLAUDE.md is a small managed block (~7 lines) pointing here, so there
+is no synced ORIENTATION.md or per-Kind doc to fall out of sync (release#501 —
+discovery is the CLI, not docs).
 
 It does NOT guess commands by Kind. The no-arg path reads THIS repo's real
 commands via :mod:`release_core.repo_commands` (the component detector) and lists
@@ -197,14 +198,14 @@ def _ci_jobs_section() -> list[str]:
         "  Managed paths (bin/check*, lib/release_core/, .release/**) are "
         "EPHEMERAL — recomposed by `release-core init`, untracked, so they DO "
         "NOT exist on a fresh CI checkout. Any job step that invokes one must "
-        "materialize the managed tree first:"
+        "build the managed tree first:"
     )
     lines.append("    - uses: arthur-debert/release/.github/actions/arm-gate@v2")
     lines.append("      with:")
-    lines.append("        toolset: 'false'   # materialize-only (skips the lint toolset)")
+    lines.append("        toolset: 'false'   # build-only (skips the lint toolset)")
     lines.append(
         "  Drop the `toolset` input (default 'true') when the job also runs the "
-        "gate. Never hand-copy the materialize recipe — invoke the composite."
+        "gate. Never hand-copy the build recipe — invoke the composite."
     )
     return lines
 

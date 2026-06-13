@@ -4,7 +4,7 @@
 consumed by release-sync, release-cut, done-check, and BATS contract tests, so
 it MUST match the bash byte-for-byte: same Kind strings, same precedence, same
 "could not detect kind of <pwd>" stderr + exit semantics (here: a ValueError the
-shim turns into that message + exit 1).
+wrapper turns into that message + exit 1).
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ def _grep(path: str, needles: tuple[str, ...]) -> bool:
 def detect_kind(root: str | None = None) -> str:
     """Filesystem-signal Kind detection. Matches bin/detect-kind byte-for-byte.
 
-    Raises :class:`KindError` when undetermined (the shim renders the bash
+    Raises :class:`KindError` when undetermined (the wrapper renders the bash
     "could not detect kind of <pwd>" stderr line + exit 1).
     """
     d = root if root is not None else "."
