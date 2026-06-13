@@ -11,8 +11,8 @@ DISTRIBUTION is pull-only — there is no push mechanism (#476; `orc propagate`
 was removed). The `--push` flag below is unrelated to distribution: it is an
 opt-in plain `git push` of the LOCAL managed auto-commit.
 
-A bare `release-core init` runs the COMPLETE release-sync pipeline (build_plan +
-materialize + compute_mirror + apply) sourced from the wheel bundle — the whole
+A bare `release-core init` runs the COMPLETE release-sync pipeline (`build_plan` +
+`materialize` + `compute_mirror` + apply) sourced from the wheel bundle — the whole
 `.release/` build dir + every working-tree mirror (skills, configs,
 per-Kind/Component files, real-file workflow copies, the CLAUDE.md managed
 block) — then AUTO-COMMITS ONLY the managed paths iff they actually changed.
@@ -341,7 +341,7 @@ def _warn_unmaterialized_workflow_refs(repo_root: str, mirror_dests: set[str]) -
     print(
         "Each listed job must build the managed tree first — add, BEFORE the\n"
         "referencing step:\n"
-        "  - uses: arthur-debert/release/.github/actions/arm-gate@v2\n"
+        "  - uses: arthur-debert/release/.github/actions/arm-gate@v3\n"
         "    with:\n"
         "      toolset: 'false'   # build-only; drop to also arm the lint gate\n"
         "See `release-core how-to`.",

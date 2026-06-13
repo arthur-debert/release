@@ -111,7 +111,7 @@ def test_how_to_documents_the_materialize_only_ci_pattern(tmp_path):
     # materialize the managed tree first — how-to is the consumer-facing home of
     # that pattern (arm-gate with toolset:'false'), on BOTH render paths.
     for body in (how_to._render("rust-cli"), how_to._render_repo(str(tmp_path), "unknown")):
-        assert "arthur-debert/release/.github/actions/arm-gate@v2" in body
+        assert "arthur-debert/release/.github/actions/arm-gate@v3" in body
         assert "toolset: 'false'" in body
         assert "DO NOT exist on a fresh CI checkout" in body
         assert "Never hand-copy the build recipe" in body

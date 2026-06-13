@@ -200,7 +200,7 @@ def _ci_jobs_section() -> list[str]:
         "NOT exist on a fresh CI checkout. Any job step that invokes one must "
         "build the managed tree first:"
     )
-    lines.append("    - uses: arthur-debert/release/.github/actions/arm-gate@v2")
+    lines.append("    - uses: arthur-debert/release/.github/actions/arm-gate@v3")
     lines.append("      with:")
     lines.append("        toolset: 'false'   # build-only (skips the lint toolset)")
     lines.append(

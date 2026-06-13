@@ -11,8 +11,9 @@ the publish trio), under the shared ruleset, and registered in the
 
 Usage:
   release-core admin canary init --family <f>
-      [--reset]        force-push the canary's main back to the standard seed
-                       (wedge escape). Sanctioned ONLY for registered canary
+      [--reset]        force-push the canary's main back to the authored fixture
+                       seed (`tests/fixtures/<kind>/`; wedge escape). Sanctioned
+                       ONLY for registered canary
                        repos — the verb hard-refuses anything else.
       [--root DIR]     hermetic workdir (default /tmp/release-canary-init-$USER)
       [--auth-dir DIR] operator auth material for family-declared secrets

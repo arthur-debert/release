@@ -230,11 +230,11 @@ the `canaries:` registry entry (appended once).
   changes.
 - **Fail-closed secrets (#587).** The canary gets only what its family
   needs: `RELEASE_TOKEN` via the per-repo-targeted token verb (#601; pipe
-  the shared PAT on stdin to set/rotate), plus whatever the fixture's
+  the release PAT on stdin to set/rotate), plus whatever the fixture's
   optional `.canary-secrets` marker declares — the rust family declares
   the cert-only Apple signing pair (`APPLE_CERTIFICATE_P12_BASE64`,
   `APPLE_CERTIFICATE_PASSWORD`, sourced from `--auth-dir`, the same
-  shared files `install-release-secrets` reads), so every canary cut
+  operator auth files `install-release-secrets` reads), so every canary cut
   exercises sign-mac for real (OQ3). The publish trio
   (`CRATES_IO_KEY`, `HOMEBREW_TAP_TOKEN`, `NPM_TOKEN`) is never installed
   and its presence on the repo *fails the run* until removed; the same
