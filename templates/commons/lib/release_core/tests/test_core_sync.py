@@ -1087,15 +1087,6 @@ def test_retired_blob_file_removed_only_on_exact_match(tmp_path, monkeypatch):
     assert sync._find_retired_files(str(tmp_path)) == []
 
 
-def test_retired_marker_file_swept_and_unmarked_kept(tmp_path):
-    state = tmp_path / ".release-sync-state.yaml"
-    state.write_text("# Managed by release-sync. Do not edit.\nsha: abc\n")
-    assert ".release-sync-state.yaml" in sync._find_retired_files(str(tmp_path))
-
-    state.write_text("consumer: file\n")  # no marker → not ours to delete
-    assert ".release-sync-state.yaml" not in sync._find_retired_files(str(tmp_path))
-
-
 def test_retired_fingerprint_file_swept_and_plain_kept(tmp_path):
     """bin/release shims were per-repo tailored (no stable blob); the verbatim
     header line is the provenance. A consumer's own bin/release stays."""
@@ -1246,7 +1237,6 @@ def test_retired_tables_inventory_locked():
         assert blobs, dest
         for sha in blobs:
             assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), (dest, sha)
-    assert frozenset({".release-sync-state.yaml"}) == sync.RETIRED_MARKER_FILES
     assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release", "scripts/setup-dev-env.sh"}
 
 

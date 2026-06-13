@@ -73,26 +73,6 @@ def test_classify_copilot_pointer():
     assert audit_repo.classify_copilot_pointer("uses: some/other@v1") == "unknown"
 
 
-def test_classify_changelog_precedence():
-    assert audit_repo.classify_changelog(True, False, False) == (
-        "PASS",
-        "fragment-dir (canonical)",
-    )
-    assert audit_repo.classify_changelog(False, True, False)[0] == "WARN"
-    assert audit_repo.classify_changelog(False, False, True)[0] == "WARN"
-    assert audit_repo.classify_changelog(False, False, False)[0] == "WARN"
-    status, msg = audit_repo.classify_changelog(True, True, False)
-    assert status == "FAIL"
-    assert "mixed" in msg
-
-
-def test_parse_release_sync_state():
-    body = "sha: abcdef1234567890\ncomponents:\n  - rust-cli\n  - bats\nother:\n  - ignored\n"
-    sha, comps = audit_repo.parse_release_sync_state(body)
-    assert sha == "abcdef1234567890"
-    assert comps == "rust-cli,bats"
-
-
 def test_exit_code_precedence():
     assert audit_repo.exit_code([("PASS", "a", "")]) == 0
     assert audit_repo.exit_code([("PASS", "a", ""), ("WARN", "b", "")]) == 2
@@ -176,12 +156,10 @@ def test_audit_all_green(monkeypatch):
     assert rows["dep_policy"][0] == "PASS"
     assert rows["ci_main_green"][0] == "PASS"
     assert rows["private_mod_auth"][0] == "SKIP"  # no go.mod
-    assert rows["release_sync"][0] == "PASS"
     assert rows["scripts_inventory"][0] == "PASS"
     # ci.yml uses rust-ci reusable → workflows_canonical PASS, ci_calls_bin_check PASS via reusable
     assert rows["workflows_canonical"][0] == "PASS"
     assert rows["ci_calls_bin_check"][0] == "PASS"
-    assert rows["changelog_handling"][0] == "PASS"
 
 
 def test_dep_security_404_is_fail(monkeypatch):
@@ -289,23 +267,6 @@ def test_ci_calls_bin_check_warns_when_absent(monkeypatch):
     assert rows["ci_calls_bin_check"][0] == "WARN"
 
 
-def test_changelog_mixed_fails(monkeypatch):
-    routes = _green_routes()
-    routes["repos/o/r/contents/CHANGELOG.md"] = _b64("## Unreleased\n- thing\n")
-    routes["repos/o/r/contents/CHANGELOG_UNRELEASED.md"] = _b64("- x")
-    rows = _rows(monkeypatch, routes)
-    assert rows["changelog_handling"][0] == "FAIL"
-
-
-def test_changelog_single_file_warns(monkeypatch):
-    routes = _green_routes()
-    del routes["repos/o/r/contents/CHANGELOG"]  # no fragment dir
-    routes["repos/o/r/contents/CHANGELOG.md"] = _b64("## [Unreleased]\n- x\n")
-    rows = _rows(monkeypatch, routes)
-    assert rows["changelog_handling"][0] == "WARN"
-    assert "single-file" in rows["changelog_handling"][1]
-
-
 # --------------------------------------------------------------------------
 # main() — output shapes + exit codes
 # --------------------------------------------------------------------------
@@ -318,7 +279,7 @@ def test_main_json_shape(monkeypatch, capsys):
     data = json.loads(capsys.readouterr().out)
     assert data["repo"] == "o/r"
     names = {c["name"] for c in data["checks"]}
-    assert "ruleset" in names and "changelog_handling" in names
+    assert "ruleset" in names and "scripts_inventory" in names
     assert all({"name", "status", "message"} == set(c) for c in data["checks"])
 
 

@@ -198,9 +198,7 @@ fi
 # Wiring `.git/hooks/pre-commit` is per-clone state — every fresh clone
 # (and cloud snapshot) starts without it, so we wire it on every session
 # and in both contexts. Runs ABOVE the cloud-only gate because skipping
-# it locally is what produces the "agents are still running husky"
-# symptom: lefthook never gets installed, husky's old wiring keeps
-# firing.
+# it locally leaves the session with no pre-commit hook wired at all.
 #
 # Runs AFTER the pull-model boot (§0.1) deliberately (release#567): on a
 # fresh clone/session the boot installs release-core and `release-core
@@ -214,13 +212,6 @@ fi
 # brew/cargo/npm locally). Fallback for repos that ship a hand-rolled
 # app-bin/pre-commit instead (zed-lex, tree-sitter-lex pattern): symlink
 # it into .git/hooks/.
-#
-# Husky migration: if a previous `husky install` set
-# `core.hooksPath=.husky`, git routes hooks to `.husky/pre-commit` and
-# ignores `.git/hooks/pre-commit` entirely — so `lefthook install`
-# silently no-ops. Clear that config first when migrating a repo to
-# lefthook. We do NOT delete `.husky/` itself; that's a consumer-side
-# cleanup (committed file, belongs in a PR).
 
 # Resolve lefthook binary. npm/pnpm consumers commonly have lefthook
 # installed at `node_modules/.bin/lefthook` (via `prepare: lefthook install`
@@ -253,25 +244,7 @@ if command -v release-core >/dev/null 2>&1 \
     echo "warning: release-core gate --install-hook failed — pre-commit hook NOT wired" >&2
   fi
 elif [ -f lefthook.yml ] && [ -n "${_lefthook}" ]; then
-  # `git config --get` returns 1 when unset. Command substitution exit
-  # codes don't propagate `set -e` from a conditional context, but the
-  # explicit `|| true` makes the empty-when-unset intent unambiguous.
-  _hooks_path="$(git config --get core.hooksPath 2>/dev/null || true)"
-  # Unset core.hooksPath if set to ANY value (not just .husky). Any
-  # custom hooksPath redirects git away from .git/hooks/, which is
-  # where `lefthook install` writes its pre-commit shim — so a leftover
-  # config from any prior hook manager (husky, pre-commit framework,
-  # custom) makes the install silently no-op.
-  if [ -n "${_hooks_path}" ]; then
-    # Don't suppress unset failures with `|| true` — if the unset
-    # fails (e.g. unwritable .git/config), the custom redirect stays
-    # in place and the subsequent `lefthook install` is effectively
-    # a no-op. The user needs to know that, not have it silently
-    # swallowed.
-    if ! git config --unset core.hooksPath; then
-      echo "warning: failed to unset core.hooksPath (=${_hooks_path}); custom redirect still active — lefthook install will not take effect" >&2
-    fi
-  fi
+  # Root-lefthook.yml branch — release's own repo (hand-authored root gate).
   if ! "${_lefthook}" install >/dev/null; then
     echo "warning: lefthook install failed — pre-commit hook NOT wired" >&2
   fi

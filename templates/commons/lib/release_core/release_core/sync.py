@@ -1407,10 +1407,6 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
     **_RETIRED_SKILL_FILES,
 }
 
-# The retired release-sync subsystem's per-repo state manifest (WS4, #521,
-# removed the writer; the file itself stayed tracked in every pre-WS4 seed).
-RETIRED_MARKER_FILES: frozenset[str] = frozenset({".release-sync-state.yaml"})
-
 RETIRED_FINGERPRINT_FILES: dict[str, str] = {
     # The release-cut shim (retired by the CLI cutover, #468/#476): body was
     # tailored per repo at onboarding, header line is verbatim everywhere.
@@ -1450,10 +1446,6 @@ def _find_retired_files(repo_root: str) -> list[str]:
     for dest, blobs in RETIRED_BLOB_FILES.items():
         full = os.path.join(repo_root, dest)
         if os.path.isfile(full) and not os.path.islink(full) and _git_blob_sha1(full) in blobs:
-            out.add(dest)
-    for dest in RETIRED_MARKER_FILES:
-        full = os.path.join(repo_root, dest)
-        if os.path.isfile(full) and not os.path.islink(full) and _first_line_has_marker(full):
             out.add(dest)
     for dest, needle in RETIRED_FINGERPRINT_FILES.items():
         full = os.path.join(repo_root, dest)
