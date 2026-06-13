@@ -110,19 +110,6 @@ on:
         required: false
         default: 'CHANGELOG.md'
 
-      wasm-package:
-        description: |
-          Single workspace member with a wasm-bindgen crate to build
-          via wasm-pack and (optionally) publish to npm. Empty = no
-          WASM build (default). DEPRECATED in favor of
-          `wasm-packages` (multiline list); kept for backward
-          compatibility — `wasm-package: foo` is treated as
-          `wasm-packages: foo`. When BOTH are set, `wasm-packages`
-          takes precedence.
-        type: string
-        required: false
-        default: ''
-
       wasm-packages:
         description: |
           Multiline list of workspace members with wasm-bindgen
@@ -131,8 +118,8 @@ on:
           to the GH release, and (if NPM_TOKEN is set) published to
           npm. Use this for workspaces with >1 wasm crate (phos-core
           ships phos-color-wasm + phos-editor-wasm +
-          phos-viewer-wasm under a single release). Empty = falls
-          back to `wasm-package` (single) or no WASM build.
+          phos-viewer-wasm under a single release). Empty = no WASM
+          build (default).
 
           Example:
             wasm-packages: |
@@ -144,13 +131,13 @@ on:
         default: ''
 
       wasm-pack-target:
-        description: 'wasm-pack --target value: bundler|web|nodejs|no-modules. Only consulted when wasm-package(s) is set.'
+        description: 'wasm-pack --target value: bundler|web|nodejs|no-modules. Only consulted when wasm-packages is set.'
         type: string
         required: false
         default: 'bundler'
 
       wasm-npm-scope:
-        description: 'npm org scope (publishes each member as @<scope>/<package>). Empty = unscoped publish. Only consulted when wasm-package(s) is set.'
+        description: 'npm org scope (publishes each member as @<scope>/<package>). Empty = unscoped publish. Only consulted when wasm-packages is set.'
         type: string
         required: false
         default: ''
@@ -174,7 +161,7 @@ on:
       HOMEBREW_TAP_TOKEN:
         required: false
       NPM_TOKEN:
-        description: 'npm publish token. Only required when wasm-package is set.'
+        description: 'npm publish token. Optional; required only to publish wasm npm packages — wasm build/check run without it (publish-npm skips with a warning when unset).'
         required: false
 
 permissions:
@@ -664,14 +651,11 @@ jobs:
           version: ${{ needs.prepare.outputs.version }}
 
   wasm-setup:
-    # Compute the effective wasm-package list from either input:
-    #   * `wasm-packages` (multiline) wins when set
-    #   * `wasm-package` (single, deprecated) is the backward-compat
-    #     fallback
-    # Emits a JSON array consumed by build-wasm + publish-npm matrices.
-    # Skips downstream if neither is set (no wasm work at all).
+    # Compute the effective wasm-packages list from `wasm-packages`
+    # (multiline). Emits a JSON array consumed by build-wasm +
+    # publish-npm matrices. Skips downstream if unset (no wasm work).
     needs: prepare
-    if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
+    if: always() && !failure() && !cancelled() && inputs.wasm-packages != ''
     runs-on: ubuntu-latest
     outputs:
       packages: ${{ steps.list.outputs.packages }}
@@ -680,29 +664,21 @@ jobs:
         id: list
         shell: bash
         env:
-          PACKAGE: ${{ inputs.wasm-package }}
           PACKAGES: ${{ inputs.wasm-packages }}
         run: |
           set -euo pipefail
-          # `wasm-packages` (multiline) wins. Strip blank + comment
-          # lines; emit JSON array. When unset, fall back to the
-          # single `wasm-package` value (also single-element array).
-          if [ -n "${PACKAGES}" ]; then
-            # Trim trailing whitespace per line, drop blank + comment
-            # lines, emit JSON array. `grep -v` returns exit 1 when
-            # it filters EVERY line (e.g. a wasm-packages value that
-            # is whitespace-only) — `|| true` keeps pipefail from
-            # aborting; the `length == 0` check below catches that
-            # case with a clearer error than grep's exit code.
-            # POSIX `[[:space:]]` for the comment/blank match —
-            # GNU grep's BRE/ERE doesn't recognize `\s`.
-            json=$(printf '%s\n' "${PACKAGES}" \
-              | sed 's/[[:space:]]*$//' \
-              | { grep -vE '^[[:space:]]*(#|$)' || true; } \
-              | jq -R . | jq -s -c .)
-          else
-            json=$(jq -c -n --arg p "${PACKAGE}" '[$p]')
-          fi
+          # Trim trailing whitespace per line, drop blank + comment
+          # lines, emit JSON array. `grep -v` returns exit 1 when
+          # it filters EVERY line (e.g. a wasm-packages value that
+          # is whitespace-only) — `|| true` keeps pipefail from
+          # aborting; the `length == 0` check below catches that
+          # case with a clearer error than grep's exit code.
+          # POSIX `[[:space:]]` for the comment/blank match —
+          # GNU grep's BRE/ERE doesn't recognize `\s`.
+          json=$(printf '%s\n' "${PACKAGES}" \
+            | sed 's/[[:space:]]*$//' \
+            | { grep -vE '^[[:space:]]*(#|$)' || true; } \
+            | jq -R . | jq -s -c .)
           if [ "$(jq 'length' <<<"${json}")" -eq 0 ]; then
             echo "::error::wasm-packages parsed to empty list — check input formatting"
             exit 1
@@ -718,7 +694,7 @@ jobs:
     # members (phos-core: phos-color-wasm + phos-editor-wasm +
     # phos-viewer-wasm) all build + attach in one release.
     needs: [prepare, create-release, wasm-setup]
-    if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
+    if: always() && !failure() && !cancelled() && inputs.wasm-packages != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -809,7 +785,7 @@ jobs:
     # member is published independently (failures don't take siblings
     # down — `fail-fast: false`).
     needs: [prepare, build-wasm, wasm-setup]
-    if: always() && !failure() && !cancelled() && (inputs.wasm-package != '' || inputs.wasm-packages != '')
+    if: always() && !failure() && !cancelled() && inputs.wasm-packages != ''
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
