@@ -298,8 +298,8 @@ def _complex_cycle_section() -> list[str]:
     lines.append(
         "  5. Converge: once the planned workstreams land, open ONE final "
         "workstream for the fallouts — follow-up issues filed during the build "
-        "plus things that surfaced mid-implementation. In scope only; don't let "
-        "the epic merge trailing a pile of decoupled follow-ups."
+        "plus things that surfaced mid-implementation. In scope only; the epic "
+        "must not merge with a pile of decoupled follow-ups trailing behind it."
     )
     lines.append(
         "  6. Docs pass: delegate a final PR that updates the docs and docstrings "
