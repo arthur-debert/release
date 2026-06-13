@@ -315,9 +315,11 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> 
             encoding="utf-8",
             errors="replace",
         )
-    except FileNotFoundError:
-        print("error: lefthook not found — the gate does not skip.", file=sys.stderr)
-        print("GATE: FAILED (lefthook not found)")
+    except OSError as exc:
+        # Missing (FileNotFoundError) OR present-but-not-executable (PermissionError)
+        # and any other spawn failure — all OSError. Still print the verdict.
+        print(f"error: could not run lefthook — the gate does not skip: {exc}", file=sys.stderr)
+        print("GATE: FAILED (lefthook unavailable)")
         return 1
     passed: list[str] = []
     failed: list[str] = []

@@ -105,6 +105,17 @@ def test_glyph_parsing_tolerates_ansi_escapes(tmp_path, capsys):
     assert out.strip().splitlines()[-1] == "GATE: OK (1 check)"
 
 
+def test_unspawnable_lefthook_still_prints_a_verdict(tmp_path, capsys):
+    # A present-but-not-executable lefthook raises OSError (PermissionError) on
+    # spawn; the gate must still emit GATE: FAILED, not crash (release#628 review).
+    not_exec = tmp_path / "lefthook"
+    not_exec.write_text("#!/bin/sh\n")  # NOT chmod +x
+    rc = gate._run_and_summarize([str(not_exec)], str(tmp_path), dict(os.environ), quiet=False)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert out.strip().splitlines()[-1] == "GATE: FAILED (lefthook unavailable)"
+
+
 def test_verdict_is_standalone_when_output_lacks_trailing_newline(tmp_path, capsys):
     # lefthook's final chunk without a trailing newline must not get the verdict
     # glued onto it — release#628 review.
