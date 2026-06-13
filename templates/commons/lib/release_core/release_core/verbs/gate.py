@@ -284,7 +284,11 @@ def _install_hook(root: str) -> int:
 # ✓/✔ = passed, ✗/✖ = failed. Parsed ONLY for the GATE: verdict line's parenthetical
 # detail; the pass/fail verdict itself comes from lefthook's exit code (authoritative),
 # so a format change degrades the detail gracefully without ever lying about pass/fail.
+# Glyphs are collected ONLY after the `summary:` header (matching classify.py's
+# boundary), so pre-summary tool output that happens to start with a ✓/✗ can't skew
+# the count or names.
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_GATE_SUMMARY_RE = re.compile(r"^\s*summary:")
 _GATE_PASS_RE = re.compile(r"^\s*[✓✔]\s+(\S+)")
 _GATE_FAIL_RE = re.compile(r"^\s*[✗✖]\s+(\S+)")
 
@@ -335,14 +339,18 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict[str, str], *, quiet:
             if quiet
             else None
         )
+        in_summary = False
         for line in proc.stdout:
             clean = _ANSI_RE.sub("", line)
-            pm = _GATE_PASS_RE.match(clean)
-            fm = _GATE_FAIL_RE.match(clean)
-            if pm:
-                passed.append(pm.group(1))
-            elif fm:
-                failed.append(fm.group(1))
+            if _GATE_SUMMARY_RE.match(clean):
+                in_summary = True
+            elif in_summary:
+                pm = _GATE_PASS_RE.match(clean)
+                fm = _GATE_FAIL_RE.match(clean)
+                if pm:
+                    passed.append(pm.group(1))
+                elif fm:
+                    failed.append(fm.group(1))
             if spool is not None:
                 spool.write(line)
             else:
