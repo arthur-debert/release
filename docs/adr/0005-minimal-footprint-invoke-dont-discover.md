@@ -15,9 +15,9 @@ When `.release/` becomes gitignored and regenerated each session (the WS3/WS4
 end state of this epic), this ADR **supersedes** the committed-content
 provenance/drift machinery of [ADR-0001](0001-release-sync-build-dir-with-symlinks.md)
 and [ADR-0002](0002-provenance-marker.md): with the tree gitignored and rebuilt
-from the pinned binary, drift is impossible by construction, so drift-check and
-the provenance marker have nothing left to do. Those two ADRs are marked
-superseded only once that flip ships — not by this document alone.
+from the pinned binary every session, it can't fall out of sync, so the
+drift-check and the provenance marker have nothing left to do. Those two ADRs are
+marked superseded only once that flip ships — not by this document alone.
 
 ## Context
 
@@ -28,9 +28,9 @@ follow-ups.
 
 The instability is not the auto-pull. Auto-updating one versioned binary is
 deterministic and has been reliable. The instability is the **tracked in-repo
-footprint**: every file materialized into a consumer (the CLAUDE.md block,
-ORIENTATION.md, synced skills, `bin/` shims, committed `.release/` symlinks,
-gate configs) is a thing that can drift, get gitignored, get shadowed, or sit
+footprint**: every file built into a consumer (the CLAUDE.md block,
+ORIENTATION.md, synced skills, `bin/` tool symlinks, committed `.release/` symlinks,
+gate configs) is a thing that can fall out of sync, get gitignored, get shadowed, or sit
 at a different version per repo. Checking 20 repos became "Russian roulette" —
 each is plausibly fine and silently different.
 
@@ -72,14 +72,15 @@ Irreducible (platform-forced, tiny, stable):
 
 Everything else moves into the binary, or into a **gitignored, ephemeral
 `.release/`** regenerated from the pinned binary each session. Gitignored +
-regenerated ⇒ drift is impossible by construction.
+regenerated ⇒ it can't fall out of sync.
 
 ### The two carriers
 
 - `release-core how-to` — the kind-aware procedural source of truth (lint /
   test / build / release / run + the draft-first dev cycle). It replaces the
   synced ORIENTATION.md and the per-Kind reference docs: the consumer CLAUDE.md
-  becomes a short stub pointing here, so there is nothing to drift.
+  becomes a small managed block (~7 lines) pointing here, so there is nothing
+  to fall out of sync.
 - `release-core gate` — the one quality entry, run identically locally and in
   CI, configured from `.release/`-rooted paths so it survives dropping the root
   discovery symlinks.
@@ -88,9 +89,9 @@ regenerated ⇒ drift is impossible by construction.
 
 ### What we gain
 
-- **Drift is impossible by construction, not merely loud.** ADR-0004 made
-  in-place edits detectable; this removes the file, so there is nothing to edit
-  or detect. A gitignored, regenerated tree cannot diverge per repo.
+- **Out-of-sync files are impossible by construction, not merely loud.** ADR-0004
+  made in-place edits detectable; this removes the file, so there is nothing to
+  edit or detect. A gitignored, regenerated tree cannot diverge per repo.
 - **One source of procedural truth.** The dev cycle stops living in six places
   (global CLAUDE.md, project CLAUDE.md, ORIENTATION.md, the dev-cycle docs, a
   skill, the PreToolUse guard) and lives in `release-core how-to` — kept in
@@ -120,16 +121,17 @@ regenerated ⇒ drift is impossible by construction.
 2. WS1 — ship `release-core how-to` and `release-core gate`; agent-tune the help
    strings. (Shipped: [#502](https://github.com/arthur-debert/release/pull/502),
    [#504](https://github.com/arthur-debert/release/pull/504).)
-3. WS2 — CLAUDE.md → short stub; stop syncing ORIENTATION.md and the infra
-   skill set as files. (Shipped:
+3. WS2 — CLAUDE.md → small managed block (~7 lines); stop syncing ORIENTATION.md
+   and the infra skill set as files. (Shipped:
    [#523](https://github.com/arthur-debert/release/issues/523) — the CLAUDE.md
-   block is a stub pointing at `release-core how-to`; ORIENTATION.md retired;
+   block is a small managed block pointing at `release-core how-to`;
+   ORIENTATION.md retired;
    PUSH_ALL_SKILLS trimmed to `gh-pr-review-loop` + `release-issue-relay`, the
    rest auto-swept on next init. One delegating skill kept per the open question.)
 4. WS3 — gate configs into `.release/`; the gate runs from the binary so
    `lefthook.yml` leaves the consumer. (Shipped:
    [#524](https://github.com/arthur-debert/release/issues/524) — `lefthook.yml`
-   + most lint/format configs are release-internal (materialized into `.release/`,
+   + most lint/format configs are release-internal (built into `.release/`,
    no longer mirrored to the root; each tool is handed its config explicitly via
    `--config`/`-c`/`--ignore-path`). `.editorconfig` (editor-facing) and
    `.shellcheckrc` (shellcheck has no version-portable `--rcfile` on the fleet's
@@ -140,12 +142,12 @@ regenerated ⇒ drift is impossible by construction.
    consumer's old root gate symlinks are swept on next init. Folds in the
    WS4-deferred root-`lefthook.yml` symlink drop. Rider: npm `typecheck` fails
    loud when TS is staged with no `typecheck` script — no more hollow green.)
-5. WS4 — `.release/` gitignored + regenerated; delete the drift/sync subsystem.
+5. WS4 — `.release/` gitignored + regenerated; delete the sync subsystem.
    This is the flip that supersedes ADR-0001 and ADR-0002. (Shipped:
    [#521](https://github.com/arthur-debert/release/issues/521) — `.release/` is
    self-ignoring + composed by `release-core init`; the standalone `release-sync`
    / `release-drift-check` verbs, console-scripts, and `sync` CLI group were
-   removed; CI materializes via `arm-gate`. The root `lefthook.yml` discovery
+   removed; CI builds it via `arm-gate`. The root `lefthook.yml` discovery
    symlink drop was deferred to a follow-up.)
 6. WS5–WS8 — lock the irreducible footprint, migrate the fleet via pull,
    re-evaluate the self-improving machinery, and validate with fresh agents on

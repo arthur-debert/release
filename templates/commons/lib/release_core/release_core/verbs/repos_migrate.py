@@ -2,10 +2,10 @@
 
 The pull-model successor to the removed ``orc propagate``. For each managed repo
 it: clones hermetically, runs ``release-core init`` (the full managed-tree
-materialize + auto-commit of *only* the managed paths — force-added past a
+build + auto-commit of *only* the managed paths — force-added past a
 consumer ``.gitignore``), and, when that produced a managed commit, pushes a
 branch and opens one managed-sync PR. The content is the consumer's
-self-materialized managed tree (what it would pull at SessionStart), NOT a
+self-built managed tree (what it would pull at SessionStart), NOT a
 release-sync push — so this is just a one-time seed for repos still on a
 pre-pull tree; after it merges, each repo self-updates natively.
 
@@ -36,13 +36,13 @@ from . import managed_repos
 _BRANCH = "chore/pull-model-migration"
 _TITLE = "chore(release): migrate to the pull model (managed sync from release_core)"
 _BODY = (
-    "Pull-model migration: the managed tree self-materialized from the published "
+    "Pull-model migration: the managed tree self-built from the published "
     "`release_core` wheel (a bare `release-core init`) and auto-committed — no "
     "`orc propagate` (removed). After this merges the repo carries the current "
     "managed tree + resolver and self-updates at every SessionStart.\n\n"
     "Managed/generated content only (`.release/**`, synced `.github/**`, "
     "`.claude/skills`, configs) — excluded from review as a managed change per the "
-    "fleet doctrine; the threads on synced files are upstream `arthur-debert/release` "
+    "fleet rule; the threads on synced files are upstream `arthur-debert/release` "
     "concerns, not blockers for this consumer PR.\n\n"
     "\U0001f916 Generated with Claude Code"
 )
@@ -67,11 +67,11 @@ _INIT_SNIPPET = "from release_core.verbs import init; raise SystemExit(init.main
 def _run_init(dest: str) -> bool:
     """Run a bare `release-core init` in ``dest`` via an isolated subprocess.
 
-    RELEASE_HOME is STRIPPED so init materializes from the wheel bundle — exactly
+    RELEASE_HOME is STRIPPED so init builds from the wheel bundle — exactly
     what the consumer pulls at SessionStart — not a maintainer's local release
     checkout. (Critically, the bundle path also REMOVES retired tree like
-    `.release/lib/release_core/`; a RELEASE_HOME git-source run re-materializes it
-    and the migration PR drifts from the real pull.) Best-effort: a non-zero exit
+    `.release/lib/release_core/`; a RELEASE_HOME git-source run rebuilds it
+    and the migration PR falls out of sync with the real pull.) Best-effort: a non-zero exit
     surfaces via the caller's post-init ahead-count, not here."""
     env = {k: v for k, v in os.environ.items() if k != "RELEASE_HOME"}
     proc = subprocess.run(

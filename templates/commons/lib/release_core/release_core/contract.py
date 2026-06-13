@@ -21,7 +21,7 @@ Two artifacts fix that:
 2. **The assumption lint** (:func:`lint_repo`) — scans this repo's CI surfaces
    (reusable workflows, composite actions, shipped workflow copies under
    ``templates/``) for any JOB whose steps reference a managed path (from the
-   manifest's managed-path patterns) without a PRIOR materialize step in the
+   manifest's managed-path patterns) without a PRIOR build step in the
    same job (the ``arm-gate`` composite or an explicit ``release-core init``).
    This is the sweep that would have caught #579 the day WS7 merged.
 
@@ -52,11 +52,11 @@ BASELINE_RELPATH = "docs/references/consumer-contract-lint-baseline.yaml"
 
 # Schema version of the manifest document. Bump when the SHAPE of the document
 # changes (keys added/renamed/removed) — content changes (a new mirror dest, a
-# new tombstone) regenerate under the same schema.
+# new retired-file entry) regenerate under the same schema.
 CONTRACT_SCHEMA = 1
 
 # The managed-path PREFIXES: a CI job referencing any path under these must
-# materialize the managed tree first (arm-gate / release-core init) — post
+# build the managed tree first (arm-gate / release-core init) — post
 # WS4/WS7 none of them exist in a fresh checkout. `bin/check` is deliberately a
 # prefix (covers bin/check, bin/check-e2e, bin/check-gate, …, the #579 family);
 # exact mirror dests (e.g. `.editorconfig`) come from the manifest's
@@ -93,8 +93,8 @@ def _template_kinds(repo_root: str) -> list[str]:
 
 
 def _capability_names(repo_root: str) -> list[str]:
-    """Every Capability dir under templates/components/ (sorted; `_`-prefixed
-    entries are shared fragments, not Capabilities — mirrors should_skip_source)."""
+    """Every Component dir under templates/components/ (sorted; `_`-prefixed
+    entries are shared fragments, not Components — mirrors should_skip_source)."""
     cdir = os.path.join(repo_root, "templates", "components")
     if not os.path.isdir(cdir):
         return []
@@ -106,8 +106,8 @@ def _capability_names(repo_root: str) -> list[str]:
 
 
 def _all_consumer_dests(repo_root: str) -> set[str]:
-    """The UNION of every dest the sync engine can materialize into a consumer,
-    across all Kinds and all Capabilities — each subtree walked exactly as
+    """The UNION of every dest the sync engine can build into a consumer,
+    across all Kinds and all Components — each subtree walked exactly as
     ``build_plan`` walks it (same Source abstraction, same skip predicate,
     same prefix-strip), plus every distributed-skill dest (both catalogs:
     PUSH_ALL_SKILLS unconditionally and REPLACE_IF_PRESENT_SKILLS, which are
@@ -183,7 +183,7 @@ _HEADER = """\
 #
 # A PR that changes the contract (sync.py classification, templates/ dests,
 # tombstones) MUST regenerate this file in the same PR — the root lefthook.yml
-# `consumer-contract-check` gate entry fails on drift.
+# `consumer-contract-check` gate entry fails when the file is out of sync.
 #
 # This manifest is PRESCRIPTIVE, not descriptive (#583 owner constraint): it
 # states what a consumer tree MUST look like. Where a repo diverges, the fix
@@ -201,7 +201,7 @@ _HEADER = """\
 #   gate_internal         — live only inside .release/ (WS3).
 #   tombstones            — retired dests init removes (provenance-gated, WS6).
 #   managed_path_prefixes — path prefixes whose presence in a CI job means the
-#                           job MUST materialize first (arm-gate /
+#                           job MUST build first (arm-gate /
 #                           release-core init); the assumption lint
 #                           (bin-internal/lint-consumer-contract.sh) enforces
 #                           this over every workflow + composite action.
@@ -256,7 +256,7 @@ def manifest_text(repo_root: str) -> str:
 
 @dataclass(frozen=True)
 class Violation:
-    """One job step that references a managed path with no prior materialize."""
+    """One job step that references a managed path with no prior build step."""
 
     file: str  # repo-relative path of the workflow / action file
     job: str  # job id ("(composite)" for a composite action's steps)
@@ -327,8 +327,8 @@ def _step_is_materialize(step: dict) -> bool:
 
     arm-gate called with `materialize: 'false'` (release's own ci.yml — the one
     repo with real root configs) does NOT compose the tree, so it earns no
-    credit; `toolset: 'false'` (#581, the materialize-only building block)
-    still materializes and does."""
+    credit; `toolset: 'false'` (#581, the build-only building block)
+    still builds the tree and does."""
     uses = step.get("uses")
     if isinstance(uses, str) and uses.split("@", 1)[0].endswith("/arm-gate"):
         with_block = step.get("with")
@@ -381,7 +381,7 @@ def _step_checkout_path(step: dict) -> str | None:
 
 def _lint_steps(relpath: str, job_id: str, steps: list, regex: re.Pattern[str]) -> list[Violation]:
     """One job's steps, in order: a managed-path reference is a violation
-    unless a PRIOR step in the SAME job either materialized the managed tree
+    unless a PRIOR step in the SAME job either built the managed tree
     (arm-gate / release-core init) or checked content out INTO that path."""
     out: list[Violation] = []
     materialized = False
@@ -407,7 +407,7 @@ def _lint_steps(relpath: str, job_id: str, steps: list, regex: re.Pattern[str]) 
 def _first_unprovided_ref(step: dict, regex: re.Pattern[str], provided: list[str]) -> str | None:
     """The first managed-path reference in the step's scanned texts that is not
     under a checkout-provided prefix; None when the step is clean. One ref per
-    step is enough — the fix (materialize first) is per-job anyway."""
+    step is enough — the fix (build first) is per-job anyway."""
     for text in _step_texts(step):
         for m in regex.finditer(text):
             ref = m.group("ref")
@@ -481,7 +481,7 @@ def lint_workflow_dir(repo_root: str, patterns: list[str]) -> list[Violation]:
     """The CONSUMER-side sweep (#581): scan only ``.github/workflows/**`` of a
     consumer repo for jobs that reference a managed ephemeral path (``patterns``
     — the init-resolved mirror dests + the managed prefixes) without a prior
-    materialize step. Same scanner as :func:`lint_repo` (one scanner, two file
+    build step. Same scanner as :func:`lint_repo` (one scanner, two file
     enumerations); ``release-core init`` runs this at seed/session time as the
     tripwire warning for consumer-authored jobs (the supage#163 class).
 

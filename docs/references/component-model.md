@@ -1,21 +1,21 @@
-# Capability model
+# Component model
 
 Status: locked 2026-05-19 (take-iii). Reference for issue #97.
 
-## What a Capability is
+## What a Component is
 
-A **Capability** is a reusable, cross-Kind unit of tooling. Where a *Kind*
+A **Component** is a reusable, cross-Kind unit of tooling. Where a *Kind*
 captures "what kind of project is this" (rust-cli, electron-app, vsce-ext),
-a Capability captures "what shared concern does this project participate
+a Component captures "what shared concern does this project participate
 in" (rust-quality, npm-quality, bats). (The shell/markdown/yaml lint
-gate was once such a Capability but is now universal — see
+gate was once such a Component but is now universal — see
 `### shell-quality` below.)
 
-A Capability is identified empirically: it shows up across multiple Kinds
+A Component is identified empirically: it shows up across multiple Kinds
 with substantially the same shape. Concerns that only appear in one Kind
-are not Capabilities — they belong inside the Kind template.
+are not Components — they belong inside the Kind template.
 
-Capabilities exist to eliminate the N×M permutation problem: without them,
+Components exist to eliminate the N×M permutation problem: without them,
 a portfolio of N Kinds × M concerns proliferates. With them, each
 concern lives once and is composed in.
 
@@ -35,7 +35,7 @@ path with the `templates/commons/`, `templates/components/<c>/`, or
 Example: `templates/commons/.editorconfig` lands at `.editorconfig` in the
 consumer. (The gate definition + most tool configs — `lefthook.yml`,
 `.markdownlint.json`, `.yamllint`, `.prettierignore`, … — are an exception since
-WS3 (#524): they materialize into `.release/` only and are NOT mirrored to the
+WS3 (#524): they are built into `.release/` only and are NOT mirrored to the
 root — see "release-internal files" below. `.editorconfig` is the one config
 still mirrored — editors discover it at the root and have no `--config` flag.
 `.shellcheckrc` joined the release-internal set in #531 F3, once #536 pinned
@@ -50,18 +50,18 @@ material.
 
 A **Kind** template now consists of three things:
 
-1. `templates/<kind>/manifest.yaml` — declares default Capabilities for
+1. `templates/<kind>/manifest.yaml` — declares default Components for
    this Kind.
 2. `templates/<kind>/lefthook.fragment.yaml` (optional) — Kind-specific
-   hook entries that aren't a Capability's job (e.g. a check that
+   hook entries that aren't a Component's job (e.g. a check that
    `tauri.conf.json` parses).
 3. `templates/<kind>/**` — any other Kind-specific files (CI workflow
    ref isn't actually composed into the tree; consumers reference
-   `arthur-debert/release/.github/workflows/<kind>.yml@v2` directly).
+   `arthur-debert/release/.github/workflows/<kind>.yml@v3` directly).
 
 Most of what used to live in a Kind template (the hand-maintained
-`lefthook.yml`, language-specific lint configs) moves to Capabilities.
-Kinds become *thin recipes*: name + default Capabilities + CI workflow
+`lefthook.yml`, language-specific lint configs) moves to Components.
+Kinds become *thin recipes*: name + default Components + CI workflow
 target.
 
 ## The manifest
@@ -92,20 +92,20 @@ capabilities:
 The override is the full set (not additive). If `.release-sync.yaml` is
 absent, the Kind manifest is authoritative. If present, it wins.
 
-Declaring a Capability that doesn't exist is a fatal compose error
+Declaring a Component that doesn't exist is a fatal compose error
 (`release-core init` exits non-zero).
 
 ## What `release-core init` composes
 
-After detecting the Kind and resolving the effective Capability list:
+After detecting the Kind and resolving the effective Component list:
 
 1. `templates/commons/**` — always (truly universal files).
-2. `templates/components/<c>/**` — for each declared Capability, excluding
+2. `templates/components/<c>/**` — for each declared Component, excluding
    `lefthook.fragment.yaml` (used for composition, not synced as-is).
 3. `templates/<kind>/**` — Kind-specific files, excluding the Kind's
    own `lefthook.fragment.yaml` and `manifest.yaml`.
 
-Kind-specific paths win on collision with Capability paths; Capability
+Kind-specific paths win on collision with Component paths; Component
 paths win on collision with commons. (Highest specificity wins.)
 
 ## Generated artifacts
@@ -119,7 +119,7 @@ Composed from:
 
 - A base header (`templates/components/_lefthook-base.yaml` — the common
   output settings and skip rules)
-- + each declared Capability's `lefthook.fragment.yaml`
+- + each declared Component's `lefthook.fragment.yaml`
 - + the Kind's `lefthook.fragment.yaml` (if present)
 
 Merge mechanism: `yq eval-all '. as $item ireduce ({}; . *+ $item)'` (deep
@@ -147,7 +147,7 @@ config explicitly — `markdownlint --config/--ignore-path`, `yamllint -c`,
 fleet, so `check-shell` passes `--rcfile=.release/.shellcheckrc` explicitly —
 the upward-walk root dotfile is gone.
 
-## How sync materializes the managed tree (no state file)
+## How sync builds the managed tree (no state file)
 
 Sync is **stateless**. It does not track a per-consumer manifest of what
 was synced before. Instead it rebuilds the whole managed tree from scratch
@@ -155,7 +155,7 @@ on every run (ADR-0001):
 
 1. Remove `.release/` entirely.
 2. Rebuild `.release/` from the current templates (commons + declared
-   Capabilities + Kind) — a self-contained build directory of real file
+   Components + Kind) — a self-contained build directory of real file
    content.
 3. Create working-tree symlinks (`bin/check`, `.editorconfig`,
    `.claude/skills/*`, …) pointing into `.release/`. (`lefthook.yml` + the gate
@@ -178,23 +178,23 @@ string for the source that generated the tree: the wheel's version label on
 the normal bundle path, or the resolved git SHA when composing from a
 `$RELEASE_HOME` checkout (ADR-0002, historical). With the tree
 ephemeral and recomposed every session (WS4, #521), nothing reads it anymore
-— the drift-check it served was retired (drift is impossible by
-construction); it remains purely informational.
+— the `release-drift-check` it served was retired (the tree is rebuilt every
+session, so it can't fall out of sync); it remains purely informational.
 
 There is no state file.
 
-Authoritative mechanism:
+Mechanism reference:
 [ADR-0001](../adr/0001-release-sync-build-dir-with-symlinks.md) (build dir +
 symlinks), [ADR-0002](../adr/0002-provenance-marker.md) (provenance marker),
 and the distribution section of `docs/tooling.lex`.
 
-## Initial Capabilities (locked, take-iii)
+## Initial Components (locked, take-iii)
 
 Derived from the empirical survey of 21 repos (issue #97 description).
 
 ### `shell-quality` → promoted to commons (release#320)
 
-> **Update:** `shell-quality` is no longer a Capability. Because it is
+> **Update:** `shell-quality` is no longer a Component. Because it is
 > truly universal (every Kind listed it), the gate was promoted into
 > `templates/commons/` so release-sync applies it to *every* consumer
 > structurally — including manifest-less Kinds (`tree-sitter`, `render`)
@@ -235,7 +235,7 @@ Ships:
 
 No config files. rustfmt's stdlib defaults match the portfolio
 (0/21 repos override). Projects with conflicting features that break
-under `--all-features` can override the Kind manifest's Capability
+under `--all-features` can override the Kind manifest's Component
 selection.
 
 ### `bats`
@@ -252,7 +252,7 @@ Ships:
 - `lefthook.fragment.yaml` — runs `bats tests/` on commit
 
 Kinds adopting bats also need to install `bats-core` in CI; that is the
-Kind's CI workflow's job, not the Capability's.
+Kind's CI workflow's job, not the Component's.
 
 ### `playwright`
 
@@ -269,54 +269,54 @@ Kinds adopting playwright install browsers in their CI workflow.
 
 ## Lefthook is the universal hook runner
 
-Lefthook is a **convention**, not a Capability. Every consumer gets a
+Lefthook is a **convention**, not a Component. Every consumer gets a
 generated `lefthook.yml` regardless of Kind. There is no
 `scripts/pre-commit`, no `.husky`, no alternative runners. The 8 repos
-currently using non-lefthook runners are migrated as part of the Capability
+currently using non-lefthook runners are migrated as part of the Component
 rollout (issue #97 sub-task).
 
-A consumer with zero declared Capabilities and an empty Kind fragment
+A consumer with zero declared Components and an empty Kind fragment
 still gets a `lefthook.yml` containing the base header plus the commons
 lint gate (shellcheck + markdownlint + yamllint) — the latter ships from
 `templates/commons/lefthook.fragment.yaml` and applies to every consumer
-regardless of declared Capabilities (release#320).
+regardless of declared Components (release#320).
 
 ## Deferred (revisit when evidence justifies)
 
 - `mkdocs` — only 2/21 repos use it; mdbook also in play. Defer to a
   third adopter.
 - `docs-dir` (just having a `docs/` folder) — pure convention, no
-  tooling to share, not a Capability.
+  tooling to share, not a Component.
 
-## What is NOT a Capability
+## What is NOT a Component
 
 - **Kind-specific concerns** (cargo-publish, vsce-package, tauri-bundle):
-  inside the Kind template's CI workflow, not a Capability.
+  inside the Kind template's CI workflow, not a Component.
 - **File conventions without tooling**: handled by Kind template or repo
-  convention, not Capability.
+  convention, not a Component.
 - **Reusable CI workflows** in release/.github/workflows/: centralized in
-  release/ itself, consumers reference via `uses:`. Not a Capability.
+  release/ itself, consumers reference via `uses:`. Not a Component.
 
-## Adding a new Capability
+## Adding a new Component
 
 1. Identify cross-Kind evidence: ≥5 repos already exhibit the pattern,
    OR ≥2 Kinds want it.
 2. Create `templates/components/<name>/`.
 3. Add files at their mirror destinations.
 4. Add `templates/components/<name>/lefthook.fragment.yaml` if the
-   Capability contributes hooks.
+   Component contributes hooks.
 5. Update each adopting Kind's `templates/<kind>/manifest.yaml` to
-   declare the Capability (or document it as opt-in via
+   declare the Component (or document it as opt-in via
    `.release-sync.yaml`).
 6. Update the adopting Kind's CI workflow to install any required
    tooling.
-7. Document the Capability in this file.
+7. Document the Component in this file.
 
 ## Open refinements for later
 
-- **Capability versioning** — independent `@v1` per Capability. Defer; the
+- **Component versioning** — independent `@v1` per Component. Defer; the
   whole repo's floating `@v2` is sufficient at our scale.
-- **Conditional fragments** — a Capability fragment that varies by Kind
+- **Conditional fragments** — a Component fragment that varies by Kind
   context. Defer; no real case yet.
-- **Capability dependencies** — Capability A requires Capability B. Defer;
+- **Component dependencies** — Component A requires Component B. Defer;
   not needed for the initial set.

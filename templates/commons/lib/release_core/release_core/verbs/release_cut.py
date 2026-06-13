@@ -1,10 +1,10 @@
-"""release-cut — canonical "cut a release" CLI across every Kind in the
+"""release-cut — the one "cut a release" CLI across every Kind in the
 arthur-debert/* + lex-fmt/* fleets.
 
 Everything that actually mutates state runs in CI. This script does
 the local-side pre-flight:
   1. Detect the Consumer's Kind (via release_core.manifest.detect_kind).
-  2. Read the current version from that Kind's canonical source
+  2. Read the current version from that Kind's version source
      (Cargo.toml, package.json, extension.toml, git tag, …).
   3. Compute the new version (bump shortcut or literal X.Y.Z).
   4. Dispatch .github/workflows/release.yml with the new version.
@@ -68,9 +68,9 @@ After dispatch:
   gh run list --workflow=release.yml --limit=1
 
 Shell→Python migration: the kind-aware
-version readers + semver math moved here; bin/release-cut is a thin shim.
+version readers + semver math moved here; bin/release-cut is a thin launcher.
 release-cut is release-only (a real file in bin/, NOT synced to consumers);
-the distributed templates/commons/bin/release shim execs whatever release-cut
+the distributed templates/commons/bin/release launcher execs whatever release-cut
 is on $PATH. Stdout, exit codes, and the `gh workflow run` invocation are
 preserved byte-for-byte — they are pinned by tests/release-cut/release-cut.bats.
 """
@@ -94,7 +94,7 @@ Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
 pre-release suffix is stripped before bumping; to step from
 1.0.0-rc.1 to 1.0.0, type the version literally).
 
-The current version is read from the canonical source for the
+The current version is read from the version source for the
 Consumer's Kind (Cargo.toml, package.json, extension.toml, or the
 latest git tag for Kinds without a manifest — including repos with
 no detectable Kind at all, e.g. manifest-less meta repos). See the
@@ -168,10 +168,10 @@ def _read_json_version(path: str) -> str | None:
 
 def _read_rust_version() -> str | None:
     """Rust: try the root Cargo.toml first (single crate OR workspace with
-    [workspace.package].version — the canonical layout for ~all rust
+    [workspace.package].version — the standard layout for ~all rust
     consumers). If empty, probe workspace members for the first one
     carrying a literal version (covers dodot's workspace-only root,
-    where the lib crate at crates/dodot-lib holds the canonical version
+    where the lib crate at crates/dodot-lib holds the version
     and the bin crate inherits via version.workspace = true).
     """
     v = _read_toml_version("Cargo.toml")
@@ -234,7 +234,7 @@ def _read_git_tag_version() -> str | None:
     return tag[1:] if tag.startswith("v") else tag
 
 
-# Kinds whose canonical version lives in a manifest file, mapped to their
+# Kinds whose version lives in a manifest file, mapped to their
 # reader. This is the ONE version-source mapping: a Kind listed here reads
 # its manifest; everything else — tag-sourced Kinds (nvim-plugin, go-cli),
 # Kinds with no version manifest, and repos detect-kind can't classify at
@@ -311,8 +311,9 @@ def _canary_gate() -> int | None:
 
     The registry is read from the manifest of the REPO BEING CUT (main() has
     already chdir'd to its root) — deliberately NOT managed_repos's
-    script-dir/env resolution, which the bin/release-core shim pins to
-    release's own manifest: a maintainer cutting a *consumer* repo from a
+    script-dir/env resolution, which the in-checkout `bin/release-core`
+    launcher pins to release's own manifest: a maintainer cutting a *consumer*
+    repo from a
     release dev shell must not be gated on release's canaries."""
     try:
         registry = managed_repos.canaries(os.path.join(os.getcwd(), "managed-repos.yaml"))

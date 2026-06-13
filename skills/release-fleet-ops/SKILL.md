@@ -5,7 +5,7 @@ description: "Drive and diagnose release→consumer fleet changes from inside ar
 
 # release-fleet-ops
 
-The operating doctrine for release-side work that touches the fleet. `release/`
+The operating rules for release-side work that touches the fleet. `release/`
 produces the files consumers run **and** the config that lints them, so most
 fleet failures are *release* bugs wearing a consumer's error message. This skill
 encodes the loop that routes them correctly — written because the obvious
@@ -98,8 +98,8 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   clones (missing-deps artifacts, not regressions — classify by failing step;
   #594 tracks making verify classify these itself).
 - `release-core admin canary run --ref main` — the deep pre-ship round: a
-  synthetic consumer lives its full life (boot from source, materialize,
-  gate, e2e, a real prerelease cut) against the candidate sha and a
+  synthetic consumer lives its full life (boot from source, build the
+  managed tree, gate, e2e, a real prerelease cut) against the candidate sha and a
   `canary/<family>` commit status lands on `release@<sha>`. NOT optional
   before a cut: `release-core cut` refuses unless every registered family's
   status is green on the exact main HEAD it dispatches (release#606, no skip
@@ -108,11 +108,11 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   the target repo on a fresh branch, run the resolver once — `bash
   bin/install-release-core` (use release's own `bin/install-release-core` if the
   consumer's is pre-fix and can't self-bootstrap). It pulls the latest wheel and
-  a bare `init` full-materializes + auto-commits the managed tree. Then push and
+  a bare `init` fully builds + auto-commits the managed tree. Then push and
   open the managed-sync PR; its CI is the gate. One repo at a time; after the
   first seed the consumer self-updates natively. No fleet-wide push.
   (Release-dev note: if `RELEASE_HOME` is set in *your* env, prefix the run with
-  `env -u RELEASE_HOME` so `init` materializes from the published wheel bundle —
+  `env -u RELEASE_HOME` so `init` builds from the published wheel bundle —
   what the consumer actually pulls — not your local release checkout.)
 - `orc probe --yes <clone> "<eval prompt>"` — spin ONE fresh agent to evaluate a
   repo's state and report. Use for a perspective check, not as a per-repo fixer.
@@ -126,7 +126,7 @@ exists only because the gate used to be brittle), not to re-patch upstream.
 A pre-flight that runs the gate differently from production lies. `lefthook run
 pre-commit --all-files` and a real `git commit` do **not** behave identically
 (file selection, glob `exclude` honouring). Verify with the same invocation the
-consumer's CI uses, and prefer the dogfood (release CI running the canonical
+consumer's CI uses, and prefer the dogfood (release CI running the shared
 gate over its own output) as the source of truth — its green equals the
 consumer's green by construction.
 
@@ -154,8 +154,8 @@ Only a run created *after* the advance resolves the new `vN` tip.
   once, fix the root.
 - **Consumer-first patching.** Opening consumer PRs for what is a `release/` bug
   just produces red CI in N repos. Classify before touching anything.
-- **Glob whack-a-mole in the gate.** Per-file `exclude` patterns (`**/x`) drift
-  across lefthook modes and can't catch extensionless non-shell files. Selection
+- **Glob whack-a-mole in the gate.** Per-file `exclude` patterns (`**/x`) behave
+  inconsistently across lefthook modes and can't catch extensionless non-shell files. Selection
   belongs in a content-based runner (`bin/check-shell`), not in glob/exclude.
 - **Trusting a non-faithful pre-flight.** `verify-fleet --all-files` passing did
   not mean consumers would pass — it ran a different mode. Match production.

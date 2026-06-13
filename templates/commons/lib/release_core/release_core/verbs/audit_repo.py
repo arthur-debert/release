@@ -31,13 +31,13 @@ Checks performed:
                          configure git insteadOf with RELEASE_TOKEN
 
 Conformance checks (WARN-only — don't fail; surface adoption gaps):
-  9. scripts_inventory  — what's left in scripts/ beyond the canonical
+  9. scripts_inventory  — what's left in scripts/ beyond the shared
                            setup-dev-env.sh + project extras
  10. workflows_canonical — count of workflows that are NOT thin callers of
                            arthur-debert/release/* (legacy / bespoke surface)
  11. ci_calls_bin_check    — does ANY workflow file (typically ci.yml /
                              test.yml) actually invoke `bin/check`? If not,
-                             the Component-supplied canonical interface is
+                             the Component-supplied interface is
                              dead weight on disk — CI bypasses it.
 
 Shell→Python migration: the base64/jq/grep
@@ -64,11 +64,11 @@ _ECOSYSTEM_RE = re.compile(r"^[ \t]*-[ \t]*package-ecosystem:[ \t]*(.+?)[ \t]*$"
 # go.mod private-dep refs (skip the repo's own `module …` line).
 _GOMOD_DEP_RE = re.compile(r"^\s*(?:require\s+)?github\.com/arthur-debert/", re.MULTILINE)
 _GOMOD_MODULE_RE = re.compile(r"^\s*module\s+")
-# Workflow canonicality: thin caller of a release/ reusable workflow.
+# A thin caller of a release/ reusable workflow.
 _CANONICAL_USE_RE = re.compile(r"uses:.*arthur-debert/release/\.github/workflows/")
 # CI runs bin/check directly (umbrella), not bin/check-fmt alone.
 _RUN_BIN_CHECK_RE = re.compile(r"^[ \t]*run:[ \t]*bin/check([ \t]|$)", re.MULTILINE)
-# CI thin-calls a canonical release/ reusable that runs bin/check internally.
+# CI thin-calls a release/ reusable that runs bin/check internally.
 _CANONICAL_CALLEE_RE = re.compile(
     r"uses:[ \t]*arthur-debert/release/\.github/workflows/"
     r"(?:rust-ci|go-ci|electron-ci|tauri-ci|bats-e2e|mkdocs)\.yml"

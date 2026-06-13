@@ -31,9 +31,9 @@ def group() -> None:
     view of release_core/sync.py: what a consumer tree MUST look like
     (tracked real files, untracked ephemeral mirrors, gate-internal set,
     tombstones, managed-path patterns). ``dump`` regenerates it, ``check``
-    fails on drift, ``lint`` sweeps every CI surface for jobs that reference
-    a managed path without materializing first. Run from inside
-    ``arthur-debert/release``.
+    fails when the committed manifest is out of sync, ``lint`` sweeps every CI
+    surface for jobs that reference a managed path without a prior build step.
+    Run from inside ``arthur-debert/release``.
     """
 
 
@@ -48,13 +48,13 @@ group.add_command(
     wrap_verb(
         contract.check_main,
         name="check",
-        short_help="Fail if the committed manifest drifted from sync.py.",
+        short_help="Fail if the committed manifest is out of sync with sync.py.",
     )
 )
 group.add_command(
     wrap_verb(
         contract.lint_main,
         name="lint",
-        short_help="Assumption lint: managed-path use without materialize.",
+        short_help="Assumption lint: managed-path use without a build step.",
     )
 )

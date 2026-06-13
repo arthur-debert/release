@@ -51,7 +51,7 @@ def _repo_root() -> str:
 
 def _resolve_argv(cmd: Cmd, root: str) -> list[str]:
     """Final exec argv: upgrade ``cargo test`` → ``cargo nextest run`` when
-    nextest is installed (the portfolio canonical runner), PRESERVING the
+    nextest is installed (the portfolio's standard runner), PRESERVING the
     command's own flags and adding ``--no-tests=pass`` so a zero-test crate
     doesn't fail the umbrella. Everything else runs verbatim."""
     if cmd.argv[:2] == ["cargo", "test"] and which("cargo-nextest"):

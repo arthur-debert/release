@@ -125,7 +125,7 @@ def required_reviewers(names: tuple[str, ...]) -> list[ReviewerAdapter]:
     """Map required names → their registry adapters, preserving config order.
 
     `_validate` guarantees every name resolves, so `by_name` never returns None
-    here; the explicit guard turns any future registry/validation drift into a
+    here; the explicit guard turns any future registry/validation mismatch into a
     loud error instead of a None leaking to callers (keeps the return type a
     clean `list[ReviewerAdapter]`)."""
     _validate(names)

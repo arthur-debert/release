@@ -1,16 +1,16 @@
 ---
 name: gh-repo-setup
-description: "Bring a GitHub repo up to the canonical arthur-debert/* + lex-fmt/* release-loop setup: main-branch protection ruleset (PR required, linear history, required checks), per-stack policy files (CODEOWNERS, dependabot.yml, copilot-instructions.md, pull_request_template.md, workflows/copilot-review.yml). No PATH dependency on `~/h/release/bin/`; does clone the public `arthur-debert/release` repo at runtime to read the canonical templates. Idempotent for the policy sweep (re-runs report `ok` for unchanged files); ruleset application is a PUT-replace so it always reports `updated`, content-diff-aware `unchanged` is a known follow-up. Use when: onboarding a new repo, verifying an existing repo is still aligned, recovering from audit-repo drift, or when an agent reports missing branch-protection or copilot auto-trigger."
+description: "Bring a GitHub repo up to the shared arthur-debert/* + lex-fmt/* release-loop setup: main-branch protection ruleset (PR required, linear history, required checks), per-stack policy files (CODEOWNERS, dependabot.yml, copilot-instructions.md, pull_request_template.md, workflows/copilot-review.yml). No PATH dependency on `~/h/release/bin/`; does clone the public `arthur-debert/release` repo at runtime to read the shared templates. Idempotent for the policy sweep (re-runs report `ok` for unchanged files); ruleset application is a PUT-replace so it always reports `updated`, content-diff-aware `unchanged` is a known follow-up. Use when: onboarding a new repo, verifying an existing repo is still aligned, recovering from a repo that has fallen out of sync, or when an agent reports missing branch-protection or copilot auto-trigger."
 ---
 
 # gh-repo-setup
 
-Portable equivalent of `release-core admin policy ruleset` + `release-core admin policy sweep` + `detect-kind` (retired flat names `apply-ruleset` / `sweep-github-policy`). Brings a repo up to the canonical release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
+Portable equivalent of `release-core admin policy ruleset` + `release-core admin policy sweep` + `detect-kind` (retired flat names `apply-ruleset` / `sweep-github-policy`). Brings a repo up to the shared release-loop setup. Idempotent for the policy sweep: re-running on an already-set-up repo reports `ok` for every file. The ruleset application is a PUT-replace and always reports `updated` (content-diff-aware `unchanged` is a known follow-up — see Pitfalls).
 
 ## When to use
 
 - **Onboarding a new repo** to the `arthur-debert/*` or `lex-fmt/*` portfolio.
-- **Verifying alignment** — quick way to check whether a repo has drifted from canonical.
+- **Verifying alignment** — quick way to check whether a repo has fallen out of sync with the shared setup.
 - **Recovery** — when `release-core audit` (retired flat: `audit-repo`) reports a repo is missing pieces.
 
 If you have `~/h/release/bin/` on `$PATH` (local Claude Code, dodot-set-up), prefer the local scripts — they're the same logic but quicker to invoke. This skill exists for cloud sessions and any environment without that PATH.
@@ -182,7 +182,7 @@ Dry-run mode: skip the final `gh api -X PUT/POST` block and just `echo "$PAYLOAD
 
 ## Step 3: sweep policy files
 
-Drop the canonical policy + setup files into the target repo. Compare before copying so we can report `ok`, `created`, `updated`, or `conflict`.
+Drop the shared policy + setup files into the target repo. Compare before copying so we can report `ok`, `created`, `updated`, or `conflict`.
 
 ### Source layout (path-mirror)
 
@@ -243,7 +243,7 @@ printf 'policy files: %d created, %d updated, %d ok, %d conflicts\n' \
   "$CREATED" "$UPDATED" "$SKIPPED" "$CONFLICTS"
 ```
 
-**Drift note for the local `bin/sweep-github-policy`:** at the time of writing, the bin/ version still hardcodes `dest=".github/$rel"` for *all* template files. That worked when templates only contained `.github/`-bound files, but became wrong when `scripts/` and `lefthook.yml` were added (PR #8). The skill above is the corrected logic; the bin/ version needs the same fix. Tracked as a follow-up issue.
+**Out-of-sync note for the local `bin/sweep-github-policy`:** at the time of writing, the bin/ version still hardcodes `dest=".github/$rel"` for *all* template files. That worked when templates only contained `.github/`-bound files, but became wrong when `scripts/` and `lefthook.yml` were added (PR #8). The skill above is the corrected logic; the bin/ version needs the same fix. Tracked as a follow-up issue.
 
 If any files were created or updated, the target repo now has uncommitted changes. Commit them on a branch and open a PR through the standard flow (`gh pr create` → Auto-fix → review → merge); the policy files are part of the repo's history once that PR merges.
 
@@ -261,14 +261,14 @@ The end-state of a successful invocation:
 |---|---|
 | `ruleset: updated` + all `ok` | Repo was already aligned. No-op confirmation. |
 | `ruleset: created` + all `created` | Brand-new onboarding. Commit the .github/ changes, open the PR, merge. |
-| `ruleset: updated` + mix of `created`/`ok` | Partial drift. Review the created files; commit the additions; investigate any items that were missing. |
-| Any `conflict` | The repo has a customized version of a canonical file. Either resolve manually, or re-run with `FORCE=1` to overwrite — but only after deciding the customization isn't worth keeping. |
+| `ruleset: updated` + mix of `created`/`ok` | Partially out of sync. Review the created files; commit the additions; investigate any items that were missing. |
+| Any `conflict` | The repo has a customized version of a shared file. Either resolve manually, or re-run with `FORCE=1` to overwrite — but only after deciding the customization isn't worth keeping. |
 
 A clean idempotent re-run reports `ok` for every file and either `updated` (PUT replaced with same content) or `created` (new) for the ruleset. The `updated` line for an unchanged-content ruleset is not great UX — see Pitfalls.
 
 ## Pitfalls
 
-- **`ruleset: updated` doesn't tell you whether the content actually changed.** The GH API's PUT-replace doesn't emit a diff; we report `updated` for any successful PUT. To detect actual drift, fetch the existing ruleset (`gh api "repos/$REPO/rulesets/$ID"`) and diff against `$PAYLOAD` before deciding to PUT. Skipped here for simplicity; add it if you want a "no change needed" report.
+- **`ruleset: updated` doesn't tell you whether the content actually changed.** The GH API's PUT-replace doesn't emit a diff; we report `updated` for any successful PUT. To detect an actual content change, fetch the existing ruleset (`gh api "repos/$REPO/rulesets/$ID"`) and diff against `$PAYLOAD` before deciding to PUT. Skipped here for simplicity; add it if you want a "no change needed" report.
 - **YAML 1.1 `on:` boolean footgun.** GitHub Actions uses `on:` as the trigger key, but under YAML 1.1 (and older mikefarah/yq) the bareword `on` is parsed as the boolean literal `true`. So `yq -o json` may emit `{"true": ...}` instead of `{"on": ...}`. The check-detection jq uses `(.on // .true)` to handle both shapes. If you see `PR_WORKFLOWS` come back empty on a repo that definitely has PR-triggering workflows, this is the likely cause — check the `yq` output directly.
 - **`copilot-review.yml` is excluded from the required-checks detection** by filename. It's a side-effect workflow (requests Copilot), not a gate — listing it as required would make every PR block on it.
 - **No `--checks` override here yet.** If `detect_stack` succeeds but `$CHECKS` is empty (no PR-trigger workflows or no workflow runs), set `CHECKS=$'name1\nname2'` manually before step 2b.
@@ -281,7 +281,7 @@ A clean idempotent re-run reports `ok` for every file and either `updated` (PUT 
 
 These are not reimplemented in this portable skill because they touch multiple repos at once and aren't useful from inside a single repo's session — run them via `release-core admin …` (retired flat names shown in parens) on a machine with the release tooling on `$PATH`:
 
-- `release-core admin secrets install` (retired flat: `install-release-secrets`) — propagate the canonical secrets set to every onboarded repo.
+- `release-core admin secrets install` (retired flat: `install-release-secrets`) — propagate the shared secrets set to every onboarded repo.
 - `release-core admin secrets token` (retired flat: `install-release-token`) — propagate `RELEASE_TOKEN` to every onboarded repo.
 - `release-core admin policy dependabot` (retired flat: `enable-dependabot-security`) — enable Dependabot vulnerability alerts portfolio-wide.
 - `release-core admin repos audit` (retired flat: `audit-portfolio`), `release-core audit` (retired flat: `audit-repo`), `release-core admin smoke-test` (retired flat: `audit-smoke-test`) — read-only auditing.

@@ -5,7 +5,7 @@
 Accepted, then partially superseded. The package-distribution half is superseded
 by [ADR-0003](0003-pip-install-bootstrap-distribution.md): `release_core` now
 arrives via `pip install` of a wheel from the GitHub release, not as committed code
-materialized into `.release/`. The build-dir + symlink mechanism described here
+built into `.release/`. The build-dir + symlink mechanism described here
 still governs how config is composed into the consumer tree — but the
 committed-`.release/` decision is superseded by
 [ADR-0004](0004-symlinked-managed-files-into-the-installed-package.md) and
@@ -21,12 +21,12 @@ release-sync copies managed files from the release repo's templates directly int
 
 ## Decision
 
-Sync materializes ALL managed files into a single `.release/` directory in the consumer repo, rebuilt from scratch on every sync. Files at their expected locations (`bin/check`, `lefthook.yml`, `.claude/skills/*`, etc.) are symlinks pointing into `.release/`. Both `.release/` and the symlinks are checked into git.
+Sync builds ALL managed files into a single `.release/` directory in the consumer repo, rebuilt from scratch on every sync. Files at their expected locations (`bin/check`, `lefthook.yml`, `.claude/skills/*`, etc.) are symlinks pointing into `.release/`. Both `.release/` and the symlinks are checked into git.
 
 The sync cycle:
 
 1. Remove `.release/` entirely
-2. Rebuild it from current templates (commons + capabilities + kind)
+2. Rebuild it from current templates (commons + components + kind)
 3. Create symlinks for any new files that appeared
 4. Walk the repo tree for symlinks pointing into `.release/` that are now broken — delete them
 5. Commit the result
@@ -40,7 +40,7 @@ The sync cycle:
   from the pinned wheel by `release-core init` (SessionStart + CI). The committed
   surface is just the symlinks (+ the real-file workflow copies + the CLAUDE.md
   block); nothing under `.release/` is tracked. The trade — losing
-  stale-but-working self-containedness for a drift-free, uniform tree — is the
+  stale-but-working self-containedness for an always-in-sync, uniform tree — is the
   explicit subject of [ADR-0004](0004-symlinked-managed-files-into-the-installed-package.md)
   and [ADR-0005](0005-minimal-footprint-invoke-dont-discover.md).
 - **Clear ownership.** Symlinks visually signal "this file is managed by release — don't edit it here." The build directory is the single place managed content lives.

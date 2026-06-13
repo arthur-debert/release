@@ -242,7 +242,7 @@ def _verify_attached(
     *,
     baseline_ids: set[int],
 ) -> list[ReviewerAdapter]:
-    """The placed adapters whose request edge never materialized (empty = all good).
+    """The placed adapters whose request edge never appeared (empty = all good).
 
     An adapter is verified when its reviewer appears in the PR's pending
     review requests, OR when a fresh review by it (one not in the pre-request

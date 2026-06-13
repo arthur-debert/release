@@ -1,6 +1,6 @@
 """Console-script entry points. Each wrapper reads ``sys.argv`` and delegates to
 a verb's ``main(argv) -> int`` (``changelog`` keeps ``orchestrator_main``; its
-add/cut/render shims map to the dedicated ``add_main``/``cut_main``/``render_main``
+add/cut/render wrappers map to the dedicated ``add_main``/``cut_main``/``render_main``
 functions). Wrappers exist so the verb modules stay free of console-script
 plumbing — they keep their pure ``main(argv: list[str]) -> int`` signature.
 

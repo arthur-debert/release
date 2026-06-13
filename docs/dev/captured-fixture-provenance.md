@@ -25,8 +25,8 @@ The worked example is **#619**:
 > verify.
 
 The fix made the fixture the **verbatim block from a live verify-gate log**, so
-it can never silently drift from the real surface again. That fixture is the
-model. Its sisters: **#620** (a test seam stubbed below the layer it needed to
+it can never silently fall out of sync with the real surface again. That fixture
+is the model. Its sisters: **#620** (a test seam stubbed below the layer it needed to
 exercise) and **#612** (mocks only ever fed well-formed manifests).
 
 The only oracle for an external surface is captured reality. So:

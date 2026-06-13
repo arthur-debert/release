@@ -1,6 +1,6 @@
 """sync — the managed-tree compose engine (build-dir + symlinks, ADR-0001).
 
-Ref selection, Kind+Capability resolution, the materialize-into-a-fresh-.release/
+Ref selection, Kind+Component resolution, the build-into-a-fresh-.release/
 plan, lefthook fragment composition, release-internal classification,
 symlink-target computation, the diff against an existing .release/,
 broken-symlink detection, and the CLAUDE.md orientation block. ``verbs/init.py``
@@ -33,7 +33,7 @@ from . import gh
 #       is IDENTICAL to the pre-abstraction engine (release-sync's contract).
 #   BundleSource(bundle_root)     — the wheel bundle: the on-disk template tree
 #       hatch_build.py stages into release_core/_bundled_templates/. Lets `init`
-#       materialize the full managed tree offline, no release clone, no network.
+#       build the full managed tree offline, no release clone, no network.
 #
 # Paths are always git-style (POSIX, '/'-separated, relative to the source root,
 # e.g. "templates/commons/bin/check" or "skills/tdd/SKILL.md"). list_tree returns
@@ -133,7 +133,7 @@ class BundleSource(Source):
 
     def _abs(self, relpath: str) -> str:
         # relpath is always POSIX/'/'-separated; translate to the host separator.
-        # CONTAINMENT GUARD: capability names flow in from consumer-controlled
+        # CONTAINMENT GUARD: component names flow in from consumer-controlled
         # YAML (e.g. a subtree "templates/components/<cap>"), so a malicious
         # "../.." could otherwise escape the bundle and read arbitrary files.
         # Resolve against the real bundle root and refuse any path that lands
@@ -206,7 +206,7 @@ def read_source_tag() -> str | None:
     Reads ``<sys.prefix>/release-source.tag``. None when absent — a wheel
     installed by an older (pre-#580) resolver, or a dev checkout venv — in
     which case callers fall back to the static wheel-version string (a
-    one-session boot-window robustness, not a compat shim). The
+    one-session boot-window robustness, not a compatibility fallback). The
     $RELEASE_CORE_SOURCE_TAG env var, when SET, overrides the file (tests;
     empty value means "no stamp").
     """
@@ -223,8 +223,8 @@ def read_source_tag() -> str | None:
 # WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
 # and recomposed every session/CI from the pinned wheel, never committed. A
 # `.gitignore` of `*` inside the dir makes it self-ignoring: git sees nothing
-# under `.release/` (including this file), so drift of the build dir is
-# impossible by construction (ADR-0005 supersedes the committed-tree model of
+# under `.release/` (including this file), so the build dir can't fall out of
+# sync by construction (ADR-0005 supersedes the committed-tree model of
 # ADR-0001/0002). This subsumes the old `__pycache__`-only ignore (release#450).
 GITIGNORE_BODY = (
     f"{MANAGED_MARKER}\n"
@@ -236,10 +236,11 @@ GITIGNORE_BODY = (
 CLAUDE_FILE = "CLAUDE.md"
 CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
 CLAUDE_END = "<!-- END release-managed orientation -->"
-# WS2 (release#523): the managed block is a tiny STUB pointing at the binary —
-# `release-core how-to` is the single source of orientation (kind-aware, renders
-# the dev cycle), so there is no synced ORIENTATION.md to drift ("invoke, don't
-# discover"). The BEGIN/END markers are kept byte-identical so an existing
+# WS2 (release#523): the managed block is a small managed block (~7 lines)
+# pointing at the CLI — `release-core how-to` is the single source of orientation
+# (kind-aware, renders the dev cycle), so there is no synced ORIENTATION.md to
+# fall out of sync (discovery is the CLI, not docs). The BEGIN/END markers are
+# kept byte-identical so an existing
 # consumer's block (which imported @.release/ORIENTATION.md) is recognized and
 # REFRESHED to this stub, not duplicated.
 CLAUDE_STUB_BODY = (
@@ -296,7 +297,7 @@ def should_skip_source(rel: str) -> bool:
     templates/components/_*, and *.DS_Store.
 
     Also drops Python bytecode (__pycache__/, *.pyc, *.pyo): host- and
-    Python-version-specific build artifacts that must never be materialized into
+    Python-version-specific build artifacts that must never be built into
     a consumer's .release/ (release#450). The release repo gitignores these, so
     a clean ls-tree never lists them — this is defense-in-depth for a future
     source tree that tracks them, paired with the managed .release/.gitignore."""
@@ -351,7 +352,7 @@ def is_distributed_skill_dest(dest: str) -> bool:
 
 
 # The gate definition + most of its tool configs live ONLY in the ephemeral
-# .release/ build dir now (WS3, release#524): they are materialized into .release/
+# .release/ build dir now (WS3, release#524): they are built into .release/
 # but no longer mirrored out to the consumer root. `release-core gate` points
 # lefthook at .release/lefthook.yml (LEFTHOOK_CONFIG) and each tool is handed its
 # config EXPLICITLY (markdownlint --config/--ignore-path, yamllint -c, prettier
@@ -381,7 +382,7 @@ GATE_INTERNAL_FILES: frozenset[str] = frozenset(
 
 
 def is_release_internal(dest: str) -> bool:
-    """Content materialized into .release/ but NOT mirrored out as a symlink/copy:
+    """Content built into .release/ but NOT mirrored out as a symlink/copy:
     the provenance marker, the managed .gitignore (release#450), the Python engine
     package (lib/release_core/* — the folded PR state engine ships by pip wheel
     now, not sync; release#459), and the gate definition + tool configs
@@ -480,7 +481,7 @@ def resolve_capabilities(
 
 
 def validate_capabilities(source: Source, capabilities: list[str]) -> None:
-    """Per-capability existence guard: each declared Capability must have a
+    """Per-component existence guard: each declared Component must have a
     templates/components/<c>/ tree in the source.
 
     A cheap existence probe (source.exists on the tree path) — NOT a recursive
@@ -492,7 +493,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
             continue
         if not source.exists(f"templates/components/{c}"):
             raise SyncError(
-                f"release-core init: declared Capability '{c}' has no "
+                f"release-core init: declared Component '{c}' has no "
                 f"templates/components/{c}/ tree in {source.label}"
             )
 
@@ -502,7 +503,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
 
 @dataclass
 class Plan:
-    """The materialization plan. ``order`` preserves first-seen dest order
+    """The build plan. ``order`` preserves first-seen dest order
     (mirrors plan_order); ``mode``/``source`` map dest → git filemode / source
     path (last write wins, mirroring the bash assoc-array overwrite)."""
 
@@ -670,7 +671,7 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
 
 
 def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release: str) -> None:
-    """Mirror the lefthook.yml generation: materialize each fragment to a
+    """Mirror the lefthook.yml generation: build each fragment to a
     NN-<dir>.yaml temp file (the numeric prefix fixes the merge order), then
     `yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""'` over them,
     under the generated-by header. The `*+` deep-merges with array concat; the
@@ -774,9 +775,9 @@ def _files_equal(a: str, b: str) -> bool:
 
 def _expected_copy_bytes(f: str, tmp_release: str) -> bytes:
     """The exact bytes ``_apply_mirror`` would write for the real-file copy ``f`` —
-    the materialized source under ``tmp_release``, with the managed-marker header
+    the built source under ``tmp_release``, with the managed-marker header
     prepended for YAML (mirrors init._apply_mirror's copy branch). Used to tell a
-    genuine copy change from a byte-identical re-materialize so a steady-state
+    genuine copy change from a byte-identical rebuild so a steady-state
     sync is a true no-op (no phantom change count, no failed auto-commit)."""
     with open(os.path.join(tmp_release, f), "rb") as fh:
         body = fh.read()
@@ -789,7 +790,7 @@ def _managed_copy_differs(f: str, repo_root: str, tmp_release: str) -> bool:
     """True iff the managed real-file copy ``f`` would actually change the working
     tree — absent dest, or dest bytes differ from what ``_apply`` would write.
     Byte-identical dest → False, so the copy is skipped (no churn, no spurious
-    commit). A hand-edited/drifted dest → True, so drift is still repaired."""
+    commit). A hand-edited / out-of-sync dest → True, so it is still repaired."""
     dest = os.path.join(repo_root, f)
     if not os.path.lexists(dest):
         return True
@@ -817,11 +818,11 @@ class MirrorPlan:
     symlinks_to_remove: list[str] = field(default_factory=list)
     copies_to_write: list[str] = field(default_factory=list)
     copies_to_remove: list[str] = field(default_factory=list)
-    retired_to_remove: list[str] = field(default_factory=list)  # WS6 tombstones
+    retired_to_remove: list[str] = field(default_factory=list)  # WS6 retired files
     conflicts: list[str] = field(default_factory=list)
     migrated: list[str] = field(default_factory=list)
     # EVERY dest this sync mirrors out as a symlink (changed or not) — the
-    # ephemeral-mirror population (WS7, release#528): these are materialized but
+    # ephemeral-mirror population (WS7, release#528): these are built but
     # never tracked; init writes them into .git/info/exclude and untracks any a
     # pre-WS7 seed committed.
     mirror_dests: set[str] = field(default_factory=set)
@@ -897,7 +898,7 @@ def compute_mirror(
     mp.mirror_dests = mirrored_dests
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, mirrored_dests)
     mp.copies_to_remove = _find_stale_managed_copies(repo_root, live_copies)
-    # A dest this sync still distributes is LIVE, never a tombstone — guards a
+    # A dest this sync still distributes is LIVE, never a retired file — guards a
     # future kind re-shipping a retired name against the sweep eating its mirror.
     planned = {f for f in new_files if not is_release_internal(f)}
     mp.retired_to_remove = [f for f in _find_retired_files(repo_root) if f not in planned]
@@ -946,10 +947,10 @@ def _find_broken_release_links(repo_root: str, mirrored_dests: set[str]) -> list
 
     This single membership rule subsumes the older "target absent from the new
     tree" test: a target removed or dropped this sync is not a mirrored dest, so
-    it is swept (the lex/#476 case — a retired shim whose old `.release/` copy is
+    it is swept (the lex/#476 case — a retired file whose old `.release/` copy is
     still live). It ALSO sweeps a de-mirrored-but-still-resolving link: WS3
     (release#524) made the root `lefthook.yml` + lint/format configs
-    release-internal (materialized into `.release/` but no longer mirrored out),
+    release-internal (built into `.release/` but no longer mirrored out),
     so their `.release/` targets still EXIST — a filesystem-presence test would
     leave the stale root symlinks behind, but they are no longer mirrored dests,
     so they are swept. A hand-tampered `..` target is likewise not a clean
@@ -1023,7 +1024,7 @@ def _first_line_has_marker(path: str) -> bool:
     return MANAGED_MARKER_SIGNATURE in first
 
 
-# ── Retired distributed files — tombstones (WS6, release#527) ─────────────────
+# ── Retired distributed files (WS6, release#527) ──────────────────────────────
 #
 # Files release ONCE distributed as tracked REAL files and has since retired.
 # The two mirror sweeps cannot touch them: the broken-symlink sweep only sees
@@ -1032,15 +1033,15 @@ def _first_line_has_marker(path: str) -> bool:
 # from the pre-marker era is invisible to both — it sits tracked in the consumer
 # forever unless removed here.
 #
-# Removal is provenance-gated — a tombstone must NEVER eat consumer-authored
-# work. Three tests, the strongest available per path:
+# Removal is provenance-gated — a retired-file entry must NEVER eat
+# consumer-authored work. Three tests, the strongest available per path:
 #   blob         the content's git blob SHA-1 is one release's template history
 #                actually shipped (byte-exact; a consumer-MODIFIED copy no
 #                longer matches and is deliberately left alone);
 #   marker       the first line carries the managed-marker signature (the
 #                release-sync state manifest: content varies per repo, header
 #                is stable across both marker wordings);
-#   fingerprint  a distinctive header line (the bin/release shims were tailored
+#   fingerprint  a distinctive header line (the bin/release callers were tailored
 #                per repo at onboarding, so no stable blob exists — but the
 #                header comment is verbatim across every variant).
 # Inventory: the 2026-06 fleet audit for release#527, COMPLETED by the #563
@@ -1052,7 +1053,7 @@ def _first_line_has_marker(path: str) -> bool:
 # The de-distributed infra/dev-cycle skill set (WS2 #523 / WS7 #528): 17 skills
 # release once pushed to every consumer. Symlinked copies are swept by the
 # broken-symlink sweep; the REAL tracked copies some repos carry need per-file
-# blob tombstones. One entry per file ever shipped under skills/<name>/, dest
+# blob retired-file entries. One entry per file ever shipped under skills/<name>/, dest
 # `.claude/skills/<name>/<subpath>` (the _add_skill_dir mapping). The skill dir
 # itself is pruned only when the sweep empties it — a consumer file inside
 # keeps the dir (and that file) alive.
@@ -1232,7 +1233,7 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
             "c10b23f55b77cf7e0a14b61ada351074932b1428",  # templates/go
         }
     ),
-    # The pre-console-script changelog shims (retired with the pip cutover,
+    # The pre-console-script changelog scripts (retired with the pip cutover,
     # #476): every blob templates/commons/bin/changelog* ever held.
     "bin/changelog": frozenset(
         {
@@ -1283,7 +1284,7 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
             "c487c76488fdb23b16cc4251013e58e53e174101",
         }
     ),
-    # The synced semver shim (retired #476). BLOB-ONLY by design: the name
+    # The synced semver script (retired #476). BLOB-ONLY by design: the name
     # collides with the KEPT pip console-script `semver` and with common
     # consumer-authored scripts — never fingerprint or marker-match this dest.
     "bin/semver": frozenset(
@@ -1292,7 +1293,7 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
             "8312a43759740ac125bdda64d7933a9b2b3a7aca",
         }
     ),
-    # The pre-console-script gh shims (retired #476; now pip console-scripts).
+    # The pre-console-script gh scripts (retired #476; now pip console-scripts).
     "bin/gh-task-status": frozenset(
         {
             "2413816060a323697d853edcd65f72dce40b44c9",
@@ -1364,8 +1365,8 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
     # ORIENTATION.md (retired WS2 #523; release#563): every blob
     # templates/commons/ORIENTATION.md ever held. Pre-WS4 seeds still TRACK
     # this in the consumer; the recompose removes the on-disk copy, the WS4
-    # untracking removes the index entry, and this tombstone pins the dest in
-    # the managed commit pathspec so the deletion is recorded explicitly.
+    # untracking removes the index entry, and this retired-file entry pins the
+    # dest in the managed commit pathspec so the deletion is recorded explicitly.
     ".release/ORIENTATION.md": frozenset(
         {
             "0efc67ac39d2fdb796977400582c07def0f720be",
@@ -1385,7 +1386,7 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
     # The packaged-binary smoke hooks (retired release#590): dead since WS7
     # (#528) made the mirrors untracked — `hashFiles('app-bin/smoke-hook.sh')`
     # on a plain checkout never matched, so the hook never executed; #592
-    # removed the dead workflow branches and this tombstone sweeps the seeded
+    # removed the dead workflow branches and this retired-file entry sweeps the seeded
     # copies. One dest, both kinds' blobs (electron-app + tauri-app shipped
     # the same path). A consumer-OVERRIDDEN hook (the documented customization
     # path) no longer matches a shipped blob and is left alone.
@@ -1409,8 +1410,10 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
 }
 
 RETIRED_FINGERPRINT_FILES: dict[str, str] = {
-    # The release-cut shim (retired by the CLI cutover, #468/#476): body was
-    # tailored per repo at onboarding, header line is verbatim everywhere.
+    # The release-cut caller (retired by the CLI cutover, #468/#476): body was
+    # tailored per repo at onboarding, header line is verbatim everywhere. The
+    # string value is the verbatim fingerprint matched against consumer files —
+    # it is data, not prose, and must stay byte-exact.
     "bin/release": "Thin shim around the canonical release-cut CLI",
     # The pre-path-mirror SessionStart script: tailored per repo (extras
     # appended below the rsync marker), so the blob set misses tailored
@@ -1424,8 +1427,8 @@ RETIRED_FINGERPRINT_FILES: dict[str, str] = {
 
 def _git_blob_sha1(path: str) -> str | None:
     """The git blob SHA-1 of the file's content (sha1 over ``blob <len>\\0`` +
-    bytes — what ``git hash-object`` computes), so a tombstone can match the
-    consumer's tracked blob without shelling out to git."""
+    bytes — what ``git hash-object`` computes), so a retired-file entry can match
+    the consumer's tracked blob without shelling out to git."""
     try:
         with open(path, "rb") as fh:
             data = fh.read()
@@ -1437,7 +1440,7 @@ def _git_blob_sha1(path: str) -> str | None:
 
 
 def _find_retired_files(repo_root: str) -> list[str]:
-    """Tombstoned dests present as REAL files whose provenance confirms they are
+    """Retired dests present as REAL files whose provenance confirms they are
     release's retired copies. Symlinks are skipped (the broken-symlink sweep owns
     those); provenance misses are skipped (consumer-authored, or consumer-modified
     enough to no longer match — either way not ours to delete). De-duplicated:
@@ -1461,8 +1464,8 @@ def _has_fingerprint_header(path: str, needle: str) -> bool:
     """True iff one of the file's first lines is a COMMENT starting with the
     verbatim fingerprint — `# <needle>…`. Header-anchored on purpose: a loose
     substring search could false-positive on a consumer-owned file that merely
-    mentions the phrase somewhere in its body. The shims carry it as the first
-    comment under the shebang; 10 lines is generous slack."""
+    mentions the phrase somewhere in its body. The retired scripts carry it as the
+    first comment under the shebang; 10 lines is generous slack."""
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
             head = [fh.readline() for _ in range(10)]

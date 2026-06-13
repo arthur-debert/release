@@ -8,7 +8,7 @@
 #
 # A PR that changes the contract (sync.py classification, templates/ dests,
 # tombstones) MUST regenerate this file in the same PR — the root lefthook.yml
-# `consumer-contract-check` gate entry fails on drift.
+# `consumer-contract-check` gate entry fails when the file is out of sync.
 #
 # This manifest is PRESCRIPTIVE, not descriptive (#583 owner constraint): it
 # states what a consumer tree MUST look like. Where a repo diverges, the fix
@@ -26,7 +26,7 @@
 #   gate_internal         — live only inside .release/ (WS3).
 #   tombstones            — retired dests init removes (provenance-gated, WS6).
 #   managed_path_prefixes — path prefixes whose presence in a CI job means the
-#                           job MUST materialize first (arm-gate /
+#                           job MUST build first (arm-gate /
 #                           release-core init); the assumption lint
 #                           (bin-internal/lint-consumer-contract.sh) enforces
 #                           this over every workflow + composite action.

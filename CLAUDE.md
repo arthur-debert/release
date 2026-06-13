@@ -1,12 +1,12 @@
 # release/
 
 Reusable GitHub Actions workflows + composite actions for releasing
-software across the arthur-debert / lex-fmt ecosystems. One canonical
-pipeline per artifact category; consumers call them with a thin `with:`
-block.
+software across the arthur-debert / lex-fmt ecosystems. One shared
+pipeline per Kind; consumers call them with a thin `with:` block.
 
-`README.md` has the consumer-facing overview, category table, and
-versioning policy. This file captures the principles and non-obvious
+`README.md` has the consumer-facing overview and the four pillars;
+[`GLOSSARY.md`](GLOSSARY.md) is the authoritative vocabulary — terms used
+here are defined there. This file captures the principles and non-obvious
 constraints that apply when *working on this repo itself*.
 
 ## Working the fleet / consumer repos — start here
@@ -54,7 +54,7 @@ silently dropping managed `bin/` tools).
   <owner/name> --watch` — empty commit to its main + classified verdict, never
   `gh run rerun`; #595). That's it — consumers
   self-update at SessionStart: `install-release-core` pulls the wheel and a bare
-  `release-core init` (the DEFAULT full materialize) re-syncs the whole managed
+  `release-core init` (the DEFAULT full build) re-syncs the whole managed
   tree from the wheel bundle and auto-commits any change. There is **no push
   mechanism** — the wheel is the carrier; pull does the rest. A consumer still on
   a pre-pull seed migrates by running the (fixed) resolver once in that repo and
@@ -71,14 +71,14 @@ silently dropping managed `bin/` tools).
 
 - `.github/workflows/rust-cli.yml`, `copilot-review.yml` — reusable workflows
 - `.github/actions/<name>/` — composite actions, atomic units shared across (future) workflows
-- `bin/` — local CLI tools that mutate consumer-repo state or drive the day-to-day PR loop. **Single source of truth for everything on `$PATH`.** Includes:
-  - Policy/setup (canonical `release-core admin policy|secrets …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin policy ruleset` (← `apply-ruleset`), `… policy sweep` (← `sweep-github-policy`), `… policy dependabot` (← `enable-dependabot-security`); `release-core admin secrets install|token` (← `install-release-{secrets,token}`); plus the kept flat alias `detect-kind`
-  - Pull-model boot: `install-release-core` (THE boot resolver, ADR-0003 — resolves the `release_core` wheel from a GitHub release and installs it into its OWN dedicated, isolated venv (`${XDG_DATA_HOME}/release-core/venv`, `--force-reinstall`, deps from PyPI — never the user pip / system site / a project venv), symlinks the console-scripts onto PATH (`~/.local/bin`) + persists `$GITHUB_PATH` under Actions, then runs a bare `release-core init` in the current repo (`--no-init` to skip; init is best-effort). Install from a local checkout instead with `--from-source PATH` (release's own CI). Post-#476, a bare `init` is the DEFAULT FULL materialize — it materializes the whole managed tree from the wheel bundle (the `.release/` build dir + every working-tree mirror: skills, configs, the CLAUDE.md stub block — ORIENTATION.md retired in WS2 #523) and auto-commits managed changes (no `[skip ci]` — that would block a managed-only migration PR under required checks), so the wheel pull carries the full tree and no push is needed. The `--config-only` escape hatch and its `--full` alias were REMOVED in #532 (the full materialize is the only mode; `--commit`/`--force` remain tolerated no-ops for stale resolvers). `--major vN` pins to the latest release in that major line, default `releases/latest` — the v3-safety filter since the wheel version is static. One command does the whole boot — NOT a pip post-install hook (wheels have none; init is repo-specific). Pure shell, runs before `release_core` is installed. Lives in the SYNCED bootstrap (`templates/commons/bin/install-release-core`, symlinked from repo-root `bin/`) so it reaches consumers — `setup-dev-env.sh` §0.2 invokes it by repo path at SessionStart (local+cloud); CI reaches it via `@vN` action_path. Tests: `tests/install-release-core/`)
-  - Release mechanics: `release-core admin release advance-major` (← retired flat `release-advance-major`) — manual/recovery fast-forward of the floating major branch (auto-detected highest `vN`, currently `v2`) to main. Normally NOT part of the loop: `release.yml` auto-advances at cut (`advance-major: true`); reach for the verb only when that job failed or for an out-of-band advance
-  - Managed-tree compose: `release-core init` composes the gitignored, ephemeral `.release/` build dir + the committed mirrors (symlinks, real-file workflow copies, CLAUDE.md block) from the pinned wheel. WS4 (#521) made `.release/` gitignored + recomposed every session/CI, so drift of the build dir is impossible by construction — the standalone `release-sync` materializer and the `release-drift-check` gate (+ the `sync` CLI group) were RETIRED. The compose ENGINE lives in `release_core/sync.py` (`build_plan`/`materialize`/`compute_mirror`); `release-core init` is its only driver. The `.release/.release-sync-source` provenance marker (ADR-0002) is still written but transient + informational (no reader). CI materializes `.release/` via the `arm-gate` composite's `materialize` input (default on) before the gate.
-  - Fleet (canonical: `release-core admin repos|inbox …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin repos list` (← `managed-repos`) — zero-logic accessor over `managed-repos.yaml`, the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`; `release-core admin repos verify` (← `release-verify-fleet`) — hermetic pre-flight lint sweep: clone fleet → `release-core init --no-commit` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-core cut` (the cut auto-advances `@vN`, so there is no later checkpoint); `release-core admin inbox` (← `release-inbox`) — read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run; `release-core admin inbox notify-source` (← `release-notify-source`) — close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue. The `release-fleet-triage` skill orchestrates inbox → fix loop → notify-source. See `docs/dev/fleet-tooling.md`.
-  - PR loop: `release-core pr status|wait|ready` (the state machine: one lifecycle state + next action; `pr wait` is the ONE engine-driven in-turn wait — it replaced `pr review wait` + `pr checks-wait` per #503; `pr ready` is the guarded draft→ready flip per #456), `release-core pr review request|cancel|show [--reviewer <name>]` (reviewer-agnostic, dispatches through the adapter registry in `prstate/reviewers.py` — the RETIRED `pr copilot on|off|wait|review` group and the `gh-copilot-*` bin scripts are gone, no aliases, per #555), plus `release-core pr resolve-thread` (bin shim: `gh-pr-resolve-thread`) (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` shim in #476)
-- `bin-internal/` — CI-side scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally)
+- `bin/` — **not a consumer surface** (the wheel + bootstrap quartet carry everything consumers need). It holds only what genuinely can't be a `release-core` subcommand: the in-checkout dev entry (`bin/release-core`), pre-boot scripts that run before `release_core` exists (`install-release-core`), standalone stdlib fetchers pulled raw over HTTP (`fetch-deps`/`fetch-artifact`), and fleet-operator tools (`orc`, `clone-lex-*`). On release's own `$PATH` via dodot. **The maintainer surface listed below is the `release-core` CLI, NOT `bin/` scripts** — mapped here so you know where each capability lives:
+  - Policy/setup (now `release-core admin policy|secrets …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin policy ruleset` (← `apply-ruleset`), `… policy sweep` (← `sweep-github-policy`), `… policy dependabot` (← `enable-dependabot-security`); `release-core admin secrets install|token` (← `install-release-{secrets,token}`); plus the kept flat alias `detect-kind`
+  - Pull-model boot: `install-release-core` (THE boot resolver, ADR-0003 — resolves the `release_core` wheel from a GitHub release and installs it into its OWN dedicated, isolated venv (`${XDG_DATA_HOME}/release-core/venv`, `--force-reinstall`, deps from PyPI — never the user pip / system site / a project venv), symlinks the console-scripts onto PATH (`~/.local/bin`) + persists `$GITHUB_PATH` under Actions, then runs a bare `release-core init` in the current repo (`--no-init` to skip; init is best-effort). Install from a local checkout instead with `--from-source PATH` (release's own CI). Post-#476, a bare `init` is the DEFAULT FULL build — it builds the whole managed tree from the wheel bundle (the `.release/` build dir + every working-tree mirror: skills, configs, the CLAUDE.md stub block — ORIENTATION.md retired in WS2 #523) and auto-commits managed changes (no `[skip ci]` — that would block a managed-only migration PR under required checks), so the wheel pull carries the full tree and no push is needed. The `--config-only` escape hatch and its `--full` alias were REMOVED in #532 (the full build is the only mode; `--commit`/`--force` remain tolerated no-ops for stale resolvers). `--major vN` pins to the latest release in that major line, default `releases/latest` — the v3-safety filter since the wheel version is static. One command does the whole boot — NOT a pip post-install hook (wheels have none; init is repo-specific). Pure shell, runs before `release_core` is installed. Lives in the SYNCED bootstrap (`templates/commons/bin/install-release-core`, symlinked from repo-root `bin/`) so it reaches consumers — `setup-dev-env.sh` §0.2 invokes it by repo path at SessionStart (local+cloud); CI reaches it via `@vN` action_path. Tests: `tests/install-release-core/`)
+  - Release mechanics: `release-core admin release advance-major` (← retired flat `release-advance-major`) — manual/recovery fast-forward of the floating major branch (auto-detected highest `vN`, currently `v3`) to main. Normally NOT part of the loop: `release.yml` auto-advances at cut (`advance-major: true`); reach for the verb only when that job failed or for an out-of-band advance
+  - Managed-tree compose: `release-core init` builds the gitignored, ephemeral `.release/` build dir + the committed mirrors (symlinks, real-file workflow copies, CLAUDE.md block) from the pinned wheel. WS4 (#521) made `.release/` gitignored + rebuilt every session/CI, so the build dir can't fall out of sync — the standalone `release-sync` builder and the `release-drift-check` check (+ the `sync` CLI group) were RETIRED. The compose ENGINE lives in `release_core/sync.py` (the `build_plan`/`materialize`/`compute_mirror` functions — code identifiers, left as-is); `release-core init` is its only driver. The `.release/.release-sync-source` provenance marker (ADR-0002) is still written but transient + informational (no reader). CI builds `.release/` via the `arm-gate` composite's `materialize` input (default on) before the gate.
+  - Fleet (now `release-core admin repos|inbox …`; the `←` names are the RETIRED flat names, gone from PATH after #468): `release-core admin repos list` (← `managed-repos`) — zero-logic accessor over `managed-repos.yaml`, the ONLY fleet source of truth, no discovery; resolves each repo to `$REPOS_ROOT/<path>`; `release-core admin repos verify` (← `release-verify-fleet`) — hermetic pre-flight lint sweep: clone fleet → `release-core init --no-commit` from a candidate ref → `lefthook run pre-commit --all-files`; run before `release-core cut` (the cut auto-advances `@vN`, so there is no later checkpoint); `release-core admin inbox` (← `release-inbox`) — read-only triage view over `consumer-filed` issues on this repo — the #348 feedback-loop inbox; groups by `[component]`, sorts clusters by recurrence/comment-count, `--json` for the Phase C batch run; `release-core admin inbox notify-source` (← `release-notify-source`) — close-the-loop: reads a consumer-filed issue, comments the "upstream fix shipped — bump `@vN`, re-run" notice on each source PR it points at; dry-run by default, `--post` to send, `--close` to also close the release issue. The `release-fleet-triage` skill orchestrates inbox → fix loop → notify-source. See `docs/dev/fleet-tooling.md`.
+  - PR loop: `release-core pr status|wait|ready` (the state machine: one lifecycle state + next action; `pr wait` is the ONE engine-driven in-turn wait — it replaced `pr review wait` + `pr checks-wait` per #503; `pr ready` is the guarded draft→ready flip per #456), `release-core pr review request|cancel|show [--reviewer <name>]` (reviewer-agnostic, dispatches through the adapter registry in `prstate/reviewers.py` — the RETIRED `pr copilot on|off|wait|review` group and the `gh-copilot-*` bin scripts are gone, no aliases, per #555), plus `release-core pr resolve-thread` (wraps the `gh-pr-resolve-thread` launcher) (the `gh-release-issue` consumer escalation tool is now a pip console-script, retired as a `bin/` script in #476)
+- `bin-internal/` — CI-glue scripts that composite actions and reusable workflows exec inside GitHub Actions runners (not on `$PATH`, never called locally). They handle *environment* and **call `release-core`; they never reimplement it.** A script whose body reduces to "set env, call release-core" is a missing command feature — collapse it. Genuine CI plumbing only (matrix math, artifact bundling, secret validation, pre-bootstrap fetch).
 - `templates/` — render templates (e.g. Homebrew formula)
 - `tests/` — per-tool BATS suites (one dir per `bin/` / `bin-internal/` tool, run by the matching `.github/workflows/*-tests.yml`). The ONE fixture tree is `tests/fixtures/<kind>/` — the AUTHORED canary seeds (#604): each dir carries a `.canary-family` marker naming its family (rust-cli → `rust`, vscode-ext → `vscode-ext`; optionally a `.canary-secrets` marker declaring the extra secrets `canary init` converges, e.g. rust's cert-only Apple signing pair per #587 OQ3) and holds exactly the consumer-authored content of that family's canary repo (project tree + thin callers; never the init-generated bootstrap quartet / copilot-review.yml / CLAUDE.md). `release-core admin canary init` seeds the canary FROM it, so fixture and canary cannot diverge. Everything else still fabricates synthetic consumers inline (`tests/release-sync/helper.bash` temp repos, the throwaway fixture repos in `pip-bootstrap-smoke.yml`) matching `docs/references/consumer-contract.yaml` (epic #583 WS-B).
 - `docs/` — the four narrative .lex docs + ADRs + references
@@ -94,18 +94,19 @@ Earlier attempts that *don't* work and shouldn't be reintroduced:
 
 ## Versioning contract — do not break
 
-Consumers pin `@v1` (floating major) or `@v1.2.3` (exact). The `v1`
-branch always points at the latest non-breaking tag.
+Consumers pin `@v3` (floating major) or `@v3.1.2` (exact). The `v3`
+branch always points at the latest non-breaking tag. (v3.0.0 was cut
+2026-06-13; v2 is frozen at v2.21.0 and the `@v2`→`@v3` consumer migration
+is the open follow-on.)
 
 | Bump | Trigger |
 |---|---|
 | PATCH | bug fix in any composite action, no input changes |
-| MINOR | new optional input, opt-in feature, new category workflow |
+| MINOR | new optional input, opt-in feature, new Kind workflow |
 | MAJOR | required-input rename, default behavior change, removed input |
 
 Anything that forces every consumer to edit their thin caller is a
-MAJOR. Six rust-CLI consumers currently track `@v1`; cutting v2 means
-coordinating six PRs.
+MAJOR — coordinate the consumer PRs before cutting.
 
 ## Design principles
 
@@ -129,7 +130,7 @@ exception (`cargo publish` from anywhere is fine). Don't suggest
 - Unit tests guard quality (breadth + depth + invariants). E2E
   verifies user perspective and glue. Don't substitute one for the
   other.
-- Canonical shell E2E framework: **BATS** (`bats-core`). Each `@test`
+- Standard shell E2E framework: **BATS** (`bats-core`). Each `@test`
   runs in a fresh subshell — matches the shell-subshell isolation
   pattern used in padz/dodot.
 - Docker is for testing the *delivery mechanism* (`apt install
@@ -183,7 +184,7 @@ lex-fmt/lex v0.9.1.
   run it, and CI runs the SAME `lefthook run pre-commit --all-files` as a
   required check. **WS3 (#524):** in a *consumer* the gate definition + most tool
   configs live only in the ephemeral `.release/` (no tracked root `lefthook.yml`);
-  the binary is the carrier — `release-core gate` points lefthook at
+  the wheel carries it — `release-core gate` points lefthook at
   `.release/lefthook.yml` and the git hook is `release-core gate --install-hook` →
   `release-core gate --hook`. (`.editorconfig` is the one root mirror kept —
   editors discover it; `.shellcheckrc` moved gate-internal in #531 F3: the
@@ -225,10 +226,11 @@ lex-fmt/lex v0.9.1.
   crates.io JSON API but `cargo publish` errors. Don't replace
   with a `cargo search VERSION | grep` fallback — that's the
   pattern this script was written to fix.
-- **Companion scripts:** `bin/install-release-secrets` propagates the 7
-  release secrets to onboarded rust repos. Sister to
-  `bin/install-release-token`. If the set of required secrets here
-  changes, update that script.
+- **Secret propagation:** `release-core admin secrets install` propagates the
+  release secret set to onboarded repos; `release-core admin secrets token`
+  installs just the release token. If the set of required secrets changes,
+  update those verbs (the old `bin/install-release-{secrets,token}` flat names
+  were retired in #468).
 - **Authoring a skill? Lint it.** Skills under `skills/` split by
   provenance: vendored/third-party ones carry an `.upstream` marker
   (source repo + pinned commit) and are exempt; our own self-authored

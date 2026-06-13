@@ -1,6 +1,6 @@
 ---
 name: migrate-consumer-to-build-dir
-description: "Migrate one consumer repo from the old in-place release-sync model to the new .release/ build-dir + symlinks model (ADR-0001). Performs the full sequence: checkout main, branch, run release-sync --migrate, install lefthook, commit with the canonical message, push, open a PR titled 'Adopt release-sync build-dir + symlinks', and hand off to gh-pr-review-loop. STOPS at ready-to-merge — user does the final merge. Encodes the guardrails learned across 17 consumer migrations: never git add -A, never paper over canonical-lint failures consumer-side, distinguish modified-tracked (stop) from untracked-scratch (ignore), and handle the re-sync (PR already exists) case via reset + force-with-lease. Use when: user asks to migrate a consumer to the build-dir model, adopt ADR-0001 on a repo, run release-sync --migrate on a consumer, port a repo to the symlinks layout, or any phrasing meaning 'pull repo X into the .release/ era'."
+description: "Migrate one consumer repo from the old in-place release-sync model to the new .release/ build-dir + symlinks model (ADR-0001). Performs the full sequence: checkout main, branch, run release-sync --migrate, install lefthook, commit with the standard message, push, open a PR titled 'Adopt release-sync build-dir + symlinks', and hand off to gh-pr-review-loop. STOPS at ready-to-merge — user does the final merge. Encodes the guardrails learned across 17 consumer migrations: never git add -A, never paper over shared-lint failures consumer-side, distinguish modified-tracked (stop) from untracked-scratch (ignore), and handle the re-sync (PR already exists) case via reset + force-with-lease. Use when: user asks to migrate a consumer to the build-dir model, adopt ADR-0001 on a repo, run release-sync --migrate on a consumer, port a repo to the symlinks layout, or any phrasing meaning 'pull repo X into the .release/ era'."
 ---
 
 # migrate-consumer-to-build-dir
@@ -19,7 +19,7 @@ The design rationale lives in `docs/adr/0001-release-sync-build-dir-with-symlink
 
 - The repo is not yet onboarded to release-sync at all (no `.release-sync.yaml`). That's `gh-repo-setup` territory first.
 - The user wants to *change* what release-sync syncs (template edits) — that's upstream work in release/.
-- A canonical-lint regression is failing CI across many consumers — fix it upstream in release/, then re-run this skill on the affected consumers.
+- A shared-lint regression is failing CI across many consumers — fix it upstream in release/, then re-run this skill on the affected consumers.
 
 ## Prerequisites
 
@@ -128,7 +128,7 @@ git status --porcelain | awk '/^\?\?/{print}' | sed 's/^/  ignoring untracked: /
 
 ### 4. Create (or reset) the migration branch
 
-The canonical branch name is **`chore/adopt-release-sync-build-dir`** — use exactly this. The gh-pr-review-loop tooling and any future audit will rely on it.
+The required branch name is **`chore/adopt-release-sync-build-dir`** — use exactly this. The gh-pr-review-loop tooling and any future audit will rely on it.
 
 Check **both** the local branch and the remote-tracking ref. A previous attempt from another clone / cloud session can leave `origin/chore/adopt-release-sync-build-dir` published while this clone has no local copy; without the remote check we'd create a fresh branch from main, push without `--force-with-lease`, and the existing remote would reject the push.
 
@@ -208,7 +208,7 @@ git status --short
 
 If `git status --short` shows anything staged that's not under `.release/`, `.github/`, or a previously-tracked file, STOP and investigate before committing.
 
-### 9. Commit with the canonical message
+### 9. Commit with the standard message
 
 Use a HEREDOC verbatim. The message is the same on every consumer — agents downstream (`release-core admin repos audit`, future migration verifiers) match on these exact words.
 
@@ -307,22 +307,22 @@ Invoke the `gh-pr-review-loop` skill. Let it drive the PR through Copilot review
 
 When the review loop surfaces a CI failure, decide which bucket it falls into:
 
-### Bucket A: known canonical-lint regression (do NOT fix consumer-side)
+### Bucket A: known shared-lint regression (do NOT fix consumer-side)
 
 Examples:
 
 - `shellcheck` false positive on a vendored file, a `completions/` script, a test fixture, or a file release-sync itself put in place.
 - A new `lefthook` step that's overly strict and would need a per-consumer disable.
-- Anything where the fix would mean editing files inside `.release/` (you can't — they're rebuilt every sync) or adding consumer-side overrides to canonical files.
+- Anything where the fix would mean editing files inside `.release/` (you can't — they're rebuilt every sync) or adding consumer-side overrides to shared files.
 
-**Action:** STOP. Surface the failure to the user with a short note: "this is canonical drift — fix belongs in release/, not here." Do NOT:
+**Action:** STOP. Surface the failure to the user with a short note: "this is a shared file out of sync — fix belongs in release/, not here." Do NOT:
 
 - add `lefthook.yml` overrides
 - add per-file `# shellcheck disable=...` to symlinked files
 - replace a symlink with a hand-edited real file
 - ignore a `.release/`-managed file via `.gitignore`
 
-Any of those create canonical drift, which is the exact thing this migration is meant to prevent.
+Any of those put a shared file out of sync, which is the exact thing this migration is meant to prevent.
 
 ### Bucket B: genuine consumer-specific failure
 
@@ -366,7 +366,7 @@ Do NOT `git commit --amend` an existing migration commit. Always replace it with
 ## Output expected at the end of a successful run
 
 - New branch `chore/adopt-release-sync-build-dir` pushed to the consumer's remote.
-- PR open at `https://github.com/<owner>/<repo>/pull/N` with the canonical title.
+- PR open at `https://github.com/<owner>/<repo>/pull/N` with the standard title.
 - `gh-pr-review-loop` driven the PR to mergeable (CI green, threads resolved).
 - Short status reported back: "PR #N on `<owner>/<repo>` is ready to merge — handing back to you."
 

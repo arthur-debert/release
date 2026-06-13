@@ -7,8 +7,8 @@ release/ — Agent & Maintainer Docs
 
     The procedural source of truth for "how do I work in THIS repo" is the
     binary, not these files: `release-core how-to` renders it, version-correct,
-    kind-aware (release#501, "invoke, don't discover"). These docs are the
-    durable design/mechanism layer behind that.
+    kind-aware (release#501 — discovery is the CLI, not docs). These docs are
+    the durable design/mechanism layer behind that.
 
 The four narrative documents:
     dev-cycle.lex:
@@ -34,13 +34,13 @@ The four narrative documents:
 Kept references (the durable "why"):
     adr/:
         Architecture Decision Records — historical decisions, in order; 0005
-        (minimal footprint, invoke-don't-discover) is the current
+        (minimal footprint; discovery is the CLI, not docs) is the current
         architecture. Earlier ADRs describe mechanisms 0005 superseded; they
         are records, not current design.
 
     references/:
         Design "why" notes that exist nowhere else — the component model
-        (Kind/Capability composition), the lint-debt three-case model, the
+        (Kind/Component composition), the lint-debt three-case model, the
         RELEASE_TOKEN setup, and the WS7 self-improving-machinery
         keep/fold/drop decisions.
 
@@ -67,5 +67,5 @@ Note on per-Kind docs:
     The former `per-category/`, `per-component/`, and `per-stack/` reference
     docs were removed in the #501 consolidation. Per-Kind "how to build/test
     this" content is now `release-core how-to <kind>` OUTPUT, not a
-    hand-maintained file — the same invoke-don't-discover principle applied to
-    docs.
+    hand-maintained file — the same "discovery is the CLI, not docs" principle
+    applied to docs.

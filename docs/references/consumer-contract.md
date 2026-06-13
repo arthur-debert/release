@@ -3,9 +3,9 @@
 `docs/references/consumer-contract.yaml` states what a consumer tree looks
 like: the tracked real files (the bootstrap quartet + `.github/workflows/*`
 managed copies), the untracked ephemeral mirror dests (WS7), the gitignored
-`.release/` build dir (WS4), the gate-internal set (WS3), the tombstone sets
+`.release/` build dir (WS4), the gate-internal set (WS3), the retired-file sets
 (WS6), and the managed-path patterns a CI job may only reference after
-materializing the managed tree.
+building the managed tree.
 
 ## Generated, never hand-maintained
 
@@ -19,8 +19,8 @@ byte-stable (no timestamps, no SHAs), versioned by `contract_schema`.
 
 **The process rule: a contract-changing PR regenerates the manifest in the
 same PR.** This is mechanical, not discipline — the `consumer-contract-check`
-entry in the root `lefthook.yml` regenerates in memory and fails the gate on
-any drift. The gate wrappers (`bin-internal/check-consumer-contract.sh`,
+entry in the root `lefthook.yml` regenerates in memory and fails the gate when
+the rendered manifest no longer matches the checked-in one. The gate wrappers (`bin-internal/check-consumer-contract.sh`,
 `bin-internal/lint-consumer-contract.sh`) run the WORKING-TREE `release_core`
 via `PYTHONPATH`, never the installed wheel — the PATH `release-core` is the
 latest release, which would regenerate from the old classification code.
@@ -39,9 +39,9 @@ It scans every CI surface — `.github/workflows/*.yml`,
 manifest's `managed_path_prefixes` plus every `untracked_mirrors` dest)
 without a prior step in the same job that provides it:
 
-- a materialize step — the `arm-gate` composite or an explicit
-  `release-core init` run line (exactly these two: the standard recipe is
-  demanded, not one option among many); or
+- a build step that sets up the managed tree — the `arm-gate` composite or an
+  explicit `release-core init` run line (exactly these two: the standard recipe
+  is demanded, not one option among many); or
 - an `actions/checkout` step whose `with.path` checks content out INTO the
   referenced path (tauri-app.yml / nvim-plugin.yml stage release's
   `bin-internal/` at `path: .release`).
@@ -95,8 +95,9 @@ Scope and non-scope, deliberately:
 - It does **not** exempt the workflow from the **assumption lint**
   (`release-core admin contract lint`): an `# UNMANAGED` workflow that
   references a managed ephemeral path (`.release/`, `bin/check`,
-  `lib/release_core/`, an untracked mirror) still must materialize first.
-  Being domain-bespoke does not license assuming the old managed-tree shape.
+  `lib/release_core/`, an untracked mirror) still must build the managed tree
+  first. Being domain-bespoke does not license assuming the old managed-tree
+  shape.
 - There is currently **no automated fat-workflow / bypass linter** in this
   repo — the release#569/#630 "litmus sweep" was a one-time manual fleet
   analysis, not a gate. So this marker is, today, a **documented convention**

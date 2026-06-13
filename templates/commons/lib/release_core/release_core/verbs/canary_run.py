@@ -1,6 +1,6 @@
 """release-core admin canary run — one pre-ship canary round against a candidate ref.
 
-Exercises a consumer's FULL life — boot from source, materialize, check, e2e,
+Exercises a consumer's FULL life — boot from source, build, check, e2e,
 and a real prerelease cut — on the registered canary repos, against an
 UNRELEASED release revision, before `release-core cut` moves the fleet
 (#587, epic #583). Collapses "cut → advance → wait for a consumer to go red"
@@ -175,16 +175,16 @@ def _publish_candidate(release_dir: str, sha: str, branch: str, ref: str) -> int
 
 # Vars STRIPPED from the sandbox env so the boot is hermetic — the sandbox must
 # exercise the CANDIDATE wheel, never the operator's checkout or live engine:
-#   RELEASE_HOME / RELEASE_REF — init would materialize from a maintainer
+#   RELEASE_HOME / RELEASE_REF — init would build from a maintainer
 #     checkout instead of the candidate wheel bundle.
-#   PYTHONPATH — the bin/release-core checkout shim re-execs under the venv
+#   PYTHONPATH — the bin/release-core checkout launcher re-execs under the venv
 #     python with PYTHONPATH pinned to the checkout lib; inherited by the
 #     sandbox venv's python it shadows the candidate wheel's package, and the
 #     checkout never carries _bundled_templates (the build hook stages it
 #     transiently and removes it), so the sandbox init dies with "no bundled
 #     templates" while every manual repro (a shell without PYTHONPATH) passes.
 #     Caught live as a deterministic canary setup failure pre-v3.
-#   _RELEASE_CORE_REEXEC + the *_SCRIPT_DIR vars — the same shim's process
+#   _RELEASE_CORE_REEXEC + the *_SCRIPT_DIR vars — the same launcher's process
 #     markers; stale pointers into the operator's checkout.
 _SANDBOX_STRIP = frozenset(
     {

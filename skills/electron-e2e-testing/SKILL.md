@@ -2,12 +2,12 @@
 name: electron-e2e-testing
 description: |
   Reliable, fast E2E tests for Electron desktop apps with Playwright.
-  Prescribes a canonical `window.__e2e` runtime contract and `E2E_*` env vars
+  Prescribes one shared `window.__e2e` runtime contract and `E2E_*` env vars
   so every electron project's tests look the same. Use when:
   (1) Setting up or fixing E2E tests in an Electron app
   (2) Diagnosing flaky or slow E2E tests (waitForTimeout abuse, magic sleeps,
       DOM-string assertions)
-  (3) Migrating a project to the canonical `window.__e2e` / `E2E_*` convention
+  (3) Migrating a project to the shared `window.__e2e` / `E2E_*` convention
   (4) Setting up GitHub Actions CI for Electron E2E tests
   Sister skill: `tauri-e2e-testing` (same patterns, different launch).
 ---
@@ -603,7 +603,7 @@ Monaco may skip the LSP range formatting provider when triggered
 programmatically (the selection isn't "real" from its perspective). Full
 document formatting via button/menu click is more reliable for E2E.
 
-## Migration checklist (existing project → canonical conventions)
+## Migration checklist (existing project → shared conventions)
 
 When migrating a project that has its own e2e setup:
 

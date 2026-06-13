@@ -47,7 +47,7 @@ Rank the clusters you'll act on this run by two axes the digest already gives yo
 | Axis | Where it comes from | Why it matters |
 |---|---|---|
 | **Recurrence** | comment count (`recurrence` in `--json`) | the same break hitting many consumers / many times is costing the fleet the most |
-| **Blast radius** | `issue_count` + the distinct source repos in the bodies | a break in a shared workflow/template hits every consumer of that capability |
+| **Blast radius** | `issue_count` + the distinct source repos in the bodies | a break in a shared workflow/template hits every consumer of that component |
 
 Take the top cluster(s). It's fine to fix one cluster per run — the inbox is a
 queue, not a checklist to clear in one sitting. **Log what you're deferring** so
@@ -125,5 +125,5 @@ their tracker), then close the release issue manually.
   the read-side producers that fill the inbox.
 - [`release-fleet-ops`](../release-fleet-ops/SKILL.md) — the upstream-vs-consumer
   diagnosis + `release-core admin release advance-major` /
-  `release-core admin repos verify` doctrine.
+  `release-core admin repos verify` rules.
 - [`gh-pr-review-loop`](../gh-pr-review-loop/SKILL.md) — the PR mechanics for Step 3.

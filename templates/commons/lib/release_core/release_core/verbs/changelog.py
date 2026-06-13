@@ -1,7 +1,7 @@
 """changelog — the changelog-* family (shell→Python migration, Phase 1).
 
 One module for the tight changelog cluster; each former bash script maps to a
-``*_main`` here and is driven by its own thin shim on ``$PATH``:
+``*_main`` here and is driven by its own thin wrapper on ``$PATH``:
 
   - :func:`orchestrator_main`  ← changelog (the dispatch front-end)
   - :func:`add_main`           ← changelog-add

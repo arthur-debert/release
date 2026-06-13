@@ -3,7 +3,7 @@
 Why: the `arthur-debert/release` rust-cli reusable workflow needs up
 to 8 GH secrets to do its job (Apple sign+notarize, crates.io publish,
 Homebrew tap push, optional npm publish for wasm-bindgen workspaces).
-This script propagates them from canonical local sources so onboarding
+This script propagates them from the shared local sources so onboarding
 a new project — or rotating secrets across all projects — is a single
 command. Companion to `install-release-token` (which handles
 RELEASE_TOKEN separately).
@@ -73,7 +73,7 @@ def _usage_block() -> str:
 
 
 # --------------------------------------------------------------------------
-# Secret sourcing — read the canonical local files + env vars.
+# Secret sourcing — read the shared local files + env vars.
 # --------------------------------------------------------------------------
 
 

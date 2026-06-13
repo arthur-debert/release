@@ -1,7 +1,7 @@
 """list-repo-scripts — for each managed repo, list the contents of its
 bin/, scripts/, and app-bin/ directories in side-by-side columns.
 
-The repo list is the canonical "managed by arthur-debert/release" set
+The repo list is the one "managed by arthur-debert/release" set
 (NOT auto-discovered from the main-branch-protection ruleset — that
 signal includes unrelated repos). Update REPOS below when the
 managed set changes.

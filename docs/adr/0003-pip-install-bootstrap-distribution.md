@@ -8,12 +8,12 @@ Accepted. Supersedes parts of [ADR-0001](0001-release-sync-build-dir-with-symlin
 ## Context
 
 [ADR-0001](0001-release-sync-build-dir-with-symlinks.md) makes `release-sync`
-materialize _all_ managed content — both per-repo config (`lefthook.yml`, lint
+build _all_ managed content — both per-repo config (`lefthook.yml`, lint
 configs, skills) **and** the `release_core` package code — into a committed
 `.release/` build directory, with symlinks pointing at it. The package itself is
 not installed anywhere; consumers run it off `sys.path` reaching into the synced
-tree, the `bin/` shims are symlinks into `.release/`, and tooling updates arrive
-by re-running `release-sync` (driven fleet-wide by `orc propagate`).
+tree, the `bin/` tool entries are symlinks into `.release/`, and tooling updates
+arrive by re-running `release-sync` (driven fleet-wide by `orc propagate`).
 
 That arrangement forces three constraints that have outlived their reason:
 
@@ -30,7 +30,7 @@ That arrangement forces three constraints that have outlived their reason:
   consumer, because the package code lives _inside_ each consumer's git tree.
 
 `setup-dev-env.sh` carries its own bespoke package-resolution to find and wire
-`release_core` for local dev, duplicating the logic the sync materializer already
+`release_core` for local dev, duplicating the logic the sync build step already
 encodes.
 
 Meanwhile `release_core` is already a real Python package with a `pyproject.toml`
@@ -52,8 +52,8 @@ rest of the pipeline already produces, with no extra namespace to own.
 followed by `release-core init`.**
 
 - **Tools become console-scripts.** `pyproject.toml` `[project.scripts]` maps
-  each on-PATH command name (the hyphenated names the `bin/` shims use today) to
-  a zero-arg wrapper in `release_core/entrypoints.py` that delegates to the
+  each on-PATH command name (the hyphenated names the `bin/` thin scripts use
+  today) to a zero-arg wrapper in `release_core/entrypoints.py` that delegates to the
   verb's existing `main(argv) -> int`. Installing the wheel puts the tools on
   PATH; they are current by virtue of the install.
 - **Transport is a wheel attached to each GitHub release.** The release pipeline
@@ -61,23 +61,23 @@ followed by `release-core init`.**
   Boot resolves the asset URL for the target release and `pip install -U`s it.
   This is decided; PyPI and `git+https` were considered and rejected for the
   reasons above.
-- **`release-core init` materializes the per-repo committed bits.** The package
+- **`release-core init` builds the per-repo committed bits.** The package
   arrives via pip; the files a consumer must have _in its own git tree_ (managed
   `lefthook.yml`, lint configs) are written by an idempotent `release-core init`
-  subcommand. Init is the seam that replaces sync's _config_ materialization.
+  subcommand. Init is the seam that replaces sync's _config_ build step.
 
-  > **Update (#476 cutover):** `init` now defaults to materializing the WHOLE
+  > **Update (#476 cutover):** `init` now defaults to building the WHOLE
   > managed tree (the `.release/` build dir + every working-tree mirror — skills,
   > ORIENTATION, configs, the CLAUDE.md block) from the wheel bundle and
   > auto-committing managed changes — "release-sync sourced from the wheel". The
   > config-subset behavior described here became the `--config-only` escape
   > hatch — then was REMOVED outright in #532 (post-WS3 it composed root configs
-  > whose gate referenced a `.release/` it never created; the full materialize is
+  > whose gate referenced a `.release/` it never created; the full build is
   > the only mode). So the wheel pull now carries the full tree, retiring
   > `orc propagate` in steady state (see "What this changes" → propagate bullet
   > below, now realized).
 
-The canonical boot resolver — used by both the CI and local-dev contexts
+The shared boot resolver — used by both the CI and local-dev contexts
 (`gh` is the GitHub CLI):
 
 ```bash
@@ -99,15 +99,15 @@ follow-up below, not part of this PoC.
 This supersedes the package-distribution half of ADR-0001 and reframes several
 constraints. Concretely:
 
-- **ADR-0001 `.release/` materialization of the package is superseded.**
+- **ADR-0001 `.release/` build of the package is superseded.**
   `release_core` now arrives via `pip install`, not as committed code symlinked
   out of `.release/`. ADR-0001's build-dir + symlink mechanism remains the model
-  for any _config_ still materialized into the consumer tree until `init` fully
+  for any _config_ still built into the consumer tree until `init` fully
   absorbs it — the build directory stops being the package's delivery vehicle.
 - **`orc propagate` is no longer the tooling-update path.** `pip install -U` is
   the update: a consumer re-resolves the latest release wheel and installs it.
   Propagate's role narrows to per-repo config changes, not shipping new tool code.
-  _(#476 update: with the default `init` now materializing the whole managed tree
+  _(#476 update: with the default `init` now building the whole managed tree
   from the wheel + auto-committing, even per-repo config/tree changes ride the
   pull. `orc propagate` is demoted to a "force the fleet now" override — the
   steady-state push is retired.)_
@@ -130,7 +130,7 @@ This ADR records the decision; the PoC's boundaries are:
 **This PoC does:**
 
 - Add `release_core/entrypoints.py` + `[project.scripts]` so the wheel exposes
-  every tool that has a `bin/` shim today, byte-identical `--help` preserved.
+  every tool that has a `bin/` thin script today, byte-identical `--help` preserved.
 - Add the `release-core` top-level CLI with an idempotent, create-if-absent
   `init` subcommand.
 - Add the wheel build + upload job to the release pipeline.
@@ -140,7 +140,7 @@ This ADR records the decision; the PoC's boundaries are:
 
 **This PoC does NOT do:**
 
-- Does not rip out `release-sync` / `.release/` materialization fleet-wide.
+- Does not rip out `release-sync` / `.release/` build fleet-wide.
 - Does not touch consumer repos (phos especially excluded).
 - Does not remove the `fetch-deps` curl bootstrap from consumer workflows.
 
@@ -150,7 +150,7 @@ This ADR records the decision; the PoC's boundaries are:
   and the reusable CI workflows.
 - Folding `fetch-deps` / `fetch-artifact` into console-scripts (the "deps fail →
   non-zero exit" hard requirement rides with that migration).
-- Retiring `release-sync` package materialization + the curl bootstrap fleet-wide.
+- Retiring `release-sync` package build + the curl bootstrap fleet-wide.
 - Major-line-aware wheel resolution — pinning to the consumer's `vN` instead of
   `releases/latest`.
 

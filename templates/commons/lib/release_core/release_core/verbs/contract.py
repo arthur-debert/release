@@ -6,13 +6,13 @@ Subcommands (also reachable as `release-core admin contract <sub>`):
           constants + predicates applied to this repo's templates/ tree, and
           write it in place. Byte-stable for an unchanged tree.
   check   Regenerate in memory and diff against the committed manifest.
-          Exit 1 (with the diff) on drift — "run: release-core admin
+          Exit 1 (with the diff) when out of sync — "run: release-core admin
           contract dump". This is the gate's freshness check.
   lint    The assumption lint: scan .github/workflows/*.yml,
           .github/actions/*/action.yml, and the workflow copies under
           templates/ for any JOB whose steps reference a managed path
           (manifest managed_path_prefixes + untracked_mirrors) without a
-          prior materialize step in the same job (arm-gate / release-core
+          prior build step in the same job (arm-gate / release-core
           init). Reports `file -> job -> step`; exit 1 on any violation not
           grandfathered by the shrink-only baseline
           (docs/references/consumer-contract-lint-baseline.yaml). The baseline
@@ -29,7 +29,7 @@ regenerate/lint with the NEW code.
 
 Exit codes:
   0  — ok
-  1  — drift (check) / violations or stale baseline entries (lint) / error
+  1  — out of sync (check) / violations or stale baseline entries (lint) / error
   64 — bad usage
 """
 
@@ -98,7 +98,7 @@ def _check(root: str) -> int:
     )
     sys.stderr.writelines(diff)
     print(
-        "\ncontract check: FAIL — the committed manifest has drifted from "
+        "\ncontract check: FAIL — the committed manifest is out of sync with "
         "sync.py + templates/. A contract-changing PR regenerates it in the "
         "SAME PR: run `release-core admin contract dump` and commit the result.",
         file=sys.stderr,
@@ -133,7 +133,7 @@ def _lint(root: str) -> int:
     for v in failing:
         print(
             f"contract lint: VIOLATION: {v.file} -> {v.job} -> {v.step}: references "
-            f"managed path {v.matched!r} with no prior materialize step in the job "
+            f"managed path {v.matched!r} with no prior build step in the job "
             "(add the arm-gate composite / a `release-core init` step BEFORE it)",
             file=sys.stderr,
         )

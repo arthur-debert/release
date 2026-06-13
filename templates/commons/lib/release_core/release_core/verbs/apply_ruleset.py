@@ -1,4 +1,4 @@
-"""apply-ruleset — apply the canonical main-branch ruleset to a GitHub repo.
+"""apply-ruleset — apply the shared main-branch ruleset to a GitHub repo.
 
 Usage:
   apply-ruleset [--dry-run] [--checks check1,check2,...]
@@ -98,7 +98,7 @@ def pr_trigger_is_path_filtered(workflow: object) -> bool:
     required. A required check that never runs on an unrelated PR leaves the PR
     permanently BLOCKED (the check stays "expected", never "success"). The
     fleet of `bats` suites (changelog/audit/release-sync/…), each filtered to
-    its own `tests/<area>/` paths, is the canonical case: auto-detection saw
+    its own `tests/<area>/` paths, is the textbook case: auto-detection saw
     `bats` in the latest default-branch run and required it, deadlocking every
     workflow-only or docs-only PR (release#416).
 
@@ -382,8 +382,8 @@ def _release_root() -> str:
     """The release/ checkout root, where rulesets/main-protection.json.tmpl lives.
 
     The verb lives at templates/commons/lib/release_core/release_core/verbs/, so
-    the repo root is six parents up. (The bash resolved it from the shim's dir,
-    bin/, but the template lives at <root>/rulesets either way.)
+    the repo root is six parents up. (The bash resolved it from the launcher's
+    dir, bin/, but the template lives at <root>/rulesets either way.)
     """
     here = os.path.dirname(os.path.realpath(__file__))
     return os.path.normpath(os.path.join(here, "..", "..", "..", "..", "..", ".."))

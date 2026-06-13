@@ -66,7 +66,7 @@ clone-lex-stack --with-setup lexed
 
 Flags:
 
-- `--all` — every repo in the canonical 8-repo list. Mutually exclusive with positional names.
+- `--all` — every repo in the fixed 8-repo list. Mutually exclusive with positional names.
 - `--depth=N` — shallow clone (use `1` for read-only grep tasks; default is full clone for planning tasks that need `git log` / `blame`).
 - `--with-setup` — run each repo's `scripts/setup-dev-env.sh` after clone. **Opt-in only** — most tasks just need to read source.
 - `--refresh` — `git fetch + reset --hard` on existing dirs instead of skip-if-exists. Use sparingly.
@@ -140,7 +140,7 @@ When you hit the fallback, also consider filing a `release-issue-relay` issue no
 
 `bin/clone-lex-repos` (in the same release repo) is a *release-pipeline* bootstrap used by `release-core admin release lex` (retired flat: `release-lex`) — clones 7 repos into cwd including `arthur-debert/release` itself, no flags. This skill uses `clone-lex-stack` instead, which has a different repo list (8 lex-fmt repos, no `arthur-debert/release`), different default location (`/tmp/lex-fmt/`), and the flag-driven selection model needed for agent use. Don't conflate them.
 
-## Canonical repo list
+## The fixed repo list
 
 Hardcoded in `clone-lex-stack`. To add a new lex-fmt repo to the stack:
 

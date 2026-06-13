@@ -2,17 +2,18 @@
 
 Makes the canary-repo lifecycle reproducible (#604; slice 1 of #587
 hand-created `release-canary-rust`). One verb converges a family's canary to
-the canonical state: a PUBLIC `arthur-debert/release-canary-<family>` repo
+a known-good state: a PUBLIC `arthur-debert/release-canary-<family>` repo
 seeded from the per-kind fixture under tests/fixtures/, booted onto the pull
 model from THIS checkout (`install-release-core --from-source` + a sandboxed
 `release-core init`), carrying exactly the secrets the family needs (never
-the publish trio), under the canonical ruleset, and registered in the
+the publish trio), under the shared ruleset, and registered in the
 `canaries:` block of managed-repos.yaml.
 
 Usage:
   release-core admin canary init --family <f>
-      [--reset]        force-push the canary's main back to the canonical seed
-                       (wedge escape). Sanctioned ONLY for registered canary
+      [--reset]        force-push the canary's main back to the authored fixture
+                       seed (`tests/fixtures/<kind>/`; wedge escape). Sanctioned
+                       ONLY for registered canary
                        repos — the verb hard-refuses anything else.
       [--root DIR]     hermetic workdir (default /tmp/release-canary-init-$USER)
       [--auth-dir DIR] operator auth material for family-declared secrets
@@ -21,7 +22,7 @@ Usage:
 
 Run from inside arthur-debert/release. Idempotent: re-running converges —
 repo exists → not recreated; main already seeded → left alone (without
---reset); RELEASE_TOKEN present → kept (pipe a canonical PAT on stdin to
+--reset); RELEASE_TOKEN present → kept (pipe the release PAT on stdin to
 set/rotate it); ruleset → upserted; registry entry → appended once.
 
 The family→fixture mapping is declarative: each tests/fixtures/<kind>/ dir
@@ -297,7 +298,7 @@ def _rewrite_callers(dest: str, major: str) -> None:
 def _build_seed(
     *, dest: str, fixture_dir: str, family: str, release_root: str, major: str, root: str
 ) -> None:
-    """Construct the canonical seed in the clone: orphan history, fixture
+    """Construct the standard seed in the clone: orphan history, fixture
     content, callers at the floating major, pull-model boot from THIS checkout.
 
     A fresh root commit every time (orphan): --reset is a wedge escape, so the
@@ -364,7 +365,7 @@ def _apply_policy(dest: str) -> int:
 def _signing_secret_values(auth_dir: str) -> dict[str, str]:
     """Source the cert-only signing pair from the operator's auth dir.
 
-    Same canonical sources install-release-secrets reads: the Developer ID
+    Same shared sources install-release-secrets reads: the Developer ID
     .p12 and its password file. The ASC key is deliberately NOT sourced —
     cert-only is the whole point (#587 OQ3)."""
     p12_file = os.path.join(auth_dir, "developerID_application.p12")
@@ -416,7 +417,7 @@ def _converge_secrets(
         print(f"canary init: RELEASE_TOKEN present on {repo} — kept (pipe a PAT to rotate)")
     else:
         raise CanaryError(
-            f"{repo} has no RELEASE_TOKEN — pipe the canonical PAT to stdin "
+            f"{repo} has no RELEASE_TOKEN — pipe the release PAT to stdin "
             "(e.g. pbpaste | release-core admin canary init --family …)"
         )
     if required:
@@ -537,7 +538,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
         os.makedirs(opts["root"], exist_ok=True)
         _clone(repo, dest)
 
-        # ── seed: empty main, or --reset → force-push the canonical seed ─────
+        # ── seed: empty main, or --reset → force-push the standard seed ─────
         if _main_seeded(dest) and not reset:
             print(f"canary init: {repo} main is seeded — skip (use --reset to re-seed)")
         else:
@@ -551,7 +552,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0912, PLR0915 — linear pha
             )
             _push_seed(dest, force=reset)
             print(
-                f"canary init: pushed the canonical seed to {repo} main"
+                f"canary init: pushed the standard seed to {repo} main"
                 f"{' (forced)' if reset else ''}"
             )
     except (CanaryError, gh.GhError, proc.ProcError, OSError) as exc:

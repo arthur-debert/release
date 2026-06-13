@@ -5,7 +5,7 @@ The Agent Harness
     how this repo works, and the skill set it can invoke. This document absorbs
     the former `skills` doc and the agent-facing half of `injected-files`.
 
-    The machinery that materializes these files (the sync engine, the gate, the
+    The machinery that builds these files (the sync engine, the gate, the
     CLI) lives in `tooling.lex`. The dev cycle the agent then follows lives in
     `dev-cycle.lex`.
 
@@ -26,7 +26,7 @@ The Agent Harness
       resolves the `release_core` wheel from that line's latest GitHub
       release, `pip install --force-reinstall`s it into an isolated venv
       (deps from PyPI), then runs a bare `release-core init`. That init
-      materializes the managed tree from the wheel bundle — the ephemeral
+      builds the managed tree from the wheel bundle — the ephemeral
       `.release/` build dir, the untracked mirrors (skills, `bin/` verbs,
       `.editorconfig`), the real-file quartet + workflow copies, and the
       CLAUDE.md stub — and auto-commits any managed change. The wheel pull
@@ -40,7 +40,7 @@ The Agent Harness
     `bin/pr-loop-guard` — so a freshly cloned consumer can boot before
     `release_core` is installed (the boot chain can't depend on what it
     boots). Everything else (the gate tools, the `release_core` package, the
-    mirrors, the cloud dependency caches) is pulled or materialized at session
+    mirrors, the cloud dependency caches) is pulled or built at session
     start.
 
     :: note :: The `release_core` Python package is NOT a synced file. It ships
@@ -48,14 +48,15 @@ The Agent Harness
     surface is the quartet + workflow callers; the engine arrives out-of-band
     (tooling.lex §4). Its console-scripts — `release-core`, `changelog`,
     `semver`, `detect-kind`, `gh-task-status`, `gh-release-issue` — land on
-    PATH from the wheel; they are not synced `bin/` shims (release#476).
+    PATH from the wheel; they are not synced `bin/` scripts (release#476).
 
 2. Orientation — how the agent learns this repo
 
     The agent's single source of "how do I lint / test / build / release / run
     *in this repo*, and what's the dev cycle" is `release-core how-to`. It is
     kind-aware and rendered from the binary, so it is always version-correct and
-    cannot drift (release#501, "invoke, don't discover"). It is the one home for
+    cannot fall out of sync (release#501 — discovery is the CLI, not docs). It
+    is the one home for
     the dev-cycle text — kept in lockstep with `dev-cycle.lex` and the
     `gh-pr-review-loop` skill.
 
@@ -96,7 +97,7 @@ The Agent Harness
         Every skill lives in exactly one place: the `skills/` directory at the
         root of this repo. One directory per skill, each with a `SKILL.md`
         (frontmatter `name` + `description`, then the playbook body). There is no
-        second copy in `templates/` — one source, no drift.
+        second copy in `templates/` — one source, nothing to fall out of sync.
 
         Two provenances share that directory, told apart by an `.upstream` marker
         file inside the skill's dir:
@@ -121,8 +122,9 @@ The Agent Harness
     3.2. Ownership policy
 
         release/ is the single source of truth for the skills it distributes.
-        WS2 (release#523, "invoke don't discover") cut that distributed set to
-        two; WS7 (release#528) cut it to the ONE skill the harness needs a file
+        WS2 (release#523 — discovery is the CLI, not docs) cut that distributed
+        set to two; WS7 (release#528) cut it to the ONE skill the harness needs
+        a file
         on disk for — `gh-pr-review-loop` (the `/`-triggered PR-loop driver).
         `release-issue-relay` was dropped from distribution: the escalation
         contract is binary-carried (the CLAUDE.md stub, `release-core how-to`,
@@ -135,8 +137,8 @@ The Agent Harness
         The distributed skill is still synced (never hand-copied) as a symlink
         into the `.release/` build tree — and since WS7 that mirror is EPHEMERAL
         (untracked, listed in `.git/info/exclude`, recomposed by every init), so
-        a consumer's copy cannot drift from release's official blob and leaves
-        no tracked footprint.
+        a consumer's copy cannot fall out of sync with release's official blob
+        and leaves no tracked footprint.
 
     3.3. The three distribution tiers
 
@@ -179,7 +181,7 @@ The Agent Harness
 
         Distribution is whole-directory and rides the same build-dir + symlink
         mechanism as every other injected file (tooling.lex §5). For each
-        distributed skill, EVERY file under `skills/<name>/` is materialized — so
+        distributed skill, EVERY file under `skills/<name>/` is built — so
         a multi-file skill (e.g. `tdd`, `triage`) arrives complete, not just its
         `SKILL.md`.
 
@@ -201,8 +203,8 @@ The Agent Harness
         Skill dests are release-owned, so a stale hand-copy is always upgraded
         rather than flagged as a conflict.
 
-        One source, one materialized copy, one symlink — no hand-copied skill
-        files in the consumer, so nothing can drift out of step with upstream.
+        One source, one built copy, one symlink — no hand-copied skill
+        files in the consumer, so nothing can fall out of step with upstream.
 
     3.5. Linting
 
