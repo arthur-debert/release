@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 3.0.0 - 2026-06-13
+
+- canary run: strip PYTHONPATH and checkout-shim vars from the sandbox env so the round exercises the candidate wheel, not the operator checkout
+- testing: provenance markers + ratchet lint for external-surface fixtures
+- prstate: CodeRabbit reviewer adapter (requestable, attach-verified), piloted on phos-org repos via per-repo `required_reviewers:` opt-in; default required set stays `[copilot]`, and the engine gates on the full required set against the current head
+- Coordinated execution splits the PR loop: implementer stops at PR-open, coordinator owns waits + the ready flip, a fresh shepherd subagent per review round (dev-cycle §2, how-to, gh-pr-review-loop skill)
+- release-core how-to now renders the §2 coordinator (complex/multi-PR) discipline; CLAUDE.md stub names it
+- Fix pr-loop-guard resolving chained relative cd targets against the original cwd instead of folding left (release#632)
+- remove fleet-saturated back-compat: pre-commit-framework gate fallback + legacy single/two-file changelog detection (#569)
+- BREAKING: remove deprecated singular wasm-package input from rust-cli.yml; use wasm-packages (#569 B7)
+- remove fleet-saturated WS4/WS7 untrack migrations, husky unset, .release-sync-state tombstone + changelog classifier (#569)
+- rust-ci.yml: optional wasm-packages companion (PR-time wasm check/build) + sanctioned-bespoke # UNMANAGED marker convention (#630)
+- admin repos verify: refresh clones unconditionally; remove --refresh flag
+
 ## 2.21.0 - 2026-06-12
 
 - admin repos verify classifies expected toolchain-artifact FAILs (npm-deps mechanically, sibling-checkout cases via expect-verify-fail annotations; exit non-zero only on unexpected, stale annotations flagged) and new admin repos poke — one-command fresh-event consumer verification (empty commit, HEAD-SHA run resolution, classified --watch verdict); the INFRA/PROJECT failing-step classifier is extracted to release_core.classify, shared by canary run / verify / poke (#594, #595)

@@ -1,1 +1,0 @@
-- prstate: CodeRabbit reviewer adapter (requestable, attach-verified), piloted on phos-org repos via per-repo `required_reviewers:` opt-in; default required set stays `[copilot]`, and the engine gates on the full required set against the current head

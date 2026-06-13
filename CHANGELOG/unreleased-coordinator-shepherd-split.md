@@ -1,1 +1,0 @@
-- Coordinated execution splits the PR loop: implementer stops at PR-open, coordinator owns waits + the ready flip, a fresh shepherd subagent per review round (dev-cycle §2, how-to, gh-pr-review-loop skill)

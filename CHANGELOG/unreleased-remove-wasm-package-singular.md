@@ -1,1 +1,0 @@
-- BREAKING: remove deprecated singular wasm-package input from rust-cli.yml; use wasm-packages (#569 B7)

@@ -1,1 +1,0 @@
-- remove fleet-saturated back-compat: pre-commit-framework gate fallback + legacy single/two-file changelog detection (#569)
