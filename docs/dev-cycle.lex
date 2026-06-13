@@ -144,13 +144,35 @@ The Development Life Cycle
         token usage (and cost) down.
 
         It spins one subagent per part — ideally each scoped by its own GitHub
-        issue. Each subagent:
+        issue. The single-task cycle for a part is SPLIT across roles, so no
+        one context carries all of it. An implementer that also shepherds its
+        own review rounds drags the full implementation context — exploration,
+        dead ends, test output — through every round: single agents have
+        ballooned past ~700k tokens that way, and a long context is also a
+        worse judge of review comments, defending remembered choices instead
+        of reading the diff on its merits.
 
-        1. runs the full single-task cycle for its part ([#1]) — implement,
-           run `release-core gate`, then shepherd its own PR through the
-           `gh-pr-review-loop` skill to READY;
-        2. targets the epic branch, not `main`;
-        3. reports back to the coordinating agent.
+        - The IMPLEMENTER subagent stops at PR-open. It implements its part
+          ([#1.2]), runs `release-core gate`, pushes, and opens the draft PR
+          targeting the epic branch (not `main`) — with the `## Context`
+          handoff note in the PR body (why this approach, what is out of
+          scope, what NOT to "fix") written for a stranger, because a
+          stranger is exactly who addresses the review rounds. Then it
+          reports back and terminates; it never sees a review round.
+
+        - The COORDINATOR owns every wait and every flip. It blocks in-turn
+          on `release-core pr wait` (a subagent that yields to wait
+          terminates and is never re-woken), and when the engine says READY
+          it runs the guarded `release-core pr ready`.
+
+        - A FRESH SHEPHERD subagent handles each ADDRESSING round. When the
+          wait returns ADDRESSING, the coordinator spawns a shepherd whose
+          brief is just the PR number and the Context note. It triages the
+          open threads ([#1.3]'s discipline: fix or reply with rationale,
+          resolve as it goes), pushes, re-requests the review, hands the
+          wait back to the coordinator, and terminates. One fresh shepherd
+          per round: each starts cold on the diff as it exists — a fraction
+          of the tokens, and a cleaner read of the reviewer's point.
 
     2.3. Integration
 
@@ -203,9 +225,10 @@ The Development Life Cycle
            not);
         2. writes a high-level description of the whole epic, pointing to the
            related issues;
-        3. shepherds the PR through the same `gh-pr-review-loop` discipline
-           ([#1.3]) — manage reviewers, checks, mergeability — then flips it to
-           READY for the user's final merge.
+        3. drives the PR through the same `gh-pr-review-loop` discipline
+           ([#1.3]) under the same split ([#2.2]) — the coordinator waits and
+           flips, a fresh shepherd handles each review round — then flips it
+           to READY for the user's final merge.
 
     2.7. Release
 
