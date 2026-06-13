@@ -1,1 +1,1 @@
-- Add GLOSSARY.md, rewrite README around the four pillars, and sweep banned terminology (materialize/canonical/doctrine/tombstone/drift/shim) from docs, skills, and help-strings
+- Add GLOSSARY.md as the authoritative vocabulary, rewrite README around the four pillars, and sweep the legacy terminology listed in GLOSSARY.md's banned-terms table out of docs, skills, and help-strings (prose only; `gate` is kept).

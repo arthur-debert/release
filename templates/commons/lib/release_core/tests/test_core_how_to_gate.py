@@ -114,7 +114,7 @@ def test_how_to_documents_the_materialize_only_ci_pattern(tmp_path):
         assert "arthur-debert/release/.github/actions/arm-gate@v2" in body
         assert "toolset: 'false'" in body
         assert "DO NOT exist on a fresh CI checkout" in body
-        assert "Never hand-copy the materialize recipe" in body
+        assert "Never hand-copy the build recipe" in body
 
 
 def test_how_to_distinguishes_gate_from_tests():
@@ -356,7 +356,7 @@ def test_gate_unmaterialized_config_fails_loud(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
     assert gate.main(["--hook"]) == 1
     err = capsys.readouterr().err
-    assert "not materialized" in err
+    assert "not built" in err
     assert "release-core init" in err
 
 
