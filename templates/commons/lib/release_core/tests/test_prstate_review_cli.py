@@ -188,10 +188,11 @@ def test_cancel_dispatches_through_the_same_interface(fakes, capsys):
 
 
 def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
-    # End-to-end through the REAL registry: the CLI selects the config-resolved
-    # required SET — both Copilot AND CodeRabbit (release#622) — and each adapter
-    # places its request via ghapi.pr_edit_reviewer. Proves the second required
-    # reviewer attaches as a real review_requested edge the same generic way.
+    # End-to-end through the REAL registry: a bare request selects the
+    # config-resolved required SET (default [copilot]); an explicit
+    # `--reviewer coderabbit` (the phos-pilot opt-in path) dispatches through
+    # the SAME generic ghapi.pr_edit_reviewer edge — proving a second
+    # requestable reviewer attaches as a real review_requested edge.
     monkeypatch.setattr(
         review,
         "attach_state",
@@ -202,6 +203,8 @@ def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
         ghapi, "pr_edit_reviewer", lambda pr, reviewer, remove=False: calls.append((pr, reviewer))
     )
     assert review.request_main(["42"]) == 0
+    assert calls == [(42, "@copilot")]
+    assert review.request_main(["42", "--reviewer", "coderabbit"]) == 0
     assert calls == [(42, "@copilot"), (42, "coderabbitai[bot]")]
     out = capsys.readouterr().out
     assert "copilot" in out

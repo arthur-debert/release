@@ -31,9 +31,10 @@ def test_registry_catalogs_copilot_coderabbit_and_gemini():
     assert GEMINI.requestable is False
 
 
-def test_default_required_set_is_copilot_and_coderabbit():
-    # The shipped default config: both gate Ready (parallel-required, #622).
-    assert [r.name for r in required_reviewers()] == ["copilot", "coderabbit"]
+def test_default_required_set_is_copilot_only():
+    # The shipped default config: Copilot gates Ready. CodeRabbit is a phos-org
+    # pilot — requestable (eligible), but required only where a repo opts in.
+    assert [r.name for r in required_reviewers()] == ["copilot"]
 
 
 def test_copilot_done_with_open_comment(context):

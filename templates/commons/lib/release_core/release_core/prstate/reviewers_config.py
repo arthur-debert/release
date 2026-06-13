@@ -5,7 +5,11 @@ availability, so it must be a one-line config edit with no code change
 (release#622). This module is the single place that resolves the required SET:
 
   * `DEFAULT_REQUIRED` — the declarative default shipped for every consumer:
-    Copilot + CodeRabbit, both required (parallel-required, not fallback).
+    Copilot only. CodeRabbit is a registered, requestable adapter being PILOTED
+    on the phos-org repos (where the GitHub App is installed) — a pilot repo
+    opts in via the override below; requiring it by default would gate every
+    other repo on an app that is not installed there (the request edge silently
+    drops, #613-style, and the PR parks at REVIEWS_PENDING forever).
   * a per-repo OVERRIDE — the optional `required_reviewers:` key in the
     consumer's existing `.release-sync.yaml` (the same file that already carries
     `capabilities:`). No NEW tracked consumer file: a repo that wants a
@@ -26,10 +30,10 @@ import os
 
 from .reviewers import REGISTRY, ReviewerAdapter, by_name
 
-# The shipped default: both required, in order. Changing the required set for
-# ALL consumers is editing this one line; a single consumer overrides it in its
-# own `.release-sync.yaml`.
-DEFAULT_REQUIRED: tuple[str, ...] = ("copilot", "coderabbit")
+# The shipped default. Changing the required set for ALL consumers is editing
+# this one line; a single consumer overrides it in its own `.release-sync.yaml`
+# (the phos pilot repos add coderabbit there — see module docstring).
+DEFAULT_REQUIRED: tuple[str, ...] = ("copilot",)
 
 # The override key + the file that carries it (the existing optional consumer
 # override — see module docstring). Named here so the doc and the loader agree.

@@ -77,29 +77,38 @@ The Development Life Cycle
         and `release-core pr status` advises RE-REQUEST. That next action
         is authoritative; bot re-reviews are cheap, so comply and move on.
 
-    On the required reviewer set (Copilot AND CodeRabbit, in parallel):
+    On the required reviewer set:
 
-        The default required set is BOTH Copilot and CodeRabbit — they gate
-        in parallel (release#622), not as a primary with a fallback. A PR is
-        `REVIEWED` only when both have a review on the CURRENT head; every
-        push stales both (so `release-core pr review request` re-requests
-        both), and `release-core pr ready` requires both present + resolved.
-        This guarantees always-on dual coverage; the accepted trade-off is
-        availability — if one required reviewer is down, the PR stays at
-        `REVIEWS_PENDING` until it recovers, and the engine names the
-        outstanding reviewer so the stall is visible, never silent.
+        The default required set is Copilot only. CodeRabbit is a second
+        requestable reviewer being PILOTED on the phos-org repos — the only
+        place its GitHub App is installed; a pilot repo opts in via the
+        override below. Requiring it by default would gate every other
+        repo on an app that is not installed there: the request edge
+        silently drops (#613-style) and the PR parks at `REVIEWS_PENDING`
+        forever.
+
+        When a repo requires several reviewers, they gate in parallel
+        (release#622), not as a primary with a fallback. A PR is `REVIEWED`
+        only when EVERY required reviewer has a review on the CURRENT head;
+        every push stales them all (so `release-core pr review request`
+        re-requests them), and `release-core pr ready` requires all present
+        + resolved. Dual coverage trades availability — if one required
+        reviewer is down, the PR stays at `REVIEWS_PENDING` until it
+        recovers, and the engine names the outstanding reviewer so the
+        stall is visible, never silent.
 
         The required set is a CONFIG knob, not code — reviewer pricing and
         availability shift, so changing it is a one-line edit with no engine
-        change. The shipped default `[copilot, coderabbit]` lives in
+        change. The shipped default `[copilot]` lives in
         `reviewers_config.DEFAULT_REQUIRED` (carried by the `release_core`
         wheel). A single repo overrides it with a `required_reviewers:` list
         in its existing optional `.release-sync.yaml` (the same file that
         carries `capabilities:` — no new tracked file):
 
-        Override a repo to just CodeRabbit:
+        Opt a pilot repo into CodeRabbit alongside Copilot:
 
             required_reviewers:
+              - copilot
               - coderabbit
 
         :: yaml ::

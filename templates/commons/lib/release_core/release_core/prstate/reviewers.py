@@ -119,16 +119,19 @@ class CopilotAdapter(ReviewerAdapter):
 
 class CodeRabbitAdapter(ReviewerAdapter):
     """CodeRabbit is a requestable GitHub App that posts a discrete review on the
-    PR head SHA — structurally the same model as Copilot. It is in the DEFAULT
-    required set alongside Copilot (release#622), but whether it gates is a
-    config decision, not an adapter property: the required set is config-driven
-    (`reviewers_config`) and a repo can override it via `.release-sync.yaml`.
-    This adapter only declares CodeRabbit *requestable* (it has a real request
-    edge + the #614 attach-verification, so it is ELIGIBLE to be required).
+    PR head SHA — structurally the same model as Copilot. It is being PILOTED on
+    the phos-org repos (the only place the App is installed); a pilot repo opts
+    in via `required_reviewers:` in its `.release-sync.yaml`. It is NOT in the
+    default required set: on a repo without the App, the request edge silently
+    drops (#613-style) and a required gate would park every PR at
+    REVIEWS_PENDING. Whether it gates is a config decision, not an adapter
+    property — this adapter only declares CodeRabbit *requestable* (it has a
+    real request edge + the #614 attach-verification, so it is ELIGIBLE to be
+    required wherever the App is installed).
 
-    Default policy is parallel-required, not fallback: when both Copilot and
-    CodeRabbit are required, each gates Ready, so a PR is reviewed only when BOTH
-    have a fresh review on the current head. The accepted trade-off is
+    When a repo requires both Copilot and CodeRabbit, the policy is
+    parallel-required, not fallback: each gates Ready, so a PR is reviewed only
+    when BOTH have a fresh review on the current head. The accepted trade-off is
     availability — one required reviewer's outage holds Ready until it recovers —
     in exchange for always-on dual coverage and no single point of failure on
     review *quality*.
@@ -227,7 +230,8 @@ class GeminiAdapter(ReviewerAdapter):
 # The adapter CATALOG: every reviewer the engine knows how to read/request. This
 # is the registry (#558) — adding a backend is adding an adapter here. WHICH of
 # these gate Ready is NOT decided here: that is the config knob in
-# `reviewers_config` (release#622), default [copilot, coderabbit].
+# `reviewers_config` (release#622), default [copilot] (coderabbit is a
+# phos-org pilot, opted in per-repo).
 REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), CodeRabbitAdapter(), GeminiAdapter()]
 
 
