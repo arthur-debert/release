@@ -11,6 +11,8 @@ rounds, not here.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from release_core.verbs import canary_run, managed_repos
 
@@ -327,6 +329,28 @@ def test_one_family_dispatch_failure_does_not_stop_the_other(round_seams, monkey
     assert statuses == ["vscode-ext:True"]
     out = capsys.readouterr().out
     assert "rust: SETUP ERROR" in out and "verdict: ERROR" in out
+
+
+# ── sandbox env hermeticity ──────────────────────────────────────────────────
+
+
+def test_sandbox_env_strips_checkout_and_release_vars(monkeypatch, tmp_path):
+    # The sandbox must boot from the CANDIDATE wheel, never the operator's
+    # checkout: the bin/release-core shim re-execs with PYTHONPATH pinned to
+    # the checkout lib, and an inherited PYTHONPATH makes the sandbox venv's
+    # python shadow the candidate wheel's package (the checkout never carries
+    # _bundled_templates, so init dies with "no bundled templates" — caught
+    # live as a deterministic canary setup failure pre-v3).
+    for var in canary_run._SANDBOX_STRIP:
+        monkeypatch.setenv(var, "/somewhere/checkout")
+    monkeypatch.setenv("KEEP_ME", "1")
+    env = canary_run._sandbox_env(str(tmp_path))
+    for var in canary_run._SANDBOX_STRIP:
+        assert var not in env
+    assert env["KEEP_ME"] == "1"
+    assert env["XDG_DATA_HOME"] == str(tmp_path / "xdg" / "data")
+    assert env["XDG_BIN_HOME"] == str(tmp_path / "xdg" / "bin")
+    assert env["PATH"].startswith(env["XDG_BIN_HOME"] + os.pathsep)
 
 
 # ── CLI registration ─────────────────────────────────────────────────────────
