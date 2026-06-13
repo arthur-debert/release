@@ -1,0 +1,1 @@
+- remove run-precommit-gate.sh's pre-WS3 root-lefthook.yml consumer fallback (0/19 consumers track a root config; release-self self-releases via gh-action.yml and never runs this script). The managed .release/lefthook.yml path via LEFTHOOK_CONFIG + the release-core materialize branch cover all live cases. #569 B4

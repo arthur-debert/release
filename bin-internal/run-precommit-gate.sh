@@ -2,10 +2,9 @@
 # Run the consumer's own pre-commit gate against staged files.
 #
 # Detects (in order):
-#   1. lefthook  (LEFTHOOK_CONFIG / managed .release/lefthook.yml /
-#                 root lefthook.yml / .lefthook.yml / lefthook.yaml)
+#   1. lefthook  (LEFTHOOK_CONFIG / managed .release/lefthook.yml)
 #   2. husky  (.husky/pre-commit)
-#   3. release-core managed-gate fallback — when no root gate config is
+#   3. release-core managed-gate fallback — when no gate config is
 #      present but release-core is on PATH, materialize the managed
 #      tree from the wheel bundle and run the gate through the binary
 #      (`release-core gate --hook`). This is the post-WS3 path: the
@@ -76,17 +75,21 @@ run_husky() {
 }
 
 # WS3 (release#524): the gate config lives in the ephemeral .release/ build dir;
-# the root lefthook.yml symlink is no longer tracked. Prefer the managed config via
-# LEFTHOOK_CONFIG so lefthook finds it without a root file, falling back to a root
-# config for a not-yet-migrated consumer (or release's own repo). .release/lefthook.yml
-# exists only when the caller materialized it (e.g. rust-cli's arm-gate before
-# prepare-release); when it is absent this is a no-op and detection falls through.
+# there is no tracked root lefthook.yml. Point lefthook at the managed config via
+# LEFTHOOK_CONFIG. .release/lefthook.yml exists only when the caller materialized
+# it (e.g. rust-cli's arm-gate before prepare-release); when it is absent this is a
+# no-op and detection falls through to the release-core branch, which materializes
+# the managed tree from the wheel bundle. The pre-WS3 root-config fallback
+# (lefthook.yml / .lefthook.yml / lefthook.yaml) was removed in #569 B4 — 0/19
+# consumers track a root config, this script never runs against release's own repo
+# (it self-releases via gh-action.yml), and an un-materialized managed consumer is
+# handled by the release-core branch below.
 if [ -f .release/lefthook.yml ]; then
   export LEFTHOOK_CONFIG=.release/lefthook.yml
 fi
 
 gate_ran=0
-if [ -n "${LEFTHOOK_CONFIG:-}" ] || [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
+if [ -n "${LEFTHOOK_CONFIG:-}" ]; then
   echo "Detected lefthook config — running gate."
   run_lefthook
   gate_ran=1
