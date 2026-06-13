@@ -47,7 +47,7 @@ auto-updates. So we can assume every consumer has the latest. There is **no push
 — the wheel is the carrier. The logic + the changing information live in
 `release-core`; consumers carry a near-zero, near-static footprint.
 
-**The consumer footprint (minimal + stable, so it never drifts):**
+**The consumer footprint (minimal + stable, so it never falls out of sync):**
 
 - a small managed CLAUDE.md block (~7 lines, between
   `<!-- BEGIN/END release-managed orientation -->` markers) that points at
@@ -55,7 +55,7 @@ auto-updates. So we can assume every consumer has the latest. There is **no push
 - exactly **one** unconditionally-distributed skill: `gh-pr-review-loop`. Four
   others (`lex-primer`, `lex-multirepo`, `electron-e2e-testing`,
   `macos-signing-notarization`) are **upgrade-only** (synced only if already
-  present). The "3 skills" framing is **dead doctrine** — do not repeat it.
+  present). The "3 skills" framing is **obsolete** — do not repeat it.
 - thin workflow files that just `uses:` release's reusable workflows.
 - the bootstrap quartet (`.claude/settings.json`, `install-release-core`,
   `setup-dev-env.sh`, `pr-loop-guard`).
@@ -108,7 +108,7 @@ auto-updates. So we can assume every consumer has the latest. There is **no push
    project executables / old release design — both centralized into release-core).
    **`app-bin/` is legitimate** for app-specific hooks / runnables (npm post-build,
    vscode theme generation, phos golden image) — but not for anything that
-   duplicates, shims, or forks release-core functionality.
+   duplicates, wraps, or forks release-core functionality.
 
 ## 4. Execution checklist (not started)
 

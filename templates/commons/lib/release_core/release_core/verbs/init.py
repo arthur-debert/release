@@ -11,8 +11,9 @@ DISTRIBUTION is pull-only — there is no push mechanism (#476; `orc propagate`
 was removed). The `--push` flag below is unrelated to distribution: it is an
 opt-in plain `git push` of the LOCAL managed auto-commit.
 
-A bare `release-core init` runs the COMPLETE release-sync pipeline (`build_plan` +
-`materialize` + `compute_mirror` + apply) sourced from the wheel bundle — the whole
+A bare `release-core init` runs the COMPLETE release-sync pipeline (`build_plan` →
+`materialize` → `diff_release` → `compute_mirror` → `decide_claude` → apply) sourced
+from the wheel bundle — the whole
 `.release/` build dir + every working-tree mirror (skills, configs,
 per-Kind/Component files, real-file workflow copies, the CLAUDE.md managed
 block) — then AUTO-COMMITS ONLY the managed paths iff they actually changed.
@@ -653,7 +654,8 @@ def _main_full(
     """The default init path: full managed-tree build + auto-commit-on-change.
 
     Runs the complete release-sync pipeline (build_plan + materialize +
-    compute_mirror + apply), sourced from the wheel bundle by default (or a real
+    diff_release + compute_mirror + decide_claude + apply), sourced from the wheel
+    bundle by default (or a real
     $RELEASE_HOME clone), then — unless --no-commit/--dry-run — stages ONLY the
     managed paths and commits iff they actually changed. Idempotent: a second run
     with no upstream change computes zero changes → no commit.
