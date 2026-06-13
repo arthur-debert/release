@@ -54,8 +54,16 @@ discover. ``--hook`` runs lefthook over the STAGED set (not ``--all-files``), so
 agent-facing ``release-core gate`` keeps ``--all-files`` (no false green on an
 unstaged edit).
 
+Every gate run prints a single final line — ``GATE: OK (N checks)`` or
+``GATE: FAILED (name, ...)`` — derived from lefthook's exit code (release#628).
+It survives a ``release-core gate | tail`` view, where the pipe would otherwise
+mask the exit status and lefthook's last lines don't say pass/fail. ``--quiet``
+prints only that verdict line on success (full output on failure), so there's no
+incentive to pipe through tail at all.
+
 Usage:
   release-core gate [extra lefthook args...]   # agent/human: full --all-files gate
+  release-core gate --quiet [lefthook args...] # only the verdict line on success
   release-core gate --hook [lefthook args...]  # git pre-commit: staged-set gate
   release-core gate --install-hook             # wire .git/hooks/pre-commit
 
@@ -269,6 +277,65 @@ def _install_hook(root: str) -> int:
     return 0
 
 
+# lefthook's NO_COLOR summary block is one line per check: "<glyph> <name> (<time>)".
+# ✓/✔ = passed, ✗/✖ = failed. Parsed ONLY for the GATE: verdict line's parenthetical
+# detail; the pass/fail verdict itself comes from lefthook's exit code (authoritative),
+# so a format change degrades the detail gracefully without ever lying about pass/fail.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_GATE_PASS_RE = re.compile(r"^[✓✔]\s+(\S+)")
+_GATE_FAIL_RE = re.compile(r"^[✗✖]\s+(\S+)")
+
+
+def _run_and_summarize(cmd: list[str], root: str, env: dict, *, quiet: bool) -> int:
+    """Run the gate, tee its output, and print a final greppable verdict line.
+
+    release#628: agents/humans habitually pipe `release-core gate` through
+    `tail`/`grep` to bound transcript output, which masks the exit code — and
+    nothing in lefthook's last lines says pass/fail. So always emit a single final
+    line — `GATE: OK (N checks)` / `GATE: FAILED (name, ...)` — derived from
+    lefthook's exit code, which survives any `| tail` view.
+
+    quiet: buffer lefthook's output and print it ONLY on failure; on success print
+    just the verdict line — removing the incentive to pipe through tail at all.
+    """
+    try:
+        proc = subprocess.Popen(
+            cmd, cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+    except FileNotFoundError:
+        print("error: lefthook not found — the gate does not skip.", file=sys.stderr)
+        print("GATE: FAILED (lefthook not found)")
+        return 1
+    passed: list[str] = []
+    failed: list[str] = []
+    buffered: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        clean = _ANSI_RE.sub("", line)
+        pm = _GATE_PASS_RE.match(clean)
+        fm = _GATE_FAIL_RE.match(clean)
+        if pm:
+            passed.append(pm.group(1))
+        elif fm:
+            failed.append(fm.group(1))
+        if quiet:
+            buffered.append(line)
+        else:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+    rc = proc.wait()
+    if quiet and rc != 0:
+        sys.stdout.write("".join(buffered))
+    if rc == 0:
+        n = len(passed)
+        detail = f"{n} check{'' if n == 1 else 's'}" if n else "all checks"
+        print(f"GATE: OK ({detail})")
+    else:
+        detail = ", ".join(failed) if failed else "see output above"
+        print(f"GATE: FAILED ({detail})")
+    return rc
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] in ("-h", "--help"):
         print(USAGE.strip())
@@ -286,6 +353,12 @@ def main(argv: list[str]) -> int:
     hook_mode = bool(argv) and argv[0] == "--hook"
     if hook_mode:
         argv = argv[1:]
+
+    # --quiet (release#628): print only the verdict line on success, full output
+    # on failure. Our flag — strip it so it never reaches lefthook.
+    quiet = "--quiet" in argv
+    if quiet:
+        argv = [a for a in argv if a != "--quiet"]
 
     pin = _pinned_lefthook_version(root)
     lefthook = _resolve_lefthook(pin)
@@ -305,6 +378,7 @@ def main(argv: list[str]) -> int:
                 "bootstrap (setup-dev-env.sh / release-core init).",
                 file=sys.stderr,
             )
+        print("GATE: FAILED (lefthook unavailable)")
         return 1
 
     env = dict(os.environ)
@@ -334,6 +408,7 @@ def main(argv: list[str]) -> int:
                 f"error: LEFTHOOK_CONFIG={explicit_cfg} does not exist — the gate does not skip.",
                 file=sys.stderr,
             )
+            print("GATE: FAILED (LEFTHOOK_CONFIG missing)")
             return 1
         env["LEFTHOOK_CONFIG"] = explicit_cfg
     elif os.path.isfile(managed_cfg):
@@ -346,6 +421,7 @@ def main(argv: list[str]) -> int:
             "warn-and-passes an ungated commit (release#567).",
             file=sys.stderr,
         )
+        print("GATE: FAILED (gate config not built)")
         return 1
 
     # --no-auto-install: running `lefthook run` otherwise auto-SYNCS hooks — it
@@ -355,4 +431,4 @@ def main(argv: list[str]) -> int:
     # the hook now (WS3), so lefthook must never re-manage it.
     scope = [] if hook_mode else ["--all-files"]
     cmd = [lefthook, "run", "pre-commit", "--no-auto-install", *scope, "--no-tty", *argv]
-    return subprocess.run(cmd, cwd=root, env=env).returncode
+    return _run_and_summarize(cmd, root, env, quiet=quiet)
