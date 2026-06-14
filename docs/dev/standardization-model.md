@@ -51,7 +51,8 @@ state and raise issues.
 - **Minimal injected footprint** — and only this:
   1. the few-line `CLAUDE.md` pointer (never changes — the how-to updates
      instead),
-  2. the 2–3 skills (rarely change),
+  2. the one distributed skill (`gh-pr-review-loop`) + any optional
+     upgrade-only skills (rarely change),
   3. thin workflow callers (rarely change — they only `uses:` the shared
      workflows).
 
@@ -170,8 +171,9 @@ stopping point — **restructure the consumer.**
   already centralized.
 - A consumer **`bin/*`** → release's old design; replaced by `release-core`.
 - A **fat workflow** — embedded shell beyond env/creds/cache/status/artifact.
-- `CLAUDE.md` beyond the stable pointer; skills beyond the 2–3; any workflow for
-  ordinary checks/release that isn't a thin caller.
+- `CLAUDE.md` beyond the stable pointer; skills beyond the one distributed
+  `gh-pr-review-loop` (+ optional upgrade-only ones); any workflow for ordinary
+  checks/release that isn't a thin caller.
 - `app-bin/` that **duplicates / wraps / forks** an ordinary capability (the
   legit use is bespoke hooks/runnables only).
 - The **jargon** (per the GLOSSARY's banned table) — `canonical`, `materialize`,
