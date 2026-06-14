@@ -45,9 +45,9 @@ state and raise issues.
 - **Session start** installs the right OS deps (pinned versions: lefthook,
   shellcheck, …) + `release-core`, and wires the pre-commit hook to
   `release-core`'s quality check.
-- `release-core` **auto-updates to the pinned major** (currently `v3`).
-  Consumers *pull*; there is no central push; we may assume every consumer has
-  the latest.
+- `release-core` **auto-updates to the major line the consumer pins** (`@vN` in
+  its thin callers; `v3` is current). Consumers *pull* at session start / CI —
+  there is no central push — so a consumer is current as of its last session.
 - **Minimal injected footprint** — and only this:
   1. the few-line `CLAUDE.md` pointer (never changes — the how-to updates
      instead),
@@ -66,7 +66,7 @@ One definition, run in two moments:
 - **CI** (server — because the local hook is skippable).
 
 Categories: **lint / format / check** (enforce patterns) and **test**
-(unit / e2e — ensure behaviour).
+(unit / e2e — ensure behavior).
 
 ## Release — the pipeline (stages; per-Kind coverage varies)
 
