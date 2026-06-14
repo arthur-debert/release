@@ -14,21 +14,21 @@ Scope: 17 reports (16 live consumers; `lex-fmt/comms` is barely-onboarded). The 
 
 ## 1. CAPABILITY MATRIX
 
-Legend: **shim** = thin caller to shared workflow / release-core; **partly** = mostly shared but with hand-rolled jobs/scripts; **hand** = fully hand-rolled (embedded shell, no shared ref); **n/a** = capability absent.
+Legend: **thin-caller** = consumer only `uses:` the shared workflow / release-core; **partly** = mostly shared but with hand-rolled jobs/scripts; **hand** = fully hand-rolled (embedded shell, no shared ref); **n/a** = capability absent.
 
 ### Testing (unit + e2e + suite-selection + gather)
 
 | Repo | How | Verdict |
 |---|---|---|
-| lexed | electron-ci.yml@v2 (vitest + playwright dev/packaged via `--project` + `E2E_*` env; xvfb/gather upstream) | shim |
-| phos-app | tauri-ci.yml@v3 + tauri-e2e.yml@v3 (playwright-wasm + native; scope path-gated; `@gpu` env-gated) | shim |
-| dodot, padz, supage | rust-ci/go-ci@v2 + bats via shared `check-e2e` runner (`bats:true`); `bats.conf` declares suite | shim/partly |
+| lexed | electron-ci.yml@v2 (vitest + playwright dev/packaged via `--project` + `E2E_*` env; xvfb/gather upstream) | thin-caller |
+| phos-app | tauri-ci.yml@v3 + tauri-e2e.yml@v3 (playwright-wasm + native; scope path-gated; `@gpu` env-gated) | thin-caller |
+| dodot, padz, supage | rust-ci/go-ci@v2 + bats via shared `check-e2e` runner (`bats:true`); `bats.conf` declares suite | thin-caller/partly |
 | lex | rust-ci.yml@v2 (good) **+ test-rust.yml hand** (wasm-pack + cargo-doc) **+ sandbox-tests.yml hand** (per-OS seccomp matrix) | partly |
 | tree-sitter-lex | tree-sitter-ci.yml@v2 + bespoke parity/corpus bats (generate-tests.sh) | partly |
 | nvim | nvim-plugin-ci.yml@v2 + **inline luacheck lint job (hand)** | partly |
 | vscode | vscode-ext-ci.yml@v2 **+ competing husky pre-commit gate (hand)** | partly |
 | phos-core | rust-ci.yml@v3 **+ wasm.yml hand** (wasm clippy/test/build) | partly |
-| zed-lex, clapfig, rustloc, simple-gal, standout, burgertocow | rust-ci/zed-ext@v2 pure shim; gate in `.release/lefthook.yml` | shim |
+| zed-lex, clapfig, rustloc, simple-gal, standout, burgertocow | rust-ci/zed-ext@v2 pure thin-caller; gate in `.release/lefthook.yml` | thin-caller |
 | comms | **NONE** — no gate, no CI test workflow at all | n/a |
 
 **Variation:** suite-selection axis differs (electron `--project`; tauri path-gated scope + GPU env; rust `--target` for wasm; bats `bats.conf` discovery; go build-tags `-tags=emulator`). **Common interface underneath:** *env-setup → select(plat/arch/tag/scope) → run → gather(artifact/report)*. Today this is owned upstream for the host-test path everywhere, but the **wasm sub-target test path is hand-rolled in 3 rust repos** (lex, phos-core, +lex's wasm job), and **e2e is standardized only where a Kind workflow exists** (electron, tauri, bats-capable rust/go). Lua-lint and cargo-doc are ordinary checks not yet exposed as shared inputs.
@@ -37,12 +37,12 @@ Legend: **shim** = thin caller to shared workflow / release-core; **partly** = m
 
 | Repo | How | Verdict |
 |---|---|---|
-| All rust-cli/lib (lex, dodot, padz, rustloc, simple-gal, standout, clapfig, burgertocow, phos-core) | matrix in rust-cli/rust-lib@v2/v3 | shim |
-| lexed | electron-builder matrix in electron-app.yml@v2; prebuild hooks in app-bin | shim |
-| phos-app | tauri build matrix in tauri-app.yml@v3 | shim |
-| tree-sitter-lex, zed-lex, vscode, nvim | parser/wasm/vsix/lua build in the Kind workflow | shim |
+| All rust-cli/lib (lex, dodot, padz, rustloc, simple-gal, standout, clapfig, burgertocow, phos-core) | matrix in rust-cli/rust-lib@v2/v3 | thin-caller |
+| lexed | electron-builder matrix in electron-app.yml@v2; prebuild hooks in app-bin | thin-caller |
+| phos-app | tauri build matrix in tauri-app.yml@v3 | thin-caller |
+| tree-sitter-lex, zed-lex, vscode, nvim | parser/wasm/vsix/lua build in the Kind workflow | thin-caller |
 | lex, phos-core | **wasm32 build hand-rolled** (test-rust.yml / wasm.yml) | partly |
-| supage | CLI build shim; **server `docker build` hand-rolled in deploy.yml + app-bin/deploy.sh** | partly |
+| supage | CLI build thin-caller; **server `docker build` hand-rolled in deploy.yml + app-bin/deploy.sh** | partly |
 
 **Common interface:** *matrix(target) → build → upload-artifact*. Fully owned upstream **except** (a) the rust→wasm sub-target build, and (b) go-server/Docker→Cloud-Run, which has **no shared Kind at all**.
 
@@ -52,7 +52,7 @@ Legend: **shim** = thin caller to shared workflow / release-core; **partly** = m
 |---|---|
 | lex, lexed, nvim, tree-sitter-lex, vscode, zed-lex, dodot, padz, rustloc, simple-gal, standout, clapfig, burgertocow, phos-core, phos-app, supage(CLI) | thin caller to the Kind release workflow; bump/tag/changelog/publish all upstream |
 | comms | **fully hand-rolled** (tar + softprops/gh-release + repository_dispatch loop) |
-| phos-core, tree-sitter-lex | shim + **bespoke extra-asset jobs** (corpus/fixtures tarballs; cascade fan-out) with embedded glue |
+| phos-core, tree-sitter-lex | thin-caller + **bespoke extra-asset jobs** (corpus/fixtures tarballs; cascade fan-out) with embedded glue |
 
 **Common interface:** *bump → commit → tag → build → publish → gh-release → (advance major)*. Standardized everywhere except comms. The recurring leak: **no generic "extra release asset" hook** — phos-core and tree-sitter-lex embed checkout/toolchain/gh-upload glue around a bespoke generator.
 
@@ -76,9 +76,9 @@ Only macOS runnables: **lex, lexed, rustloc, simple-gal, phos-core, phos-app** �
 
 | Repo | How |
 |---|---|
-| dodot, simple-gal, standout | mkdocs.yml/mdbook.yml@v2 shim |
+| dodot, simple-gal, standout | mkdocs.yml/mdbook.yml@v2 thin-caller |
 | comms, lex | **Jekyll pages.yml fully hand-rolled** (embedded lex-CLI fetch shell) |
-| standout | shim + **DEAD readthedocs/mkdocs second system** |
+| standout | thin-caller + **DEAD readthedocs/mkdocs second system** |
 | all others | no docs site (n/a) |
 
 **Common interface:** *book-dir → build → Pages deploy*. Owned upstream for mkdocs/mdbook. **No shared Jekyll workflow** → comms + lex hand-roll it (the genuinely-bespoke part is only the lex→HTML render step; the jekyll-build/pages-deploy scaffold is ordinary).
@@ -107,7 +107,7 @@ lex, lexed, nvim, tree-sitter-lex, vscode → `cascade-handler.yml@v2` (inbound)
 
 **6. Shared Jekyll docs workflow (blast radius: comms, lex).** **Proposed:** a `jekyll.yml@vN` (Ruby/bundler-cache + Pages deploy) with a pre-build hook slot for the lex-CLI fetch + lex→HTML render. Mirrors mkdocs/mdbook.
 
-**7. go-server / Cloud-Run release Kind (blast radius: supage only today).** Genuine **specificity-by-absence**: supage's `deploy.yml` + `app-bin/deploy.sh` are ordinary build→push→roll with no upstream analog. Lower payoff (n=1) but flagged because the two copies can drift.
+**7. go-server / Cloud-Run release Kind (blast radius: supage only today).** Genuine **specificity-by-absence**: supage's `deploy.yml` + `app-bin/deploy.sh` are ordinary build→push→roll with no upstream analog. Lower payoff (n=1) but flagged because the two copies can fall out of sync.
 
 ---
 
@@ -131,7 +131,7 @@ The honest tradeoff line: **content is bespoke, the hook/interface is ordinary.*
 
 ## 4. FAT-WORKFLOW & FOOTPRINT DEBT (grouped by absorbing capability)
 
-**Absorbed by §1 stale-seed re-sync (`@v3` wheel):** retired-jargon CLAUDE.md markers (ALL 16), `.release-sync-state.yaml` / `.release-sync-source` / "Generated by release-sync" lefthook headers (lex, vscode, comms, +seed-model repos), legacy tracked `bin/check`/`bin/build` symlinks + `.gitignore` "take-iii/canonical shims" whitelist (lex, tree-sitter-lex), pre-WS3 lefthook shape (burgertocow). **lex + vscode are still on the RETIRED release-sync seed model with tracked `.release/`** — both need the one-time re-seed, not just a pin bump.
+**Absorbed by §1 stale-seed re-sync (`@v3` wheel):** retired-jargon CLAUDE.md markers (ALL 16), `.release-sync-state.yaml` / `.release-sync-source` / "Generated by release-sync" lefthook headers (lex, vscode, comms, +seed-model repos), legacy tracked `bin/check`/`bin/build` symlinks + `.gitignore` "take-iii/canonical thin-callers" whitelist (lex, tree-sitter-lex), pre-WS3 lefthook shape (burgertocow). **lex + vscode are still on the RETIRED release-sync seed model with tracked `.release/`** — both need the one-time re-seed, not just a pin bump.
 
 **Absorbed by brew-publish (delete dead-orphans):** `.github/render-homebrew-formula.py` + `homebrew-formula.rb.tmpl` in **burgertocow, dodot, padz, rustloc, simple-gal**; plus `.github/actions/rust-setup/action.yml` (burgertocow, dodot). All grep-confirmed unreferenced. Pure delete.
 
@@ -163,7 +163,7 @@ The honest tradeoff line: **content is bespoke, the hook/interface is ordinary.*
 |---|---|---|---|
 | rust-cli | rust-cli.yml@v3 ✓ | **wasm sub-target test/build** (lex, phos-core hand-roll); generic extra-asset hook | **yes (rust)** |
 | rust-lib | rust-lib.yml ✓ | cargo-doc as input (lex) | yes (rust) |
-| electron-app | electron-app.yml + electron-ci.yml ✓ | fetch-deps on shared runner PATH (lexed embeds a fetch shim) | unknown |
+| electron-app | electron-app.yml + electron-ci.yml ✓ | fetch-deps on shared runner PATH (lexed embeds a fetch thin-caller) | unknown |
 | tauri-app | tauri-app.yml + tauri-ci.yml + tauri-e2e.yml@v3 ✓ | native-E2E **launch seam** standardization | unknown |
 | vscode-ext | vscode-ext.yml + vscode-ext-ci.yml ✓ | — | **yes (vscode-ext)** |
 | nvim-plugin | nvim-plugin.yml + nvim-plugin-ci.yml ✓ | **lua-lint opt-in input** (nvim inlines luacheck) | unknown |
@@ -193,7 +193,7 @@ The honest tradeoff line: **content is bespoke, the hook/interface is ordinary.*
 | **padz** | small | 1) delete brew-render pair + `docs/release-pipeline.lex` 2) retire `release.toml` local flow 3) review `live-tests/` vs managed e2e |
 | **simple-gal** | small | 1) delete brew-render pair 2) fix `release.toml` dead `bin/changelog` hook 3) `@v2→v3` + trim CLAUDE.md |
 | **standout** | small-med | 1) delete dead readthedocs/mkdocs system 2) `docs-spellcheck`→gate, `docs-book` remove 3) `@v1/v2→v3` |
-| **supage** | med (server gap) | 1) trim stale CLAUDE.md (`scripts/` refs) 2) collapse `deploy.yml`/`deploy.sh` (await go-server Kind) 3) fold ci.yml materialize step into shared composite |
+| **supage** | med (server gap) | 1) trim stale CLAUDE.md (`scripts/` refs) 2) collapse `deploy.yml`/`deploy.sh` (await go-server Kind) 3) fold ci.yml `materialize` step into shared composite |
 | **tree-sitter-lex** | med | 1) drop legacy `bin/check`/`bin/build` + dual umbrella (use release-core gate) 2) `@v2→v3` 3) trim CLAUDE.md |
 | **phos-core** | med | 1) `wasm.yml`→shared wasm input 2) trim 265-line CLAUDE.md + fix stale `@v1`/`scripts/check-rust.sh` 3) extra-asset hook for corpus/fixtures |
 | **phos-app** | med (high bespoke, mostly legit) | 1) move `scripts/release/update-release`→app-bin; fix dead `trigger-release` ref 2) trim 266-line CLAUDE.md 3) `@v1→v3` copilot + wheel `v2.21.0→v3` |

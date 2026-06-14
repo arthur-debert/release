@@ -29,11 +29,11 @@ reason to do it carefully (canary per Kind), never a reason to leave it.
 2. **CI tools/tasks** — reusable GH workflows for the same verbs + their trigger
    logic. Workflows are **thin orchestrators**: they handle *environment* (shell
    env, credentials, OS packages, caching, status, artifacts) and do real work
-   only by **calling scripts/release-core**. No logic embedded in YAML.
+   only by **calling out to scripts or `release-core`**. No logic embedded in YAML.
 3. **Agent harness** — a minimal, stable `CLAUDE.md` pointer (a few lines →
    `release-core how-to`) + the small stable skill set (the general ones like
    `grill-with-docs`; one dev-cycle skill that delegates to the tool).
-4. **Dev cycle (Workflow)** — the standardized way of working
+4. **Dev cycle** — the standardized way of working
    (`docs/dev-cycle.lex`), enforced/informed by the tooling. (Called "dev cycle"
    to avoid colliding with "GH workflow".)
 
@@ -52,7 +52,7 @@ state and raise issues.
   1. the few-line `CLAUDE.md` pointer (never changes — the how-to updates
      instead),
   2. the 2–3 skills (rarely change),
-  3. thin workflow callers (rarely change — they're shims to the shared
+  3. thin workflow callers (rarely change — they only `uses:` the shared
      workflows).
 
   All logic and all changing information live in `release-core` + the shared
@@ -170,13 +170,14 @@ stopping point — **restructure the consumer.**
   already centralized.
 - A consumer **`bin/*`** → release's old design; replaced by `release-core`.
 - A **fat workflow** — embedded shell beyond env/creds/cache/status/artifact.
-- `CLAUDE.md` beyond the stable pointer; skills beyond the 2–3; any non-shim
-  workflow for ordinary checks/release.
-- `app-bin/` that **duplicates / shims / forks** an ordinary capability (the
+- `CLAUDE.md` beyond the stable pointer; skills beyond the 2–3; any workflow for
+  ordinary checks/release that isn't a thin caller.
+- `app-bin/` that **duplicates / wraps / forks** an ordinary capability (the
   legit use is bespoke hooks/runnables only).
-- The **jargon** — `gated/gate`, `canonical`, `materialize`, `tombstone`,
-  `doctrine`, `drift`. All go. (Prefer: *quality check*, *shared/the one*,
-  *build/compose*, *removed*, *thin caller*.)
+- The **jargon** (per the GLOSSARY's banned table) — `canonical`, `materialize`,
+  `tombstone`, `doctrine`, `drift`, `shim`. All go. (Prefer: *shared / the one*,
+  *build / set up*, *retired file*, *out of sync*, *thin caller*.) `gate` is
+  **kept** — it's defined in the GLOSSARY and is the `release-core gate` verb.
 
 ## Verification — proving standardization holds (live-fire, not synthetic)
 
@@ -188,7 +189,7 @@ pre-cut gate), but they cost effort to design and often don't exercise the
 **live-fire**: a standard, repo-independent dev task that exercises the whole
 loop authentically and leaves merged value behind.
 
-**The canonical task — coverage improvement.** Repo-independent, exercises the
+**The standard task — coverage improvement.** Repo-independent, exercises the
 full quality half, and is mergeable:
 
 1. Check test coverage; find one module that is both *important* and *poorly
