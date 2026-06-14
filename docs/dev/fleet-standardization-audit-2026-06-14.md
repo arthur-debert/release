@@ -1,0 +1,223 @@
+# Fleet standardization audit — snapshot 2026-06-14
+
+> POINT-IN-TIME research snapshot (17-repo read-only audit + synthesis), not a
+> living doc. Frame: `docs/dev/standardization-model.md`. Use as the input for
+> the README/GLOSSARY rewrite and the #569 rework; expect it to go stale as the
+> fleet converges. Per-repo raw reports: see the workflow result.
+
+
+# Fleet Standardization Audit: Common Ground / Specificity Tradeoff Map
+
+Scope: 17 reports (16 live consumers; `lex-fmt/comms` is barely-onboarded). The bar: a conformant consumer's ONLY tracked footprint is (1) a few-line `CLAUDE.md` pointer to `release-core how-to`, (2) ~2-3 stable skills, (3) thin workflow callers into shared `arthur-debert/release` workflows. Everything else ordinary is owned upstream; only genuinely-bespoke product logic lives in thin `app-bin/` hooks.
+
+---
+
+## 1. CAPABILITY MATRIX
+
+Legend: **shim** = thin caller to shared workflow / release-core; **partly** = mostly shared but with hand-rolled jobs/scripts; **hand** = fully hand-rolled (embedded shell, no shared ref); **n/a** = capability absent.
+
+### Testing (unit + e2e + suite-selection + gather)
+
+| Repo | How | Verdict |
+|---|---|---|
+| lexed | electron-ci.yml@v2 (vitest + playwright dev/packaged via `--project` + `E2E_*` env; xvfb/gather upstream) | shim |
+| phos-app | tauri-ci.yml@v3 + tauri-e2e.yml@v3 (playwright-wasm + native; scope path-gated; `@gpu` env-gated) | shim |
+| dodot, padz, supage | rust-ci/go-ci@v2 + bats via shared `check-e2e` runner (`bats:true`); `bats.conf` declares suite | shim/partly |
+| lex | rust-ci.yml@v2 (good) **+ test-rust.yml hand** (wasm-pack + cargo-doc) **+ sandbox-tests.yml hand** (per-OS seccomp matrix) | partly |
+| tree-sitter-lex | tree-sitter-ci.yml@v2 + bespoke parity/corpus bats (generate-tests.sh) | partly |
+| nvim | nvim-plugin-ci.yml@v2 + **inline luacheck lint job (hand)** | partly |
+| vscode | vscode-ext-ci.yml@v2 **+ competing husky pre-commit gate (hand)** | partly |
+| phos-core | rust-ci.yml@v3 **+ wasm.yml hand** (wasm clippy/test/build) | partly |
+| zed-lex, clapfig, rustloc, simple-gal, standout, burgertocow | rust-ci/zed-ext@v2 pure shim; gate in `.release/lefthook.yml` | shim |
+| comms | **NONE** — no gate, no CI test workflow at all | n/a |
+
+**Variation:** suite-selection axis differs (electron `--project`; tauri path-gated scope + GPU env; rust `--target` for wasm; bats `bats.conf` discovery; go build-tags `-tags=emulator`). **Common interface underneath:** *env-setup → select(plat/arch/tag/scope) → run → gather(artifact/report)*. Today this is owned upstream for the host-test path everywhere, but the **wasm sub-target test path is hand-rolled in 3 rust repos** (lex, phos-core, +lex's wasm job), and **e2e is standardized only where a Kind workflow exists** (electron, tauri, bats-capable rust/go). Lua-lint and cargo-doc are ordinary checks not yet exposed as shared inputs.
+
+### Build (incl. matrix + sub-target)
+
+| Repo | How | Verdict |
+|---|---|---|
+| All rust-cli/lib (lex, dodot, padz, rustloc, simple-gal, standout, clapfig, burgertocow, phos-core) | matrix in rust-cli/rust-lib@v2/v3 | shim |
+| lexed | electron-builder matrix in electron-app.yml@v2; prebuild hooks in app-bin | shim |
+| phos-app | tauri build matrix in tauri-app.yml@v3 | shim |
+| tree-sitter-lex, zed-lex, vscode, nvim | parser/wasm/vsix/lua build in the Kind workflow | shim |
+| lex, phos-core | **wasm32 build hand-rolled** (test-rust.yml / wasm.yml) | partly |
+| supage | CLI build shim; **server `docker build` hand-rolled in deploy.yml + app-bin/deploy.sh** | partly |
+
+**Common interface:** *matrix(target) → build → upload-artifact*. Fully owned upstream **except** (a) the rust→wasm sub-target build, and (b) go-server/Docker→Cloud-Run, which has **no shared Kind at all**.
+
+### Release / version / changelog
+
+| Repo | How |
+|---|---|
+| lex, lexed, nvim, tree-sitter-lex, vscode, zed-lex, dodot, padz, rustloc, simple-gal, standout, clapfig, burgertocow, phos-core, phos-app, supage(CLI) | thin caller to the Kind release workflow; bump/tag/changelog/publish all upstream |
+| comms | **fully hand-rolled** (tar + softprops/gh-release + repository_dispatch loop) |
+| phos-core, tree-sitter-lex | shim + **bespoke extra-asset jobs** (corpus/fixtures tarballs; cascade fan-out) with embedded glue |
+
+**Common interface:** *bump → commit → tag → build → publish → gh-release → (advance major)*. Standardized everywhere except comms. The recurring leak: **no generic "extra release asset" hook** — phos-core and tree-sitter-lex embed checkout/toolchain/gh-upload glue around a bespoke generator.
+
+### Sign / notarize
+
+Only macOS runnables: **lex, lexed, rustloc, simple-gal, phos-core, phos-app** — all delegate to the Kind workflow (electron-builder CSC / tauri sign+notarize / rust-cli mac signing) with **explicit cross-org secret mapping** (lex-fmt/phos-editor can't `inherit`). **Common interface fully owned upstream.** lexed's `afterPack` appex re-sign is genuinely bespoke (electron-builder doesn't recurse into `PlugIns/*.appex`).
+
+### Publish (crates / npm / brew / marketplace / openvsx / deb)
+
+| Channel | Owned by | Hand-rolled leaks |
+|---|---|---|
+| crates.io | rust-cli/rust-lib@vN | — |
+| brew | rust-cli homebrew-formula job | **DEAD-ORPHAN render pairs** in burgertocow, dodot, padz, rustloc, simple-gal |
+| deb | cargo-deb metadata + workflow | — |
+| npm (wasm) | rust-cli wasm-package | partly-duplicated by lex/phos-core CI wasm jobs |
+| marketplace/openvsx | vscode-ext.yml | — |
+| Cloud Run | **no shared Kind** | supage deploy.yml + deploy.sh |
+| repo_dispatch cascade | cascade-handler.yml / tree-sitter.yml fan-out | comms hand-rolls the whole thing |
+
+### Docs
+
+| Repo | How |
+|---|---|
+| dodot, simple-gal, standout | mkdocs.yml/mdbook.yml@v2 shim |
+| comms, lex | **Jekyll pages.yml fully hand-rolled** (embedded lex-CLI fetch shell) |
+| standout | shim + **DEAD readthedocs/mkdocs second system** |
+| all others | no docs site (n/a) |
+
+**Common interface:** *book-dir → build → Pages deploy*. Owned upstream for mkdocs/mdbook. **No shared Jekyll workflow** → comms + lex hand-roll it (the genuinely-bespoke part is only the lex→HTML render step; the jekyll-build/pages-deploy scaffold is ordinary).
+
+### Lint / format / check (the gate)
+
+ONE definition (`.release/lefthook.yml`, wheel-carried) invoked everywhere — **standardized for all migrated consumers**. Leaks: **vscode runs a competing husky gate**; **nvim inlines a luacheck job**; **standout hand-rolls docs-spellcheck**; lex/vscode keep tracked `bin/check-fmt`/`bin/check-lint` real scripts duplicating cargo-fmt/clippy or eslint/prettier. comms has **no gate at all**.
+
+### Cross-repo cascade
+
+lex, lexed, nvim, tree-sitter-lex, vscode → `cascade-handler.yml@v2` (inbound) + thin fan-out (outbound, sanctioned). comms hand-rolls the entire dispatch loop. **Common interface:** *on upstream-released → should-release → bump → trigger* (owned); fan-out target-list is legitimately bespoke.
+
+---
+
+## 2. THE COMMON GROUND (standardize upstream, ranked by blast radius × payoff)
+
+**1. Stale-seed / `@vN` migration (blast radius: ~ALL 16).** Nearly every consumer is pinned `@v2`/`@v1` on a `v2.21.0` wheel, with retired `release-sync`/`ORIENTATION`/`canonical`/`take-iii` terminology baked into managed stubs. This is not per-repo cleanup — it's one fleet action: cut/converge the `@v3` wheel + re-seed. *Single highest-payoff move; it auto-fixes most CLAUDE.md-marker, lefthook-shape, and bin/check-residue gaps below.* Proposed interface: the existing pull-model re-seed (run fixed `install-release-core` → bare `release-core init` → managed-sync PR), driven fleet-wide.
+
+**2. Rust→wasm test+build sub-target (blast radius: lex, phos-core, +lex wasm job; latent in any wasm rust repo).** Three repos hand-roll `wasm-pack build/test` + `wasm32 clippy` because `rust-ci.yml` "deliberately doesn't cover" wasm. **Proposed standard:** a `wasm` input on `rust-ci.yml` (`wasm-targets`, `wasm-members`, `wasm-test: node|web`) that runs select-by-target → wasm clippy → wasm-pack test → build/artifact. Collapses `wasm.yml` and lex's `test-rust.yml` wasm job. (Tracked under #630 gap.)
+
+**3. Generic "extra release asset" hook (blast radius: phos-core, tree-sitter-lex; pattern recurs for any byte-deterministic artifact).** **Proposed standard:** a `release-extra-assets:` input naming an `app-bin/*` script whose output is attached to the cut tag — removing the embedded checkout/toolchain/cache/`gh release upload` glue. Only the generator body stays consumer-side.
+
+**4. Docs-quality + cargo-doc + lua-lint as shared check inputs (blast radius: standout, nvim, lex).** Ordinary checks currently hand-rolled. **Proposed:** opt-in inputs on the Kind CI workflows — `lua-lint: true` (nvim-plugin-ci), `cargo-doc: true` (rust-ci), and a docs-spellcheck gate check (lefthook) so standout's `docs-spellcheck`/nvim's luacheck/lex's cargo-doc collapse into the gate or a shared input.
+
+**5. Test interface formalization (env-setup/select/run/gather) (blast radius: all e2e consumers).** The interface is *already* de-facto standard via the Kind CI workflows + `check-e2e` runner; the gap is **consumer-side launch orchestration** for native E2E (phos-app's `native-e2e.sh` + `run-native-e2e*.sh`, ~5 scripts) and dodot's `app-bin/e2e` re-rolling Docker around the shared `check-e2e`. **Proposed:** standardize the "containerize-onto-pinned-image → pick thin/full scope → run → gather report" launch seam in `tauri-e2e.yml`/`check-e2e`, leaving only the bespoke build/driver step consumer-side.
+
+**6. Shared Jekyll docs workflow (blast radius: comms, lex).** **Proposed:** a `jekyll.yml@vN` (Ruby/bundler-cache + Pages deploy) with a pre-build hook slot for the lex-CLI fetch + lex→HTML render. Mirrors mkdocs/mdbook.
+
+**7. go-server / Cloud-Run release Kind (blast radius: supage only today).** Genuine **specificity-by-absence**: supage's `deploy.yml` + `app-bin/deploy.sh` are ordinary build→push→roll with no upstream analog. Lower payoff (n=1) but flagged because the two copies can drift.
+
+---
+
+## 3. GENUINE SPECIFICITY (legitimately app-bin, named precisely)
+
+The honest tradeoff line: **content is bespoke, the hook/interface is ordinary.** These pass the strict test — meaningless outside their product:
+
+- **lexed:** `app-bin/electron-after-pack.mjs` (sign embedded QuickLook `.appex`), `build-quicklook.sh`, `generate-tries.mjs`/`generate-dictionary-supplement.py` (Hunspell→cspell tries), `gen-theme.py` (Monaco theme from comms), `check-deps.mjs`. `bin/lexed` is a product-runtime launcher bundled into the `.app`.
+- **phos-app:** the four parity guards (`check-parity-{editor,viewer,color}`, `check-release-no-webdriver`), `check-deps-sync` (dual-pin), `ci-setup-native-deps`/`ci-fetch-phos-core-src` (private git-dep auth), `gen-dag-validator.mjs` (CSP-safe ajv codegen), `gen-cargo-config`. Native-E2E *build/driver* step (the *launch* seam is ordinary — §2.5).
+- **phos-core:** `build-corpus-tarball.sh`, `build-fixtures-tarball.sh` (byte-deterministic assets), `setup-dev.sh` (OCIO + PyOCIO golden generation).
+- **tree-sitter-lex:** `parity-print.js`, `parity-ignored.txt`, `generate-tests.sh`, `helpers.bash` (CST↔lex-core parity), `smoke-grammars.sh`/`bump-grammars.sh`/`bundle-extras.sh` (embedded-grammars lifecycle — `bundle-extras.sh` is a sanctioned `tree-sitter.yml` hook).
+- **zed-lex:** `gen-theme.py` (Zed theme_overrides), `gen-injections.py` (Zed injection matrix), `zed-package-extras.sh` (sanctioned bundle hook).
+- **lex:** `app-bin/dev/{Dockerfile.sandbox,sandbox-test-linux.sh}` (seccomp/landlock sandbox — meaningless outside lex-extension-host).
+- **nvim / vscode:** `gen-theme.py` (theme from comms), the thin convention hooks (`ci-fetch-deps.sh`, `pre-vsce-package-hook.sh`, `ci-build-shared-hook.sh`) — content bespoke (shared/ submodule + fetch-deps), slot standard.
+- **supage:** Firestore-emulator integration tests, `dev.sh`/`dev-prod-shadow.sh`, `check-e2e` server-lifecycle/token-mint content.
+- **dodot:** `demo-errors`. **clapfig:** trybuild UI tests. **rustloc:** root `action.yml` (the product IS a composite Action). **standout:** `standout-docs` skill + `ARCHITECTURE_REVIEW.md`.
+
+**Do NOT launder as app-specific:** brew render pairs (5 repos), `bin/check-fmt`/`check-lint` (lex, vscode), `bin/release` forwarder (lex), husky gate (vscode), luacheck job (nvim), `docs-book`/`docs-spellcheck` (standout), `app-bin/e2e` (dodot), `wasm.yml` (phos-core), comms' tar+dispatch+jekyll. All ordinary.
+
+---
+
+## 4. FAT-WORKFLOW & FOOTPRINT DEBT (grouped by absorbing capability)
+
+**Absorbed by §1 stale-seed re-sync (`@v3` wheel):** retired-jargon CLAUDE.md markers (ALL 16), `.release-sync-state.yaml` / `.release-sync-source` / "Generated by release-sync" lefthook headers (lex, vscode, comms, +seed-model repos), legacy tracked `bin/check`/`bin/build` symlinks + `.gitignore` "take-iii/canonical shims" whitelist (lex, tree-sitter-lex), pre-WS3 lefthook shape (burgertocow). **lex + vscode are still on the RETIRED release-sync seed model with tracked `.release/`** — both need the one-time re-seed, not just a pin bump.
+
+**Absorbed by brew-publish (delete dead-orphans):** `.github/render-homebrew-formula.py` + `homebrew-formula.rb.tmpl` in **burgertocow, dodot, padz, rustloc, simple-gal**; plus `.github/actions/rust-setup/action.yml` (burgertocow, dodot). All grep-confirmed unreferenced. Pure delete.
+
+**Absorbed by the gate (one definition):** vscode `.husky/pre-commit` (delete; git hook → `release-core gate --hook`); vscode `bin/check-fmt`/`bin/check-lint` (delete); lex `bin/check-fmt`/`bin/check-lint`/`bin/release` (delete); nvim inline luacheck job → shared input; standout `app-bin/docs-spellcheck` → gate check.
+
+**Absorbed by wasm shared input (§2.2):** phos-core `wasm.yml` (fat), lex `test-rust.yml` wasm job.
+
+**Absorbed by extra-asset hook (§2.3):** phos-core release.yml corpus/fixtures jobs; tree-sitter-lex fan-out glue (fan-out itself sanctioned).
+
+**Absorbed by Jekyll Kind (§2.6):** comms `pages.yml` (fat) + `release.yml` (fat tar+dispatch); lex `pages.yml` (fat).
+
+**Absorbed by go-server Kind (§2.7):** supage `deploy.yml` (fat) + `app-bin/deploy.sh` duplicate.
+
+**`scripts/` graveyard (smoking-gun):** **phos-app** `scripts/release/update-release` (bespoke-legit but belongs in app-bin/; release.yml cites non-existent `scripts/release/trigger-release`). No other consumer has a live `scripts/` dir.
+
+**Bloated CLAUDE.md (trim to pointer):** phos-app (266 lines), phos-core (265), tree-sitter-lex (~80), rustloc (~120), lex (3871 bytes + stale `@.release/ORIENTATION.md`), simple-gal (~30), supage (~100, references non-existent `scripts/`), lexed/nvim/vscode (cascade prose, partly stale).
+
+**Infra-duplicate skills (prune to ~2-3 app-domain + 1 distributed gh-pr-review-loop):** **lex** (~21 skills: ~15 mattpocock + `pr-review-respond`/`release-issue-relay` infra-dupes + stale qa/request-refactor-plan/ubiquitous-language), **vscode** (18 skills incl. `release-issue-relay`/`pr-review-respond`), **comms** (`.claude/skills/pr-review-respond`). supage carries 9 vendored skills but gitignored (latent).
+
+**Stale-memory / dead references:** comms **BROKEN SessionStart** (`scripts/setup-dev-env.sh` deleted, never replaced — no install/init/gate); comms `shared/theming/README.md` "Canonical Source" + `scripts/gen-theme.py` refs; lexed `lexed-development` SKILL.md documents nonexistent `scripts/`/`app-bin/fetch-deps.sh`; phos-app `lefthook-local.yml` "survives release-sync"; nvim `.gitignore` "take-iii"; simple-gal `settings.local.json` defunct `~/h/lightable/` path; dodot `feedback_copilot_review_request.md` retired copilot model.
+
+**Stray/dead artifacts:** nvim `bin/lexd-lsp-v0.17.0`+`lex-v0.11.0.so` (misplaced, belong in resources/); tree-sitter-lex `bin/lex`+`bin/lexd` (16MB vendored); phos-app `app-bin/compare-ui.ts` (dead-orphan); standout dead readthedocs/mkdocs + `palette_compare.sh` at root; supage `bin/supage`/`supaged-test` build output.
+
+---
+
+## 5. KIND COVERAGE GAPS
+
+| Kind | Shared workflow? | Missing | Canary family? |
+|---|---|---|---|
+| rust-cli | rust-cli.yml@v3 ✓ | **wasm sub-target test/build** (lex, phos-core hand-roll); generic extra-asset hook | **yes (rust)** |
+| rust-lib | rust-lib.yml ✓ | cargo-doc as input (lex) | yes (rust) |
+| electron-app | electron-app.yml + electron-ci.yml ✓ | fetch-deps on shared runner PATH (lexed embeds a fetch shim) | unknown |
+| tauri-app | tauri-app.yml + tauri-ci.yml + tauri-e2e.yml@v3 ✓ | native-E2E **launch seam** standardization | unknown |
+| vscode-ext | vscode-ext.yml + vscode-ext-ci.yml ✓ | — | **yes (vscode-ext)** |
+| nvim-plugin | nvim-plugin.yml + nvim-plugin-ci.yml ✓ | **lua-lint opt-in input** (nvim inlines luacheck) | unknown |
+| tree-sitter | tree-sitter.yml + tree-sitter-ci.yml ✓ | scheduled-manifest-bump (tree-sitter-lex `quarterly-grammar-bump.yml` fat) | unknown |
+| zed-extension | zed-extension.yml + zed-extension-ci.yml ✓ | — | unknown |
+| go-cli | go-cli.yml + go-ci.yml ✓ | — | unknown |
+| mkdocs / mdbook | mkdocs.yml + mdbook.yml ✓ | — | n/a |
+| **Jekyll docs-site** | **NONE** | full build+Pages deploy + lex-CLI-fetch hook slot | **(comms, lex hand-roll)** |
+| **go-server / Cloud-Run** | **NONE** | build→push(Artifact Registry)→roll(Cloud Run services+jobs) | **(supage hand-rolls)** |
+| **cross-repo cascade (standalone)** | cascade-handler.yml ✓ for handlers | the **tarball+gh-release+repository_dispatch fan-out** as a callable (comms hand-rolls end-to-end) | n/a |
+
+**Author upstream, priority order:** (1) wasm input on rust-ci/rust-cli (3 consumers, has canary), (2) generic extra-asset hook (2 consumers, has canary), (3) Jekyll Kind (2 consumers), (4) lua-lint/cargo-doc/docs-spellcheck inputs (3 consumers), (5) go-server Kind (1), (6) scheduled-manifest-bump (1). Note: only **rust** and **vscode-ext** have authored canary families today (per the fixtures tree) — electron/tauri/nvim/tree-sitter/zed/go Kinds lack canary seeds, so per-Kind canary coverage is itself a gap for the riskiest standardizations below.
+
+---
+
+## 6. PER-REPO CONFORMANCE SCORECARD
+
+| Repo | Distance from minimal | Top 3 fixes |
+|---|---|---|
+| **clapfig** | **~0 (model)** | 1) `@v2→v3` re-sync 2) refresh CLAUDE.md marker 3) (nothing else) |
+| **zed-lex** | ~0 | 1) `@v1→v3` copilot bump 2) `@v2→v3` re-sync 3) fix README "release-sync" line |
+| **dodot** | small | 1) delete brew-render pair + `rust-setup/action.yml` 2) collapse `app-bin/e2e` into `check-e2e` 3) `@v2→v3` |
+| **lexed** | small | 1) `@v1/v2→v3` 2) trim CLAUDE.md "# Releasing"; fix marker 3) correct stale `lexed-development` SKILL.md |
+| **nvim** | small | 1) lua-lint → shared input (de-fat test.yml) 2) sweep `.gitignore`/CLAUDE.md jargon 3) move stray binaries out of `bin/` |
+| **rustloc** | small | 1) delete brew-render pair 2) `@v2→v3` 3) trim/move CLAUDE.md architecture prose |
+| **burgertocow** | small | 1) delete brew-render pair + `rust-setup/action.yml` 2) `@v2→v3` re-sync 3) (markers refresh on sync) |
+| **padz** | small | 1) delete brew-render pair + `docs/release-pipeline.lex` 2) retire `release.toml` local flow 3) review `live-tests/` vs managed e2e |
+| **simple-gal** | small | 1) delete brew-render pair 2) fix `release.toml` dead `bin/changelog` hook 3) `@v2→v3` + trim CLAUDE.md |
+| **standout** | small-med | 1) delete dead readthedocs/mkdocs system 2) `docs-spellcheck`→gate, `docs-book` remove 3) `@v1/v2→v3` |
+| **supage** | med (server gap) | 1) trim stale CLAUDE.md (`scripts/` refs) 2) collapse `deploy.yml`/`deploy.sh` (await go-server Kind) 3) fold ci.yml materialize step into shared composite |
+| **tree-sitter-lex** | med | 1) drop legacy `bin/check`/`bin/build` + dual umbrella (use release-core gate) 2) `@v2→v3` 3) trim CLAUDE.md |
+| **phos-core** | med | 1) `wasm.yml`→shared wasm input 2) trim 265-line CLAUDE.md + fix stale `@v1`/`scripts/check-rust.sh` 3) extra-asset hook for corpus/fixtures |
+| **phos-app** | med (high bespoke, mostly legit) | 1) move `scripts/release/update-release`→app-bin; fix dead `trigger-release` ref 2) trim 266-line CLAUDE.md 3) `@v1→v3` copilot + wheel `v2.21.0→v3` |
+| **lex** | **large (retired seed model)** | 1) **re-seed off release-sync onto v3 pull model** (`.release-sync-state.yaml` + tracked `.release/` + bin symlinks → bootstrap quartet) 2) delete `bin/check-fmt`/`check-lint`/`release`; push cargo-doc/wasm into rust-ci 3) prune ~21 skills → 3 app-domain; trim CLAUDE.md + drop ORIENTATION include |
+| **vscode** | **large (retired seed model)** | 1) **re-seed off release-sync** (tracked `.release/`, ORIENTATION @-include) 2) **remove husky gate** + `bin/check-fmt`/`check-lint` 3) prune 18 skills; `@v1/v2→v3` |
+| **comms** | **largest (not onboarded)** | 1) **onboard to pull model** (fix BROKEN SessionStart, add bootstrap quartet + gate) 2) `release.yml` tar+dispatch → shared cascade workflow 3) `pages.yml` → Jekyll Kind |
+
+---
+
+## 7. RECOMMENDED EXECUTION ORDER
+
+**Phase 0 — unlock the most cleanup with one upstream action:** Drive the **`@v3` wheel re-seed across the fleet.** This single move refreshes managed CLAUDE.md markers, lefthook shape, and converges legacy `bin/check`/`bin/build` residue + `release-sync`/`take-iii` jargon for ~14 repos automatically. **lex and vscode need the explicit one-time re-seed** (they're on the retired tracked-`.release/` seed model, not just a pin bump) — sequence them first since they're the most stale.
+
+**Phase 1 — pure deletes (no upstream work, zero risk):** Delete the **dead-orphan brew-render pairs** (burgertocow, dodot, padz, rustloc, simple-gal) + `rust-setup/action.yml` (burgertocow, dodot) + standout's dead readthedocs/mkdocs + dead `release.toml` hooks. Remove **vscode's husky gate** and the tracked `bin/check-fmt`/`check-lint` (lex, vscode) / `bin/release` (lex). Prune **infra-duplicate skills** (lex ~21→3, vscode 18→~3, comms). These need no shared-workflow changes.
+
+**Phase 2 — author the high-blast-radius shared inputs:** (a) **wasm input on rust-ci/rust-cli** (unlocks phos-core `wasm.yml` + lex wasm job — and rust has a canary family, so it's safely testable), (b) **generic extra-release-asset hook** (phos-core, tree-sitter-lex — also rust canary), (c) **lua-lint/cargo-doc/docs-spellcheck** opt-in inputs (nvim, lex, standout). Then de-fat the consumers.
+
+**Phase 3 — new Kinds (no existing canary; build the seed first):** **Jekyll docs Kind** (comms, lex), **standalone cascade fan-out callable** (comms), **go-server/Cloud-Run Kind** (supage). Each needs a **new authored canary family** before rollout.
+
+**Phase 4 — onboard comms** (fix the broken SessionStart, add the bootstrap quartet + gate, then point its now-fat workflows at the Phase-3 Jekyll/cascade Kinds).
+
+### Highest-risk standardizations — flag for careful per-Kind canary
+
+The load-bearing danger: **managed workflow copies overwrite live consumer CI with no conflict guard.** Re-seeding a repo whose `.github/**` carries a *partly* hand-rolled companion workflow (lex `test-rust.yml`/`sandbox-tests.yml`/`pages.yml`, phos-core `wasm.yml`, supage `deploy.yml`, tree-sitter-lex `quarterly-grammar-bump.yml`) risks the sync clobbering or orphaning a load-bearing job. **Require careful per-Kind canary for:**
+1. **electron / tauri / nvim / tree-sitter / zed / go Kinds — none have an authored canary family today** (only rust + vscode-ext do). Any standardization touching those Kinds' workflows ships blind. Author canary seeds for them *before* the wasm/lua-lint/extra-asset changes land in their callers.
+2. **lex and vscode re-seed** — most divergent (retired model + companion fat workflows); canary the converged `.release/` + `.github/**` on a throwaway clone before opening the managed-sync PR, to confirm the seed doesn't drop `test-rust.yml`/`sandbox-tests.yml`/husky-replacement wiring.
+3. **The wasm input on rust-cli** — it's on the busiest shared workflow (every rust consumer calls it); a regression there has fleet-wide blast radius. Gate it behind the rust canary family and `release-core admin canary run` before the cut.

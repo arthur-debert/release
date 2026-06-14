@@ -57,6 +57,40 @@ change → changelog fragment → green gate → **draft** PR → review loop of
 `release-core pr status` → guarded `release-core pr ready` flip → human merges. Called
 the *development cycle*, never "workflow" (which means a GitHub workflow).
 
+## The model (why standardize)
+
+Full treatment: [docs/dev/standardization-model.md](docs/dev/standardization-model.md).
+
+**Standardize-default** — release's one rule: standardize a capability **upstream**,
+never leave a consumer hand-rolling it. A release that lets repos keep doing their
+own thing is a costly middle layer while the divergence survives. "Expensive / risky
+to standardize" is a reason to canary carefully per Kind, never a reason to leave it.
+
+**Ordinary vs bespoke** — the test for whether release must own a capability. The
+question is *"is the capability ordinary?"*, never *"is this file different?"*
+**Ordinary** = anything in the universal lifecycle (below) — release owns it; a
+consumer hand-rolling it is a bug. **Bespoke** = not-normal-software-dev work
+(theme-gen from the marketing repo, golden-image benchmarking) — a thin `app-bin/`
+hook, where the *interface* is ordinary and owned, only the *content* is bespoke.
+The bespoke list is short on purpose.
+
+**Universal lifecycle** — the litmus backbone every project shares: lint/format →
+automated tests (unit/e2e/gpu) → provision → build (incl. docs) → release (prep,
+sign/notarize, publish, cross-repo cascade). The *interface* of each step is
+standard even when the per-stack impl differs (testing is always env-setup → select
+suites → run → gather).
+
+**Fold-in rule** — "should release support a *new* capability?" is a real design
+debate; "we *already have* it working in one of our repos" is not — it's a fold-in:
+parametrize and move it upstream. So an uncommon-but-already-working capability
+(a Tauri app, a Jekyll site) folds in as a parametrizable Kind, never a special case.
+
+**We own both sides** — release owns the tooling *and* the consumers, so the
+adjustment usually moves the consumer. Only a repo's core product *functionality*
+(its source) is sacred; its setup / scripts / paths / layout are ours to restructure
+to match the standard. "The consumer is structured differently" is never a stopping
+point — restructure the consumer.
+
 ## Distribution
 
 **Pull model** — How release reaches consumers. There is **no push**. Session start
