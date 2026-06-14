@@ -299,7 +299,7 @@ def check_release(repo: str, stack: str) -> str:
         except gh.GhError:
             latest_tag = ""
     if not latest_tag:
-        return "WARN|no releases — consumer has not shipped through canonical yet"
+        return "WARN|no releases — consumer has not shipped through the shared pipeline yet"
 
     rel_yml = _raw_contents(repo, ".github/workflows/release.yml", ref=latest_tag)
     if not rel_yml:

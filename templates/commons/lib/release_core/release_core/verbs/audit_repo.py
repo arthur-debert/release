@@ -388,9 +388,9 @@ def _check_scripts_inventory(repo: str, results: list) -> None:
         return
     extras = [n for n in listing if n != "setup-dev-env.sh"]
     if not extras:
-        _record(results, "PASS", "scripts_inventory", "only setup-dev-env.sh (canonical)")
+        _record(results, "PASS", "scripts_inventory", "only setup-dev-env.sh (the standard one)")
     else:
-        _record(results, "WARN", "scripts_inventory", f"non-canonical: {','.join(extras)}")
+        _record(results, "WARN", "scripts_inventory", f"non-standard: {','.join(extras)}")
 
 
 def _check_workflows_canonical(repo: str, results: list) -> None:
@@ -420,7 +420,7 @@ def _check_workflows_canonical(repo: str, results: list) -> None:
             results,
             "WARN",
             "workflows_canonical",
-            f"{canonical}/{total} canonical; bespoke: {', '.join(bespoke)}",
+            f"{canonical}/{total} thin callers; bespoke: {', '.join(bespoke)}",
         )
 
 
