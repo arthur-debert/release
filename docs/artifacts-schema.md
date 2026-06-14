@@ -1,6 +1,6 @@
 # `artifacts.json` schema
 
-The one cross-repo artifact-pin file. Every onboarded repo that
+The single cross-repo artifact-pin file. Every onboarded repo that
 consumes a binary or source-tree artifact from another repo's GitHub
 release declares those pins in a single `artifacts.json` at the repo
 root. The fetcher (composite action + CLI) reads this schema and
