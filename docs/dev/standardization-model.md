@@ -68,7 +68,7 @@ One definition, run in two moments:
 Categories: **lint / format / check** (enforce patterns) and **test**
 (unit / e2e — ensure behaviour).
 
-## Release (future scope — keep the granularity in mind)
+## Release — the pipeline (stages; per-Kind coverage varies)
 
 `Prep` (verify version, changelog presence, code change) → `Build` (artifacts,
 any plat/arch matrix) → `Sign & Notarize` (macOS, VSCode, Windows…) →
