@@ -23,6 +23,31 @@ Terms in **bold** are defined in [GLOSSARY.md](GLOSSARY.md).
 Internally, release also carries **fleet ops** (`release-core admin …`) — its own
 tools to probe, update, verify, and raise issues against consumers.
 
+## The one rule: standardize, or there's no point
+
+A release/ that lets repos keep doing their own thing is just a costly middle
+layer while the divergence it was meant to kill survives. So the default is
+**standardize the capability upstream — never leave a consumer hand-rolling it.**
+"Expensive / risky to standardize correctly" is a reason to do it carefully
+(canary per Kind), never a reason to leave it. Three tests keep that honest:
+
+- **Is the capability _ordinary_?** Not "is this file different." Every project
+  has the same lifecycle — lint/format → tests → provision → build (incl. docs)
+  → release (incl. sign / publish / cross-repo cascade). All of it is ordinary;
+  a consumer hand-rolling any of it is a bug. The *interface* is standard even
+  when the per-stack impl differs.
+- **The fold-in rule.** "Should release support a *new* capability?" is a real
+  debate; "we *already have* it working in one of our repos" is not — parametrize
+  it and move it upstream.
+- **We own both sides.** Only a repo's core product *functionality* is sacred;
+  its setup / scripts / paths / layout are ours to restructure to match the
+  standard.
+
+Genuinely bespoke product logic (theme-gen from the marketing repo, golden-image
+checks) lives in a thin `app-bin/` hook — content bespoke, interface ordinary;
+the list is short on purpose. The full model + how we verify it live-fire:
+[docs/dev/standardization-model.md](docs/dev/standardization-model.md).
+
 ## How it reaches consumers (the pull model)
 
 There is **no push.** A consumer's **footprint** is kept minimal and stable so it
