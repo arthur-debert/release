@@ -1,0 +1,1 @@
+- strip lefthook's hardcoded ANSI escapes from release-core gate output when stdout is not a TTY
