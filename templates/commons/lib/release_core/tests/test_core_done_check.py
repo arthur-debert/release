@@ -209,7 +209,7 @@ def test_check_release_no_releases_warns(monkeypatch):
 
     monkeypatch.setattr(gh, "rest", rest)
     out = done_check.check_release("o/r", "rust-cli")
-    assert out == "WARN|no releases — consumer has not shipped through canonical yet"
+    assert out == "WARN|no releases — consumer has not shipped through the shared pipeline yet"
 
 
 def test_check_release_prerelease_fallback(monkeypatch):
@@ -297,7 +297,9 @@ def test_aggregate_release_row_carries_local_and_na_ci():
         {
             "check": "PASS|bin/check",
             "build": "PASS|bin/build",
-            "release": "WARN|no releases — consumer has not shipped through canonical yet",
+            "release": (
+                "WARN|no releases — consumer has not shipped through the shared pipeline yet"
+            ),
             "release:local": "FAIL|release.yml missing",
         },
     )

@@ -56,7 +56,7 @@ def attach(root: click.Group) -> None:
         wrap_verb(
             init.main,
             name="init",
-            short_help="Materialize this repo's ephemeral .release/ tree + mirrors.",
+            short_help="Build this repo's ephemeral .release/ tree + mirrors.",
         )
     )
     root.add_command(
