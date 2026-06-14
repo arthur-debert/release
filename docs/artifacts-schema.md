@@ -1,6 +1,6 @@
 # `artifacts.json` schema
 
-Canonical cross-repo artifact-pin file. Every onboarded repo that
+The single cross-repo artifact-pin file. Every onboarded repo that
 consumes a binary or source-tree artifact from another repo's GitHub
 release declares those pins in a single `artifacts.json` at the repo
 root. The fetcher (composite action + CLI) reads this schema and
@@ -71,7 +71,7 @@ is the right shape for source-tree artifacts (one tarball serves all
 hosts) and wasm artifacts (host-agnostic by nature).
 
 **musl variants.** Some artifacts ship both `*-linux-gnu` and
-`*-linux-musl` builds (lex's `lexd-lsp` is the canonical example).
+`*-linux-musl` builds (lex's `lexd-lsp` is the standard example).
 Pick the variant explicitly via the `asset` field — there's no
 implicit musl detection. Example:
 
@@ -225,7 +225,7 @@ Alternatives considered + dropped:
 
 The `lex-fmt/{vscode,nvim,lexed}` repos that still carry
 `shared/lex-deps.json` (flat schema for vscode/nvim, nested for lexed)
-move to canonical `artifacts.json` at the repo root one PR per repo.
+move to the standard `artifacts.json` at the repo root one PR per repo.
 
 ### Before (e.g. `lex-fmt/nvim/shared/lex-deps.json`, flat schema)
 
@@ -238,7 +238,7 @@ move to canonical `artifacts.json` at the repo root one PR per repo.
 }
 ```
 
-### After (e.g. `lex-fmt/nvim/artifacts.json`, canonical schema)
+### After (e.g. `lex-fmt/nvim/artifacts.json`, standard schema)
 
 ```json
 {

@@ -1,6 +1,6 @@
 # Component model
 
-Status: locked 2026-05-19 (take-iii). Reference for issue #97.
+Status: locked 2026-05-19. Reference for issue #97.
 
 ## What a Component is
 
@@ -188,7 +188,7 @@ Mechanism reference:
 symlinks), [ADR-0002](../adr/0002-provenance-marker.md) (provenance marker),
 and the distribution section of `docs/tooling.lex`.
 
-## Initial Components (locked, take-iii)
+## Initial Components (locked)
 
 Derived from the empirical survey of 21 repos (issue #97 description).
 
@@ -196,7 +196,7 @@ Derived from the empirical survey of 21 repos (issue #97 description).
 
 > **Update:** `shell-quality` is no longer a Component. Because it is
 > truly universal (every Kind listed it), the gate was promoted into
-> `templates/commons/` so release-sync applies it to *every* consumer
+> `templates/commons/` so the wheel pull builds it into *every* consumer
 > structurally — including manifest-less Kinds (`tree-sitter`, `render`)
 > that never declared it. Nothing below changed except where it lives;
 > consumers no longer list it in a manifest.

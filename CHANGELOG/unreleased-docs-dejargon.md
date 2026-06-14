@@ -1,0 +1,1 @@
+- de-jargon docs/: retire stale release-sync/materialize/canonical/drift vocabulary, keep ADRs + live filenames

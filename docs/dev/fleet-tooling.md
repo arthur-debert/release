@@ -64,7 +64,7 @@ consumer).
 ## `release-core admin repos verify`
 
 The pre-flight lint sweep — the realization of "checkout all repos,
-release-sync them, try to commit," using real consumer files instead of
+build their managed tree (`release-core init`), try to commit," using real consumer files instead of
 synthetic fixtures (this is why per-Kind fixtures, release#298, were closed
 won't-do).
 
