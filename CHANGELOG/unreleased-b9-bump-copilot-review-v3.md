@@ -1,1 +1,0 @@
-- Bump the per-Kind copilot-review.yml caller templates from @v1 to @v3 (#569 B9), clearing the last mixed-major straggler: every managed consumer's copilot-review.yml re-renders to @v3 on its next release-core init (pull), aligning it with the @v3 ci/release/test callers

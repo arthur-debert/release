@@ -1,1 +1,0 @@
-- Remove the redundant bin/detect-kind shim and its bats canary (classification is covered by test_core_manifest.py); detect-kind stays available via release-core detect-kind and the pip console-script

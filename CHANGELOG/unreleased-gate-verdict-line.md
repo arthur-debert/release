@@ -1,1 +1,0 @@
-- Add a final GATE: OK (N checks) / GATE: FAILED (names) verdict line to release-core gate (#628), derived from lefthook's exit code so a `gate | tail` view can't mask a failure; plus a --quiet mode that prints only the verdict on success (full output on failure)
