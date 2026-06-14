@@ -44,7 +44,7 @@ The automation is built in two layers. Each layer is independently useful and ca
 ### The managed release tools
 
 Each repo carries these two executables under `bin/` (built from the
-`arthur-debert/release` wheel by `release-core init` — not hand-authored per repo):
+`release-core` wheel by `release-core init` — not hand-authored per repo):
 
 #### `bin/diff-since-release`
 
