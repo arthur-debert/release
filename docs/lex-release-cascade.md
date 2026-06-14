@@ -34,8 +34,8 @@ The automation is built in two layers. Each layer is independently useful and ca
 > per-repo `scripts/release/*` primitives (`get-current-version`,
 > `get-commits-since-release`, `should-release`, `update-release`,
 > `trigger-release`). Those were **retired**. There are no per-repo release
-> scripts anymore: release is driven by the managed `bin/` tooling that
-> `release-sync` materializes into every consumer —
+> scripts anymore: release is driven by the managed `bin/` tooling that the
+> wheel pull builds into every consumer (`release-core init`) —
 > [`bin/diff-since-release`](#binbin-diff-since-release) and the Kind-aware
 > [`release-core cut`](#release-core-cut-formerly-the-binrelease-shim-retired-in-476).
 > The orchestrator drives those; the event-cascade handler decides via plain git
@@ -43,8 +43,8 @@ The automation is built in two layers. Each layer is independently useful and ca
 
 ### The managed release tools
 
-Each repo carries these two executables under `bin/` (re-synced from
-`arthur-debert/release` via `release-sync` — not hand-authored per repo):
+Each repo carries these two executables under `bin/` (built from the
+`arthur-debert/release` wheel by `release-core init` — not hand-authored per repo):
 
 #### `bin/diff-since-release`
 
@@ -66,7 +66,7 @@ shim that used to exec it was retired in #476 — `release-core cut` is reached
 directly as the pip console-script (on the maintainer's PATH for the local
 orchestrator) or, in the event cascade, the handler dispatches `release.yml`
 itself with the explicit version. It is **Kind-aware**: it reads the current
-version from the consumer's canonical manifest source (`Cargo.toml`,
+version from the consumer's manifest source (`Cargo.toml`,
 `package.json`, `extension.toml`, or the latest git tag for manifest-less
 Kinds), computes the new version from a bump shortcut (`patch`/`minor`/`major`)
 or a literal `X.Y.Z[-PRERELEASE]`, and **dispatches
@@ -87,7 +87,7 @@ that responsibility moved entirely into CI.
 
 ##### Per-repo manifest surfaces
 
-`release-core cut` reads each repo's current version from its canonical source;
+`release-core cut` reads each repo's current version from its manifest source;
 the dep-pin updates (comms submodule, `shared/lex-deps.json`) and the build
 itself all happen in CI via the reusable workflow.
 
@@ -238,7 +238,7 @@ These were originally handler/primitive concerns; after the `scripts/release` re
 
 4. **Annotated tags, not lightweight.** `release.yml` reads the tag message via `git tag -l --format='%(contents)'`; the workflow's tag step uses `git tag -a`. Manual cuts must too.
 5. **`--allow-same-version` on `npm version`.** Where the workflow bumps `package.json` then runs `npm version <tag>`, the flag avoids the "Version not changed" error if the bump already matched.
-6. **Manifest may drift behind tags.** `release-core cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `release-core cut` / the orchestrator.
+6. **Manifest may fall behind tags.** `release-core cut` reads the manifest; if past releases were cut without bumping the manifest, a bump-shortcut may collide with an existing tag (tree-sitter-lex hit this: `package.json` said `0.8.0` while the highest tag was `v0.10.1`). Workaround: pass an explicit `X.Y.Z` to `release-core cut` / the orchestrator.
 7. **Resume-on-existing-tag in `arthur-debert/release/.github/actions/prepare-release`.** When a reusable workflow sees an existing tag matching the requested version, it validates the manifest matches and skips the bump+commit+tag — making re-dispatch idempotent.
 8. **CHANGELOG / UNRELEASED.md.** The CI bump requires Keep-a-Changelog `## [Unreleased]`; the workflow handles the empty-UNRELEASED seed for cascade runs that carry no human-authored notes.
 
@@ -246,7 +246,7 @@ These were originally handler/primitive concerns; after the `scripts/release` re
 
 Three pieces. None is hard individually; the order matters.
 
-1. **Sync the managed release tooling.** Run `release-sync` in the new repo so it carries `bin/diff-since-release` (and add a `.github/workflows/release.yml` thin caller of the right reusable per-Kind workflow). Cutting goes through the `release-core cut` console-script — no per-repo release scripts to author — and it is Kind-aware.
+1. **Set up the managed release tooling.** Run `release-core init` in the new repo so the wheel pull builds `bin/diff-since-release` (and add a `.github/workflows/release.yml` thin caller of the right reusable per-Kind workflow). Cutting goes through the `release-core cut` console-script — no per-repo release scripts to author — and it is Kind-aware.
 2. **Add `.github/workflows/on-upstream-released.yml`.** Use the
    reusable workflow (recommended) — a 6-line thin caller:
 
@@ -279,7 +279,7 @@ Three pieces. None is hard individually; the order matters.
    Run lookups happen under the **caller's** filename
    (`on-upstream-released.yml` by convention) — not under the reusable
    workflow's filename. `gh run list --repo <repo>
-   --workflow=on-upstream-released.yml` is the canonical way to see
+   --workflow=on-upstream-released.yml` is the standard way to see
    handler activity. See [`.github/workflows/cascade-handler.yml`](../.github/workflows/cascade-handler.yml).
 
    The older copy-per-repo `on-upstream-released.yml` shape (~120 lines)

@@ -196,7 +196,7 @@ Derived from the empirical survey of 21 repos (issue #97 description).
 
 > **Update:** `shell-quality` is no longer a Component. Because it is
 > truly universal (every Kind listed it), the gate was promoted into
-> `templates/commons/` so release-sync applies it to *every* consumer
+> `templates/commons/` so the wheel pull builds it into *every* consumer
 > structurally — including manifest-less Kinds (`tree-sitter`, `render`)
 > that never declared it. Nothing below changed except where it lives;
 > consumers no longer list it in a manifest.

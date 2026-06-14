@@ -154,7 +154,7 @@ mechanism below stays available for registering an intended-but-unwired shape.
 
 ## Reaching the CLI two ways
 
-- Local checkout: `bin/release-core` (a thin sys.path shim → `cli_entry.main`).
+- Local checkout: `bin/release-core` (a thin sys.path caller → `cli_entry.main`).
 - Installed wheel: the `release-core` console-script (`[project.scripts]` →
   `release_core.cli_entry:main`). Same `main`, same tree.
 
