@@ -1,6 +1,6 @@
 # Component model
 
-Status: locked 2026-05-19 (take-iii). Reference for issue #97.
+Status: locked 2026-05-19. Reference for issue #97.
 
 ## What a Component is
 
@@ -188,7 +188,7 @@ Mechanism reference:
 symlinks), [ADR-0002](../adr/0002-provenance-marker.md) (provenance marker),
 and the distribution section of `docs/tooling.lex`.
 
-## Initial Components (locked, take-iii)
+## Initial Components (locked)
 
 Derived from the empirical survey of 21 repos (issue #97 description).
 
