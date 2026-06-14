@@ -192,19 +192,16 @@ def _gated_root(tmp_path):
 def test_gate_runs_all_files_over_the_repo(monkeypatch, tmp_path):
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["cmd"] = cmd
         captured["cwd"] = cwd
-        return _Result()
+        return 0
 
     root = _gated_root(tmp_path)
     monkeypatch.setattr(gate, "_repo_root", lambda: root)
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     assert gate.main([]) == 0
     cmd = captured["cmd"]
     expected = ["lefthook", "run", "pre-commit", "--no-auto-install", "--all-files", "--no-tty"]
@@ -217,17 +214,14 @@ def test_gate_hook_mode_runs_staged_not_all_files(monkeypatch, tmp_path):
     --all-files — so stage_fixed auto-fix+restage stays correct at commit time."""
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["cmd"] = cmd
-        return _Result()
+        return 0
 
     monkeypatch.setattr(gate, "_repo_root", lambda: _gated_root(tmp_path))
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     assert gate.main(["--hook"]) == 0
     cmd = captured["cmd"]
     assert cmd == ["lefthook", "run", "pre-commit", "--no-auto-install", "--no-tty"]
@@ -242,18 +236,15 @@ def test_gate_points_lefthook_at_managed_config(monkeypatch, tmp_path):
     (tmp_path / ".release" / "lefthook.yml").write_text("pre-commit:\n")
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["env"] = env
-        return _Result()
+        return 0
 
     monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     assert gate.main([]) == 0
     assert captured["env"]["LEFTHOOK_CONFIG"] == str(tmp_path / ".release" / "lefthook.yml")
 
@@ -366,18 +357,15 @@ def test_gate_root_config_uses_default_discovery(monkeypatch, tmp_path):
     (tmp_path / "lefthook.yml").write_text("pre-commit:\n")
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["env"] = env
-        return _Result()
+        return 0
 
     monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.delenv("LEFTHOOK_CONFIG", raising=False)
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     assert gate.main([]) == 0
     assert "LEFTHOOK_CONFIG" not in captured["env"]
 
@@ -401,18 +389,15 @@ def test_gate_explicit_lefthook_config_is_respected(monkeypatch, tmp_path):
     mine.write_text("pre-commit:\n")
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["env"] = env
-        return _Result()
+        return 0
 
     monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.setenv("LEFTHOOK_CONFIG", str(mine))
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     assert gate.main([]) == 0
     assert captured["env"]["LEFTHOOK_CONFIG"] == str(mine)
 
@@ -424,18 +409,15 @@ def test_gate_empty_lefthook_config_counts_as_unset(monkeypatch, tmp_path):
     (tmp_path / ".release" / "lefthook.yml").write_text("pre-commit:\n")
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["env"] = env
-        return _Result()
+        return 0
 
     monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.setenv("LEFTHOOK_CONFIG", "   ")
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     assert gate.main([]) == 0
     assert captured["env"]["LEFTHOOK_CONFIG"] == str(tmp_path / ".release" / "lefthook.yml")
 
@@ -448,18 +430,15 @@ def test_gate_explicit_relative_lefthook_config_resolves_against_root(monkeypatc
     (tmp_path / ".release" / "lefthook.yml").write_text("pre-commit:\n")
     captured: dict[str, object] = {}
 
-    class _Result:
-        returncode = 0
-
-    def _fake_run(cmd, cwd, env):
+    def _fake_run(cmd, cwd, env, quiet=False):
         captured["env"] = env
-        return _Result()
+        return 0
 
     monkeypatch.setattr(gate, "_repo_root", lambda: str(tmp_path))
     monkeypatch.setattr(gate, "_pinned_lefthook_version", lambda root: None)
     monkeypatch.setattr(gate, "_resolve_lefthook", lambda pin: "lefthook")
     monkeypatch.setenv("LEFTHOOK_CONFIG", os.path.join(".release", "lefthook.yml"))
-    monkeypatch.setattr(gate.subprocess, "run", _fake_run)
+    monkeypatch.setattr(gate, "_run_and_summarize", _fake_run)
     # cwd is the pytest rootdir (a subdir-of-nowhere relative to tmp_path) —
     # the relative path must still validate against root and pass resolved.
     assert gate.main([]) == 0
