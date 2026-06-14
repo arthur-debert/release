@@ -287,7 +287,9 @@ def _install_hook(root: str) -> int:
 # Glyphs are collected ONLY after the `summary:` header (matching classify.py's
 # boundary), so pre-summary tool output that happens to start with a ✓/✗ can't skew
 # the count or names.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Any CSI escape (SGR color/bold + cursor moves), not just `…m` — robust against
+# every ANSI sequence lefthook emits, so captured logs stay fully clean.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _GATE_SUMMARY_RE = re.compile(r"^\s*summary:")
 _GATE_PASS_RE = re.compile(r"^\s*[✓✔]\s+(\S+)")
 _GATE_FAIL_RE = re.compile(r"^\s*[✗✖]\s+(\S+)")
@@ -340,6 +342,13 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict[str, str], *, quiet:
             else None
         )
         in_summary = False
+        # lefthook hardcodes a couple of ANSI sequences (bold on the meta-header
+        # hook name, a truecolor summary rule) that NO color knob suppresses —
+        # `--colors off`, `NO_COLOR`, `CLICOLOR=0` all leave them. They garble
+        # captured / CI / agent logs. When our own stdout is not a TTY, strip the
+        # escapes on passthrough (the UTF-8 box glyphs stay — they render fine);
+        # an interactive terminal keeps the color.
+        strip_ansi = not (hasattr(sys.stdout, "isatty") and sys.stdout.isatty())
         for line in proc.stdout:
             clean = _ANSI_RE.sub("", line)
             if _GATE_SUMMARY_RE.match(clean):
@@ -351,12 +360,13 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict[str, str], *, quiet:
                     passed.append(pm.group(1))
                 elif fm:
                     failed.append(fm.group(1))
+            out_line = clean if strip_ansi else line
             if spool is not None:
-                spool.write(line)
+                spool.write(out_line)
             else:
-                sys.stdout.write(line)
+                sys.stdout.write(out_line)
                 sys.stdout.flush()
-            last_line = line
+            last_line = out_line
         rc = proc.wait()
         emitted = spool is None  # non-quiet always streamed to stdout
         if spool is not None and rc != 0:
