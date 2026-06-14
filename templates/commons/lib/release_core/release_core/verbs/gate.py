@@ -287,7 +287,9 @@ def _install_hook(root: str) -> int:
 # Glyphs are collected ONLY after the `summary:` header (matching classify.py's
 # boundary), so pre-summary tool output that happens to start with a ✓/✗ can't skew
 # the count or names.
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+# Any CSI escape (SGR color/bold + cursor moves), not just `…m` — robust against
+# every ANSI sequence lefthook emits, so captured logs stay fully clean.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _GATE_SUMMARY_RE = re.compile(r"^\s*summary:")
 _GATE_PASS_RE = re.compile(r"^\s*[✓✔]\s+(\S+)")
 _GATE_FAIL_RE = re.compile(r"^\s*[✗✖]\s+(\S+)")

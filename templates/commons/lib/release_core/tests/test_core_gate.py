@@ -54,11 +54,12 @@ def test_ansi_escapes_stripped_when_not_a_tty(tmp_path, capsys):
     # lefthook hardcodes a bold meta-header + a truecolor summary rule that no
     # color knob suppresses; the gate strips them on passthrough when stdout is
     # not a TTY (capsys), so captured / CI / agent logs stay clean.
-    noisy = "\x1b[1mpre-commit\x1b[m\n\x1b[38;2;56;56;56m  ----\x1b[m\n" + _SUMMARY_PASS
+    # SGR color/bold AND a non-SGR CSI (erase-line) — all must be stripped.
+    noisy = "\x1b[1mpre-commit\x1b[m\n\x1b[2K\x1b[38;2;56;56;56m  ----\x1b[m\n" + _SUMMARY_PASS
     rc = _run(tmp_path, stdout=noisy, exit_code=0)
     out = capsys.readouterr().out
     assert rc == 0
-    assert "\x1b[" not in out  # no escape sequence leaks
+    assert "\x1b" not in out  # no escape sequence of any kind leaks
     assert "pre-commit" in out  # the underlying text survives the strip
     assert out.strip().splitlines()[-1] == "GATE: OK (2 checks)"
 
