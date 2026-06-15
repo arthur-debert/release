@@ -234,13 +234,20 @@ GITIGNORE_BODY = (
 )
 
 CLAUDE_FILE = "CLAUDE.md"
-CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
+CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-core; do not edit -->"
+# The pre-de-jargon BEGIN marker an already-seeded consumer carries. The block is
+# located by EITHER marker (see _has_claude_begin) so an existing consumer whose
+# CLAUDE.md still opens with this legacy line is RECOGNIZED and REWRITTEN to the
+# CLAUDE_BEGIN above on its next init — never duplicated.
+CLAUDE_BEGIN_LEGACY = (
+    "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
+)
 CLAUDE_END = "<!-- END release-managed orientation -->"
 # WS2 (release#523): the managed block is a small managed block (~7 lines)
 # pointing at the CLI — `release-core how-to` is the single source of orientation
 # (kind-aware, renders the dev cycle), so there is no synced ORIENTATION.md to
-# fall out of sync (discovery is the CLI, not docs). The BEGIN/END markers are
-# kept byte-identical so an existing
+# fall out of sync (discovery is the CLI, not docs). The block is located by the
+# BEGIN marker (current OR legacy — see _has_claude_begin), so an existing
 # consumer's block (which imported @.release/ORIENTATION.md) is recognized and
 # REFRESHED to this stub, not duplicated.
 CLAUDE_STUB_BODY = (
@@ -1050,137 +1057,6 @@ def _first_line_has_marker(path: str) -> bool:
 # (`git rev-list --all -- <template path>` → `git rev-parse <rev>:<path>`),
 # never taken from a consumer on faith.
 
-# The de-distributed infra/dev-cycle skill set (WS2 #523 / WS7 #528): 17 skills
-# release once pushed to every consumer. Symlinked copies are swept by the
-# broken-symlink sweep; the REAL tracked copies some repos carry need per-file
-# blob retired-file entries. One entry per file ever shipped under skills/<name>/, dest
-# `.claude/skills/<name>/<subpath>` (the _add_skill_dir mapping). The skill dir
-# itself is pruned only when the sweep empties it — a consumer file inside
-# keeps the dir (and that file) alive.
-_RETIRED_SKILL_FILES: dict[str, frozenset[str]] = {
-    ".claude/skills/pr-review-respond/SKILL.md": frozenset(
-        {
-            "019389266ff985d3584e9b940c8d96f741edd4b6",
-            "0ef8240cf5b429fa75cd3081a80f251e78c17eef",
-            "5005e2d0a29b01ddc8d2c8344f5989f9974d93f9",
-            "5b7cae8426408fee61c532f1f4797431e4bcc223",
-            "790d94ed8815049cf4fd3338cff994251af215c0",
-            "99835724c09537055433ffb14cdb97f983775376",
-            "afe397de593acf7d1618abd2bfd84d0c4b1e837d",
-            "c2148b56db5648d5916d0f053213f69a9b70ecef",
-            "d6fb41166e61764e2547a328a570d13f9fe9ccf4",
-            "d705dc6cc815756a0414ca727ad8d4acab2d7e65",
-            "fa3a2a34f64d86dbf0a303c63018287d7f44e73d",
-        }
-    ),
-    ".claude/skills/release-issue-relay/SKILL.md": frozenset(
-        {
-            "00f16c2e90bc2601de2c011f9cb4babf3b0350eb",
-            "0d5bb55a1b390493684c02da34afdcdfb83a86b5",
-            "1fb7ddd6f0d286929210de4bc4b727ec5d9dbac5",
-            "3517044214c927ea64ee5a8fe479d5b456a94891",
-            "689833625d5ccc4beec73f52ba938e5ac021dc93",
-            "981217f2f109948f7182cb2cc11d761b161ada44",
-            "98da93f7a920aa5900458f2567aff82daf1ca981",
-            "a4a6e1b82319496cc48a59c7a396641d9d2a84e3",
-            "b53d9951e73182dc7c2db085729514d2c2ee9052",
-            "bc75321ad6abbfd228157b42e669c6cc12012e0b",
-            "be55e1c26e4ae421efd96f5a0ebc1e9f8eda7353",
-        }
-    ),
-    ".claude/skills/diagnose/.upstream": frozenset({"34f5c05f014978e70f0339c46c741e3879ea13d8"}),
-    ".claude/skills/diagnose/scripts/hitl-loop.template.sh": frozenset(
-        {"40afc4652f6f52fc117b2b00e1fa65fcec235838"}
-    ),
-    ".claude/skills/diagnose/SKILL.md": frozenset({"d3323baef364b6d7af95adf1faf84632df4ca825"}),
-    ".claude/skills/tdd/.upstream": frozenset({"551071897d036893ca78501e1fe424267045df96"}),
-    ".claude/skills/tdd/deep-modules.md": frozenset({"0d9720cf1dce25e51f4ba66d16f9d2de78a12abb"}),
-    ".claude/skills/tdd/interface-design.md": frozenset(
-        {"a0a20ca41f02f18e63b78cde06cec0763923a403"}
-    ),
-    ".claude/skills/tdd/mocking.md": frozenset({"71cbfee674d93244ce81d1830b930ca9a69200bd"}),
-    ".claude/skills/tdd/refactoring.md": frozenset({"8a4443924fbe40c2f865c56a9477d5ec01cc9962"}),
-    ".claude/skills/tdd/SKILL.md": frozenset({"6cb95cb006125524dd48ee7beba8fcfe0122126d"}),
-    ".claude/skills/tdd/tests.md": frozenset({"ff22f809ccbcac26ecd7a3c4bc48ef701a8ac82e"}),
-    ".claude/skills/review/.upstream": frozenset({"c2b6c8e95108805c9c460b741f086b00f74d0dc5"}),
-    ".claude/skills/review/SKILL.md": frozenset({"60f27a3f25f0f1824140abbbbf49e72124524b52"}),
-    ".claude/skills/triage/.upstream": frozenset({"fe247ccab0ea801203c22a3dadb3954a9190cb38"}),
-    ".claude/skills/triage/AGENT-BRIEF.md": frozenset({"2efecdfeb392246430a957de21d5062c2e5c98ba"}),
-    ".claude/skills/triage/OUT-OF-SCOPE.md": frozenset(
-        {"cc8ea2575981f464bcc7429faf401ffd4fe64ede"}
-    ),
-    ".claude/skills/triage/SKILL.md": frozenset({"52a0eefaebd26d8c0f30bade56b12b03ab776e90"}),
-    ".claude/skills/to-issues/.upstream": frozenset({"ad0dd222822313b3ad95ce704cefa9ae9f216d0a"}),
-    ".claude/skills/to-issues/SKILL.md": frozenset({"a3e4d3ab15186ca7b4e7a842a5d0efc8c0499626"}),
-    ".claude/skills/handoff/.upstream": frozenset({"0384ae3ee262e9688ef5f6ed291ebb5296b33dff"}),
-    ".claude/skills/handoff/SKILL.md": frozenset({"a710d8917274826ebd380762ad47edc26d28f10f"}),
-    ".claude/skills/qa/.upstream": frozenset({"701c55eb16648b6b5dca3ccc8c3e3baec55eac6b"}),
-    ".claude/skills/qa/SKILL.md": frozenset({"54c3c289875cd400fd4637424c541d89142b0646"}),
-    ".claude/skills/grill-me/.upstream": frozenset({"875479a3cd7bd7fdd999b8cb68aeea0cba75d151"}),
-    ".claude/skills/grill-me/SKILL.md": frozenset({"33b55c962e8c0896bca184ae97d7ee844d33e8cf"}),
-    ".claude/skills/grill-with-docs/.upstream": frozenset(
-        {"58d7fad0e72cab1cb2cd7f42369bc8c51d482cb6"}
-    ),
-    ".claude/skills/grill-with-docs/ADR-FORMAT.md": frozenset(
-        {"da7e78ec1c220cd0aedf7ad36424c9398034f375"}
-    ),
-    ".claude/skills/grill-with-docs/CONTEXT-FORMAT.md": frozenset(
-        {"08302557cc2ca8de32c02de708a7c8c84ed66f3f"}
-    ),
-    ".claude/skills/grill-with-docs/SKILL.md": frozenset(
-        {"3568a9f5a2b09eb586bc39b3480b2b3579a05360"}
-    ),
-    ".claude/skills/improve-codebase-architecture/.upstream": frozenset(
-        {"1bbd6cdc1721d6913cb9cf51b354be58ab3cd944"}
-    ),
-    ".claude/skills/improve-codebase-architecture/DEEPENING.md": frozenset(
-        {"ecaf5d7dcf7aae2aff6dbc63742dd069351b4f5c"}
-    ),
-    ".claude/skills/improve-codebase-architecture/HTML-REPORT.md": frozenset(
-        {"8adc368ffb30f9e8a6f01ac95621555f4afc2b76"}
-    ),
-    ".claude/skills/improve-codebase-architecture/INTERFACE-DESIGN.md": frozenset(
-        {"3197723a0d04aef73b74fbcf7e48269988a61684"}
-    ),
-    ".claude/skills/improve-codebase-architecture/LANGUAGE.md": frozenset(
-        {"530c27630a045406a66712c8f062e873c3b22449"}
-    ),
-    ".claude/skills/improve-codebase-architecture/SKILL.md": frozenset(
-        {"631a2561492efacb7f363837065330c7d997410b"}
-    ),
-    ".claude/skills/request-refactor-plan/.upstream": frozenset(
-        {"b7c1377147d6c4638d181dc84ba59fd86b028370"}
-    ),
-    ".claude/skills/request-refactor-plan/SKILL.md": frozenset(
-        {"7d9a74a2c9a7ba38f197a90d04c956b62e681d3d"}
-    ),
-    ".claude/skills/ubiquitous-language/.upstream": frozenset(
-        {"810b8a5e25e44643e0bc8e0a9b0c1cfc7da36ea6"}
-    ),
-    ".claude/skills/ubiquitous-language/SKILL.md": frozenset(
-        {"d1e9d84af5c3db2d2d7ba246363db762ed7f29a1"}
-    ),
-    ".claude/skills/zoom-out/.upstream": frozenset({"444197ba1ccd501579abdd6cd74b0dbfaa5e0e5f"}),
-    ".claude/skills/zoom-out/SKILL.md": frozenset({"f82ced573dc190fa2b2f169f5cf6af17b0eefca9"}),
-    ".claude/skills/teach/.upstream": frozenset({"04cb6186f47f5d69009d10fc89d25801805032e6"}),
-    ".claude/skills/teach/GLOSSARY-FORMAT.md": frozenset(
-        {"9cae84c44c8eb5d27b8695d4ef29a2893dc4900c"}
-    ),
-    ".claude/skills/teach/LEARNING-RECORD-FORMAT.md": frozenset(
-        {"2faa7c98fabcdff48eb6bd07e4847d48a6b8d4e1"}
-    ),
-    ".claude/skills/teach/MISSION-FORMAT.md": frozenset(
-        {"5dac184a319308e2ec0c18c16d6b8d52b9be2748"}
-    ),
-    ".claude/skills/teach/RESOURCES-FORMAT.md": frozenset(
-        {"c94aac6a2634cc229fe0b777fc5cc7da3a28c3d2"}
-    ),
-    ".claude/skills/teach/SKILL.md": frozenset({"8c8a3cb41ac29bd5aa4345296109794730a2514c"}),
-    ".claude/skills/padz-for-agents/SKILL.md": frozenset(
-        {"be96007eb67bcc0fad4aaa39b0d7a1d845c76ab8"}
-    ),
-}
-
 RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
     # Pre-unified-gate lint/format entry points, superseded by the composed
     # lefthook gate (WS3): every blob each kind template ever shipped.
@@ -1406,7 +1282,6 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
             "8c59bc21b47bd5b49cf61518ac9fdd5892b7adfc",  # templates/tauri-app
         }
     ),
-    **_RETIRED_SKILL_FILES,
 }
 
 RETIRED_FINGERPRINT_FILES: dict[str, str] = {
@@ -1503,7 +1378,7 @@ def _strip_managed_block(path: str) -> str:
     kept: list[str] = []
     skip = False
     for line in lines:
-        if CLAUDE_BEGIN in line:
+        if _has_claude_begin(line):
             skip = True
         if not skip:
             kept.append(line)
@@ -1537,9 +1412,17 @@ def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
     existing = _read_text(claude_path)
     if existing == desired:
         return ClaudeDecision("none", desired)
-    if CLAUDE_BEGIN in existing:
+    if _has_claude_begin(existing):
         return ClaudeDecision("refresh", desired)
     return ClaudeDecision("inject", desired)
+
+
+def _has_claude_begin(text: str) -> bool:
+    """True iff ``text`` carries the managed-block BEGIN marker — the current
+    CLAUDE_BEGIN OR the legacy CLAUDE_BEGIN_LEGACY. Recognizing the legacy line is
+    what lets an already-seeded consumer's block be REWRITTEN to the current
+    marker on the next init rather than a second block injected above it."""
+    return CLAUDE_BEGIN in text or CLAUDE_BEGIN_LEGACY in text
 
 
 def _read_text(path: str) -> str:

@@ -876,7 +876,7 @@ def test_claude_desired_strips_prior_block_idempotent(tmp_path):
 def test_claude_desired_strips_stale_block_and_refreshes(tmp_path):
     p = tmp_path / "CLAUDE.md"
     # An old consumer's block imported @.release/ORIENTATION.md — it must be
-    # stripped (markers kept byte-identical) and refreshed to the stub, not duplicated.
+    # stripped and refreshed to the stub, not duplicated.
     old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
     p.write_text(f"{old}\n# Proj\n\nmine\n")
     desired = sync.claude_desired(str(tmp_path))
@@ -890,8 +890,8 @@ def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
     """release#563: every init must rewrite the managed block to the current
     how-to-pointing stub regardless of WHICH historical form it finds — the
     @.release/ORIENTATION.md import form (padz/phos-app seeds, including the
-    blank-line variant) and any older inlined-prose body. One marker wording
-    ever shipped, so CLAUDE_BEGIN recognizes every historical block."""
+    blank-line variant) and any older inlined-prose body. (The legacy-marker
+    form is covered by test_claude_legacy_marker_is_rewritten_not_duplicated.)"""
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
     p = tmp_path / "CLAUDE.md"
@@ -923,6 +923,30 @@ def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
         # Convergence is a fixpoint: applying the refresh ends the loop.
         p.write_text(decision.desired)
         assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
+
+
+def test_claude_legacy_marker_is_rewritten_not_duplicated(tmp_path):
+    """De-jargon (#655): the BEGIN marker moved from 'managed by release-sync' to
+    'managed by release-core'. An already-seeded consumer whose CLAUDE.md still
+    opens with the legacy marker must be RECOGNIZED (so the block is rewritten to
+    the current marker), never have a second block injected above it."""
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    p = tmp_path / "CLAUDE.md"
+    legacy = f"{sync.CLAUDE_BEGIN_LEGACY}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
+    p.write_text(f"{legacy}\n# Proj\n\nmine\n")
+
+    decision = sync.decide_claude(str(tmp_path), str(tmp_release))
+    assert decision.action == "refresh"  # recognized, not "inject"
+    assert decision.desired is not None
+    # Rewritten to the new marker; the legacy line is gone; no duplicate block.
+    assert decision.desired.count(sync.CLAUDE_BEGIN) == 1
+    assert sync.CLAUDE_BEGIN_LEGACY not in decision.desired
+    assert "release-core how-to" in decision.desired
+    assert "# Proj" in decision.desired
+    # Applying the refresh is a fixpoint — the next init is a no-op.
+    p.write_text(decision.desired)
+    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
 
 
 def test_no_orientation_file_anywhere_in_the_template_source():
@@ -1198,40 +1222,13 @@ def test_retired_tables_inventory_locked():
         "app-bin/smoke-hook.sh": 2,
         "scripts/smoke.sh": 3,
     }
-    non_skill = {
-        k: v for k, v in sync.RETIRED_BLOB_FILES.items() if not k.startswith(".claude/skills/")
-    }
-    assert {k: len(v) for k, v in non_skill.items()} == expected_counts
+    assert {k: len(v) for k, v in sync.RETIRED_BLOB_FILES.items()} == expected_counts
 
-    # The de-distributed infra-skill set (WS2/WS7): 17 skills, 49 files,
-    # 69 historical blobs — per-file blob entries under .claude/skills/.
-    skill_files = {
-        k: v for k, v in sync.RETIRED_BLOB_FILES.items() if k.startswith(".claude/skills/")
-    }
-    assert {k.split("/")[2] for k in skill_files} == {
-        "pr-review-respond",
-        "release-issue-relay",
-        "diagnose",
-        "tdd",
-        "review",
-        "triage",
-        "to-issues",
-        "handoff",
-        "qa",
-        "grill-me",
-        "grill-with-docs",
-        "improve-codebase-architecture",
-        "request-refactor-plan",
-        "ubiquitous-language",
-        "zoom-out",
-        "teach",
-        "padz-for-agents",
-    }
-    assert len(skill_files) == 49
-    assert sum(len(v) for v in skill_files.values()) == 69
-    # The STILL-distributed skills must never be tombstoned.
-    live = {"gh-pr-review-loop", *sync.REPLACE_IF_PRESENT_SKILLS}
-    assert not live & {k.split("/")[2] for k in skill_files}
+    # The de-distributed infra-skill set is NOT in this table (#655): a dropped
+    # skill reaches a consumer as an untracked symlink (WS7), which the
+    # broken-symlink sweep removes — the explicit per-file blob entries were
+    # redundant and were deleted. No .claude/skills/ entry survives here.
+    assert not any(k.startswith(".claude/skills/") for k in sync.RETIRED_BLOB_FILES)
 
     for dest, blobs in sync.RETIRED_BLOB_FILES.items():
         assert blobs, dest
