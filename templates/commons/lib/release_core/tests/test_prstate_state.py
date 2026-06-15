@@ -39,6 +39,94 @@ def test_evaluate_states(context, fixture, expected):
     assert evaluate(context(fixture)).state is expected
 
 
+# --- mergeStateStatus gating (release#675) ----------------------------------
+# `mergeable` is computed async and stale on first read (optimistic MERGEABLE);
+# READY requires the authoritative `mergeStateStatus == CLEAN`. We vary only the
+# merge fields on the otherwise-READY fixture to isolate the gate. CLEAN is the
+# ONLY ready state — every other COMPUTED state is a real block (this fleet
+# requires 0 approving reviews, so a reviewed+green PR reaches CLEAN without a
+# human; a non-CLEAN computed state is never a waiting-on-approval handoff).
+
+
+@pytest.mark.parametrize(
+    ("mergeable", "merge_state", "expected"),
+    [
+        # The bug: optimistic MERGEABLE while GitHub's real verdict is a conflict.
+        ("MERGEABLE", "DIRTY", TaskState.BLOCKED),
+        # Behind the base — cannot merge cleanly until updated.
+        ("MERGEABLE", "BEHIND", TaskState.BLOCKED),
+        # Merge state not yet computed — must re-poll, never hand off.
+        ("MERGEABLE", "UNKNOWN", TaskState.REVIEWED),
+        ("MERGEABLE", None, TaskState.REVIEWED),
+        # Genuinely clean — the ONLY ready state.
+        ("MERGEABLE", "CLEAN", TaskState.READY),
+        # Computed but non-CLEAN: GitHub is blocking the merge (branch protection
+        # / required status) — BLOCKED, not a handoff point.
+        ("MERGEABLE", "BLOCKED", TaskState.BLOCKED),
+        # Mergeable verdict but an unstable (failing/pending) context — not ready.
+        ("MERGEABLE", "UNSTABLE", TaskState.BLOCKED),
+        # DIRTY wins even if `mergeable` lags at the optimistic value.
+        ("UNKNOWN", "DIRTY", TaskState.BLOCKED),
+        # CLEAN is authoritative even if `mergeable` still lags at UNKNOWN.
+        ("UNKNOWN", "CLEAN", TaskState.READY),
+        # A stale CONFLICTING must NOT block when the fresher merge state is
+        # CLEAN — merge_state is authoritative (the mirror of the core bug).
+        ("CONFLICTING", "CLEAN", TaskState.READY),
+        # CONFLICTING is honored only as a fallback when merge_state is uncomputed.
+        ("CONFLICTING", "UNKNOWN", TaskState.BLOCKED),
+        ("CONFLICTING", None, TaskState.BLOCKED),
+    ],
+)
+def test_ready_requires_clean_merge_state(context, mergeable, merge_state, expected):
+    import dataclasses
+
+    ctx = dataclasses.replace(
+        context("ready_checks_green"), mergeable=mergeable, merge_state=merge_state
+    )
+    status = evaluate(ctx)
+    assert status.state is expected, f"{mergeable}/{merge_state} -> {status.state}"
+
+
+def test_dirty_merge_state_names_the_conflict_fix(context):
+    import dataclasses
+
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="DIRTY")
+    assert "conflict" in evaluate(ctx).next_action
+
+
+def test_behind_base_says_update_the_branch(context):
+    import dataclasses
+
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="BEHIND")
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "behind" in status.next_action and "update" in status.next_action
+
+
+def test_behind_base_takes_precedence_over_pending_ci(context):
+    # A moved base re-stales CI, so a behind PR with pending checks must give the
+    # actionable "update the branch" next action, not "wait for checks" — BEHIND
+    # is gated before CI state (release#675).
+    import dataclasses
+
+    pending = [{"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": None}]
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="BEHIND", checks=pending)
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "behind" in status.next_action
+
+
+def test_non_clean_block_message_is_generic_not_required(context):
+    # UNSTABLE = a NON-required check; the message must not assert "required".
+    import dataclasses
+
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE")
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "UNSTABLE" in status.next_action
+    assert "required" not in status.next_action
+
+
 def test_best_effort_gemini_does_not_gate_ready(context):
     # Gemini is NOT_REQUESTED here, yet Copilot (required) is done clean with
     # green checks -> READY. A best-effort reviewer must not hold it back.
@@ -157,12 +245,15 @@ def _green_checks() -> list[dict]:
 
 def _ctx_with_reviews(*authors_on_head: str) -> PullContext:
     """A draft PR, green + mergeable, with an APPROVED review on the head per
-    named author — everything but the review set held constant."""
+    named author — everything but the review set held constant. `merge_state`
+    is CLEAN so the merge-state gate (release#675) doesn't hold back a context
+    built to isolate REVIEWER logic."""
     return PullContext(
         number=1,
         head_sha="h",
         is_draft=True,
         mergeable="MERGEABLE",
+        merge_state="CLEAN",
         reviews=[Review(i, a, "APPROVED", "h", "") for i, a in enumerate(authors_on_head, 1)],
         checks=_green_checks(),
     )

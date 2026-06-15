@@ -61,6 +61,7 @@ query($owner: String!, $name: String!) {
         url
         isDraft
         mergeable
+        mergeStateStatus
         author { login }
         headRefName
         reviewThreads(first: 100) {
@@ -177,6 +178,7 @@ def _print_row(pr: dict) -> None:
     title = pr["title"][:50]
     is_draft = pr["isDraft"]
     mergeable = pr["mergeable"]
+    merge_state = pr.get("mergeStateStatus")
 
     commit_nodes = pr["commits"]["nodes"]
     rollup = commit_nodes[0]["commit"]["statusCheckRollup"] if commit_nodes else None
@@ -200,11 +202,23 @@ def _print_row(pr: dict) -> None:
     }
     ci_text, ci_clr = ci_map.get(ci_state, ("-", ""))
 
-    mg_map = {
+    # Render the merge cell from the authoritative mergeStateStatus, falling
+    # back to the async-stale `mergeable` verdict only when the merge state is
+    # null/UNKNOWN — so the cell stays consistent with the merge-ready green URL
+    # (e.g. never a green URL beside a "?" cell). release#675.
+    ms_map = {
+        "CLEAN": ("yes", GRN),
+        "DIRTY": ("conflict", RED),
+        "BEHIND": ("behind", YLW),
+        "BLOCKED": ("blocked", YLW),
+        "UNSTABLE": ("unstable", YLW),
+        "HAS_HOOKS": ("hooks", YLW),
+    }
+    mergeable_map = {  # fallback when mergeStateStatus is null/UNKNOWN
         "MERGEABLE": ("yes", GRN),
         "CONFLICTING": ("conflict", RED),
     }
-    mg_text, mg_clr = mg_map.get(mergeable, ("?", YLW))
+    mg_text, mg_clr = ms_map.get(merge_state) or mergeable_map.get(mergeable, ("?", YLW))
 
     cm_text = str(total_comments) if total_comments > 0 else "-"
 
@@ -213,8 +227,13 @@ def _print_row(pr: dict) -> None:
     else:
         ur_text, ur_clr = "-", ""
 
+    # Merge-ready green keys on the CLEAN merge state — the authoritative,
+    # merge-obeyed signal — NOT the async-stale `mergeable` verdict (same
+    # contract as the state engine, release#675). CLEAN already implies
+    # mergeable; requiring `mergeable == MERGEABLE` too would false-negative a
+    # genuinely-clean PR whose `mergeable` field still lags at UNKNOWN.
     url_clr = ""
-    if ci_state == "SUCCESS" and mergeable == "MERGEABLE" and threads_unresolved == 0:
+    if ci_state == "SUCCESS" and merge_state == "CLEAN" and threads_unresolved == 0:
         url_clr = GRN
 
     line = f"  {('#' + str(num)):<6} "

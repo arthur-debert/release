@@ -18,6 +18,7 @@ def _pr(**over):
         "url": "https://gh/7",
         "isDraft": False,
         "mergeable": "MERGEABLE",
+        "mergeStateStatus": "CLEAN",
         "reviewThreads": {"totalCount": 0, "nodes": []},
         "reviews": {"totalCount": 0, "nodes": []},
         "comments": {"totalCount": 0},
@@ -66,8 +67,23 @@ def test_no_commits_renders_dash(capsys):
 
 
 def test_conflicting_mergeable(capsys):
-    out = _row(_pr(mergeable="CONFLICTING"), capsys)
+    out = _row(_pr(mergeable="CONFLICTING", mergeStateStatus="DIRTY"), capsys)
     assert "conflict" in out
+
+
+def test_merge_cell_keys_on_merge_state_not_stale_mergeable(capsys):
+    # mergeStateStatus is authoritative: a CLEAN merge state renders "yes" + a
+    # green URL even when the async `mergeable` field still lags at UNKNOWN
+    # (release#675) — no green-URL-beside-"?" inconsistency.
+    out = _row(_pr(mergeable="UNKNOWN", mergeStateStatus="CLEAN"), capsys)
+    assert "yes" in out
+    assert f"{list_repo_pr.GRN}https://gh/7" in out
+
+
+def test_behind_merge_state_not_green(capsys):
+    out = _row(_pr(mergeStateStatus="BEHIND"), capsys)
+    assert "behind" in out
+    assert f"{list_repo_pr.GRN}https://gh/7" not in out
 
 
 def test_total_comments_sums_inline_and_pr(capsys):
