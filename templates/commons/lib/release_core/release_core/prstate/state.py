@@ -7,7 +7,11 @@ on a reviewer's name — it consumes the adapter interface only.
 
 Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
-  Ready    = Reviewed + CI green + mergeable.
+  Ready    = Reviewed + CI green + mergeable, where "mergeable" means a
+             COMPUTED, conflict-free merge state (mergeStateStatus not
+             DIRTY/BEHIND/UNKNOWN) — not merely GitHub's async-stale
+             `mergeable` verdict, which reads MERGEABLE optimistically before
+             a recompute lands (release#675).
 
 Best-effort reviewers (Gemini) never gate: an absent or in-progress best-effort
 reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*
@@ -165,7 +169,25 @@ def evaluate(
         return status
 
     # 3. Reviewed. Now gate on mergeability + CI.
-    if ctx.mergeable == "CONFLICTING":
+    #
+    # GitHub exposes mergeability through TWO fields, and they disagree often
+    # enough to matter (release#675):
+    #   - `mergeable`        MERGEABLE / CONFLICTING / UNKNOWN — computed
+    #                        ASYNCHRONOUSLY; the first read after an open / push
+    #                        / base move returns the STALE prior value (usually
+    #                        the optimistic MERGEABLE) until the recompute lands.
+    #   - `mergeStateStatus` CLEAN / DIRTY / BEHIND / BLOCKED / UNSTABLE /
+    #                        HAS_HOOKS / UNKNOWN — the richer, fresher signal.
+    # Gating READY on `mergeable` ALONE flips a PR to ready on a stale MERGEABLE
+    # while the branch actually conflicts (DIRTY) or trails its base (BEHIND).
+    # READY therefore requires BOTH a MERGEABLE verdict AND a computed,
+    # conflict-free merge state. (Polling for the freshly-computed value is
+    # `release-core pr wait`'s job — it loops gather()+evaluate(); on an
+    # uncomputed merge state this returns REVIEWED so the flip can't fire.)
+
+    # A real conflict — from EITHER signal. DIRTY is the authoritative flag;
+    # CONFLICTING is its slower, sometimes-stale mirror.
+    if ctx.mergeable == "CONFLICTING" or ctx.merge_state == "DIRTY":
         status.state = TaskState.BLOCKED
         status.next_action = "merge conflict — rebase/resolve against the base branch"
         return status
@@ -180,7 +202,23 @@ def evaluate(
         status.next_action = "reviews done; CI check(s) running — wait for checks"
         return status
 
-    if ctx.mergeable == "MERGEABLE":
+    # Behind the base branch: the head no longer contains the base tip, so it
+    # cannot merge cleanly (and a moved base re-stales review + CI anyway). The
+    # agent updates the branch and re-evaluates — not a human handoff.
+    if ctx.merge_state == "BEHIND":
+        status.state = TaskState.BLOCKED
+        status.next_action = (
+            "branch is behind its base — update it (merge/rebase the base) before this can be Ready"
+        )
+        return status
+
+    # READY only when MERGEABLE is confirmed AND the merge state is computed +
+    # conflict-free. An uncomputed (UNKNOWN / null) merge state means GitHub is
+    # still working — never hand off on it, even if `mergeable` optimistically
+    # reads MERGEABLE. (BLOCKED/UNSTABLE/HAS_HOOKS are mergeable-but-pending-on-
+    # the-human states — required CI is already green by the gate above — so
+    # they are legitimate hand-off points: the human approves + merges.)
+    if ctx.mergeable == "MERGEABLE" and ctx.merge_state not in (None, "UNKNOWN"):
         status.state = TaskState.READY
         if ctx.is_draft:
             status.next_action = (
@@ -194,7 +232,8 @@ def evaluate(
             )
         return status
 
-    # Reviewed, but mergeability still unknown (GitHub computing) — re-poll.
+    # Reviewed, but mergeability not yet authoritatively computed (mergeable or
+    # mergeStateStatus still UNKNOWN) — GitHub is computing; re-poll.
     status.state = TaskState.REVIEWED
     status.next_action = "reviews done; mergeability not yet determined — re-check shortly"
     return status

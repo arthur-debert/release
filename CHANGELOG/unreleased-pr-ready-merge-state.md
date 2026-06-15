@@ -1,0 +1,1 @@
+- pr ready/status now gate on mergeStateStatus (CLEAN), not just the async-stale mergeable field — a conflicting/behind/uncomputed PR no longer flips to ready

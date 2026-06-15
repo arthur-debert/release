@@ -266,6 +266,15 @@ This is the **only** sanctioned way to flip draft→ready — never raw
 `gh pr ready`. It refuses (exit 1, printing the state and next action) unless
 the engine says `READY`, so a premature flip is impossible by construction.
 
+`READY` requires a genuinely-mergeable PR: a **CLEAN** merge state, not just
+GitHub's `mergeable` verdict. GitHub computes `mergeable` asynchronously and
+returns a STALE, optimistic `MERGEABLE` on the first read after an open / push
+/ base move — so a PR that actually conflicts (`mergeStateStatus=DIRTY`) or
+trails its base (`BEHIND`) reads `mergeable=MERGEABLE` for a moment. The engine
+cross-checks `mergeStateStatus` and reports `BLOCKED` (conflict/behind) or
+re-poll (`REVIEWED`, uncomputed) instead of flipping (release#675). Trust the
+engine state, never a raw `mergeable` field.
+
 **Do NOT auto-merge.** The flip ends the agent's job: post a short status and
 stop — the human does the final read and merge. Merge only on explicit
 authorization ("merge it", "go ahead and merge", "merge when green", or a

@@ -61,6 +61,7 @@ query($owner: String!, $name: String!) {
         url
         isDraft
         mergeable
+        mergeStateStatus
         author { login }
         headRefName
         reviewThreads(first: 100) {
@@ -177,6 +178,7 @@ def _print_row(pr: dict) -> None:
     title = pr["title"][:50]
     is_draft = pr["isDraft"]
     mergeable = pr["mergeable"]
+    merge_state = pr.get("mergeStateStatus")
 
     commit_nodes = pr["commits"]["nodes"]
     rollup = commit_nodes[0]["commit"]["statusCheckRollup"] if commit_nodes else None
@@ -213,8 +215,16 @@ def _print_row(pr: dict) -> None:
     else:
         ur_text, ur_clr = "-", ""
 
+    # Merge-ready green requires a CLEAN merge state, not just a (possibly
+    # stale/optimistic) MERGEABLE verdict — same contract as the state engine
+    # (release#675): a DIRTY/BEHIND/UNKNOWN merge state is not merge-ready.
     url_clr = ""
-    if ci_state == "SUCCESS" and mergeable == "MERGEABLE" and threads_unresolved == 0:
+    if (
+        ci_state == "SUCCESS"
+        and mergeable == "MERGEABLE"
+        and merge_state == "CLEAN"
+        and threads_unresolved == 0
+    ):
         url_clr = GRN
 
     line = f"  {('#' + str(num)):<6} "

@@ -31,13 +31,23 @@ def finding(rid: int, path: str, line: int) -> Thread:
     return Thread(thread_id=f"PRT_f{cid}", is_resolved=True, comments=(comment,))
 
 
-def ctx(reviews, *, findings=None, threads=None, head=None, mergeable="MERGEABLE", checks=None):
+def ctx(
+    reviews,
+    *,
+    findings=None,
+    threads=None,
+    head=None,
+    mergeable="MERGEABLE",
+    merge_state="CLEAN",
+    checks=None,
+):
     return PullContext(
         number=1,
         head_sha=head or (reviews[-1].commit_id if reviews else "h"),
         is_draft=True,
         base_ref="main",
         mergeable=mergeable,
+        merge_state=merge_state,
         reviews=list(reviews),
         threads=[*(findings or []), *(threads or [])],
         checks=checks or [],
