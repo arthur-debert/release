@@ -7,12 +7,15 @@ on a reviewer's name — it consumes the adapter interface only.
 
 Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
-  Ready    = Reviewed + CI green + mergeable, where "mergeable" means
+  Ready    = Reviewed + CI green + a CLEAN merge state. "Mergeable" here means
              `mergeStateStatus == CLEAN` — the authoritative, merge-obeyed
-             state — NOT GitHub's async-stale `mergeable` verdict, which reads
-             MERGEABLE optimistically before a recompute lands. Any other
-             computed state (DIRTY/BEHIND/BLOCKED/UNSTABLE) is BLOCKED; an
-             uncomputed (UNKNOWN) state re-polls (release#675).
+             signal — NOT GitHub's async-stale `mergeable` verdict (it reads
+             MERGEABLE optimistically before a recompute lands). Gate order once
+             Reviewed: a conflict (DIRTY) or a BEHIND base surfaces first (a
+             moved base re-stales CI); then failing/pending CI (BLOCKED /
+             VALIDATING); then CLEAN -> READY; an uncomputed (UNKNOWN) merge
+             state re-polls; any remaining computed non-CLEAN state
+             (BLOCKED/UNSTABLE/HAS_HOOKS) is BLOCKED (release#675).
 
 Best-effort reviewers (Gemini) never gate: an absent or in-progress best-effort
 reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*

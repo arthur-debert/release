@@ -202,11 +202,23 @@ def _print_row(pr: dict) -> None:
     }
     ci_text, ci_clr = ci_map.get(ci_state, ("-", ""))
 
-    mg_map = {
+    # Render the merge cell from the authoritative mergeStateStatus, falling
+    # back to the async-stale `mergeable` verdict only when the merge state is
+    # null/UNKNOWN — so the cell stays consistent with the merge-ready green URL
+    # (e.g. never a green URL beside a "?" cell). release#675.
+    ms_map = {
+        "CLEAN": ("yes", GRN),
+        "DIRTY": ("conflict", RED),
+        "BEHIND": ("behind", YLW),
+        "BLOCKED": ("blocked", YLW),
+        "UNSTABLE": ("unstable", YLW),
+        "HAS_HOOKS": ("hooks", YLW),
+    }
+    mergeable_map = {  # fallback when mergeStateStatus is null/UNKNOWN
         "MERGEABLE": ("yes", GRN),
         "CONFLICTING": ("conflict", RED),
     }
-    mg_text, mg_clr = mg_map.get(mergeable, ("?", YLW))
+    mg_text, mg_clr = ms_map.get(merge_state) or mergeable_map.get(mergeable, ("?", YLW))
 
     cm_text = str(total_comments) if total_comments > 0 else "-"
 
