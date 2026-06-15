@@ -41,9 +41,11 @@ def test_evaluate_states(context, fixture, expected):
 
 # --- mergeStateStatus gating (release#675) ----------------------------------
 # `mergeable` is computed async and stale on first read (optimistic MERGEABLE);
-# the engine must cross-check `mergeStateStatus` so a conflicting / behind /
-# not-yet-computed PR never flips to READY on a stale MERGEABLE. We vary only
-# the merge fields on the otherwise-READY fixture to isolate the gate.
+# READY requires the authoritative `mergeStateStatus == CLEAN`. We vary only the
+# merge fields on the otherwise-READY fixture to isolate the gate. CLEAN is the
+# ONLY ready state — every other COMPUTED state is a real block (this fleet
+# requires 0 approving reviews, so a reviewed+green PR reaches CLEAN without a
+# human; a non-CLEAN computed state is never a waiting-on-approval handoff).
 
 
 @pytest.mark.parametrize(
@@ -56,13 +58,17 @@ def test_evaluate_states(context, fixture, expected):
         # Merge state not yet computed — must re-poll, never hand off.
         ("MERGEABLE", "UNKNOWN", TaskState.REVIEWED),
         ("MERGEABLE", None, TaskState.REVIEWED),
-        # Genuinely clean — still READY (regression guard).
+        # Genuinely clean — the ONLY ready state.
         ("MERGEABLE", "CLEAN", TaskState.READY),
-        # Mergeable but blocked on a (human) required approval — required CI is
-        # already green, so this is a legitimate hand-off point.
-        ("MERGEABLE", "BLOCKED", TaskState.READY),
+        # Computed but non-CLEAN: GitHub is blocking the merge (branch protection
+        # / required status) — BLOCKED, not a handoff point.
+        ("MERGEABLE", "BLOCKED", TaskState.BLOCKED),
+        # Mergeable verdict but an unstable (failing/pending) context — not ready.
+        ("MERGEABLE", "UNSTABLE", TaskState.BLOCKED),
         # DIRTY wins even if `mergeable` lags at the optimistic value.
         ("UNKNOWN", "DIRTY", TaskState.BLOCKED),
+        # CLEAN is authoritative even if `mergeable` still lags at UNKNOWN.
+        ("UNKNOWN", "CLEAN", TaskState.READY),
     ],
 )
 def test_ready_requires_clean_merge_state(context, mergeable, merge_state, expected):

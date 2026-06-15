@@ -7,11 +7,12 @@ on a reviewer's name — it consumes the adapter interface only.
 
 Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
-  Ready    = Reviewed + CI green + mergeable, where "mergeable" means a
-             COMPUTED, conflict-free merge state (mergeStateStatus not
-             DIRTY/BEHIND/UNKNOWN) — not merely GitHub's async-stale
-             `mergeable` verdict, which reads MERGEABLE optimistically before
-             a recompute lands (release#675).
+  Ready    = Reviewed + CI green + mergeable, where "mergeable" means
+             `mergeStateStatus == CLEAN` — the authoritative, merge-obeyed
+             state — NOT GitHub's async-stale `mergeable` verdict, which reads
+             MERGEABLE optimistically before a recompute lands. Any other
+             computed state (DIRTY/BEHIND/BLOCKED/UNSTABLE) is BLOCKED; an
+             uncomputed (UNKNOWN) state re-polls (release#675).
 
 Best-effort reviewers (Gemini) never gate: an absent or in-progress best-effort
 reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*
@@ -177,13 +178,20 @@ def evaluate(
     #                        / base move returns the STALE prior value (usually
     #                        the optimistic MERGEABLE) until the recompute lands.
     #   - `mergeStateStatus` CLEAN / DIRTY / BEHIND / BLOCKED / UNSTABLE /
-    #                        HAS_HOOKS / UNKNOWN — the richer, fresher signal.
-    # Gating READY on `mergeable` ALONE flips a PR to ready on a stale MERGEABLE
-    # while the branch actually conflicts (DIRTY) or trails its base (BEHIND).
-    # READY therefore requires BOTH a MERGEABLE verdict AND a computed,
-    # conflict-free merge state. (Polling for the freshly-computed value is
-    # `release-core pr wait`'s job — it loops gather()+evaluate(); on an
-    # uncomputed merge state this returns REVIEWED so the flip can't fire.)
+    #                        HAS_HOOKS / UNKNOWN — the richer, fresher signal,
+    #                        and the one the merge actually obeys.
+    # READY therefore requires the authoritative `mergeStateStatus == CLEAN`,
+    # not just a (stale-able) MERGEABLE verdict. Every other COMPUTED state is a
+    # real reason the PR is not merge-ready and must NOT hand off:
+    #   DIRTY    → conflict          BEHIND → base moved, head out of date
+    #   BLOCKED  → branch protection / a required status not satisfied
+    #   UNSTABLE → a (non-required) check is failing/pending
+    # An UNKNOWN / null merge state means GitHub is still computing — re-poll
+    # (that loop is `release-core pr wait`'s job: gather()+evaluate() until a
+    # terminal state), never flip on it. We do NOT special-case approval-pending
+    # because this fleet requires 0 approving reviews — a reviewed + green PR
+    # reaches CLEAN without a human, so a non-CLEAN computed state is always a
+    # genuine block, not a waiting-on-the-human handoff point.
 
     # A real conflict — from EITHER signal. DIRTY is the authoritative flag;
     # CONFLICTING is its slower, sometimes-stale mirror.
@@ -212,13 +220,9 @@ def evaluate(
         )
         return status
 
-    # READY only when MERGEABLE is confirmed AND the merge state is computed +
-    # conflict-free. An uncomputed (UNKNOWN / null) merge state means GitHub is
-    # still working — never hand off on it, even if `mergeable` optimistically
-    # reads MERGEABLE. (BLOCKED/UNSTABLE/HAS_HOOKS are mergeable-but-pending-on-
-    # the-human states — required CI is already green by the gate above — so
-    # they are legitimate hand-off points: the human approves + merges.)
-    if ctx.mergeable == "MERGEABLE" and ctx.merge_state not in (None, "UNKNOWN"):
+    # CLEAN is the ONLY merge-ready state — mergeable, current, all contexts
+    # green. This is the single hand-off point.
+    if ctx.merge_state == "CLEAN":
         status.state = TaskState.READY
         if ctx.is_draft:
             status.next_action = (
@@ -232,10 +236,19 @@ def evaluate(
             )
         return status
 
-    # Reviewed, but mergeability not yet authoritatively computed (mergeable or
-    # mergeStateStatus still UNKNOWN) — GitHub is computing; re-poll.
-    status.state = TaskState.REVIEWED
-    status.next_action = "reviews done; mergeability not yet determined — re-check shortly"
+    # Merge state not yet computed (UNKNOWN / null) — GitHub is working; re-poll.
+    if ctx.merge_state in (None, "UNKNOWN"):
+        status.state = TaskState.REVIEWED
+        status.next_action = "reviews done; mergeability not yet determined — re-check shortly"
+        return status
+
+    # Computed, but a non-CLEAN merge state (BLOCKED / UNSTABLE / HAS_HOOKS):
+    # GitHub is blocking the merge for a real reason — surface it, don't flip.
+    status.state = TaskState.BLOCKED
+    status.next_action = (
+        f"merge blocked by GitHub (mergeStateStatus={ctx.merge_state}) — a required "
+        "status or branch-protection rule is unmet; resolve before this can be Ready"
+    )
     return status
 
 
