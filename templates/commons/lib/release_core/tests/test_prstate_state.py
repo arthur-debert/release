@@ -69,6 +69,12 @@ def test_evaluate_states(context, fixture, expected):
         ("UNKNOWN", "DIRTY", TaskState.BLOCKED),
         # CLEAN is authoritative even if `mergeable` still lags at UNKNOWN.
         ("UNKNOWN", "CLEAN", TaskState.READY),
+        # A stale CONFLICTING must NOT block when the fresher merge state is
+        # CLEAN — merge_state is authoritative (the mirror of the core bug).
+        ("CONFLICTING", "CLEAN", TaskState.READY),
+        # CONFLICTING is honored only as a fallback when merge_state is uncomputed.
+        ("CONFLICTING", "UNKNOWN", TaskState.BLOCKED),
+        ("CONFLICTING", None, TaskState.BLOCKED),
     ],
 )
 def test_ready_requires_clean_merge_state(context, mergeable, merge_state, expected):

@@ -196,10 +196,15 @@ def evaluate(
     # reaches CLEAN without a human, so a non-CLEAN computed state is always a
     # genuine block, not a waiting-on-the-human handoff point.
 
-    # A real conflict — from EITHER signal. DIRTY is the authoritative flag;
-    # CONFLICTING is its slower, sometimes-stale mirror. Checked first: a
-    # conflict must be resolved regardless of CI.
-    if ctx.mergeable == "CONFLICTING" or ctx.merge_state == "DIRTY":
+    # A real conflict. `mergeStateStatus == DIRTY` is the authoritative flag;
+    # the async-stale `mergeable == CONFLICTING` is only a FALLBACK for when the
+    # merge state is still uncomputed (None/UNKNOWN). Trusting CONFLICTING
+    # unconditionally would false-BLOCK a PR that DIRTY/CLEAN already disproves —
+    # the mirror image of the stale-MERGEABLE bug this gate exists to fix.
+    # Checked first: a conflict must be resolved regardless of CI.
+    if ctx.merge_state == "DIRTY" or (
+        ctx.merge_state in (None, "UNKNOWN") and ctx.mergeable == "CONFLICTING"
+    ):
         status.state = TaskState.BLOCKED
         status.next_action = "merge conflict — rebase/resolve against the base branch"
         return status
