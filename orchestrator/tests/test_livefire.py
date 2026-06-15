@@ -279,3 +279,56 @@ def test_file_then_teardown_both_fail_teardown_wins(monkeypatch):
     with pytest.raises(livefire.LiveFireError, match="teardown failed"):
         livefire._file_then_teardown({"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False)
     assert calls == ["file", "teardown"]
+
+
+# ── rollout: registered_consumers / summarize_rollout / livefire_many ──────
+
+
+def test_summarize_rollout_counts():
+    results = [
+        {"consumer": "a", "verdict": "clean", "findings_filed": []},
+        {"consumer": "b", "verdict": "minor-friction", "findings_filed": ["x", "y"]},
+        {"consumer": "c", "verdict": "error", "error": "boom"},
+    ]
+    s = livefire.summarize_rollout(results)
+    assert s["consumers"] == 3
+    assert s["by_verdict"] == {"clean": 1, "minor-friction": 1, "error": 1}
+    assert s["findings_filed"] == 2
+    assert s["errored"] == ["c"]
+
+
+def test_registered_consumers_parses(monkeypatch):
+    class _Res:
+        returncode = 0
+        stdout = "phos-editor/app\narthur-debert/padz\n# a comment\nnoslash\n\n"
+        stderr = ""
+
+    monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
+    assert livefire.registered_consumers() == ["phos-editor/app", "arthur-debert/padz"]
+
+
+def test_registered_consumers_raises_on_failure(monkeypatch):
+    class _Res:
+        returncode = 1
+        stdout = ""
+        stderr = "registry unreadable"
+
+    monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
+    with pytest.raises(livefire.LiveFireError, match="could not list"):
+        livefire.registered_consumers()
+
+
+def test_livefire_many_aggregates_and_captures_errors(monkeypatch):
+    import asyncio
+
+    async def _fake_one(consumer, **kwargs):
+        if consumer == "bad":
+            raise livefire.LiveFireError("boom")
+        return {"consumer": consumer, "verdict": "clean", "findings_filed": []}
+
+    monkeypatch.setattr(livefire, "livefire_one", _fake_one)
+    report = asyncio.run(livefire.livefire_many(["a", "bad", "c"], concurrency=2))
+    assert report["consumers"] == 3
+    assert report["errored"] == ["bad"]
+    assert report["by_verdict"]["clean"] == 2
+    assert report["by_verdict"]["error"] == 1

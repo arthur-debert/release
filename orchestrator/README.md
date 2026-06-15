@@ -168,11 +168,13 @@ the runner for the standard live-fire prompt
 ([`docs/dev/live-fire-prompt.md`](../docs/dev/live-fire-prompt.md), release#663.2).
 
 ```sh
-orc livefire arthur-debert/padz --yes        # real run
-orc livefire arthur-debert/padz --yes --dry-run   # agent runs; no filing/teardown
+orc livefire arthur-debert/padz --yes              # one consumer
+orc livefire a/b c/d --yes --concurrency 2          # several, 2 at a time
+orc livefire --all --yes                            # every registered consumer
+orc livefire arthur-debert/padz --yes --dry-run     # agent runs; no filing/teardown
 ```
 
-Single-consumer path (#663.3 phase 1). One run:
+Per consumer, one run:
 
 1. **Clones** `<owner/name>` fresh from GitHub into a throwaway dir (origin is
    the real remote, so the agent's coverage PR is real — the value left behind)
@@ -187,12 +189,19 @@ Single-consumer path (#663.3 phase 1). One run:
 5. **Tears down** the throwaway `-release-rc` tag + GH pre-release (the prepare
    step never advanced the branch — #663.1 — so nothing else needs reverting).
 
-`--yes` is required (real PR + real `-release-rc` cut on the consumer);
+**Fleet rollout.** Pass several `<owner/name>` (or `--all`, which pulls the
+registry via `release-core admin repos list`) to run consumers in parallel,
+capped by `--concurrency` (default 3). Results are aggregated into a rollout
+report (counts by verdict, total findings filed, the `errored` list); one
+consumer's failure is captured there, never fatal, and the command exits
+non-zero if any errored. Each run clones into its own temp dir, so concurrent
+runs don't collide.
+
+`--yes` is required (real PR + real `-release-rc` cut on each consumer);
 `--dry-run` skips only the side-effecting filing + teardown — the agent run
 still happens, because that IS the verification. The pure pieces (prompt load,
-feedback parse, finding→issue mapping, teardown command) are unit-tested in
-`tests/test_livefire.py`; parallel fan-out across N consumers is a follow-up
-(an `asyncio.gather` over `livefire_one`).
+feedback parse, finding→issue mapping, teardown command, consumer selection,
+rollout aggregation) are unit-tested in `tests/test_livefire.py`.
 
 ## Layout
 

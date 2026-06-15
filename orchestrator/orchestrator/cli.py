@@ -90,44 +90,52 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 
 def cmd_livefire(args: argparse.Namespace) -> int:
-    """Run the live-fire verification harness against one consumer (release#663).
+    """Run the live-fire verification harness across one or more consumers
+    (release#663).
 
-    Clones `<owner/name>` to a throwaway dir, boots it, runs the ONE standard
+    For each `<owner/name>` (positional, or every registered consumer with
+    `--all`): clone it to a throwaway dir, boot it, run the ONE standard
     live-fire prompt (docs/dev/live-fire-prompt.md) via a fresh agent
-    (`bypassPermissions` — the clone bounds the blast radius), harvests the
-    agent's structured YAML feedback, files each non-ok finding into the
-    release#348 inbox (`release-core issue file`), and tears down the throwaway
-    `-release-rc` tag + GH pre-release. The coverage PR it opens on the
+    (`bypassPermissions` — the clone bounds the blast radius), harvest the
+    agent's structured YAML feedback, file each non-ok finding into the
+    release#348 inbox (`release-core issue file`), and tear down the throwaway
+    `-release-rc` tag + GH pre-release. The coverage PR it opens on each
     consumer's origin is real — that is the value left behind.
 
-    Single-consumer path (#663.3 phase 1); parallel fan-out across N consumers
-    is a follow-up. `--dry-run` skips the side-effecting filing + teardown (the
-    agent run still happens — that IS the verification).
+    Consumers run in parallel, capped at `--concurrency` (default 3). One
+    consumer's failure is captured in the report's `errored` list, not fatal.
+    `--dry-run` skips the side-effecting filing + teardown (the agent run still
+    happens — that IS the verification).
     """
+    try:
+        consumers = livefire.registered_consumers() if args.all else list(args.consumers)
+    except livefire.LiveFireError as e:
+        sys.exit(f"orc livefire: {e}")
+    if not consumers:
+        print("orc livefire: pass one or more <owner/name> consumers, or --all.", file=sys.stderr)
+        return 64
     if not args.yes:
         print(
-            "orc livefire runs a fresh agent with bypassPermissions in a\n"
-            "throwaway clone, opens a REAL coverage PR on the consumer's\n"
-            "origin, and cuts a throwaway -release-rc release. Pass --yes to\n"
-            "confirm you want to drive a real consumer end-to-end.",
+            f"orc livefire would drive {len(consumers)} real consumer(s) "
+            "end-to-end: a fresh bypassPermissions agent in a throwaway clone, a\n"
+            "REAL coverage PR on each origin, and a throwaway -release-rc cut.\n"
+            "Pass --yes to confirm.",
             file=sys.stderr,
         )
         return 2
     _guard_billing()
-    try:
-        summary = asyncio.run(
-            livefire.livefire_one(
-                args.consumer,
-                dry_run=args.dry_run,
-                verbose=args.verbose,
-                keep_clone=args.keep_clone,
-            )
+    report = asyncio.run(
+        livefire.livefire_many(
+            consumers,
+            concurrency=args.concurrency,
+            dry_run=args.dry_run,
+            verbose=args.verbose,
+            keep_clone=args.keep_clone,
         )
-    except livefire.LiveFireError as e:
-        sys.exit(f"orc livefire: {e}")
-    print("\n--- live-fire summary ---")
-    print(json.dumps(summary, indent=2))
-    return 0
+    )
+    print("\n--- live-fire rollout summary ---")
+    print(json.dumps(report, indent=2))
+    return 1 if report["errored"] else 0
 
 
 def cmd_sessions_list(_: argparse.Namespace) -> int:
@@ -341,16 +349,29 @@ def main(argv: list[str] | None = None) -> int:
 
     p_livefire = sub.add_parser(
         "livefire",
-        help="run the live-fire verification harness against one consumer "
-        "(clone → standard prompt → harvest feedback → file to #348 inbox → "
-        "teardown the -release-rc; release#663)",
+        help="run the live-fire verification harness across one or more consumers "
+        "in parallel (clone → standard prompt → harvest feedback → file to #348 "
+        "inbox → teardown the -release-rc; release#663)",
     )
-    p_livefire.add_argument("consumer", help="consumer repo as owner/name (cloned fresh)")
+    p_livefire.add_argument(
+        "consumers", nargs="*", help="consumer repos as owner/name (cloned fresh); or use --all"
+    )
+    p_livefire.add_argument(
+        "--all",
+        action="store_true",
+        help="run against every registered consumer (release-core admin repos list)",
+    )
+    p_livefire.add_argument(
+        "--concurrency",
+        type=int,
+        default=livefire.DEFAULT_CONCURRENCY,
+        help=f"max consumers run in parallel (default {livefire.DEFAULT_CONCURRENCY})",
+    )
     p_livefire.add_argument(
         "--yes",
         action="store_true",
         help="confirm a real end-to-end run (bypassPermissions agent + real "
-        "coverage PR + throwaway -release-rc on the consumer)",
+        "coverage PR + throwaway -release-rc on each consumer)",
     )
     p_livefire.add_argument(
         "--dry-run",
