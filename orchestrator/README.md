@@ -181,7 +181,7 @@ Single-consumer path (#663.3 phase 1). One run:
    clone bounds the blast radius). The prompt is loaded verbatim from the
    ```` ```text ```` fence in `live-fire-prompt.md` — one source, shared with
    the human doc.
-3. **Harvests** the structured ```yaml feedback block the agent ends with.
+3. **Harvests** the structured `yaml` feedback block the agent ends with.
 4. **Files** each non-`ok` finding into the release#348 inbox via
    `release-core issue file <component> …` (grouped by component there).
 5. **Tears down** the throwaway `-release-rc` tag + GH pre-release (the prepare

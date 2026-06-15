@@ -43,8 +43,14 @@ def test_load_prompt_raises_without_fence(tmp_path):
         livefire.load_prompt(doc)
 
 
-def test_load_prompt_real_doc():
-    """The shipped doc must always yield a non-trivial prompt."""
+def test_load_prompt_real_doc(monkeypatch):
+    """The shipped doc must always yield a non-trivial prompt.
+
+    Clear RELEASE_HOME so release_root() falls back to this module's on-disk
+    location (the repo root) — other suites in the bare-pytest run set
+    RELEASE_HOME to their own tmp dirs, and that env must not bleed in here.
+    """
+    monkeypatch.delenv("RELEASE_HOME", raising=False)
     prompt = livefire.load_prompt()
     assert "coverage" in prompt.lower()
     assert "-release-rc" in prompt
@@ -174,6 +180,18 @@ def test_file_findings_dry_run_files_nothing(capsys):
     filed = livefire.file_findings(fb, consumer="arthur-debert/padz", dry_run=True)
     assert len(filed) == 1
     assert "would file" in capsys.readouterr().err
+
+
+@requires_yaml
+def test_file_findings_raises_when_issue_file_fails(monkeypatch):
+    class _Res:
+        returncode = 1
+        stderr = "gh: not authenticated"
+
+    monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
+    fb = livefire.parse_feedback(_TRANSCRIPT)
+    with pytest.raises(livefire.LiveFireError, match="failed to file"):
+        livefire.file_findings(fb, consumer="arthur-debert/padz", dry_run=False)
 
 
 def test_teardown_rc_dry_run(capsys):

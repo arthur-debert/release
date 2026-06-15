@@ -151,9 +151,14 @@ def file_findings(feedback: dict, *, consumer: str, dry_run: bool = False) -> li
     """File each non-ok finding into the release#348 inbox via
     ``release-core issue file``. Returns the one-line symptoms filed (or that
     would be).
+
+    Filing is part of the harness contract — silently dropping a finding defeats
+    the self-improving loop — so a failed ``issue file`` RAISES after attempting
+    all of them (every successful one still lands; the operator re-files the rest).
     """
     specs = findings_to_issues(feedback, consumer=consumer)
     filed: list[str] = []
+    failures: list[str] = []
     for spec in specs:
         cmd = ["release-core", "issue", "file", spec["component"], spec["symptom"]]
         if dry_run:
@@ -161,12 +166,14 @@ def file_findings(feedback: dict, *, consumer: str, dry_run: bool = False) -> li
         else:
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode != 0:
-                print(
-                    f"[warn] failed to file finding [{spec['component']}]: {res.stderr.strip()}",
-                    file=sys.stderr,
-                )
+                failures.append(f"[{spec['component']}] {spec['symptom']}: {res.stderr.strip()}")
                 continue
         filed.append(spec["symptom"])
+    if failures:
+        raise LiveFireError(
+            f"failed to file {len(failures)} of {len(specs)} finding(s) to the #348 "
+            "inbox (re-file by hand): " + "; ".join(failures)
+        )
     return filed
 
 
