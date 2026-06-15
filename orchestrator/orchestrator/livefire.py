@@ -215,23 +215,24 @@ def teardown_rc(consumer: str, rc_tag: str | None, *, dry_run: bool = False) -> 
 def _file_then_teardown(
     feedback: dict, *, consumer: str, dry_run: bool
 ) -> tuple[list[str], str | None]:
-    """File findings, then ALWAYS attempt rc teardown, then re-raise any filing
-    error. Teardown must run even when filing fails — otherwise a filing error
-    (e.g. auth) would strand the throwaway ``-release-rc`` on the consumer. If
-    BOTH fail, the teardown error propagates (the stray release is the more
-    urgent problem). Returns ``(filed, torn_down)`` on success.
+    """File findings, then ALWAYS attempt rc teardown. Teardown must run even
+    when filing fails — otherwise a filing error (e.g. auth) would strand the
+    throwaway ``-release-rc`` on the consumer.
+
+    Implemented as ``try/finally`` so that: a filing error propagates with its
+    ORIGINAL traceback (no catch-and-re-raise); teardown still runs in the
+    ``finally``; and if BOTH fail, the teardown exception raised in the
+    ``finally`` supersedes the filing one — the stray release is the more urgent
+    problem. Returns ``(filed, torn_down)`` on success.
     """
     rc_tag = feedback.get("rc")
     rc = rc_tag if isinstance(rc_tag, str) else None
     filed: list[str] = []
-    file_error: LiveFireError | None = None
+    torn_down: str | None = None
     try:
         filed = file_findings(feedback, consumer=consumer, dry_run=dry_run)
-    except LiveFireError as e:
-        file_error = e
-    torn_down = teardown_rc(consumer, rc, dry_run=dry_run)
-    if file_error is not None:
-        raise file_error
+    finally:
+        torn_down = teardown_rc(consumer, rc, dry_run=dry_run)
     return filed, torn_down
 
 
