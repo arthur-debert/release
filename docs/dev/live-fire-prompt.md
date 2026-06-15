@@ -67,8 +67,10 @@ to do something, that is a finding — note it and use your best guess.
 
 4. RELEASE HALF. Cut a throwaway verification release to exercise the release
    pipeline without polluting the version line: use the reserved pre-release
-   suffix `-release-rc` (e.g. if the current version is 1.4.2, cut
-   `1.4.3-release-rc`). Discover the cut command. Report whether it dispatched,
+   suffix `-release-rc` (e.g. if the current version is 1.4.2, cut the bare
+   version `1.4.3-release-rc` — no leading `v`; the cut command rejects a `v`
+   prefix and the resulting tag becomes `v1.4.3-release-rc`). Discover the cut
+   command. Report whether it dispatched,
    whether the pipeline ran prep → build → (sign/notarize) → publish, and
    whether it left the branch / version line clean. Do NOT clean up the rc
    tag/release yourself — the harness does teardown.
@@ -83,14 +85,14 @@ Output the feedback as a single fenced ```yaml block with this shape:
 
 ```yaml
 repo: <owner/name>
-verdict: clean | minor-friction | blocked       # one word
-pr: <url or "none — blocked at step N">
-rc: <tag cut, or "none — blocked at step N">
+verdict: <clean|minor-friction|blocked>
+pr: <url, or "none — blocked at step N">
+rc: <vX.Y.Z-release-rc tag cut, or "none — blocked at step N">
 findings:
-  - step: coverage | commit | pr | release | discovery
+  - step: <coverage|commit|pr|release|discovery>
     component: <the release surface it concerns, e.g. how-to, gate, changelog,
                 pr-loop, cut, docs, skills — your best label>
-    severity: blocker | friction | papercut | ok
+    severity: <blocker|friction|papercut|ok>
     what: <what happened, specifically>
     expected: <what you expected / what would have helped>
 ```
