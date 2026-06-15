@@ -215,16 +215,13 @@ def _print_row(pr: dict) -> None:
     else:
         ur_text, ur_clr = "-", ""
 
-    # Merge-ready green requires a CLEAN merge state, not just a (possibly
-    # stale/optimistic) MERGEABLE verdict — same contract as the state engine
-    # (release#675): a DIRTY/BEHIND/UNKNOWN merge state is not merge-ready.
+    # Merge-ready green keys on the CLEAN merge state — the authoritative,
+    # merge-obeyed signal — NOT the async-stale `mergeable` verdict (same
+    # contract as the state engine, release#675). CLEAN already implies
+    # mergeable; requiring `mergeable == MERGEABLE` too would false-negative a
+    # genuinely-clean PR whose `mergeable` field still lags at UNKNOWN.
     url_clr = ""
-    if (
-        ci_state == "SUCCESS"
-        and mergeable == "MERGEABLE"
-        and merge_state == "CLEAN"
-        and threads_unresolved == 0
-    ):
+    if ci_state == "SUCCESS" and merge_state == "CLEAN" and threads_unresolved == 0:
         url_clr = GRN
 
     line = f"  {('#' + str(num)):<6} "

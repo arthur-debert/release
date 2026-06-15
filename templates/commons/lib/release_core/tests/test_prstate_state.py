@@ -97,6 +97,30 @@ def test_behind_base_says_update_the_branch(context):
     assert "behind" in status.next_action and "update" in status.next_action
 
 
+def test_behind_base_takes_precedence_over_pending_ci(context):
+    # A moved base re-stales CI, so a behind PR with pending checks must give the
+    # actionable "update the branch" next action, not "wait for checks" — BEHIND
+    # is gated before CI state (release#675).
+    import dataclasses
+
+    pending = [{"__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": None}]
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="BEHIND", checks=pending)
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "behind" in status.next_action
+
+
+def test_non_clean_block_message_is_generic_not_required(context):
+    # UNSTABLE = a NON-required check; the message must not assert "required".
+    import dataclasses
+
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE")
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "UNSTABLE" in status.next_action
+    assert "required" not in status.next_action
+
+
 def test_best_effort_gemini_does_not_gate_ready(context):
     # Gemini is NOT_REQUESTED here, yet Copilot (required) is done clean with
     # green checks -> READY. A best-effort reviewer must not hold it back.

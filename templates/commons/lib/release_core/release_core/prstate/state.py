@@ -194,10 +194,23 @@ def evaluate(
     # genuine block, not a waiting-on-the-human handoff point.
 
     # A real conflict — from EITHER signal. DIRTY is the authoritative flag;
-    # CONFLICTING is its slower, sometimes-stale mirror.
+    # CONFLICTING is its slower, sometimes-stale mirror. Checked first: a
+    # conflict must be resolved regardless of CI.
     if ctx.mergeable == "CONFLICTING" or ctx.merge_state == "DIRTY":
         status.state = TaskState.BLOCKED
         status.next_action = "merge conflict — rebase/resolve against the base branch"
+        return status
+
+    # Behind the base branch: the head no longer contains the base tip, so it
+    # cannot merge cleanly. Checked BEFORE CI because a moved base re-stales the
+    # branch's review + checks — reporting VALIDATING/CI-blocked here would give
+    # a misleading next action; "update the branch" is the actionable one. The
+    # agent updates and re-evaluates — not a human handoff.
+    if ctx.merge_state == "BEHIND":
+        status.state = TaskState.BLOCKED
+        status.next_action = (
+            "branch is behind its base — update it (merge/rebase the base) before this can be Ready"
+        )
         return status
 
     if checks == ChecksState.FAILING:
@@ -210,29 +223,19 @@ def evaluate(
         status.next_action = "reviews done; CI check(s) running — wait for checks"
         return status
 
-    # Behind the base branch: the head no longer contains the base tip, so it
-    # cannot merge cleanly (and a moved base re-stales review + CI anyway). The
-    # agent updates the branch and re-evaluates — not a human handoff.
-    if ctx.merge_state == "BEHIND":
-        status.state = TaskState.BLOCKED
-        status.next_action = (
-            "branch is behind its base — update it (merge/rebase the base) before this can be Ready"
-        )
-        return status
-
     # CLEAN is the ONLY merge-ready state — mergeable, current, all contexts
     # green. This is the single hand-off point.
     if ctx.merge_state == "CLEAN":
         status.state = TaskState.READY
         if ctx.is_draft:
             status.next_action = (
-                "reviewed + CI green + mergeable — run `release-core pr ready` "
-                "to flip draft->ready and page the human"
+                "reviewed + threads resolved + CI green + CLEAN merge state — run "
+                "`release-core pr ready` to flip draft->ready and page the human"
             )
         else:
             status.next_action = (
-                "reviewed + CI green + mergeable, already ready-for-review — "
-                "done; await the human's verify + merge"
+                "reviewed + threads resolved + CI green + CLEAN merge state, already "
+                "ready-for-review — done; await the human's verify + merge"
             )
         return status
 
@@ -243,11 +246,13 @@ def evaluate(
         return status
 
     # Computed, but a non-CLEAN merge state (BLOCKED / UNSTABLE / HAS_HOOKS):
-    # GitHub is blocking the merge for a real reason — surface it, don't flip.
+    # GitHub is blocking the merge for a real reason — a status check or
+    # branch-protection rule (UNSTABLE = a non-required check failing/pending).
+    # Surface it; don't flip.
     status.state = TaskState.BLOCKED
     status.next_action = (
-        f"merge blocked by GitHub (mergeStateStatus={ctx.merge_state}) — a required "
-        "status or branch-protection rule is unmet; resolve before this can be Ready"
+        f"merge blocked by GitHub (mergeStateStatus={ctx.merge_state}) — a status "
+        "check or branch-protection rule is unsatisfied; resolve before this can be Ready"
     )
     return status
 
