@@ -51,6 +51,17 @@ if [[ -n "$("$SEMVER" get prerel "${NEW_VERSION}")" ]]; then
   IS_PRERELEASE=true
 fi
 
+# Reserved verification suffix (release#663): a `-release-rc` prerelease is a
+# throwaway live-fire cut. It builds + tags + publishes a GitHub pre-release
+# like any RC, but the bump commit is NOT pushed to the branch (the tag alone
+# carries it), so the consumer's version line / main history stay clean. The
+# live-fire harness deletes the tag + GH release on teardown. Normal RCs
+# (`-rc.1`) keep real-RC behavior.
+IS_VERIFY=false
+case "${NEW_VERSION}" in
+  *-release-rc|*-release-rc.*) IS_VERIFY=true ;;
+esac
+
 # ── Early changelog validation ────────────────────────────────────
 if [ -n "${CHANGELOG}" ]; then
   CHANGELOG="${CHANGELOG}" bash "${script_dir}/check-changelog-fragments.sh"
@@ -157,7 +168,15 @@ if [ -s release-notes.md ]; then
 else
   git tag -a "${TAG}" -m "Release ${TAG}"
 fi
-git push origin HEAD "${TAG}"
+# Verification rc (release#663): tag-only — the tag carries the bump commit to
+# the remote, but the branch ref is NOT advanced, so the consumer's main stays
+# clean. Downstream jobs check out release-sha, reachable via the pushed tag.
+if [ "${IS_VERIFY}" = "true" ]; then
+  echo "verification rc (${TAG}): tag-only — not advancing the branch (release#663)."
+  git push origin "${TAG}"
+else
+  git push origin HEAD "${TAG}"
+fi
 
 emit "version=${NEW_VERSION}"
 emit "prerelease=${IS_PRERELEASE}"

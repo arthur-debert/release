@@ -1,0 +1,1 @@
+- Reserve the -release-rc pre-release suffix as a no-trace verification cut (tag-only; bump commit not pushed to the branch) for the live-fire harness (#663)
