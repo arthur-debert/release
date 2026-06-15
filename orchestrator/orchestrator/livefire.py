@@ -25,10 +25,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-import yaml
-
 from .boot import BootError, boot_clone
-from .session import run_session
+
+# NOTE: `yaml` (parse_feedback) and `.session`/the Claude Agent SDK
+# (livefire_one) are imported LAZILY inside the functions that use them — this
+# module must stay importable WITHOUT the SDK or pyyaml so its pure logic is
+# collected by the light, SDK-free `pytest` CI job (same contract as
+# orchestrator.watch; see pyproject testpaths note, release#578).
 
 PROMPT_DOC_REL = "docs/dev/live-fire-prompt.md"
 # The agent prompt lives in a 4-backtick ```` ```text ```` fence so the embedded
@@ -79,6 +82,8 @@ def parse_feedback(transcript: str) -> dict:
     yaml fence is the report (earlier ones may be incidental). Raises rather
     than returning a partial — a missing/unparseable report is a failed run.
     """
+    import yaml  # lazy — keep module import SDK/dep-free for the light CI job
+
     blocks = _YAML_BLOCK_RE.findall(transcript)
     if not blocks:
         raise LiveFireError("agent produced no ```yaml feedback block")
@@ -209,6 +214,8 @@ async def livefire_one(
         boot_clone(str(clone))
     except BootError as e:
         raise LiveFireError(f"boot failed for {consumer} — run invalidated: {e}") from e
+
+    from .session import run_session  # lazy — pulls the Claude Agent SDK
 
     prompt = load_prompt()
     sink: list[str] = []

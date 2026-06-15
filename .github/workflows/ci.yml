@@ -77,6 +77,11 @@ jobs:
           # pip requirement (a single dep like `click>=8,<9` has no spaces).
           # shellcheck disable=SC2086
           [ -n "$deps" ] && pip install $deps || true
+          # The SDK-free orchestrator tests (orchestrator.livefire pure logic,
+          # release#663) need pyyaml to parse the harness feedback block. The
+          # Claude Agent SDK is deliberately NOT installed — livefire lazy-imports
+          # it, so only its pure logic is exercised here (same contract as watch).
+          pip install pyyaml
       - name: pytest
         run: pytest
 

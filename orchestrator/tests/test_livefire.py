@@ -1,10 +1,18 @@
 """Unit tests for orc livefire pure logic — no SDK, no network (release#663)."""
 
+import importlib.util
 import textwrap
 
 import pytest
 
 from orchestrator import livefire
+
+# parse_feedback lazy-imports pyyaml; skip its tests where pyyaml is absent so
+# the SDK-free CI job stays green even without it (it's installed there — see
+# ci.yml — this is belt-and-suspenders).
+requires_yaml = pytest.mark.skipif(
+    importlib.util.find_spec("yaml") is None, reason="pyyaml not installed"
+)
 
 # ── load_prompt ───────────────────────────────────────────────────────────
 
@@ -69,6 +77,7 @@ _TRANSCRIPT = textwrap.dedent(
 )
 
 
+@requires_yaml
 def test_parse_feedback_reads_last_yaml_block():
     fb = livefire.parse_feedback(_TRANSCRIPT)
     assert fb["repo"] == "arthur-debert/padz"
@@ -76,16 +85,19 @@ def test_parse_feedback_reads_last_yaml_block():
     assert len(fb["findings"]) == 2
 
 
+@requires_yaml
 def test_parse_feedback_picks_last_block():
     t = "```yaml\nx: 1\n```\n\nmore\n\n```yaml\nrepo: r\nverdict: clean\n```"
     assert livefire.parse_feedback(t)["repo"] == "r"
 
 
+@requires_yaml
 def test_parse_feedback_raises_without_block():
     with pytest.raises(livefire.LiveFireError):
         livefire.parse_feedback("no yaml here at all")
 
 
+@requires_yaml
 def test_parse_feedback_raises_on_non_mapping():
     with pytest.raises(livefire.LiveFireError):
         livefire.parse_feedback("```yaml\n- just\n- a\n- list\n```")
@@ -94,6 +106,7 @@ def test_parse_feedback_raises_on_non_mapping():
 # ── findings_to_issues ────────────────────────────────────────────────────
 
 
+@requires_yaml
 def test_findings_to_issues_drops_ok_and_maps():
     fb = livefire.parse_feedback(_TRANSCRIPT)
     specs = livefire.findings_to_issues(fb, consumer="arthur-debert/padz")
@@ -140,6 +153,7 @@ def test_teardown_command_skips_non_verification_tags(rc):
 # ── file_findings / teardown_rc dry-run (no subprocess) ───────────────────
 
 
+@requires_yaml
 def test_file_findings_dry_run_files_nothing(capsys):
     fb = livefire.parse_feedback(_TRANSCRIPT)
     filed = livefire.file_findings(fb, consumer="arthur-debert/padz", dry_run=True)
