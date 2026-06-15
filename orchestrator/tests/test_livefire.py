@@ -324,11 +324,31 @@ def test_livefire_many_aggregates_and_captures_errors(monkeypatch):
     async def _fake_one(consumer, **kwargs):
         if consumer == "bad":
             raise livefire.LiveFireError("boom")
+        if consumer == "weird":
+            raise RuntimeError("unexpected SDK blowup")  # non-LiveFireError
         return {"consumer": consumer, "verdict": "clean", "findings_filed": []}
 
     monkeypatch.setattr(livefire, "livefire_one", _fake_one)
-    report = asyncio.run(livefire.livefire_many(["a", "bad", "c"], concurrency=2))
-    assert report["consumers"] == 3
-    assert report["errored"] == ["bad"]
+    report = asyncio.run(livefire.livefire_many(["a", "bad", "weird", "c"], concurrency=2))
+    assert report["consumers"] == 4
+    # both a LiveFireError and an unexpected RuntimeError are captured, not fatal
+    assert sorted(report["errored"]) == ["bad", "weird"]
     assert report["by_verdict"]["clean"] == 2
-    assert report["by_verdict"]["error"] == 1
+    assert report["by_verdict"]["error"] == 2
+
+
+def test_livefire_many_honors_concurrency_cap(monkeypatch):
+    import asyncio
+
+    state = {"active": 0, "max": 0}
+
+    async def _fake_one(consumer, **kwargs):
+        state["active"] += 1
+        state["max"] = max(state["max"], state["active"])
+        await asyncio.sleep(0.01)  # hold the slot so overlap is observable
+        state["active"] -= 1
+        return {"consumer": consumer, "verdict": "clean", "findings_filed": []}
+
+    monkeypatch.setattr(livefire, "livefire_one", _fake_one)
+    asyncio.run(livefire.livefire_many([f"r{i}" for i in range(8)], concurrency=2))
+    assert state["max"] <= 2  # the semaphore cap was honored

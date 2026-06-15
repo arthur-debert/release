@@ -380,8 +380,16 @@ async def livefire_many(
                 return await livefire_one(
                     consumer, dry_run=dry_run, verbose=verbose, keep_clone=keep_clone
                 )
-            except LiveFireError as e:
-                return {"consumer": consumer, "verdict": "error", "error": str(e)}
+            except Exception as e:  # noqa: BLE001 — one consumer must never abort the round
+                # Capture ANY per-consumer failure (LiveFireError, or an
+                # unexpected SDK/runtime error from run_session) so the rollout
+                # continues. CancelledError is a BaseException and still
+                # propagates, so cancellation is unaffected.
+                return {
+                    "consumer": consumer,
+                    "verdict": "error",
+                    "error": f"{type(e).__name__}: {e}",
+                }
 
     results = await asyncio.gather(*(_one(c) for c in consumers))
     return summarize_rollout(list(results))

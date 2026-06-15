@@ -107,6 +107,12 @@ def cmd_livefire(args: argparse.Namespace) -> int:
     `--dry-run` skips the side-effecting filing + teardown (the agent run still
     happens — that IS the verification).
     """
+    if args.all and args.consumers:
+        print(
+            "orc livefire: pass either explicit <owner/name> consumers OR --all, not both.",
+            file=sys.stderr,
+        )
+        return 64
     try:
         consumers = livefire.registered_consumers() if args.all else list(args.consumers)
     except livefire.LiveFireError as e:
