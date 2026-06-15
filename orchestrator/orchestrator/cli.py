@@ -113,6 +113,9 @@ def cmd_livefire(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 64
+    if args.concurrency < 1:
+        print("orc livefire: --concurrency must be >= 1.", file=sys.stderr)
+        return 64
     try:
         consumers = livefire.registered_consumers() if args.all else list(args.consumers)
     except livefire.LiveFireError as e:

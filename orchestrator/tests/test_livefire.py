@@ -300,7 +300,16 @@ def test_summarize_rollout_counts():
 def test_registered_consumers_parses(monkeypatch):
     class _Res:
         returncode = 0
-        stdout = "phos-editor/app\narthur-debert/padz\n# a comment\nnoslash\n\n"
+        # clean lines kept; comment, blank, no-slash, and a tab-separated /
+        # extra-column line are all skipped.
+        stdout = (
+            "phos-editor/app\n"
+            "arthur-debert/padz\n"
+            "# a comment\n"
+            "noslash\n"
+            "owner/name\textra-column\n"
+            "\n"
+        )
         stderr = ""
 
     monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())

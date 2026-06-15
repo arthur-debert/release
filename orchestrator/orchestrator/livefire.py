@@ -324,15 +324,31 @@ async def livefire_one(
 
 
 DEFAULT_CONCURRENCY = 3
+# A clean `owner/name` line — exactly one slash, no whitespace/extra columns. So
+# a stray tab-separated or trailing-column line (if the verb's output ever grows
+# one) is skipped rather than turned into a bogus clone target.
+_OWNER_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 def registered_consumers() -> list[str]:
     """Every consumer in the fleet registry, via ``release-core admin repos
-    list`` (the one source of truth — no re-parsing managed-repos.yaml here)."""
+    list`` (the one source of truth — no re-parsing managed-repos.yaml here).
+
+    Each line is stripped, then comments/blanks are skipped and only clean
+    ``owner/name`` tokens are kept — defensive against any future trailing
+    columns in the verb's output.
+    """
     res = subprocess.run(["release-core", "admin", "repos", "list"], capture_output=True, text=True)
     if res.returncode != 0:
         raise LiveFireError(f"could not list registered consumers: {res.stderr.strip()}")
-    return [ln.strip() for ln in res.stdout.splitlines() if "/" in ln and not ln.startswith("#")]
+    consumers: list[str] = []
+    for raw in res.stdout.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _OWNER_NAME_RE.fullmatch(line):
+            consumers.append(line)
+    return consumers
 
 
 def summarize_rollout(results: list[dict]) -> dict:
