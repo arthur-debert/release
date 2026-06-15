@@ -1,0 +1,1 @@
+- Add the canonical standard live-fire verification prompt + structured-feedback schema (#663.2)
