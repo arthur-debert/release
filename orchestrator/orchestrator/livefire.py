@@ -212,6 +212,29 @@ def teardown_rc(consumer: str, rc_tag: str | None, *, dry_run: bool = False) -> 
     return rc_tag
 
 
+def _file_then_teardown(
+    feedback: dict, *, consumer: str, dry_run: bool
+) -> tuple[list[str], str | None]:
+    """File findings, then ALWAYS attempt rc teardown, then re-raise any filing
+    error. Teardown must run even when filing fails — otherwise a filing error
+    (e.g. auth) would strand the throwaway ``-release-rc`` on the consumer. If
+    BOTH fail, the teardown error propagates (the stray release is the more
+    urgent problem). Returns ``(filed, torn_down)`` on success.
+    """
+    rc_tag = feedback.get("rc")
+    rc = rc_tag if isinstance(rc_tag, str) else None
+    filed: list[str] = []
+    file_error: LiveFireError | None = None
+    try:
+        filed = file_findings(feedback, consumer=consumer, dry_run=dry_run)
+    except LiveFireError as e:
+        file_error = e
+    torn_down = teardown_rc(consumer, rc, dry_run=dry_run)
+    if file_error is not None:
+        raise file_error
+    return filed, torn_down
+
+
 def _clone(consumer: str, parent: Path) -> Path:
     """Clone the consumer from GitHub into a throwaway dir (origin = the real
     remote, so the agent's coverage PR is real). Uses `gh repo clone` for auth."""
@@ -275,18 +298,14 @@ async def livefire_one(
         transcript = "".join(sink)
         feedback = parse_feedback(transcript)
 
-        filed = file_findings(feedback, consumer=consumer, dry_run=dry_run)
-        rc_tag = feedback.get("rc")
-        torn_down = teardown_rc(
-            consumer, rc_tag if isinstance(rc_tag, str) else None, dry_run=dry_run
-        )
+        filed, torn_down = _file_then_teardown(feedback, consumer=consumer, dry_run=dry_run)
 
         retained = keep_clone or not owns_parent
         return {
             "consumer": consumer,
             "verdict": feedback.get("verdict"),
             "pr": feedback.get("pr"),
-            "rc": rc_tag,
+            "rc": feedback.get("rc"),
             "findings_filed": filed,
             "rc_torn_down": torn_down,
             # Only report a path that still exists; the default deletes the clone.

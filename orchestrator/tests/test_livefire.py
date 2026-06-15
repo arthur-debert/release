@@ -227,3 +227,35 @@ def test_teardown_rc_raises_on_failure(monkeypatch):
     monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
     with pytest.raises(livefire.LiveFireError, match="teardown failed"):
         livefire.teardown_rc("o/n", "v1.4.3-release-rc", dry_run=False)
+
+
+# ── _file_then_teardown ordering (the contract: teardown ALWAYS attempted) ──
+
+
+def test_file_then_teardown_happy_path(monkeypatch):
+    calls = []
+    monkeypatch.setattr(livefire, "file_findings", lambda *a, **k: calls.append("file") or ["s"])
+    monkeypatch.setattr(
+        livefire, "teardown_rc", lambda *a, **k: calls.append("teardown") or "v1.2.3-release-rc"
+    )
+    filed, torn = livefire._file_then_teardown(
+        {"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False
+    )
+    assert filed == ["s"] and torn == "v1.2.3-release-rc"
+    assert calls == ["file", "teardown"]
+
+
+def test_file_then_teardown_tears_down_even_when_filing_fails(monkeypatch):
+    calls = []
+
+    def _boom(*a, **k):
+        calls.append("file")
+        raise livefire.LiveFireError("file failed")
+
+    monkeypatch.setattr(livefire, "file_findings", _boom)
+    monkeypatch.setattr(livefire, "teardown_rc", lambda *a, **k: calls.append("teardown"))
+    # teardown is attempted despite the filing failure, then the filing error
+    # re-raises so the run still fails loudly.
+    with pytest.raises(livefire.LiveFireError, match="file failed"):
+        livefire._file_then_teardown({"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False)
+    assert calls == ["file", "teardown"]
