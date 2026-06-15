@@ -113,14 +113,29 @@ def test_findings_to_issues_drops_ok_and_maps():
     assert len(specs) == 1  # the ok one is dropped
     spec = specs[0]
     assert spec["component"] == "how-to"
-    assert spec["title"].startswith("[how-to] live-fire (friction):")
-    assert "arthur-debert/padz" in spec["body"]
+    # symptom is a single line WITHOUT a [component] prefix (issue file adds it)
+    assert not spec["symptom"].startswith("[")
+    assert "\n" not in spec["symptom"]
+    assert "friction" in spec["symptom"]
+    assert "arthur-debert/padz" in spec["symptom"]
+    assert "expected:" in spec["symptom"]
 
 
 def test_findings_to_issues_defaults_component():
     fb = {"findings": [{"severity": "blocker", "what": "boom"}]}
     specs = livefire.findings_to_issues(fb, consumer="o/n")
     assert specs[0]["component"] == "uncategorized"
+
+
+def test_findings_to_issues_symptom_is_single_line_and_bounded():
+    fb = {
+        "findings": [
+            {"severity": "friction", "component": "gate", "what": "x\n" * 500, "expected": "y"}
+        ]
+    }
+    sym = livefire.findings_to_issues(fb, consumer="o/n")[0]["symptom"]
+    assert "\n" not in sym
+    assert len(sym) <= livefire._SYMPTOM_MAX
 
 
 def test_findings_to_issues_empty():
@@ -169,3 +184,13 @@ def test_teardown_rc_dry_run(capsys):
 
 def test_teardown_rc_nothing_to_do():
     assert livefire.teardown_rc("o/n", None, dry_run=True) is None
+
+
+def test_teardown_rc_raises_on_failure(monkeypatch):
+    class _Res:
+        returncode = 1
+        stderr = "release not found"
+
+    monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
+    with pytest.raises(livefire.LiveFireError, match="teardown failed"):
+        livefire.teardown_rc("o/n", "v1.4.3-release-rc", dry_run=False)

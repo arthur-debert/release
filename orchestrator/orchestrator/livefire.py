@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -96,12 +97,18 @@ def parse_feedback(transcript: str) -> dict:
     return data
 
 
+_SYMPTOM_MAX = 200
+
+
 def findings_to_issues(feedback: dict, *, consumer: str) -> list[dict]:
     """Map non-``ok`` findings to inbox issue specs.
 
     ``severity: ok`` entries are dropped (signal, not noise — per the prompt's
-    routing note). Each spec is ``{component, title, body}`` ready for
-    ``release-core issue file <component> <message>``.
+    routing note). Each spec is ``{component, symptom}`` ready for
+    ``release-core issue file <component> <one-line-symptom>``. The ``issue
+    file`` verb builds the ``[component]`` title + body itself, so ``symptom``
+    is a single line WITHOUT a component prefix — the finding's detail
+    (step/severity/what/expected) folded into one line and length-bounded.
     """
     specs: list[dict] = []
     for f in feedback.get("findings") or []:
@@ -114,15 +121,15 @@ def findings_to_issues(feedback: dict, *, consumer: str) -> list[dict]:
         step = str(f.get("step") or "?").strip()
         what = str(f.get("what") or "").strip()
         expected = str(f.get("expected") or "").strip()
-        title = f"[{component}] live-fire ({severity}): {what[:80] or step}"
-        body = (
-            f"Surfaced by the live-fire harness (release#663) on `{consumer}`.\n\n"
-            f"- **step:** {step}\n"
-            f"- **severity:** {severity}\n"
-            f"- **what:** {what or '(none)'}\n"
-            f"- **expected:** {expected or '(none)'}\n"
-        )
-        specs.append({"component": component, "title": title, "body": body, "message": title})
+        symptom = f"live-fire/{step} ({severity}) on {consumer}: {what or '(no detail)'}"
+        if expected:
+            symptom += f" — expected: {expected}"
+        # Collapse any newlines/runs of whitespace to keep it a single line, then
+        # bound the length (it becomes the GitHub issue title).
+        symptom = " ".join(symptom.split())
+        if len(symptom) > _SYMPTOM_MAX:
+            symptom = symptom[: _SYMPTOM_MAX - 1].rstrip() + "…"
+        specs.append({"component": component, "symptom": symptom})
     return specs
 
 
@@ -142,14 +149,15 @@ def teardown_command(consumer: str, rc_tag: str | None) -> list[str] | None:
 
 def file_findings(feedback: dict, *, consumer: str, dry_run: bool = False) -> list[str]:
     """File each non-ok finding into the release#348 inbox via
-    ``release-core issue file``. Returns the messages filed (or that would be).
+    ``release-core issue file``. Returns the one-line symptoms filed (or that
+    would be).
     """
     specs = findings_to_issues(feedback, consumer=consumer)
     filed: list[str] = []
     for spec in specs:
-        cmd = ["release-core", "issue", "file", spec["component"], spec["body"]]
+        cmd = ["release-core", "issue", "file", spec["component"], spec["symptom"]]
         if dry_run:
-            print(f"[dry-run] would file: [{spec['component']}] {spec['title']}", file=sys.stderr)
+            print(f"[dry-run] would file: [{spec['component']}] {spec['symptom']}", file=sys.stderr)
         else:
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode != 0:
@@ -158,13 +166,18 @@ def file_findings(feedback: dict, *, consumer: str, dry_run: bool = False) -> li
                     file=sys.stderr,
                 )
                 continue
-        filed.append(spec["title"])
+        filed.append(spec["symptom"])
     return filed
 
 
 def teardown_rc(consumer: str, rc_tag: str | None, *, dry_run: bool = False) -> str | None:
     """Delete the throwaway rc tag + GH pre-release on the consumer. Returns the
-    tag torn down, or None if there was nothing to do."""
+    tag torn down, or None if there was nothing to do.
+
+    Teardown is part of the harness contract: a failed delete leaves a stray
+    ``-release-rc`` release/tag on the consumer, so it RAISES (fails the run)
+    rather than warning — the operator must clean it up immediately.
+    """
     cmd = teardown_command(consumer, rc_tag)
     if cmd is None:
         return None
@@ -173,8 +186,10 @@ def teardown_rc(consumer: str, rc_tag: str | None, *, dry_run: bool = False) -> 
         return rc_tag
     res = subprocess.run(cmd, capture_output=True, text=True)
     if res.returncode != 0:
-        print(f"[warn] rc teardown failed for {rc_tag}: {res.stderr.strip()}", file=sys.stderr)
-        return None
+        raise LiveFireError(
+            f"rc teardown failed for {rc_tag} on {consumer} "
+            f"(stray pre-release left behind — delete it by hand): {res.stderr.strip()}"
+        )
     return rc_tag
 
 
@@ -199,6 +214,7 @@ async def livefire_one(
     clone_parent: str | None = None,
     dry_run: bool = False,
     verbose: bool = False,
+    keep_clone: bool = False,
 ) -> dict:
     """Run the full single-consumer live-fire loop and return a summary dict.
 
@@ -206,40 +222,55 @@ async def livefire_one(
     and teardown (the agent run still happens — that IS the test). Cloning into
     a fresh temp dir bounds the blast radius; the coverage PR it opens on the
     consumer's origin is real (the value left behind), the rc is torn down.
+
+    The throwaway clone is removed when the run finishes (its only value was the
+    pushed PR). Pass ``keep_clone=True`` (or an explicit ``clone_parent``) to
+    retain it for debugging — a caller-supplied ``clone_parent`` is never
+    deleted, since the caller owns it.
     """
-    parent = Path(clone_parent) if clone_parent else Path(tempfile.mkdtemp(prefix="livefire-"))
-    clone = _clone(consumer, parent)
+    if clone_parent:
+        parent, owns_parent = Path(clone_parent), False
+    else:
+        parent, owns_parent = Path(tempfile.mkdtemp(prefix="livefire-")), True
 
     try:
-        boot_clone(str(clone))
-    except BootError as e:
-        raise LiveFireError(f"boot failed for {consumer} — run invalidated: {e}") from e
+        clone = _clone(consumer, parent)
 
-    from .session import run_session  # lazy — pulls the Claude Agent SDK
+        try:
+            boot_clone(str(clone))
+        except BootError as e:
+            raise LiveFireError(f"boot failed for {consumer} — run invalidated: {e}") from e
 
-    prompt = load_prompt()
-    sink: list[str] = []
-    await run_session(
-        str(clone),
-        prompt,
-        permission_mode="bypassPermissions",
-        persist_session=False,
-        verbose=verbose,
-        text_sink=sink,
-    )
-    transcript = "".join(sink)
-    feedback = parse_feedback(transcript)
+        from .session import run_session  # lazy — pulls the Claude Agent SDK
 
-    filed = file_findings(feedback, consumer=consumer, dry_run=dry_run)
-    rc_tag = feedback.get("rc")
-    torn_down = teardown_rc(consumer, rc_tag if isinstance(rc_tag, str) else None, dry_run=dry_run)
+        prompt = load_prompt()
+        sink: list[str] = []
+        await run_session(
+            str(clone),
+            prompt,
+            permission_mode="bypassPermissions",
+            persist_session=False,
+            verbose=verbose,
+            text_sink=sink,
+        )
+        transcript = "".join(sink)
+        feedback = parse_feedback(transcript)
 
-    return {
-        "consumer": consumer,
-        "verdict": feedback.get("verdict"),
-        "pr": feedback.get("pr"),
-        "rc": rc_tag,
-        "findings_filed": filed,
-        "rc_torn_down": torn_down,
-        "clone": str(clone),
-    }
+        filed = file_findings(feedback, consumer=consumer, dry_run=dry_run)
+        rc_tag = feedback.get("rc")
+        torn_down = teardown_rc(
+            consumer, rc_tag if isinstance(rc_tag, str) else None, dry_run=dry_run
+        )
+
+        return {
+            "consumer": consumer,
+            "verdict": feedback.get("verdict"),
+            "pr": feedback.get("pr"),
+            "rc": rc_tag,
+            "findings_filed": filed,
+            "rc_torn_down": torn_down,
+            "clone": str(clone),
+        }
+    finally:
+        if owns_parent and not keep_clone:
+            shutil.rmtree(parent, ignore_errors=True)

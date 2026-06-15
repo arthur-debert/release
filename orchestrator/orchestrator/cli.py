@@ -116,7 +116,12 @@ def cmd_livefire(args: argparse.Namespace) -> int:
     _guard_billing()
     try:
         summary = asyncio.run(
-            livefire.livefire_one(args.consumer, dry_run=args.dry_run, verbose=args.verbose)
+            livefire.livefire_one(
+                args.consumer,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                keep_clone=args.keep_clone,
+            )
         )
     except livefire.LiveFireError as e:
         sys.exit(f"orc livefire: {e}")
@@ -352,6 +357,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="skip the side-effecting inbox filing + rc teardown (the agent run "
         "still happens — that IS the verification)",
+    )
+    p_livefire.add_argument(
+        "--keep-clone",
+        action="store_true",
+        help="retain the throwaway clone for debugging (default: delete it — its "
+        "only value was the pushed PR)",
     )
     p_livefire.set_defaults(func=cmd_livefire)
 
