@@ -27,8 +27,9 @@ WITHOUT leaving a trace. It behaves like any pre-release EXCEPT the
 prepare step pushes the tag ONLY — the version-bump commit is NOT
 pushed to the branch, so the consumer's version line / main history
 stay clean (downstream jobs build from the bump sha, reachable via the
-tag). The harness deletes the tag + GH release on teardown. Normal RCs
-(`-rc.1`, `-beta.2`) keep the real-RC behavior (bump commit pushed).
+tag). The harness deletes the tag + GH release on teardown. This holds
+for every Kind (all `prepare-release*` paths). Normal RCs (`-rc.1`,
+`-beta.2`) keep the real-RC behavior (bump commit pushed).
 
 What CI does is per-Kind (see your repo's
 `.github/workflows/release.yml` thin caller of one of

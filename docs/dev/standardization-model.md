@@ -220,8 +220,10 @@ consumer's version line and `main` history stay clean (downstream jobs build
 from the bump sha, reachable via the tag); the harness deletes the tag + GH
 release on teardown. No floating-major advance happens (consumer release
 workflows don't advance majors; release's own does, and it skips prereleases).
-Implemented in the `prepare-release*` composites + `prepare-tauri-release.sh`
-(release#663); normal RCs (`-rc.1`, `-beta.2`) keep the real-RC behavior.
+Implemented across every prepare path — the `prepare-release*` composites
+(rust/go/npm/python) and the delegated `prepare-tauri-release.sh` /
+`prepare-nvim-release.sh` scripts (release#663); normal RCs (`-rc.1`,
+`-beta.2`) keep the real-RC behavior.
 
 **Operationalize it as the rollout / consumer check.** Keep ONE standard prompt
 (coverage task + release-rc). A consumer check = firing it at a consumer; a
