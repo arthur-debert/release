@@ -107,7 +107,7 @@ The Agent Harness
             Examples: `gh-pr-review-loop`, `pr-review-respond`,
             `release-fleet-ops`, `release-fleet-triage`, `release-issue-relay`,
             `lex-primer`, `lex-multirepo`, `gh-repo-setup`,
-            `migrate-consumer-to-build-dir`, `macos-signing-notarization`,
+            `macos-signing-notarization`,
             `electron-e2e-testing`, `padz-for-agents`.
 
         Vendored:
@@ -170,8 +170,7 @@ The Agent Harness
         Release-only (NEVER distributed):
             Skills that only make sense while working ON this repo. They stay in
             `skills/` and never reach a consumer: `release-fleet-ops`,
-            `release-fleet-triage`, `setup-matt-pocock-skills`, `gh-repo-setup`,
-            `migrate-consumer-to-build-dir`.
+            `release-fleet-triage`, `setup-matt-pocock-skills`, `gh-repo-setup`.
 
         :: note :: The maintainer's own machine reaches the full set through the
         repo's `.claude/skills/`. That is a maintainer convenience, not the

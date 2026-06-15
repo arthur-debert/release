@@ -78,7 +78,7 @@ load helper
 @test "release-only skills are NEVER distributed" {
   release_sync >/dev/null
   for s in release-fleet-ops release-fleet-triage gh-repo-setup \
-           migrate-consumer-to-build-dir setup-matt-pocock-skills; do
+           setup-matt-pocock-skills; do
     [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked $s"; false; }
     [ ! -e ".claude/skills/$s" ]          || { echo "leaked symlink $s"; false; }
   done

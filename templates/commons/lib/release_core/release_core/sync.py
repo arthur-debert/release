@@ -275,7 +275,7 @@ CLAUDE_STUB_BODY = (
 #                               consumer that doesn't already carry it.
 #
 # Everything else under skills/ (release-fleet-ops, release-fleet-triage,
-# setup-matt-pocock-skills, gh-repo-setup, migrate-consumer-to-build-dir) is
+# setup-matt-pocock-skills, gh-repo-setup) is
 # release-only and NEVER distributed.
 PUSH_ALL_SKILLS = [
     "gh-pr-review-loop",  # the `/`-triggered PR-loop driver (arms the guard)
