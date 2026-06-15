@@ -39,6 +39,10 @@ PROMPT_DOC_REL = "docs/dev/live-fire-prompt.md"
 # 3-backtick ```yaml schema example survives verbatim. Extract between them.
 _PROMPT_FENCE_RE = re.compile(r"^````text$", re.MULTILINE)
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
+# A strict verification-tag shape — vX.Y.Z-release-rc (optional .N) — so a
+# transcript-sourced tag can't trigger a destructive delete unless it is exactly
+# a reserved verification tag (release#663).
+_VERIFY_TAG_RE = re.compile(r"v\d+\.\d+\.\d+-release-rc(\.\d+)?")
 
 
 class LiveFireError(RuntimeError):
@@ -135,11 +139,19 @@ def findings_to_issues(feedback: dict, *, consumer: str) -> list[dict]:
 
 def teardown_command(consumer: str, rc_tag: str | None) -> list[str] | None:
     """The gh command that deletes the throwaway rc release + tag, or None when
-    there is nothing to tear down (blocked run / no rc cut)."""
+    there is nothing to tear down (blocked run / no rc cut).
+
+    ``rc_tag`` comes from the agent transcript, so it is validated against a
+    STRICT verification-tag shape (``vX.Y.Z-release-rc`` with an optional
+    ``.N``) before constructing a destructive ``gh release delete``. A
+    hallucinated or malformed value — even one that merely contains
+    "release-rc" — yields None rather than risk deleting an unintended release
+    on the consumer.
+    """
     if not rc_tag:
         return None
     tag = rc_tag.strip()
-    if not tag or tag.lower().startswith("none") or "release-rc" not in tag:
+    if not _VERIFY_TAG_RE.fullmatch(tag):
         return None
     return ["gh", "release", "delete", tag, "--repo", consumer, "--yes", "--cleanup-tag"]
 
@@ -269,6 +281,7 @@ async def livefire_one(
             consumer, rc_tag if isinstance(rc_tag, str) else None, dry_run=dry_run
         )
 
+        retained = keep_clone or not owns_parent
         return {
             "consumer": consumer,
             "verdict": feedback.get("verdict"),
@@ -276,7 +289,8 @@ async def livefire_one(
             "rc": rc_tag,
             "findings_filed": filed,
             "rc_torn_down": torn_down,
-            "clone": str(clone),
+            # Only report a path that still exists; the default deletes the clone.
+            "clone": str(clone) if retained else None,
         }
     finally:
         if owns_parent and not keep_clone:

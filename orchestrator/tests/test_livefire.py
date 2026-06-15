@@ -152,13 +152,13 @@ def test_findings_to_issues_empty():
 # ── teardown_command ──────────────────────────────────────────────────────
 
 
-def test_teardown_command_for_real_rc():
-    cmd = livefire.teardown_command("o/n", "v1.4.3-release-rc")
-    assert cmd == [
+@pytest.mark.parametrize("tag", ["v1.4.3-release-rc", "v1.4.3-release-rc.2"])
+def test_teardown_command_for_real_rc(tag):
+    assert livefire.teardown_command("o/n", tag) == [
         "gh",
         "release",
         "delete",
-        "v1.4.3-release-rc",
+        tag,
         "--repo",
         "o/n",
         "--yes",
@@ -166,7 +166,22 @@ def test_teardown_command_for_real_rc():
     ]
 
 
-@pytest.mark.parametrize("rc", [None, "", "none — blocked at step 3", "v1.2.3", "v1.2.3-rc.1"])
+@pytest.mark.parametrize(
+    "rc",
+    [
+        None,
+        "",
+        "none — blocked at step 3",
+        "v1.2.3",
+        "v1.2.3-rc.1",
+        # malformed/hallucinated values that merely CONTAIN the substring must
+        # not trigger a destructive delete (strict fullmatch):
+        "prod-release-rc",
+        "v1.2.3-release-rc-evil",
+        "release-rc",
+        "v1-release-rc",
+    ],
+)
 def test_teardown_command_skips_non_verification_tags(rc):
     assert livefire.teardown_command("o/n", rc) is None
 
