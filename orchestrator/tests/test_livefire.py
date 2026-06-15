@@ -279,3 +279,85 @@ def test_file_then_teardown_both_fail_teardown_wins(monkeypatch):
     with pytest.raises(livefire.LiveFireError, match="teardown failed"):
         livefire._file_then_teardown({"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False)
     assert calls == ["file", "teardown"]
+
+
+# ── rollout: registered_consumers / summarize_rollout / livefire_many ──────
+
+
+def test_summarize_rollout_counts():
+    results = [
+        {"consumer": "a", "verdict": "clean", "findings_filed": []},
+        {"consumer": "b", "verdict": "minor-friction", "findings_filed": ["x", "y"]},
+        {"consumer": "c", "verdict": "error", "error": "boom"},
+    ]
+    s = livefire.summarize_rollout(results)
+    assert s["consumers"] == 3
+    assert s["by_verdict"] == {"clean": 1, "minor-friction": 1, "error": 1}
+    assert s["findings_filed"] == 2
+    assert s["errored"] == ["c"]
+
+
+def test_registered_consumers_parses(monkeypatch):
+    class _Res:
+        returncode = 0
+        # clean lines kept; comment, blank, no-slash, and a tab-separated /
+        # extra-column line are all skipped.
+        stdout = (
+            "phos-editor/app\n"
+            "arthur-debert/padz\n"
+            "# a comment\n"
+            "noslash\n"
+            "owner/name\textra-column\n"
+            "\n"
+        )
+        stderr = ""
+
+    monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
+    assert livefire.registered_consumers() == ["phos-editor/app", "arthur-debert/padz"]
+
+
+def test_registered_consumers_raises_on_failure(monkeypatch):
+    class _Res:
+        returncode = 1
+        stdout = ""
+        stderr = "registry unreadable"
+
+    monkeypatch.setattr(livefire.subprocess, "run", lambda *a, **k: _Res())
+    with pytest.raises(livefire.LiveFireError, match="could not list"):
+        livefire.registered_consumers()
+
+
+def test_livefire_many_aggregates_and_captures_errors(monkeypatch):
+    import asyncio
+
+    async def _fake_one(consumer, **kwargs):
+        if consumer == "bad":
+            raise livefire.LiveFireError("boom")
+        if consumer == "weird":
+            raise RuntimeError("unexpected SDK blowup")  # non-LiveFireError
+        return {"consumer": consumer, "verdict": "clean", "findings_filed": []}
+
+    monkeypatch.setattr(livefire, "livefire_one", _fake_one)
+    report = asyncio.run(livefire.livefire_many(["a", "bad", "weird", "c"], concurrency=2))
+    assert report["consumers"] == 4
+    # both a LiveFireError and an unexpected RuntimeError are captured, not fatal
+    assert sorted(report["errored"]) == ["bad", "weird"]
+    assert report["by_verdict"]["clean"] == 2
+    assert report["by_verdict"]["error"] == 2
+
+
+def test_livefire_many_honors_concurrency_cap(monkeypatch):
+    import asyncio
+
+    state = {"active": 0, "max": 0}
+
+    async def _fake_one(consumer, **kwargs):
+        state["active"] += 1
+        state["max"] = max(state["max"], state["active"])
+        await asyncio.sleep(0.01)  # hold the slot so overlap is observable
+        state["active"] -= 1
+        return {"consumer": consumer, "verdict": "clean", "findings_filed": []}
+
+    monkeypatch.setattr(livefire, "livefire_one", _fake_one)
+    asyncio.run(livefire.livefire_many([f"r{i}" for i in range(8)], concurrency=2))
+    assert state["max"] <= 2  # the semaphore cap was honored

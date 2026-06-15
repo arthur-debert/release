@@ -1,23 +1,26 @@
 """orc livefire — the live-fire verification harness runner (release#663).
 
-Single-consumer path: clone a consumer, run the ONE standard live-fire prompt
-(``docs/dev/live-fire-prompt.md``) via a fresh subordinate agent
+Per consumer (:func:`livefire_one`): clone it, run the ONE standard live-fire
+prompt (``docs/dev/live-fire-prompt.md``) via a fresh subordinate agent
 (``bypassPermissions`` in a throwaway clone that pushes a REAL coverage PR to
 the consumer's origin), harvest the structured YAML feedback the agent emits,
 file each finding into the release#348 inbox (``release-core issue file``), and
 tear down the throwaway ``-release-rc`` tag + GitHub pre-release.
 
-Parallel rollout across N consumers is a follow-up (#663.3 phase 2); the pure
-pieces here (prompt load, feedback parse, finding→issue mapping, teardown
-command) are written stand-alone so that fan-out is just an ``asyncio.gather``
-over :func:`livefire_one`.
+Fleet rollout (:func:`livefire_many`): the same loop across N consumers
+concurrently (``--all`` pulls the registry via ``release-core admin repos
+list``), aggregated by :func:`summarize_rollout`. One consumer's failure is
+captured in the report, never fatal.
 
-The pure functions (everything except :func:`livefire_one`) take no I/O state
-and are unit-tested without the SDK or network.
+The pure functions (everything except :func:`livefire_one` /
+:func:`livefire_many`) take no I/O state and are unit-tested without the SDK or
+network — the module stays importable without the Claude Agent SDK or pyyaml
+(both lazy-imported) so the light CI ``pytest`` job collects it.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -315,3 +318,94 @@ async def livefire_one(
     finally:
         if owns_parent and not keep_clone:
             shutil.rmtree(parent, ignore_errors=True)
+
+
+# ── Rollout (N consumers in parallel) ─────────────────────────────────────
+
+
+DEFAULT_CONCURRENCY = 3
+# A clean `owner/name` line — exactly one slash, no whitespace/extra columns. So
+# a stray tab-separated or trailing-column line (if the verb's output ever grows
+# one) is skipped rather than turned into a bogus clone target.
+_OWNER_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def registered_consumers() -> list[str]:
+    """Every consumer in the fleet registry, via ``release-core admin repos
+    list`` (the one source of truth — no re-parsing managed-repos.yaml here).
+
+    Each line is stripped, then comments/blanks are skipped and only clean
+    ``owner/name`` tokens are kept — defensive against any future trailing
+    columns in the verb's output.
+    """
+    res = subprocess.run(["release-core", "admin", "repos", "list"], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise LiveFireError(f"could not list registered consumers: {res.stderr.strip()}")
+    consumers: list[str] = []
+    for raw in res.stdout.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _OWNER_NAME_RE.fullmatch(line):
+            consumers.append(line)
+    return consumers
+
+
+def summarize_rollout(results: list[dict]) -> dict:
+    """Aggregate per-consumer summaries into a fleet rollout report — counts by
+    verdict, total findings filed, and the list of consumers that errored."""
+    by_verdict: dict[str, int] = {}
+    findings_filed = 0
+    errored: list[str] = []
+    for r in results:
+        verdict = str(r.get("verdict") or "unknown")
+        by_verdict[verdict] = by_verdict.get(verdict, 0) + 1
+        findings_filed += len(r.get("findings_filed") or [])
+        if r.get("error"):
+            errored.append(r.get("consumer") or "?")
+    return {
+        "consumers": len(results),
+        "by_verdict": by_verdict,
+        "findings_filed": findings_filed,
+        "errored": errored,
+        "results": results,
+    }
+
+
+async def livefire_many(
+    consumers: list[str],
+    *,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    dry_run: bool = False,
+    verbose: bool = False,
+    keep_clone: bool = False,
+) -> dict:
+    """Run :func:`livefire_one` across N consumers concurrently (capped at
+    ``concurrency``) and return :func:`summarize_rollout` over the results.
+
+    A single consumer's failure is captured as an ``{error}`` entry, NOT raised
+    — one broken consumer must not abort the rest of the fleet round (it shows
+    up in the report's ``errored`` list). Each ``livefire_one`` clones into its
+    own temp dir, so concurrent runs don't collide.
+    """
+    sem = asyncio.Semaphore(max(1, concurrency))
+
+    async def _one(consumer: str) -> dict:
+        async with sem:
+            try:
+                return await livefire_one(
+                    consumer, dry_run=dry_run, verbose=verbose, keep_clone=keep_clone
+                )
+            except Exception as e:  # noqa: BLE001 — one consumer must never abort the round
+                # Capture ANY per-consumer failure (LiveFireError, or an
+                # unexpected SDK/runtime error from run_session) so the rollout
+                # continues. CancelledError is a BaseException and still
+                # propagates, so cancellation is unaffected.
+                return {
+                    "consumer": consumer,
+                    "verdict": "error",
+                    "error": f"{type(e).__name__}: {e}",
+                }
+
+    results = await asyncio.gather(*(_one(c) for c in consumers))
+    return summarize_rollout(list(results))
