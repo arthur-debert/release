@@ -90,8 +90,7 @@ pr: <url, or "none — blocked at step N">
 rc: <vX.Y.Z-release-rc tag cut, or "none — blocked at step N">
 findings:
   - step: <coverage|commit|pr|release|discovery>
-    component: <the release surface it concerns, e.g. how-to, gate, changelog,
-                pr-loop, cut, docs, skills — your best label>
+    component: <release surface, e.g. how-to|gate|changelog|pr-loop|cut|docs|skills>
     severity: <blocker|friction|papercut|ok>
     what: <what happened, specifically>
     expected: <what you expected / what would have helped>
