@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from . import state, watch
+from . import livefire, state, watch
 from .boot import BootError, boot_clone
 from .session import run_session
 
@@ -86,6 +86,47 @@ def cmd_probe(args: argparse.Namespace) -> int:
             persist_session=False,
         )
     )
+    return 0
+
+
+def cmd_livefire(args: argparse.Namespace) -> int:
+    """Run the live-fire verification harness against one consumer (release#663).
+
+    Clones `<owner/name>` to a throwaway dir, boots it, runs the ONE standard
+    live-fire prompt (docs/dev/live-fire-prompt.md) via a fresh agent
+    (`bypassPermissions` — the clone bounds the blast radius), harvests the
+    agent's structured YAML feedback, files each non-ok finding into the
+    release#348 inbox (`release-core issue file`), and tears down the throwaway
+    `-release-rc` tag + GH pre-release. The coverage PR it opens on the
+    consumer's origin is real — that is the value left behind.
+
+    Single-consumer path (#663.3 phase 1); parallel fan-out across N consumers
+    is a follow-up. `--dry-run` skips the side-effecting filing + teardown (the
+    agent run still happens — that IS the verification).
+    """
+    if not args.yes:
+        print(
+            "orc livefire runs a fresh agent with bypassPermissions in a\n"
+            "throwaway clone, opens a REAL coverage PR on the consumer's\n"
+            "origin, and cuts a throwaway -release-rc release. Pass --yes to\n"
+            "confirm you want to drive a real consumer end-to-end.",
+            file=sys.stderr,
+        )
+        return 2
+    _guard_billing()
+    try:
+        summary = asyncio.run(
+            livefire.livefire_one(
+                args.consumer,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
+                keep_clone=args.keep_clone,
+            )
+        )
+    except livefire.LiveFireError as e:
+        sys.exit(f"orc livefire: {e}")
+    print("\n--- live-fire summary ---")
+    print(json.dumps(summary, indent=2))
     return 0
 
 
@@ -297,6 +338,33 @@ def main(argv: list[str] | None = None) -> int:
         "(bypassPermissions, in a throwaway clone). Without it, notify-only.",
     )
     p_watch.set_defaults(func=cmd_watch)
+
+    p_livefire = sub.add_parser(
+        "livefire",
+        help="run the live-fire verification harness against one consumer "
+        "(clone → standard prompt → harvest feedback → file to #348 inbox → "
+        "teardown the -release-rc; release#663)",
+    )
+    p_livefire.add_argument("consumer", help="consumer repo as owner/name (cloned fresh)")
+    p_livefire.add_argument(
+        "--yes",
+        action="store_true",
+        help="confirm a real end-to-end run (bypassPermissions agent + real "
+        "coverage PR + throwaway -release-rc on the consumer)",
+    )
+    p_livefire.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="skip the side-effecting inbox filing + rc teardown (the agent run "
+        "still happens — that IS the verification)",
+    )
+    p_livefire.add_argument(
+        "--keep-clone",
+        action="store_true",
+        help="retain the throwaway clone for debugging (default: delete it — its "
+        "only value was the pushed PR)",
+    )
+    p_livefire.set_defaults(func=cmd_livefire)
 
     p_sessions = sub.add_parser("sessions", help="manage stored sessions")
     sp = p_sessions.add_subparsers(dest="sub_cmd", required=True)
