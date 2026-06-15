@@ -74,6 +74,18 @@ runs:
         fi
         echo "prerelease=$IS_PRERELEASE" >> "$GITHUB_OUTPUT"
 
+        # Reserved verification suffix (release#663): a `-release-rc` prerelease
+        # is a throwaway live-fire cut — builds + tags + publishes a GitHub
+        # pre-release like any RC, but the bump commit is NOT pushed to the
+        # branch (the tag alone carries it), so the consumer's version line and
+        # main history stay clean. The live-fire harness deletes the tag + GH
+        # release on teardown. Normal RCs (`-rc.1`) keep real-RC behavior.
+        VERIFY_MODE=false
+        case "$NEW_VERSION" in
+          *-release-rc|*-release-rc.*) VERIFY_MODE=true ;;
+        esac
+        echo "verify_mode=$VERIFY_MODE" >> "$GITHUB_OUTPUT"
+
         if [ ! -f "$MANIFEST" ]; then
           echo "::error::manifest not found: $MANIFEST"
           exit 1
@@ -169,6 +181,7 @@ runs:
         CHANGELOG: ${{ inputs.changelog-path }}
         MANIFEST: ${{ inputs.manifest-path }}
         IS_PRERELEASE: ${{ steps.detect.outputs.prerelease }}
+        IS_VERIFY: ${{ steps.detect.outputs.verify_mode }}
       run: |
         set -euo pipefail
         TAG="v$NEW_VERSION"
@@ -232,7 +245,14 @@ runs:
         else
           git tag -a "$TAG" -m "Release $TAG"
         fi
-        git push origin HEAD
+        # Verification rc (release#663): tag-only — the tag carries the bump
+        # commit to the remote, but the branch ref is NOT advanced, so the
+        # consumer's main stays clean. Downstream jobs check out the tag/sha.
+        if [ "$IS_VERIFY" = "true" ]; then
+          echo "verification rc ($TAG): tag-only — not advancing the branch (release#663)."
+        else
+          git push origin HEAD
+        fi
         git push origin "$TAG"
 
         SHA=$(git rev-parse HEAD)

@@ -211,11 +211,17 @@ tripped it, anything missing / inaccurate / requiring a workaround. That feedbac
 is the self-improving loop — friction flows back to release as issues instead of
 being lost in the consumer.
 
-**Then the release half.** Cut a throwaway release — an rc / pre-release tag
-(e.g. `v0.3.3-release-rc`) — to exercise the second hard path (prep → build →
-sign/notarize → publish → cascade) without a real version bump. (Requires the
-semver layers to support pre-release tags — verify that holds before relying
-on it.)
+**Then the release half.** Cut a throwaway release — the reserved
+`-release-rc` pre-release suffix (e.g. `v0.3.3-release-rc`) — to exercise the
+second hard path (prep → build → sign/notarize → publish → cascade) without a
+real version bump. The `-release-rc` suffix is a **verification cut**: the
+prepare step pushes the *tag only*, never the version-bump commit, so the
+consumer's version line and `main` history stay clean (downstream jobs build
+from the bump sha, reachable via the tag); the harness deletes the tag + GH
+release on teardown. No floating-major advance happens (consumer release
+workflows don't advance majors; release's own does, and it skips prereleases).
+Implemented in the `prepare-release*` composites + `prepare-tauri-release.sh`
+(release#663); normal RCs (`-rc.1`, `-beta.2`) keep the real-RC behavior.
 
 **Operationalize it as the rollout / consumer check.** Keep ONE standard prompt
 (coverage task + release-rc). A consumer check = firing it at a consumer; a

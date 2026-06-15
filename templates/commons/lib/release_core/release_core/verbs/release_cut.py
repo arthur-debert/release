@@ -20,6 +20,16 @@ e.g. `release-cut 1.8.0-rc.1`. CI marks the GitHub Release as
 `## [Unreleased]` in CHANGELOG.md, so subsequent RCs / the final
 release can still draw from the same unreleased entries.
 
+Verification cut (`-release-rc` reserved suffix, #663): the live-fire
+verification harness cuts `X.Y.Z-release-rc` to exercise the whole
+release half (prep → build → sign/notarize → publish → cascade)
+WITHOUT leaving a trace. It behaves like any pre-release EXCEPT the
+prepare step pushes the tag ONLY — the version-bump commit is NOT
+pushed to the branch, so the consumer's version line / main history
+stay clean (downstream jobs build from the bump sha, reachable via the
+tag). The harness deletes the tag + GH release on teardown. Normal RCs
+(`-rc.1`, `-beta.2`) keep the real-RC behavior (bump commit pushed).
+
 What CI does is per-Kind (see your repo's
 `.github/workflows/release.yml` thin caller of one of
 `arthur-debert/release`'s reusable release workflows: `rust-cli.yml`,
