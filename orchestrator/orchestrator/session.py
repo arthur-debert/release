@@ -20,6 +20,7 @@ async def run_session(
     verbose: bool = False,
     permission_mode: str = "acceptEdits",
     persist_session: bool = True,
+    text_sink: list[str] | None = None,
 ) -> str | None:
     """Send `prompt` to a session pinned at `repo_path`.
 
@@ -35,6 +36,11 @@ async def run_session(
     flows. `probe` passes False because probes are one-shot fresh-agent
     evaluations — picking one up later via `orc resume` would surprise
     the user.
+
+    `text_sink`, when provided, accumulates the agent's streamed text blocks
+    (the same text printed to stdout) so a caller can harvest the full
+    transcript — `orc livefire` uses it to extract the structured feedback
+    block from the agent's final answer.
 
     Returns the discovered session_id (if any).
     """
@@ -81,6 +87,8 @@ async def run_session(
                     text = getattr(block, "text", None)
                     if text:
                         print(text, end="", flush=True)
+                        if text_sink is not None:
+                            text_sink.append(text)
 
         print()  # final newline after streamed content
 
