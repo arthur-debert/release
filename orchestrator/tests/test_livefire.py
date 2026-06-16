@@ -324,9 +324,7 @@ def test_file_then_teardown_tears_down_even_when_filing_fails(monkeypatch):
     # teardown is attempted despite the filing failure, then the filing error
     # re-raises so the run still fails loudly.
     with pytest.raises(livefire.LiveFireError, match="file failed"):
-        livefire._file_then_teardown(
-            {}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False
-        )
+        livefire._file_then_teardown({}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False)
     assert calls == ["file", "teardown"]
 
 
@@ -346,9 +344,7 @@ def test_file_then_teardown_both_fail_teardown_wins(monkeypatch):
     # both fail → teardown was still attempted, and its error supersedes the
     # filing error (a stray -release-rc is the more urgent problem).
     with pytest.raises(livefire.LiveFireError, match="teardown failed"):
-        livefire._file_then_teardown(
-            {}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False
-        )
+        livefire._file_then_teardown({}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False)
     assert calls == ["file", "teardown"]
 
 

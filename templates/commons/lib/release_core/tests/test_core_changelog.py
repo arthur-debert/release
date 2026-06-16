@@ -76,16 +76,12 @@ def test_add_default_section_heading(repo):
 def test_add_custom_section(repo):
     rc = changelog.add_main(["--section", "Added", "feat", "new shiny"])
     assert rc == 0
-    assert (
-        repo / "CHANGELOG" / "unreleased-feat.md"
-    ).read_bytes() == b"### Added\n\n- new shiny\n"
+    assert (repo / "CHANGELOG" / "unreleased-feat.md").read_bytes() == b"### Added\n\n- new shiny\n"
 
 
 def test_add_section_equals_form(repo):
     changelog.add_main(["--section=Fixed", "bug", "squashed"])
-    assert (
-        repo / "CHANGELOG" / "unreleased-bug.md"
-    ).read_bytes() == b"### Fixed\n\n- squashed\n"
+    assert (repo / "CHANGELOG" / "unreleased-bug.md").read_bytes() == b"### Fixed\n\n- squashed\n"
 
 
 def test_add_empty_section_writes_bare_bullet(repo):

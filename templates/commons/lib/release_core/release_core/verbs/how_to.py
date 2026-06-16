@@ -128,8 +128,7 @@ _GENERIC_HINT = {
 # (bump version + roll CHANGELOG, then tag + GitHub Release). Keep this honest so
 # an agent isn't told to expect a build/sign stage that never runs for its Kind.
 _PIPELINE_PREPARE_ONLY = (
-    "prepare → release (bump + CHANGELOG, then tag + GitHub Release; "
-    "no build/sign — interpreted)"
+    "prepare → release (bump + CHANGELOG, then tag + GitHub Release; no build/sign — interpreted)"
 )
 _PIPELINE_FULL = "prepare → build → (sign/notarize where applicable) → publish"
 _KIND_PIPELINE: dict[str, str] = {
