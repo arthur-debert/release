@@ -15,30 +15,44 @@ import time
 
 from audit_config import rate_resource, resolve_dir, resolve_repo
 
-Q_TMPL = """query($n:Int!){repository(owner:"%s",name:"%s"){pullRequest(number:$n){
- reviewThreads(first:100){nodes{isResolved isOutdated resolvedBy{login}
-   comments(first:1){nodes{databaseId}}}}}}}"""
+# Paginated: $after walks the reviewThreads connection 100 at a time, so PRs
+# with >100 threads don't silently lose resolution/outdated flags.
+Q_TMPL = """query($n:Int!,$after:String){repository(owner:"%s",name:"%s"){pullRequest(number:$n){
+ reviewThreads(first:100,after:$after){
+   pageInfo{hasNextPage endCursor}
+   nodes{isResolved isOutdated resolvedBy{login}
+     comments(first:1){nodes{databaseId}}}}}}}"""
 
 
-def gql(query, n):
-    out = subprocess.run(
-        ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"n={n}"],
-        capture_output=True, text=True)
+def _gql_page(query, n, after):
+    cmd = ["gh", "api", "graphql", "-f", f"query={query}", "-F", f"n={n}"]
+    if after:
+        cmd += ["-F", f"after={after}"]
+    out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
         raise RuntimeError(out.stderr.strip()[:200])
     data = json.loads(out.stdout)
     if "errors" in data:
         raise RuntimeError(json.dumps(data["errors"])[:200])
-    nodes = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+    return data["data"]["repository"]["pullRequest"]["reviewThreads"]
+
+
+def gql(query, n):
     m = {}
-    for t in nodes:
-        cs = t["comments"]["nodes"]
-        if not cs:
-            continue
-        m[cs[0]["databaseId"]] = dict(
-            resolved=t["isResolved"], gh_outdated=t["isOutdated"],
-            resolved_by=(t["resolvedBy"] or {}).get("login"))
-    return m
+    after = None
+    while True:
+        conn = _gql_page(query, n, after)
+        for t in conn["nodes"]:
+            cs = t["comments"]["nodes"]
+            if not cs:
+                continue
+            m[cs[0]["databaseId"]] = dict(
+                resolved=t["isResolved"], gh_outdated=t["isOutdated"],
+                resolved_by=(t["resolvedBy"] or {}).get("login"))
+        page = conn["pageInfo"]
+        if not page["hasNextPage"]:
+            return m
+        after = page["endCursor"]
 
 
 def gql_remaining():

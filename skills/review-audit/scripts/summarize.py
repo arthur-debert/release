@@ -16,7 +16,7 @@ import collections
 import json
 import statistics as st
 
-from audit_config import resolve_dir
+from audit_config import resolve_dir, thread_actioned
 
 
 def bucket(r):
@@ -71,19 +71,33 @@ def main():
     print("\n" + "=" * 78)
     print("PER-REVIEWER VOLUME & ACTION RATE")
     print("=" * 78)
+    # prs / rounds come from metrics.jsonl (stable), but threads + actioned are
+    # recomputed from the POST-enrich slim files: metrics.jsonl is written by
+    # extract.py BEFORE enrich.py adds the resolved/gh_outdated flags, so its
+    # actioned count systematically undercounts. The slim files carry the
+    # enriched flags, so count there.
     rev = collections.defaultdict(
         lambda: dict(prs=0, threads=0, actioned=0, rounds=[]))
     for r in rows:
         for name, d in r["per_reviewer"].items():
             rev[name]["prs"] += 1
-            rev[name]["threads"] += d["threads"]
-            rev[name]["actioned"] += d["actioned"]
             rev[name]["rounds"].append(d["rounds"])
+    for p in (out / "slim").glob("pr-*.json"):
+        slim = json.loads(p.read_text())
+        for t in slim.get("threads", []):
+            name = t.get("reviewer")
+            if name is None:
+                continue
+            rev[name]["threads"] += 1
+            if thread_actioned(t):
+                rev[name]["actioned"] += 1
     for name, d in sorted(rev.items()):
         ar = f"{100*d['actioned']/d['threads']:.0f}%" if d["threads"] else "n/a"
+        per_pr = f"{d['threads']/d['prs']:.1f}" if d["prs"] else "-"
+        mx = max(d["rounds"]) if d["rounds"] else 0
         print(f"{name:11s} PRs={d['prs']:3d} threads={d['threads']:4d} "
-              f"({d['threads']/d['prs']:.1f}/PR) action-rate={ar:>4} "
-              f"max-rounds={max(d['rounds'])} med-rounds={f(med(d['rounds']))}")
+              f"({per_pr}/PR) action-rate={ar:>4} "
+              f"max-rounds={mx} med-rounds={f(med(d['rounds']))}")
 
     # rounds-vs-PR-number curve for one reviewer (re-request onset)
     target = a.rounds_of

@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 # --- bot login -> canonical reviewer name -----------------------------------
 # Maps every login a bot can post under (top-level review author AND the
@@ -45,6 +46,19 @@ BOTS = {
 def role(login, bots=None):
     """Canonical reviewer name for a login, or None if not a tracked bot."""
     return (bots or BOTS).get((login or "").lower(), None)
+
+
+def thread_actioned(t):
+    """Mechanical 'the author did something about this thread' signal.
+
+    Counts the REST-derived signals (author replied / position dropped) AND
+    the GraphQL flags enrich.py adds (`resolved` / `gh_outdated`). All reads
+    use `.get()` so a stage-1 (pre-enrich) slim file stays valid — it just
+    sees fewer signals. Used by both extract.py's metrics row and
+    summarize.py so the two never disagree on action-rate.
+    """
+    return bool(t.get("author_replied") or t.get("outdated")
+                or t.get("resolved") or t.get("gh_outdated"))
 
 
 # --- bot markdown de-noising ------------------------------------------------
@@ -91,7 +105,7 @@ def load_overlay(path):
     global BOILER
     if not path:
         return BOTS
-    data = json.loads(open(path).read())
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     bots = dict(BOTS)
     bots.update({k.lower(): v for k, v in data.get("bots", {}).items()})
     for pat in data.get("boiler_extra", []):
@@ -121,9 +135,8 @@ def resolve_repo(arg=None):
 
 def resolve_dir(arg=None):
     """Output dir (raw/ slim/ verdicts/ live here). Default: ./analysis/reviews."""
-    import pathlib
     d = arg or os.environ.get("REVIEW_AUDIT_DIR") or "analysis/reviews"
-    p = pathlib.Path(d).resolve()
+    p = Path(d).resolve()
     p.mkdir(parents=True, exist_ok=True)
     return p
 

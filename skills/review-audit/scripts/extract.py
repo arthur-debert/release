@@ -19,8 +19,16 @@ import sys
 import time
 from datetime import datetime
 
-from audit_config import (clean, gh, load_overlay, rate_resource, resolve_dir,
-                          resolve_repo, role)
+from audit_config import (
+    clean,
+    gh,
+    load_overlay,
+    rate_resource,
+    resolve_dir,
+    resolve_repo,
+    role,
+    thread_actioned,
+)
 
 SLEEP = 0.25
 
@@ -55,13 +63,10 @@ def build_slim(n, raw, bots):
         if c.get("commit"))
 
     ready_at = None
-    review_requested = []
     for ev in raw["timeline"]:
-        et = ev.get("event")
-        if et == "ready_for_review" and not ready_at:
+        if ev.get("event") == "ready_for_review" and not ready_at:
             ready_at = ev.get("created_at")
-        if et == "review_requested":
-            review_requested.append(ev.get("created_at"))
+            break
 
     reviews_by_bot = {}
     for rv in raw["reviews"]:
@@ -97,7 +102,7 @@ def build_slim(n, raw, bots):
         threads.setdefault(root["id"], []).append(c)
 
     slim_threads = []
-    for root_id, comments in threads.items():
+    for comments in threads.values():
         comments.sort(key=lambda c: c.get("created_at") or "")
         root = comments[0]
         rl = role((root.get("user") or {}).get("login"), bots)
@@ -167,7 +172,7 @@ def metrics_row(slim):
                       if x["reviewer"] == r and x["round"]] + [0])
         n_threads = sum(1 for t in slim["threads"] if t["reviewer"] == r)
         n_actioned = sum(1 for t in slim["threads"] if t["reviewer"] == r
-                         and (t["author_replied"] or t["outdated"]))
+                         and thread_actioned(t))
         per_reviewer[r] = dict(rounds=rounds, threads=n_threads,
                                actioned=n_actioned)
     return dict(

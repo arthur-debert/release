@@ -31,9 +31,11 @@ def main():
     out = resolve_dir(a.dir)
     vdir = out / "verdicts"
 
-    metrics = {json.loads(line)["number"]: json.loads(line)
-               for line in (out / "metrics.jsonl").read_text().splitlines()
-               if line.strip()}
+    metrics = {}
+    for line in (out / "metrics.jsonl").read_text().splitlines():
+        if line.strip():
+            row = json.loads(line)
+            metrics[row["number"]] = row
     verdicts = {}
     for p in vdir.glob("pr-*.json"):
         try:

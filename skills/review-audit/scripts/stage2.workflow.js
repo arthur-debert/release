@@ -36,6 +36,12 @@ if (Array.isArray(args) && args.length) reviewed = args
 else if (typeof args === 'string' && args.trim().startsWith('[')) reviewed = JSON.parse(args)
 if (!reviewed || !reviewed.length) {
   const slimDir = `${DIR}/slim`
+  if (!fs.existsSync(slimDir)) {
+    throw new Error(
+      `review-audit: ${slimDir} not found — run the mechanical tier first ` +
+        `(extract.py -> enrich.py -> finalize.py with the same --dir), or pass args.reviewed.`,
+    )
+  }
   reviewed = fs.readdirSync(slimDir)
     .filter((f) => /^pr-\d+\.json$/.test(f))
     .map((f) => ({ n: parseInt(f.match(/\d+/)[0], 10), p: `${slimDir}/${f}` }))

@@ -195,7 +195,7 @@ def main():
     print("\n" + "=" * 90)
     print("CONVERGING examples (on the pushed change / follow-up)")
     print("=" * 90)
-    for n, r, cls, path, res, val, gist in rows:
+    for n, r, cls, path, _res, val, gist in rows:
         if cls in ("followup", "on_changed"):
             print(f"  #{n} r{r} v{val} [{cls}] {path}: {gist[:60]}")
 
