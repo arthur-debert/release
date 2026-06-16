@@ -7,6 +7,15 @@
 > `fleet-standardization-research` workflow, 2026-06-14); the raw per-repo
 > reports are not re-runnable as-is.
 
+> **Correction 2026-06-16:** the "Jekyll docs-site Kind (comms, lex)"
+> recommendation threaded through this audit (§"Common interface", proposal #6,
+> the Kind-coverage gap table, and phases 3–4) is **superseded**. comms migrated
+> its docs off Jekyll onto the existing `mkdocs.yml@v2` workflow and onboarded to
+> the fleet (comms#75); lex's orphan `pages.yml` — which duplicate-published
+> `comms/docs` to `lex-fmt.github.io/lex` — was deleted. `lex.ing` is now
+> published solely by comms via mkdocs + the `mkdocs-lex-plugin`. No Jekyll
+> workflow or Kind is needed; treat those line-items below as closed.
+
 ## Common ground / specificity tradeoff map
 
 Scope: 17 reports (16 live consumers; `lex-fmt/comms` is barely-onboarded). The bar: a conformant consumer's ONLY tracked footprint is (1) a few-line `CLAUDE.md` pointer to `release-core how-to`, (2) ~2-3 stable skills, (3) thin workflow callers into shared `arthur-debert/release` workflows. Everything else ordinary is owned upstream; only genuinely-bespoke product logic lives in thin `app-bin/` hooks.
