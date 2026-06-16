@@ -105,6 +105,14 @@ def test_coverage_errors_loudly_when_no_tool_for_kind(monkeypatch, capsys):
     assert "release-core how-to" in err  # points at the discoverability path
 
 
+def test_coverage_rejects_unknown_args(capsys):
+    # An unknown/typo'd arg is a usage error, not silently ignored (#732 review).
+    assert tasks.coverage(["--verbsoe"]) == 2
+    err = capsys.readouterr().err
+    assert "unexpected argument" in err
+    assert "--verbsoe" in err
+
+
 def test_coverage_kind_detection_failure_still_errors(monkeypatch, capsys):
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks.repo_commands, "coverage_commands", lambda r: [])

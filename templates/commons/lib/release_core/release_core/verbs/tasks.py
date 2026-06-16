@@ -208,7 +208,24 @@ def coverage(argv: list[str]) -> int:
             "show only the summary table)"
         )
         return 0
-    raw = bool(argv) and argv[0] in ("--verbose", "--raw")
+    # Parse the optional --verbose/--raw flag in any position; reject anything
+    # else with a usage error rather than silently ignoring typos/extra tokens
+    # (release#732 review). wrap_verb forwards argv verbatim, so this verb owns
+    # its own flag parsing.
+    raw = False
+    extra = []
+    for a in argv:
+        if a in ("--verbose", "--raw"):
+            raw = True
+        else:
+            extra.append(a)
+    if extra:
+        print(
+            "release-core coverage: unexpected argument(s): " + " ".join(extra),
+            file=sys.stderr,
+        )
+        print("  usage: release-core coverage [--verbose|--raw]", file=sys.stderr)
+        return 2
     root = _repo_root()
     cmds = repo_commands.coverage_commands(root)
     if not cmds:
