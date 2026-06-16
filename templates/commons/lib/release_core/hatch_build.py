@@ -1,6 +1,6 @@
-"""Hatch build hook: bundle the FULL managed tree into the wheel.
+"""Hatch build hook: bundle the FULL managed files into the wheel.
 
-`release-core init` builds per-repo managed content from these bundled
+`release-core init` installs per-repo managed content from these bundled
 sources. For the pull-model the wheel must be self-contained — it ships the
 template DATA (and the distributable skills) so `init` needs no release clone.
 
@@ -26,10 +26,10 @@ build root). It is excluded entirely so the bundle does not contain a copy of
 itself. Other templates/commons/lib/ content is kept.
 
 NOTE — config subset vs. full tree: `init` currently CONSUMES only the
-config-composition subset listed in _COMMONS_CONFIGS (lefthook.yml + lint
-configs) plus the per-kind/capability lefthook fragments + manifests. The rest
-of the now-bundled tree is PRESENT but unused until step 2 (#476) teaches `init`
-to do a full offline build. This part-1 change is purely additive data.
+config subset listed in _COMMONS_CONFIGS (lefthook.yml + lint configs) plus
+the per-kind/capability lefthook fragments + manifests. The rest of the
+now-bundled tree is PRESENT but unused until step 2 (#476) teaches `init`
+to do a full offline install. This part-1 change is purely additive data.
 """
 
 from __future__ import annotations
@@ -73,10 +73,10 @@ _SKIP_DIR_NAMES = frozenset(
 _SKIP_FILE_SUFFIXES = (".pyc", ".pyo")
 _SKIP_FILE_NAMES = frozenset({".DS_Store"})
 
-# Top-level templates/ dirs that are NOT part of the managed sync/init surface
+# Top-level templates/ dirs that are NOT part of the managed init surface
 # and must not be bundled. `render/` holds render-side material (the Homebrew
 # formula template) consumed at release-cut in CI, not a per-repo managed Kind —
-# sync only ever builds commons/, components/, and a resolved Kind dir
+# init only ever installs from commons/, components/, and a resolved Kind dir
 # (one carrying a manifest.yaml). Bundling render/ is dead weight.
 _NON_SURFACE_TEMPLATE_DIRS = frozenset({"render"})
 

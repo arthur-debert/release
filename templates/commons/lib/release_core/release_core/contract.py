@@ -21,7 +21,7 @@ Two artifacts fix that:
 2. **The assumption lint** (:func:`lint_repo`) — scans this repo's CI surfaces
    (reusable workflows, composite actions, shipped workflow copies under
    ``templates/``) for any JOB whose steps reference a managed path (from the
-   manifest's managed-path patterns) without a PRIOR build step in the
+   manifest's managed-path patterns) without a PRIOR install step in the
    same job (the ``arm-gate`` composite or an explicit ``release-core init``).
    This is the sweep that would have caught #579 the day WS7 merged.
 
@@ -106,7 +106,7 @@ def _capability_names(repo_root: str) -> list[str]:
 
 
 def _all_consumer_dests(repo_root: str) -> set[str]:
-    """The UNION of every dest the sync engine can build into a consumer,
+    """The UNION of every dest the sync engine can install into a consumer,
     across all Kinds and all Components — each subtree walked exactly as
     ``install_plan`` walks it (same Source abstraction, same skip predicate,
     same prefix-strip), plus every distributed-skill dest (both catalogs:
@@ -256,7 +256,7 @@ def manifest_text(repo_root: str) -> str:
 
 @dataclass(frozen=True)
 class Violation:
-    """One job step that references a managed path with no prior build step."""
+    """One job step that references a managed path with no prior install step."""
 
     file: str  # repo-relative path of the workflow / action file
     job: str  # job id ("(composite)" for a composite action's steps)
@@ -486,7 +486,7 @@ def lint_workflow_dir(repo_root: str, patterns: list[str]) -> list[Violation]:
     """The CONSUMER-side sweep (#581): scan only ``.github/workflows/**`` of a
     consumer repo for jobs that reference a managed ephemeral path (``patterns``
     — the init-resolved mirror dests + the managed prefixes) without a prior
-    build step. Same scanner as :func:`lint_repo` (one scanner, two file
+    install step. Same scanner as :func:`lint_repo` (one scanner, two file
     enumerations); ``release-core init`` runs this at seed/session time as the
     tripwire warning for consumer-authored jobs (the supage#163 class).
 

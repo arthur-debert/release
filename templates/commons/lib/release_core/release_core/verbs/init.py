@@ -1,4 +1,4 @@
-"""init — build the managed tree into a consumer repo (the pull-model boot).
+"""init — install the managed files into a consumer repo (the pull-model boot).
 
 Usage:
   release-core init [--dry-run] [--no-commit] [--push]
@@ -6,7 +6,7 @@ Usage:
 
 `release-core init` is the pull-model seam: the SessionStart boot
 (`install-release-core`) pulls the `release_core` wheel and runs `init`, so a
-consumer self-updates its entire managed tree from the wheel bundle. Fleet
+consumer self-updates its managed files from the wheel bundle. Fleet
 DISTRIBUTION is pull-only — there is no push mechanism (#476; `orc propagate`
 was removed). The `--push` flag below is unrelated to distribution: it is an
 opt-in plain `git push` of the LOCAL managed auto-commit.
@@ -25,8 +25,8 @@ fleet used.
 
 Flags:
   --dry-run    compute + report the change count, write nothing.
-  --no-commit  build but skip the auto-commit (tests / CI inspection —
-               CI must never auto-commit the managed tree into a checkout).
+  --no-commit  install but skip the auto-commit (tests / CI inspection —
+               CI must never auto-commit the managed files into a checkout).
   --push       fast-forward push the managed commit ONLY when on the repo's
                default branch with an otherwise-clean tree; on a feature
                branch (or a dirty tree) the commit stays local and rides the
@@ -36,20 +36,20 @@ Flags:
   --commit / --force are TOLERATED no-ops (warn + proceed), NOT errors: the
   deployed SessionStart resolver in a not-yet-migrated consumer still calls
   `init --commit`, and that stale call performs the first cutover pull —
-  failing it would stall the fleet (the resolver can't update the tree that
-  updates the resolver). The auto-commit is automatic and the build
+  failing it would stall the fleet (the resolver can't update the managed files
+  that update the resolver). The auto-commit is automatic and the install
   overwrites unconditionally, so both flags are redundant in this mode.
 
-Auto-commit (the pull-model commit-hygiene seam): after a build, if (and
+Auto-commit (the pull-model commit-hygiene seam): after an install, if (and
 only if) managed content actually changed, init commits ONLY the exact managed
 paths it wrote (never `git add -A`, never folding in a user's other staged or
 unstaged work) with a deterministic message, on whatever branch is checked out
-(the managed tree is generated — needs no review). NO `[skip ci]` in the
+(the managed files are generated — needs no review). NO `[skip ci]` in the
 message: on a pushed branch it would block a required-checks ruleset forever.
 Conservative by construction: no changes → no commit; --dry-run → no commit; an
 unborn branch or any git error makes the commit step a quiet no-op.
 
-Source resolution: the content is composed from the wheel-bundled
+Source resolution: the content is installed from the wheel-bundled
 templates (release_core/_bundled_templates/, staged at build time by
 hatch_build.py) so init is self-contained — no release clone, no network. This
 is the DEFAULT and the only path a pip-installed consumer ever takes.
@@ -108,7 +108,7 @@ def _read_sync_yaml(repo_root: str) -> str | None:
     return None
 
 
-# ── Full build: the whole managed tree, from the bundle ──────────────────────
+# ── Full install: all managed files, from the bundle ─────────────────────────
 #
 # It runs the SAME steps init always runs
 # (install_plan + install_tree + diff + compute_mirror + decide_claude + apply),
@@ -116,12 +116,12 @@ def _read_sync_yaml(repo_root: str) -> str | None:
 # or GitSource when a
 # real $RELEASE_HOME clone is present (release-dev override, mirroring how the
 # config path prefers $RELEASE_HOME over the bundle). It writes the
-# .release/ temp dir plus all working-tree mirrors (symlinks, real-file copies,
-# the CLAUDE.md header block).
+# `.release/` temp dir plus all working-tree mirrors (symlinks, real-file
+# copies, the CLAUDE.md header block).
 
 
 def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, str, list[str]]:
-    """Pick the sync Source for a full build and resolve Kind + components.
+    """Pick the sync Source for a full install and resolve Kind + components.
 
     Returns (source, kind, component_names). DEFAULT: BundleSource over the
     wheel bundle (self-contained, no clone). A real $RELEASE_HOME git checkout
@@ -160,10 +160,10 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
         ref_sha = gh.git_rev_parse(ref, cwd=release_home)
         source = sync.GitSource(release_home, ref, ref_sha)
 
-    # Guard the Kind tree exists in the source — same early error the build engine
+    # Guard the Kind tree exists in the source — same early error the install step
     # raises. Without it a wheel/ref missing templates/<kind>/ would silently
-    # build only commons/components/skills and still report success,
-    # leaving an incomplete managed tree.
+    # install only commons/components/skills and still report success,
+    # leaving an incomplete set of managed files.
     if not source.exists(f"templates/{kind}"):
         raise sync.SyncError(
             f"release-core init: source '{source.label}' has no templates/{kind}/ tree"
@@ -175,19 +175,19 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
 
 
 def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> list[str]:
-    """The exact, repo-relative managed MIRROR pathspecs a full sync produced or
+    """The exact, repo-relative managed MIRROR pathspecs a full install produced or
     removed — the ONLY paths --commit stages (never `git add -A`).
 
     Covers: each symlink removed (swept from disk — the deletion must commit);
     each real-file copy written or removed; each retired file removed
-    (WS6, release#527); and CLAUDE.md when the orientation block was
+    (WS6, release#527); and CLAUDE.md when the header block was
     created/injected/refreshed. Deterministic order, de-duplicated.
 
     Notably NOT the created symlink mirrors: since WS7 (release#528) they are
     EPHEMERAL — built every init, excluded via .git/info/exclude, never
     tracked. Staging one (git add -f) would re-track it.
 
-    And NOT `.release/`: since WS4 (release#521) the build dir is gitignored +
+    And NOT `.release/`: since WS4 (release#521) the temp dir is gitignored +
     ephemeral, never committed.
     """
     paths: list[str] = []
@@ -236,10 +236,10 @@ def _source_label(source: sync.Source) -> str:
 def _run_full_sync(
     repo_root: str, repo_name: str, *, dry_run: bool
 ) -> tuple[int, list[str], str, list[str]]:
-    """Run the full managed-tree build (bundle- or clone-sourced) and apply it.
+    """Run the full install (bundle- or clone-sourced) and apply it.
 
     Returns (changes, managed_paths, ref_label, conflicts):
-      changes        — count of tree/mirror/claude changes (0 == already current).
+      changes        — count of file/mirror/claude changes (0 == already current).
       managed_paths  — the repo-relative pathspecs touched (for --commit staging).
       ref_label      — the source provenance (for the commit message).
       conflicts      — managed dests blocked by a real file/dir (symlink NOT
@@ -248,7 +248,7 @@ def _run_full_sync(
 
     In --dry-run nothing is written/applied; the plan is still computed so the
     change count + paths + conflicts are reported. The apply phase (atomic
-    .release/ swap + :func:`_apply_mirror`) composes the full managed tree
+    `.release/` swap + :func:`_apply_mirror`) installs all managed files
     for the detected Kind.
     """
     source, kind, caps_names = _resolve_full_source(repo_root, repo_name)
@@ -263,8 +263,8 @@ def _run_full_sync(
         claude = sync.decide_claude(repo_root, tmp_release)
 
         # Consumer-side tripwire (#581): warn — never fail — when a workflow job
-        # references one of the ephemeral mirror dests this sync owns without
-        # building the managed tree first. Every init runs it (a consumer
+        # references one of the ephemeral mirror dests this install owns without
+        # installing the `.release/` temp dir first. Every init runs it (a consumer
         # can add a bad job any day), dry-run included (read-only scan).
         _warn_unbuilt_workflow_refs(repo_root, mirror.mirror_dests)
 
@@ -286,7 +286,7 @@ def _run_full_sync(
         if dry_run:
             return changes, managed, _source_label(source), list(mirror.conflicts)
 
-        # Apply: atomic .release/ swap, then the mirror/CLAUDE.md apply phase.
+        # Apply: atomic `.release/` swap, then the mirror/CLAUDE.md apply phase.
         # _apply_mirror runs relative to cwd; init has already chdir'd into repo_root.
         release_dir = os.path.join(repo_root, ".release")
         if os.path.isdir(release_dir):
@@ -305,9 +305,9 @@ def _warn_unbuilt_workflow_refs(repo_root: str, mirror_dests: set[str]) -> None:
     """The seed-time / every-session tripwire (#581, the supage#163 class).
 
     Post-WS7 the mirror dests (``bin/check*``, ``lib/release_core/``, …) are
-    EPHEMERAL — untracked, recomposed by every init — so a consumer-authored
-    workflow job that invokes one WITHOUT building the managed tree first
-    goes red on a fresh CI checkout ("No such file or directory", exit 127).
+    EPHEMERAL — untracked, reinstalled by every init — so a consumer-authored
+    workflow job that invokes one WITHOUT installing the `.release/` temp dir
+    first goes red on a fresh CI checkout ("No such file or directory", exit 127).
     Scan the consumer's ``.github/workflows/**`` with the SAME assumption-lint
     scanner the release-side contract lint uses (contract.lint_workflow_dir —
     it ships in the wheel, one scanner everywhere) and print a LOUD stderr
@@ -331,15 +331,15 @@ def _warn_unbuilt_workflow_refs(repo_root: str, mirror_dests: set[str]) -> None:
         return
     print(
         "WARNING: consumer workflow job(s) invoke managed ephemeral paths without\n"
-        "building the managed tree first. Post-WS7 these paths are untracked\n"
-        "(recomposed by `release-core init`), so they DO NOT EXIST on a fresh CI\n"
+        "installing the `.release/` temp dir first. Post-WS7 these paths are untracked\n"
+        "(rewritten by `release-core init`), so they DO NOT EXIST on a fresh CI\n"
         "checkout — each job below will fail with 'No such file or directory':",
         file=sys.stderr,
     )
     for v in violations:
         print(f"  {v.file} -> {v.job} -> {v.step}  (references {v.matched})", file=sys.stderr)
     print(
-        "Each listed job must build the managed tree first — add, BEFORE the\n"
+        "Each listed job must install the `.release/` temp dir first — add, BEFORE the\n"
         "referencing step:\n"
         "  - uses: arthur-debert/release/.github/actions/arm-gate@v3\n"
         "    with:\n"
@@ -353,7 +353,7 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     """The apply phase: --migrate removals, symlink create/remove, managed-copy
     write/remove, and the CLAUDE.md write. Runs relative to cwd (init has chdir'd
     into the repo root). Formerly ``release_sync._apply`` — relocated here when the
-    standalone sync verb was retired (WS4, release#521); init is its sole caller."""
+    standalone sync verb was RETIRED (WS4, release#521); init is its sole caller."""
     # If --migrate, delete real files at managed locations first.
     for f in mirror.migrated:
         _rm_f(f)
@@ -433,7 +433,7 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     # conflict the user is told to resolve.
     _write_mirror_excludes(mirror.mirror_dests - set(mirror.conflicts))
 
-    # Write the consumer CLAUDE.md orientation block.
+    # Write the consumer CLAUDE.md header block.
     if claude.action in ("create", "inject", "refresh"):
         # Atomic same-filesystem replace via a sibling temp file.
         assert claude.desired is not None
@@ -485,9 +485,9 @@ def _rm_f(path: str) -> None:
 
 
 def _full_commit_message(ref_label: str) -> str:
-    """The deterministic auto-commit message for a full managed-tree sync. The
-    managed tree is fully generated (no review needed), so SessionStart can
-    auto-commit it.
+    """The deterministic auto-commit message for a full managed-files install. The
+    managed files are fully generated (no review needed), so SessionStart can
+    auto-commit them.
 
     NO `[skip ci]`: when the managed commit is the head of a pushed branch — a
     consumer's first-migration PR, or any feature branch where it lands last —
@@ -509,7 +509,7 @@ def _write_mirror_excludes(dests: set[str]) -> None:
     mirror dest (WS7, release#528), so the untracked symlinks never show up in
     `git status`. Runs relative to cwd (init has chdir'd into the repo root).
     info/exclude — not the consumer's .gitignore — because the point is ZERO
-    tracked footprint; it is per-clone state recomposed by every init, exactly
+    tracked footprint; it is per-clone state reinstalled by every init, exactly
     like the mirrors it covers. Idempotent: the block is replaced wholesale.
     Quietly a no-op outside a git work tree."""
     try:
@@ -650,9 +650,9 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
 def _main_full(
     repo_root: str, repo_name: str, *, dry_run: bool, no_commit: bool, push: bool
 ) -> int:
-    """The default init path: full managed-tree build + auto-commit-on-change.
+    """The default init path: install all managed files + auto-commit-on-change.
 
-    Runs the complete managed-tree build (install_plan + install_tree +
+    Runs the complete install (install_plan + install_tree +
     diff_release + compute_mirror + decide_claude + apply), sourced from the wheel
     bundle by default (or a real
     $RELEASE_HOME clone), then — unless --no-commit/--dry-run — stages ONLY the
@@ -674,8 +674,8 @@ def _main_full(
         return 1
 
     # Surface conflicts (real file/dir at a managed location blocked a managed
-    # symlink/copy). These mean the tree is NOT in steady state even when the
-    # change count is 0 — never silently report "already current".
+    # symlink/copy). These mean the managed files are NOT in steady state even when
+    # the change count is 0 — never silently report "already current".
     if conflicts:
         print(
             "conflicts: a real file/dir blocks these managed paths (not applied) — "
@@ -687,7 +687,7 @@ def _main_full(
 
     if dry_run:
         print(
-            f"summary: {changes} managed-tree change(s), {len(conflicts)} conflict(s) "
+            f"summary: {changes} managed-file change(s), {len(conflicts)} conflict(s) "
             f"(dry-run, no writes){' from ' + ref_label if ref_label else ''}"
         )
         return 0
@@ -695,17 +695,17 @@ def _main_full(
     if changes:
         suffix = f", {len(conflicts)} conflict(s)" if conflicts else ""
         print(
-            f"summary: {changes} managed-tree change(s) applied from "
+            f"summary: {changes} managed-file change(s) applied from "
             f"{ref_label or 'release'}{suffix}."
         )
     elif conflicts:
         print(f"summary: 0 changes but {len(conflicts)} unresolved conflict(s) — see stderr.")
     else:
-        print("summary: managed tree already current (no changes).")
+        print("summary: managed files already current (no changes).")
 
     # AUTO-COMMIT: commit the managed mirror paths when something changed.
     # --no-commit skips the commit (for tests/inspection). Conservative and
-    # never-fail (see _auto_commit). On any branch — the managed tree is
+    # never-fail (see _auto_commit). On any branch — the managed files are
     # generated, needs no review.
     if changes and not no_commit:
         _auto_commit(repo_root, managed, _full_commit_message(ref_label), push=push)
@@ -744,12 +744,12 @@ def main(argv: list[str] | None = None) -> int:
         print("release-core init: --push and --no-commit are mutually exclusive", file=sys.stderr)
         return 64
     # The commit is automatic (auto-commit-on-change; --no-commit to skip) and
-    # the build overwrites unconditionally — so an explicit --commit is
+    # the install overwrites unconditionally — so an explicit --commit is
     # redundant and --force a no-op. TOLERATE them (warn, don't fail): the
     # deployed SessionStart resolver in not-yet-migrated consumers still calls
     # `release-core init --commit`, and that stale invocation is exactly what
     # performs the FIRST cutover pull. Failing it would stall the whole fleet —
-    # the resolver can't build the new tree that would in turn update the
+    # the resolver can't install the managed files that would in turn update the
     # resolver (bootstrap chicken-and-egg). After the first successful pull the
     # managed resolver no longer passes --commit, so the warning self-clears.
     if values["commit"] or force:

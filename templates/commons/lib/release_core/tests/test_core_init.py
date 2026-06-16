@@ -1,11 +1,11 @@
-"""init verb (verbs/init.py): the managed-tree builder.
+"""init verb (verbs/init.py): installs the managed files into a consumer repo.
 
-A bare `release-core init` runs the FULL managed-tree build +
+A bare `release-core init` runs the FULL install +
 auto-commit-on-change — the ONLY mode since release#532 removed the
-`--config-only` escape hatch (post-WS3 it composed root configs whose gate
-referenced a `.release/` it never created). The release-sync engine that
-composes the source content is exercised by test_core_sync.py; here we pin
-init's OWN contract: the full build + mirror apply, auto-commit scoping
+`--config-only` escape hatch (post-WS3 it wrote root configs whose gate
+referenced a `.release/` it never created). The sync engine that
+installs the source content is exercised by test_core_sync.py; here we pin
+init's OWN contract: the full install + mirror apply, auto-commit scoping
 (only managed paths, never a user's work), the push guards, idempotency,
 --dry-run/--no-commit, the tolerated legacy --commit/--force flags, and the
 resolution-failure surfaces (Kind / source / YAML) → clean exit 1.
@@ -108,7 +108,7 @@ def test_init_help_exits_0_and_prints_usage(capsys):
     assert rc == 0
     assert "Usage:" in out
     assert "release-core init" in out
-    # Post-#532: a single mode — help documents the full build, the
+    # Post-#532: a single mode — help documents the full install, the
     # real flags, and the tolerated legacy --commit/--force no-ops.
     assert "--no-commit" in out
     assert "--push" in out
@@ -178,10 +178,10 @@ def _init_git_repo(repo, *, default_branch="main"):
 
 
 def _patch_full(monkeypatch, repo, files):
-    """Wire init to the fixture repo with a stubbed full sync that "writes" the
+    """Wire init to the fixture repo with a stubbed full install that "writes" the
     given managed files into the repo and reports them as changed — so these
     tests exercise the REAL _auto_commit staging/commit/push scoping against a
-    real git repo, with the heavy build stubbed out."""
+    real git repo, with the heavy install stubbed out."""
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
 
     def fake_sync(root, name, *, dry_run):
@@ -207,8 +207,8 @@ def test_full_mode_tolerates_commit_flag_from_stale_resolver(tmp_path, monkeypat
     """Bootstrap-forward: the deployed SessionStart resolver in a not-yet-migrated
     consumer calls `release-core init --commit`. The default (full) init must
     TOLERATE that (warn + proceed, exit 0), not fail with a usage error — else the
-    first cutover pull stalls the whole fleet (the resolver can't update the tree
-    that would update the resolver). Caught by the dodot carrier run."""
+    first cutover pull stalls the whole fleet (the resolver can't install the managed
+    files that would update the resolver). Caught by the dodot carrier run."""
     repo = _init_git_repo(tmp_path / "repo")
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
     # Stub the heavy sync pipeline to a no-op so we exercise only arg handling.
@@ -511,13 +511,13 @@ def test_commit_failure_does_not_fail_init(tmp_path, monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------
-# the full managed-tree build + auto-commit-on-change (the ONLY mode)
+# the full install + auto-commit-on-change (the ONLY mode)
 # --------------------------------------------------------------------------
 # A synthetic full source (a tiny commons/ + a manifest-less kind + one
-# distributed skill) is built once, then used BOTH as a wheel bundle (the
+# distributed skill) is installed once, then used BOTH as a wheel bundle (the
 # BundleSource path) AND as a git release clone (the GitSource path). The two
-# built trees must be byte-identical modulo the provenance-marker line —
-# this is the load-bearing proof that init --full == release-sync.
+# installed trees must be byte-identical modulo the provenance-marker line —
+# this is the load-bearing proof that BundleSource == GitSource output.
 
 
 def _full_source_tree(root) -> str:
@@ -525,7 +525,7 @@ def _full_source_tree(root) -> str:
     (a lint config + a real bin tool + a lefthook fragment), a manifest-less kind
     (tree-sitter) with its own fragment, and one PUSH_ALL skill (gh-pr-review-loop).
     Returns the abs path to ``root`` (the layout root, mirroring the repo:
-    <root>/templates/… and <root>/skills/…). No ORIENTATION.md — retired in WS2
+    <root>/templates/… and <root>/skills/…). No ORIENTATION.md — RETIRED in WS2
     (#523); the CLAUDE.md block is the stub pointing at `release-core how-to`."""
     tpl = root / "templates"
     (tpl / "commons" / "bin").mkdir(parents=True)
@@ -622,7 +622,7 @@ def test_full_bundle_build_matches_git_sync(tmp_path):
 
 
 def _setup_full_repo(tmp_path, monkeypatch, src_root):
-    """A throwaway git consumer wired so init --full takes the BundleSource path
+    """A throwaway git consumer wired so init takes the BundleSource path
     (no $RELEASE_HOME) against ``src_root`` as the bundle, kind tree-sitter."""
     repo = _init_git_repo(tmp_path / "consumer")
     monkeypatch.delenv("RELEASE_HOME", raising=False)
@@ -639,9 +639,9 @@ def _setup_full_repo(tmp_path, monkeypatch, src_root):
 
 @_needs_yq
 @_needs_git
-def test_bare_init_does_full_build_and_auto_commits(tmp_path, monkeypatch, capsys):
+def test_bare_init_does_full_install_and_auto_commits(tmp_path, monkeypatch, capsys):
     # THE cutover contract: a BARE `release-core init` (exactly what SessionStart
-    # runs, no flags) builds the FULL managed tree from the bundle AND
+    # runs, no flags) installs ALL managed files from the bundle AND
     # auto-commits the managed change. This is the #476 default.
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
@@ -651,11 +651,11 @@ def test_bare_init_does_full_build_and_auto_commits(tmp_path, monkeypatch, capsy
     rc = init.main([])  # no flags — the SessionStart invocation
     out = capsys.readouterr().out
     assert rc == 0
-    assert "managed-tree change(s) applied" in out
-    # Full tree (on disk) + working-tree mirrors + CLAUDE.md block.
+    assert "managed-file change(s) applied" in out
+    # `.release/` temp dir (on disk) + working-tree mirrors + CLAUDE.md header block.
     assert (repo / ".release" / "bin" / "check").is_file()
     assert (repo / "bin" / "check").is_symlink()
-    # WS2 (#523): the CLAUDE.md block is the stub pointing at the binary.
+    # WS2 (#523): the CLAUDE.md header block is the stub pointing at the binary.
     claude = (repo / "CLAUDE.md").read_text()
     assert "release-core how-to" in claude
     assert "@.release/ORIENTATION.md" not in claude
@@ -664,10 +664,10 @@ def test_bare_init_does_full_build_and_auto_commits(tmp_path, monkeypatch, capsy
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
     assert subject.startswith("chore(release): sync managed tree from")
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
-    # WS4 (release#521): the ephemeral .release/ tree is gitignored and never
+    # WS4 (release#521): the ephemeral `.release/` temp dir is gitignored and never
     # committed. WS7 (release#528): the symlink mirrors are EPHEMERAL too —
-    # built + excluded, never tracked — so only real-file copies and the
-    # CLAUDE.md block commit.
+    # installed + excluded, never tracked — so only real-file copies and the
+    # CLAUDE.md header block commit.
     assert "bin/check" not in committed
     assert _git(repo, "ls-files", "bin/check") == ""
     assert _git(repo, "status", "--porcelain", "bin/check") == ""  # excluded
@@ -680,7 +680,7 @@ def test_bare_init_does_full_build_and_auto_commits(tmp_path, monkeypatch, capsy
 @_needs_git
 def test_bare_init_idempotent_no_commit_second_run(tmp_path, monkeypatch, capsys):
     # A bare second init with no upstream change → zero changes → no commit (the
-    # no-op-when-current property the pull model relies on for churn = cadence).
+    # no-op-when-current property the pull model relies on so churn = cadence).
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     assert init.main([]) == 0
@@ -696,7 +696,7 @@ def test_bare_init_idempotent_no_commit_second_run(tmp_path, monkeypatch, capsys
 @_needs_git
 def test_bare_init_commits_removals(tmp_path, monkeypatch, capsys):
     # The removed-target sweep works through the DEFAULT (bare) path: a managed
-    # symlink whose .release target is gone in a later sync is removed — no
+    # symlink whose .release target is gone in a later install is removed — no
     # dangling link left behind (#476 / #481). Post-WS7 (release#528) the mirror
     # was never TRACKED, so the removal is a pure filesystem op: no commit needed,
     # and the tree stays clean.
@@ -720,21 +720,21 @@ def test_bare_init_commits_removals(tmp_path, monkeypatch, capsys):
 
 @_needs_yq
 @_needs_git
-def test_full_builds_tree_and_symlinks(tmp_path, monkeypatch, capsys):
+def test_full_installs_tree_and_symlinks(tmp_path, monkeypatch, capsys):
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
     rc = init.main(["--no-commit"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "managed-tree change(s) applied" in out
-    # .release/ build dir built.
+    assert "managed-file change(s) applied" in out
+    # `.release/` temp dir populated.
     assert (repo / ".release" / "bin" / "check").is_file()
     assert (repo / ".release" / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_file()
     # Working-tree symlinks mirrored.
     assert (repo / "bin" / "check").is_symlink()
     assert (repo / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_symlink()
-    # CLAUDE.md stub block created (WS2, #523): points at the binary, no ORIENTATION.
+    # CLAUDE.md header block created (WS2, #523): points at the binary, no ORIENTATION.
     claude = (repo / "CLAUDE.md").read_text()
     assert "release-core how-to" in claude
     assert "@.release/ORIENTATION.md" not in claude
@@ -756,12 +756,13 @@ def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch
     assert "committed" in out
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
     assert subject.startswith("chore(release): sync managed tree from")
-    # NO [skip ci]: it would make a managed-only migration PR un-mergeable under a
-    # required-status-checks ruleset (CI skipped → required checks never satisfied).
+    # NO [skip ci]: it would make a managed-files-only migration PR un-mergeable
+    # under a required-status-checks ruleset (CI skipped → required checks never
+    # satisfied).
     assert "[skip ci]" not in subject
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
     # Managed real-file paths committed; the unrelated file is NOT. WS4
-    # (release#521): the ephemeral .release/ build dir is gitignored and never
+    # (release#521): the ephemeral `.release/` temp dir is gitignored and never
     # committed. WS7 (release#528): the symlink mirrors are ephemeral too.
     assert not any(p.startswith(".release/") for p in committed)
     assert "bin/check" not in committed
@@ -780,8 +781,8 @@ def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monk
     managed real files are release-owned and force-added. Regression: 6 fleet
     consumers gitignored `.claude/`, so their migration staged but never committed
     (`git add` errors on an ignored path). Post-WS7 the SYMLINK mirrors are
-    ephemeral (never tracked), so the force-add applies only to real-file copies
-    — the bootstrap quartet and workflow copies."""
+    ephemeral (never tracked), so the force-add applies only to real-file managed
+    copies — the bootstrap quartet and workflow copies."""
     src = _full_source_tree(tmp_path / "src")
     # Give the synthetic source a bootstrap real-file dest (quartet member).
     boot = os.path.join(src, "templates", "commons", "bin", "setup-dev-env.sh")
@@ -789,7 +790,7 @@ def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monk
         fh.write("#!/usr/bin/env bash\necho setup-dev-env.sh\n")
     os.chmod(boot, 0o755)
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
-    # Consumer ignores a directory the managed tree writes into.
+    # Consumer ignores a directory the managed files are written into.
     (repo / ".gitignore").write_text("/bin/\n")
     _git(repo, "add", ".gitignore")
     _git(repo, "commit", "-q", "-m", "ignore bin")
@@ -878,7 +879,7 @@ def test_full_errors_when_source_lacks_kind_tree(tmp_path, monkeypatch, capsys):
 @_needs_git
 def test_full_commits_removals(tmp_path, monkeypatch, capsys):
     # A "removals-only" managed update (a symlink whose .release target is gone in
-    # a later sync) must not be left dangling. Post-WS7 (release#528) the mirror
+    # a later install) must not be left dangling. Post-WS7 (release#528) the mirror
     # is normally never tracked, so the sweep is a pure filesystem op — but a
     # TRACKED swept symlink must still commit its deletion via the managed
     # pathspec (the swept link rides `written`).
@@ -912,7 +913,7 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------
-# Flag-combo guards (full build is the ONLY mode since release#532).
+# Flag-combo guards (full install is the ONLY mode since release#532).
 # --------------------------------------------------------------------------
 
 
@@ -930,7 +931,7 @@ def test_push_and_no_commit_is_bad_usage(capsys):
 def test_no_commit_in_default_full_mode_is_valid(tmp_path, monkeypatch, capsys):
     # The flip: a BARE `--no-commit` (default full mode) is now VALID — it skips
     # the auto-commit (was a usage error pre-#476). Run it for real and confirm
-    # rc 0, the tree built, and NO commit was made.
+    # rc 0, the files installed, and NO commit was made.
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     head_before = _git(repo, "rev-parse", "HEAD")
@@ -938,7 +939,7 @@ def test_no_commit_in_default_full_mode_is_valid(tmp_path, monkeypatch, capsys):
     rc = init.main(["--no-commit"])
     assert rc == 0
     capsys.readouterr()
-    assert (repo / ".release" / "bin" / "check").is_file()  # full tree built
+    assert (repo / ".release" / "bin" / "check").is_file()  # files installed
     assert _git(repo, "rev-parse", "HEAD") == head_before  # but no commit
 
 
@@ -1024,7 +1025,7 @@ def test_bundle_init_stamped_tag_labels_commit_and_marker(tmp_path, monkeypatch,
     assert init.main([]) == 0
     capsys.readouterr()
     # The commit subject carries the REAL release line — and keeps the exact
-    # "chore(release): sync managed tree" prefix other tooling greps.
+    # "chore(release): sync managed tree" prefix that other tooling greps on.
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
     assert subject == "chore(release): sync managed tree from release v2.17.1 (release-core wheel)"
     # The marker gains the tag line ALONGSIDE the existing source line.
@@ -1085,7 +1086,7 @@ def test_source_label_matches_the_exact_from_source_sentinel():
 @_needs_yq
 @_needs_git
 def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
-    # The $RELEASE_HOME override composes from a live clone: its resolved SHA is
+    # The $RELEASE_HOME override installs from a live clone: its resolved SHA is
     # the provenance, so the venv stamp (which describes the installed WHEEL)
     # must not relabel the commit or reach the marker.
     src = _full_source_tree(tmp_path / "src")
@@ -1110,7 +1111,7 @@ def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
 
 
 def _ws5_source_tree(root) -> str:
-    """_full_source_tree + the bootstrap quartet, so a full init exercises the
+    """_full_source_tree + the bootstrap quartet, so a full install exercises the
     real-copy path for the SessionStart chain."""
     src = _full_source_tree(root)
     tpl = root / "templates" / "commons"
@@ -1221,7 +1222,7 @@ def test_full_removes_retired_files_in_managed_commit(tmp_path, monkeypatch, cap
 def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch, capsys):
     """release#563: a pre-WS4 seed TRACKS .release/ORIENTATION.md (stale,
     rule-contradicting) and carries the OLD @.release/ORIENTATION.md
-    CLAUDE.md import. One bare init converges BOTH: the recompose removes the
+    CLAUDE.md import. One bare init converges BOTH: the install removes the
     on-disk copy and never re-builds it, the retired-file removal + WS4 untracking
     record the deletion, and the stub refresh rewrites the managed block to
     the how-to-pointing form. The second init is a no-op."""
@@ -1246,7 +1247,7 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
     assert init.main([]) == 0
     out = capsys.readouterr().out
     assert "committed" in out
-    # Gone from disk, NOT rebuilt by the recompose.
+    # Gone from disk, NOT rebuilt by the install.
     assert not orientation.exists()
     # Untracked — the deletion is recorded, not resurrected by the pathspec commit.
     assert _git(repo, "ls-files", ".release/ORIENTATION.md") == ""
@@ -1475,7 +1476,8 @@ def _write_consumer_wf(repo, text, name="e2e.yml"):
 @_needs_yq
 def test_warn_names_file_job_step_and_the_next_action(tmp_path, capsys):
     """The supage#163 shape: a consumer-authored job invokes a managed bin tool
-    with no materialize → LOUD stderr warning with exact coordinates + remedy."""
+    without installing the `.release/` temp dir first → LOUD stderr warning with
+    exact coordinates + remedy."""
     repo = tmp_path / "consumer"
     repo.mkdir()
     _write_consumer_wf(repo, _BAD_WF)
@@ -1484,14 +1486,14 @@ def test_warn_names_file_job_step_and_the_next_action(tmp_path, capsys):
     assert "WARNING" in err
     assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err
     assert "bin/check-e2e" in err
-    # The one next action: materialize via arm-gate, toolset:'false'.
+    # The one next action: install the `.release/` temp dir via arm-gate, toolset:'false'.
     assert "arm-gate" in err
     assert "toolset: 'false'" in err
     assert "release-core how-to" in err
 
 
 @_needs_yq
-def test_warn_silent_when_job_materializes_first(tmp_path, capsys):
+def test_warn_silent_when_job_installs_first(tmp_path, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()
     _write_consumer_wf(repo, _MATERIALIZED_WF)
@@ -1526,7 +1528,7 @@ def test_warn_never_raises_on_scan_failure(tmp_path, monkeypatch, capsys):
 def test_full_init_fires_the_workflow_warning(tmp_path, monkeypatch, capsys):
     """End-to-end: a bare `release-core init` over a consumer carrying a bad job
     warns on EVERY init (the tripwire is not a one-time migration message) —
-    and still exits 0 with the managed tree applied."""
+    and still exits 0 with the managed files installed."""
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     # References bin/check — a mirror dest of the synthetic source tree.
@@ -1539,9 +1541,9 @@ def test_full_init_fires_the_workflow_warning(tmp_path, monkeypatch, capsys):
     err = capsys.readouterr().err
     assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err
     assert "toolset: 'false'" in err
-    assert (repo / "bin" / "check").is_symlink()  # init still applied the tree
+    assert (repo / "bin" / "check").is_symlink()  # init still applied the managed files
 
-    # Steady-state re-run: tree already current, the warning still fires.
+    # Steady-state re-run: managed files already current, the warning still fires.
     assert init.main([]) == 0
     err = capsys.readouterr().err
     assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err

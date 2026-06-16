@@ -5,9 +5,9 @@ layer — recorded ls-tree/cat-file/show results — never at subprocess. The
 filesystem-walk + symlink + CLAUDE.md helpers run against real tmp_path trees.
 
 These pin the byte-for-byte contract: ref-selection precedence, capability
-resolution, the plan/lefthook composition order, is_release_internal
+resolution, the plan/lefthook assembly order, is_release_internal
 classification, relative symlink-target math, broken-symlink detection, the
-find-style traversal order, and the orientation-block computation.
+find-style traversal order, and the header-block computation.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from release_core import sync
         ("templates/rust-cli/manifest.yaml", True),
         ("templates/components/_lefthook-base.yaml", True),
         ("templates/commons/.DS_Store", True),
-        # Bytecode never materializes into a consumer's .release/ (release#450).
+        # Bytecode is never installed into a consumer's .release/ (release#450).
         ("templates/commons/lib/release_core/release_core/__pycache__/cli.cpython-313.pyc", True),
         ("templates/commons/lib/release_core/release_core/sync.pyc", True),
         ("templates/commons/lib/release_core/release_core/sync.pyo", True),
@@ -376,7 +376,7 @@ def _skill_tree_ls(skill_files):
 
 
 def test_install_plan_distributes_push_all_skills(monkeypatch):
-    """Every PUSH_ALL skill that exists at the ref materializes whole-directory:
+    """Every PUSH_ALL skill that exists at the ref is installed whole-directory:
     each file under skills/<name>/ → .claude/skills/<name>/<subpath>."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
@@ -516,7 +516,7 @@ def test_install_plan_skips_skip_sources(monkeypatch):
 
 def test_install_tree_writes_managed_gitignore(monkeypatch, tmp_path):
     """install_tree() always writes a self-ignoring .release/.gitignore (`*`) so the
-    whole ephemeral build dir is invisible to git — out-of-sync impossible by
+    whole ephemeral temp dir is invisible to git — out-of-sync impossible by
     construction (WS4, release#521; supersedes the bytecode-only ignore of #450)."""
     plan = sync.Plan()
     plan.order = ["bin/real"]
@@ -590,7 +590,7 @@ def test_link_swept_when_target_removed_this_sync(tmp_path):
 
 def test_demirrored_link_swept_even_when_target_present(tmp_path):
     """WS3 (release#524): the root lefthook.yml + lint/format configs became
-    release-internal — still materialized into .release/ (target RESOLVES) but no
+    release-internal — still installed into .release/ (target RESOLVES) but no
     longer mirrored out. A filesystem-presence test would leave these stale root
     symlinks behind; the mirrored-dest rule sweeps them."""
     # Seed a pre-WS3 consumer: root lefthook.yml symlink whose .release/ target
@@ -844,7 +844,7 @@ def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
     assert not mp.symlinks_to_create
 
 
-# ── CLAUDE.md orientation block ───────────────────────────────────────────────
+# ── CLAUDE.md header block ────────────────────────────────────────────────────
 
 
 def test_claude_desired_creates_block_only_when_no_file(tmp_path):
@@ -970,7 +970,7 @@ def test_no_orientation_file_anywhere_in_the_template_source():
 
 def test_decide_claude_unconditional_no_orientation_gate(tmp_path):
     # WS2 (#523): the stub block is unconditional — no ORIENTATION.md needs to be
-    # composed in the tree for the block to be created (the old gate is gone).
+    # installed for the header block to be created (the old gate is gone).
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()  # no ORIENTATION.md
     assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "create"
@@ -1047,9 +1047,9 @@ def test_diff_release_no_existing(tmp_path):
 
 def test_bootstrap_files_are_classified_real_copies():
     """The SessionStart chain must be readable/executable on a FRESH CLONE —
-    before the ephemeral .release/ exists — so it must never be a symlink into
-    it. Lock the exact set: the hooks config + the boot resolver + the session
-    provisioner + the PreToolUse guard."""
+    before the ephemeral .release/ temp dir exists — so it must never be a
+    symlink into it. Lock the exact set: the hooks config + the boot resolver +
+    the session provisioner + the PreToolUse guard."""
     assert (
         frozenset(
             {
@@ -1070,7 +1070,7 @@ def test_bootstrap_files_are_classified_real_copies():
 
 def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
     """A pre-WS5 consumer carries TRACKED SYMLINKS at the bootstrap paths
-    (pointing into .release/). On re-init those dests are planned as real-copy
+    (pointing into .release/). On re-init those dests are planned as real-file
     writes — the symlink is replaced, never left dangling for a fresh clone."""
     dest = "bin/setup-dev-env.sh"
     tmp_release = tmp_path / "tmpbuild"

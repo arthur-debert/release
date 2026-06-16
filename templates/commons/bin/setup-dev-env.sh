@@ -156,14 +156,14 @@ fi
 # resolves the latest release wheel, pip-installs it (--force-reinstall — the
 # wheel version is static, so `-U` would skip it; deps resolve from PyPI), THEN runs `release-core
 # init` itself (it locates the just-installed console-script across venv/--user/
-# system layouts). A bare `init` now builds the WHOLE managed tree from the
-# wheel bundle (the .release/ build dir + every working-tree mirror — skills,
-# ORIENTATION, configs, the CLAUDE.md block) and auto-commits any managed change
+# system layouts). A bare `init` now installs the WHOLE set of managed files from
+# the wheel bundle (the .release/ temp dir + every working-tree mirror — skills,
+# configs, the CLAUDE.md header block) and auto-commits any managed change
 # (#476 cutover) — not just the config subset. So SessionStart self-syncs the full
-# tree from the pulled wheel: no push needed (no push mechanism exists). One
+# set from the pulled wheel: no push needed (no push mechanism exists). One
 # command does the whole boot. Runs in BOTH local and cloud (above the cloud-only
 # gate) — auto-update is the whole point. Runs BEFORE the hook wiring (release#567):
-# init builds the ephemeral .release/ (the gate config), so the very first
+# init installs the ephemeral .release/ (the gate config), so the very first
 # session of a fresh clone wires a hook that has a gate to run.
 #
 # BEST-EFFORT, never aborts the session: every call is `|| warn`, and init
@@ -202,8 +202,8 @@ fi
 #
 # Runs AFTER the pull-model boot (§0.1) deliberately (release#567): on a
 # fresh clone/session the boot installs release-core and `release-core
-# init` builds the ephemeral `.release/` (gitignored since WS4, so
-# EVERY session starts without it) — wiring first left the earliest
+# init` writes the ephemeral `.release/` temp dir (gitignored since WS4,
+# so EVERY session starts without it) — wiring first left the earliest
 # commits of a session without a hook at all, and a previously-wired hook
 # firing before init warn-and-passed on the missing config (the
 # first-commit-of-session boot hole; gate now fails loud on that too).
@@ -228,7 +228,7 @@ fi
 if command -v release-core >/dev/null 2>&1 \
    && { [ -f .release/lefthook.yml ] || [ ! -f lefthook.yml ]; }; then
   # WS3 (release#524): the gate definition lives ONLY in the ephemeral .release/
-  # build dir — there is no tracked root lefthook.yml for a stock `lefthook
+  # temp dir — there is no tracked root lefthook.yml for a stock `lefthook
   # install` shim to discover. Wire the git hook through the binary instead:
   # `release-core gate --install-hook` writes .git/hooks/pre-commit (→ `release-core
   # gate --hook`, which points lefthook at .release/lefthook.yml) and unsets any

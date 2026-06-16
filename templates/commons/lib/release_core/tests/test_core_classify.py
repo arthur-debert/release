@@ -63,8 +63,8 @@ def test_project_step_with_armed_tree_is_project():
     assert classify.classify_failure("Run canonical checks (bin/check)", legacy) == "PROJECT"
 
 
-def test_project_step_without_materialize_is_infra():
-    # The #579 class: e2e job whose arm-gate/materialize step is gone — the
+def test_project_step_without_install_step_is_infra():
+    # The #579 class: e2e job whose arm-gate/install step is gone — the
     # bats step fails (bin/check-e2e exit 127) on an un-armed tree. Release's
     # bug, never the project content's.
     steps = [
@@ -76,7 +76,7 @@ def test_project_step_without_materialize_is_infra():
     assert classify.classify_failure("Run E2E tests", steps) == "INFRA"
 
 
-def test_project_step_with_failed_materialize_is_infra():
+def test_project_step_with_failed_install_step_is_infra():
     steps = [
         _step("Arm the gate toolset", "failure"),
         _step("Run E2E tests", "failure"),

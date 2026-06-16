@@ -25,15 +25,15 @@ from . import gh
 
 # ── Source abstraction ────────────────────────────────────────────────────────
 #
-# The sync engine reads its template SOURCE through this minimal interface so the
-# SAME plan/build logic serves two backends:
+# The install engine reads its template SOURCE through this minimal interface so the
+# SAME plan/install logic serves two backends:
 #
 #   GitSource(release_home, ref)  — the original: a git ref in a release clone,
 #       wrapping gh.git_ls_tree / git_show_bytes / git_cat_file_exists. Behavior
 #       is IDENTICAL to the pre-abstraction engine's contract.
 #   BundleSource(bundle_root)     — the wheel bundle: the on-disk template tree
 #       hatch_build.py stages into release_core/_bundled_templates/. Lets `init`
-#       build the full managed tree offline, no release clone, no network.
+#       install the managed files offline, no release clone, no network.
 #
 # Paths are always git-style (POSIX, '/'-separated, relative to the source root,
 # e.g. "templates/commons/bin/check" or "skills/tdd/SKILL.md"). list_tree returns
@@ -220,10 +220,10 @@ def read_source_tag() -> str | None:
         return None
 
 
-# WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
-# and recomposed every session/CI from the pinned wheel, never committed. A
+# WS4 (release#521): the whole `.release/` temp dir is EPHEMERAL — gitignored
+# and regenerated every session/CI from the pinned wheel, never committed. A
 # `.gitignore` of `*` inside the dir makes it self-ignoring: git sees nothing
-# under `.release/` (including this file), so the build dir can't fall out of
+# under `.release/` (including this file), so the temp dir can't fall out of
 # sync by construction (ADR-0005 supersedes the committed-tree model of
 # ADR-0001/0002). This subsumes the old `__pycache__`-only ignore (release#450).
 GITIGNORE_BODY = (
@@ -243,7 +243,7 @@ CLAUDE_BEGIN_LEGACY = (
     "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
 )
 CLAUDE_END = "<!-- END release-managed orientation -->"
-# WS2 (release#523): the managed block is a small managed block (~7 lines)
+# WS2 (release#523): the managed block is a small header block (~7 lines)
 # pointing at the CLI — `release-core how-to` is the single source of orientation
 # (kind-aware, renders the dev cycle), so there is no synced ORIENTATION.md to
 # fall out of sync (discovery is the CLI, not docs). The block is located by the
@@ -267,7 +267,7 @@ CLAUDE_STUB_BODY = (
 # skill files. WS7 (release#528) trimmed PUSH_ALL_SKILLS to the ONE skill the
 # harness needs a file on disk for — the `/`-triggered PR-loop driver ("at most
 # one thin delegating skill", the WS2 exit). release-issue-relay was dropped from
-# distribution: the escalation contract lives in the CLAUDE.md stub + `release-core
+# distribution: the escalation contract lives in the CLAUDE.md header block + `release-core
 # how-to`, and the mechanism (`gh-release-issue`) is a console-script on PATH. The
 # 15 general dev-cycle skills (tdd, review, diagnose, …), pr-review-respond, and
 # now release-issue-relay are no longer pushed; on a consumer's next `init` their
@@ -359,7 +359,7 @@ def is_distributed_skill_dest(dest: str) -> bool:
 
 
 # The gate definition + most of its tool configs live ONLY in the ephemeral
-# .release/ build dir now (WS3, release#524): they are built into .release/
+# .release/ temp dir now (WS3, release#524): they are installed into .release/
 # but no longer mirrored out to the consumer root. `release-core gate` points
 # lefthook at .release/lefthook.yml (LEFTHOOK_CONFIG) and each tool is handed its
 # config EXPLICITLY (markdownlint --config/--ignore-path, yamllint -c, prettier
@@ -374,8 +374,8 @@ def is_distributed_skill_dest(dest: str) -> bool:
 # equalization (release#536) pins shellcheck 0.11 everywhere via the
 # shellcheck-py wheel, so `--rcfile .release/.shellcheckrc` (shellcheck >= 0.10)
 # is now portable across the whole fleet and check-shell passes it explicitly —
-# the root-discovered dotfile is no longer needed. The de-mirrored root symlink
-# in already-seeded consumers is removed by the mirrored-dest sweep on re-init.
+# the root-discovered dotfile is no longer needed. The stale root symlink in
+# already-seeded consumers is removed by the mirrored-dest sweep on re-init.
 GATE_INTERNAL_FILES: frozenset[str] = frozenset(
     {
         "lefthook.yml",
@@ -389,7 +389,7 @@ GATE_INTERNAL_FILES: frozenset[str] = frozenset(
 
 
 def is_release_internal(dest: str) -> bool:
-    """Content built into .release/ but NOT mirrored out as a symlink/copy:
+    """Content written into .release/ but NOT mirrored out as a symlink/copy:
     the provenance marker, the managed .gitignore (release#450), the Python engine
     package (lib/release_core/* — the folded PR state engine ships by pip wheel
     now, not sync; release#459), and the gate definition + tool configs
@@ -410,7 +410,7 @@ def is_release_internal(dest: str) -> bool:
 
 
 class SyncError(RuntimeError):
-    """A fatal managed-tree-build condition (maps to exit 1)."""
+    """A fatal condition during the `.release/` temp dir install (maps to exit 1)."""
 
 
 def select_ref(release_home: str, repo_name: str, kind: str, release_ref: str | None) -> str:
@@ -510,7 +510,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
 
 @dataclass
 class Plan:
-    """The build plan. ``order`` preserves first-seen dest order
+    """The install plan. ``order`` preserves first-seen dest order
     (mirrors plan_order); ``mode``/``source`` map dest → git filemode / source
     path (last write wins, mirroring the bash assoc-array overwrite)."""
 
@@ -539,7 +539,7 @@ def install_plan(
 ) -> Plan:
     """Mirror the `--- Plan ---` block: walk each subtree, skip the
     should_skip_source paths, strip the subtree prefix to get the dest, then add
-    the distributed skills and compose the lefthook fragment list.
+    the distributed skills and assemble the lefthook fragment list.
 
     ``repo_root`` is the consumer working tree. It gates the REPLACE_IF_PRESENT
     skills (synced only when the consumer already carries .claude/skills/<name>);
@@ -568,7 +568,7 @@ def install_plan(
             if _consumer_has_skill(repo_root, name):
                 _add_skill_dir(plan, source, name)
 
-    # Compose lefthook.yml fragment list: base < commons < each capability < kind.
+    # Assemble lefthook.yml fragment list: base < commons < each capability < kind.
     frags: list[str] = []
     base = "templates/components/_lefthook-base.yaml"
     if source.exists(base):
@@ -634,8 +634,8 @@ def link_target(dest: str) -> str:
 
 
 def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
-    """Write the new .release/ tree into a tempdir: write each
-    planned blob (preserving the 100755/100644 mode), the composed lefthook.yml,
+    """Write the new .release/ temp dir into a tempdir: write each
+    planned blob (preserving the 100755/100644 mode), the assembled lefthook.yml,
     and the provenance marker into ``tmp_release``."""
     for dest in plan.order:
         src = plan.source[dest]
@@ -650,8 +650,8 @@ def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> 
     if plan.lefthook_frags:
         _write_lefthook(source, ref_sha, plan.lefthook_frags, tmp_release)
 
-    # Managed .gitignore (release#450): keeps bytecode out of the committed
-    # .release/ even when a consumer regenerates from the working tree.
+    # Managed .gitignore (release#450): keeps bytecode out of the ephemeral
+    # .release/ even when a consumer rebuilds from the working tree.
     gitignore = os.path.join(tmp_release, GITIGNORE_FILE)
     with open(gitignore, "w", encoding="utf-8") as fh:
         fh.write(GITIGNORE_BODY)
@@ -678,7 +678,7 @@ def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> 
 
 
 def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release: str) -> None:
-    """Mirror the lefthook.yml generation: build each fragment to a
+    """Mirror the lefthook.yml generation: write each fragment to a
     NN-<dir>.yaml temp file (the numeric prefix fixes the merge order), then
     `yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""'` over them,
     under the generated-by header. The `*+` deep-merges with array concat; the
@@ -782,7 +782,7 @@ def _files_equal(a: str, b: str) -> bool:
 
 def _expected_copy_bytes(f: str, tmp_release: str) -> bytes:
     """The exact bytes ``_apply_mirror`` would write for the real-file copy ``f`` —
-    the built source under ``tmp_release``, with the managed-marker header
+    the installed source under ``tmp_release``, with the managed-marker header
     prepended for YAML (mirrors init._apply_mirror's copy branch). Used to tell a
     genuine copy change from a byte-identical rebuild so a steady-state
     sync is a true no-op (no phantom change count, no failed auto-commit)."""
@@ -900,7 +900,7 @@ def compute_mirror(
     # The dests this sync mirrors OUT as symlinks into .release/ (everything in
     # new_files that is neither release-internal nor a real-file copy). The sweep
     # removes any .release/-pointing symlink whose target dest is absent from this
-    # set — a dropped target OR a de-mirrored one (WS3: root lefthook.yml + configs).
+    # set — a dropped target OR one no longer mirrored (WS3: root lefthook.yml + configs).
     mirrored_dests = {f for f in new_files if not is_release_internal(f) and not needs_real_file(f)}
     mp.mirror_dests = mirrored_dests
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, mirrored_dests)
@@ -1349,13 +1349,13 @@ def _has_fingerprint_header(path: str, needle: str) -> bool:
     return any(line.startswith(f"# {needle}") for line in head)
 
 
-# ── CLAUDE.md orientation block (#348) ────────────────────────────────────────
+# ── CLAUDE.md header block (#348) ─────────────────────────────────────────────
 
 
 def claude_desired(repo_root: str) -> str:
-    """Mirror claude_desired(): the managed block at the top, then the consumer's
-    existing content (with any prior managed block stripped, leading blanks
-    trimmed) below it. Reads $CLAUDE_FILE; returns the candidate content."""
+    """Mirror claude_desired(): the managed header block at the top, then the
+    consumer's existing content (with any prior managed block stripped, leading
+    blanks trimmed) below it. Reads $CLAUDE_FILE; returns the candidate content."""
     rest = ""
     claude_path = os.path.join(repo_root, CLAUDE_FILE)
     if os.path.isfile(claude_path) and not os.path.islink(claude_path):
@@ -1398,10 +1398,10 @@ class ClaudeDecision:
 
 
 def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
-    """The `--- CLAUDE.md orientation block ---` decision. The managed block is the
+    """The `--- CLAUDE.md header block ---` decision. The managed block is the
     unconditional stub (WS2, release#523) — it points at `release-core how-to` and
-    no longer depends on a composed ORIENTATION.md, so there is no tree-content
-    gate. ``tmp_release`` is unused now (kept for signature stability)."""
+    no longer depends on an installed ORIENTATION.md, so there is no content gate.
+    ``tmp_release`` is unused now (kept for signature stability)."""
     claude_path = os.path.join(repo_root, CLAUDE_FILE)
     if os.path.islink(claude_path):
         return ClaudeDecision("skip-symlink")

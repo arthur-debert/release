@@ -37,13 +37,14 @@ JOBS_SETTLE_DELAY_S = 10.0
 # ── INFRA vs PROJECT, by failing step (#587 §3) ──────────────────────────────
 #
 # Classification is mechanical from job/step names. INFRA = the release-owned
-# plumbing (arm-gate materialize/provision, the boot resolver, init,
+# plumbing (arm-gate install/provision, the boot resolver, init,
 # prepare-release internals) — a release/upstream bug; PROJECT = the repo's
 # own content (gate checks, cargo, bats, compilation) — consumer-side (for a
 # canary: fixture rot, not pipeline rot).
 INFRA_MARKERS = (
     "arm the gate",
-    "materialize",
+    "install the .release",  # arm-gate@v3 install step name
+    "materialize",  # legacy step name (arm-gate@v2) — still seen in in-flight runs
     "provision",
     "install-release-core",
     "release-core init",
@@ -63,16 +64,16 @@ PROJECT_MARKERS = (
     "clippy",
     "test",
 )
-_MATERIALIZE_MARKERS = ("arm the gate", "materialize")
+_INSTALL_STEP_MARKERS = ("arm the gate", "install the .release", "materialize")
 
 
 def classify_failure(failed_step: str, steps: list[dict]) -> str:
     """INFRA vs PROJECT for a failed job, from its step names.
 
     One refinement beyond the marker tables: a PROJECT-looking step that ran
-    WITHOUT a successful materialize step before it failed on an un-armed
+    WITHOUT a successful install step before it failed on an un-armed
     tree — the #579 class (`bin/check-e2e` exit 127 on a sparse post-WS7
-    checkout, the managed mirrors never composed). That is release's bug, so
+    checkout, the managed mirrors never installed). That is release's bug, so
     it classifies INFRA. Unknown failures default to INFRA: unattributed
     breakage escalates upstream, never silently blames the consumer."""
     name = (failed_step or "").lower()
@@ -81,7 +82,7 @@ def classify_failure(failed_step: str, steps: list[dict]) -> str:
     if any(marker in name for marker in PROJECT_MARKERS):
         armed = any(
             s.get("conclusion") == "success"
-            and any(m in (s.get("name") or "").lower() for m in _MATERIALIZE_MARKERS)
+            and any(m in (s.get("name") or "").lower() for m in _INSTALL_STEP_MARKERS)
             for s in steps
         )
         return "PROJECT" if armed else "INFRA"
