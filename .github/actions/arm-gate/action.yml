@@ -32,7 +32,7 @@ inputs:
       rules that turn an unrelated PR red). Empty (default) → the script's own pin.
     required: false
     default: ''
-  install-tree:
+  install_tree:
     description: |
       Install the consumer's `.release/` temp dir before the gate runs
       (release#521 / WS4). `.release/` is gitignored, so the gate entry `bin/check`
@@ -69,7 +69,7 @@ runs:
     # persists $GITHUB_PATH for LATER steps; within THIS step we add that dir to
     # PATH so the very next `release-core` call resolves.
     - name: Install the .release/ temp dir
-      if: inputs.install-tree == 'true'
+      if: inputs.install_tree == 'true'
       shell: bash
       env:
         # install-release-core resolves the release_core wheel via `gh api`

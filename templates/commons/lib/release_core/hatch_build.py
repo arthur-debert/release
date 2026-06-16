@@ -25,11 +25,10 @@ Recursion guard: templates/commons/lib/release_core/ IS this very package (the
 build root). It is excluded entirely so the bundle does not contain a copy of
 itself. Other templates/commons/lib/ content is kept.
 
-NOTE — config subset vs. full tree: `init` currently CONSUMES only the
-config subset listed in _COMMONS_CONFIGS (lefthook.yml + lint configs) plus
-the per-kind/capability lefthook fragments + manifests. The rest of the
-now-bundled tree is PRESENT but unused until step 2 (#476) teaches `init`
-to do a full offline install. This part-1 change is purely additive data.
+NOTE: `init` installs the FULL bundled tree offline (#476 shipped — see
+release_core/verbs/init.py, which runs install_plan/install_tree over this
+bundle). The bundle below is the complete source `init` installs from: the
+per-kind/capability trees, lefthook fragments, manifests, configs, and skills.
 """
 
 from __future__ import annotations

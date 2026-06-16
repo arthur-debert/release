@@ -201,7 +201,7 @@ _HEADER = """\
 #   gate_internal         — live only inside .release/ (WS3).
 #   retired_files         — retired dests init removes (provenance-gated, WS6).
 #   managed_path_prefixes — path prefixes whose presence in a CI job means the
-#                           job MUST build first (arm-gate /
+#                           job MUST install `.release/` first (arm-gate /
 #                           release-core init); the assumption lint
 #                           (bin-internal/lint-consumer-contract.sh) enforces
 #                           this over every workflow + composite action.
@@ -328,7 +328,7 @@ def _step_installs_tree(step: dict) -> bool:
     arm-gate called with the install opt-out (release's own ci.yml — the one
     repo with real root configs) does NOT write `.release/`, so it earns no
     credit; `toolset: 'false'` (#581, the install-only building block) still
-    writes `.release/` and does. The opt-out input is named `install-tree`
+    writes `.release/` and does. The opt-out input is named `install_tree`
     on arm-gate@v3 and `materialize` on the still-pinned @v2 — accept either."""
     uses = step.get("uses")
     if isinstance(uses, str) and uses.split("@", 1)[0].endswith("/arm-gate"):
@@ -337,7 +337,7 @@ def _step_installs_tree(step: dict) -> bool:
         # bare YAML `false` (parsed as a bool). Either input key opts out.
         if isinstance(with_block, dict):
             opt_out = (
-                str(with_block.get("install-tree")).lower() == "false"
+                str(with_block.get("install_tree")).lower() == "false"
                 or str(with_block.get("materialize")).lower() == "false"
             )
             return not opt_out

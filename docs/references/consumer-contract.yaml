@@ -26,7 +26,7 @@
 #   gate_internal         — live only inside .release/ (WS3).
 #   retired_files         — retired dests init removes (provenance-gated, WS6).
 #   managed_path_prefixes — path prefixes whose presence in a CI job means the
-#                           job MUST build first (arm-gate /
+#                           job MUST install `.release/` first (arm-gate /
 #                           release-core init); the assumption lint
 #                           (bin-internal/lint-consumer-contract.sh) enforces
 #                           this over every workflow + composite action.

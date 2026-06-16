@@ -147,7 +147,7 @@ jobs:
         # ONE definition of CI gate-arming (pinned toolset), same as
         # rust-cli.yml — but provision-only (the install opt-out; see the step
         # above for why). The input key is `materialize` here because this calls
-        # the still-pinned arm-gate@v2 — it becomes `install-tree` when this ref
+        # the still-pinned arm-gate@v2 — it becomes `install_tree` when this ref
         # bumps to @v3. Without an armed+installed gate this workflow's bot gate
         # had NOTHING to run on a post-WS3 consumer (no root lefthook.yml) and
         # silently skipped (release#531 F1).
