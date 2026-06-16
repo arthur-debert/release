@@ -45,11 +45,19 @@ def test_is_valid_semver_matches_semver_tool(v, valid):
 # --- changelog-add ----------------------------------------------------------
 
 
+# add writes a bare `- bullet` by default (the renderer's flat list). A
+# `### <section>` heading is opt-in via --section <name> (release#720). The
+# default carries no heading, so this prefix is empty — but mirror
+# `_with_section`'s exact bytes (heading + blank line) so the assertions stay
+# correct if DEFAULT_SECTION ever becomes non-empty (release#732 review).
+_SECTION = changelog._with_section(b"", changelog.DEFAULT_SECTION)
+
+
 def test_add_inline_args_join_with_space(repo):
     rc = changelog.add_main(["pr-142", "- Fix", "crash"])
     assert rc == 0
     frag = repo / "CHANGELOG" / "unreleased-pr-142.md"
-    assert frag.read_bytes() == b"- Fix crash\n"
+    assert frag.read_bytes() == _SECTION + b"- Fix crash\n"
 
 
 def test_add_numeric_slug_prefixed(repo):
@@ -58,27 +66,104 @@ def test_add_numeric_slug_prefixed(repo):
     assert not (repo / "CHANGELOG" / "unreleased-142.md").exists()
 
 
-def test_add_stdin_already_bulleted_unchanged(repo, monkeypatch):
+def test_add_default_is_bare_bullet(repo):
+    # The default fragment is a bare bullet — no section heading — matching the
+    # verbatim renderer's flat list (release#720).
+    rc = changelog.add_main(["fix", "Fix the thing (#9)"])
+    assert rc == 0
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
+
+
+def test_add_custom_section(repo):
+    rc = changelog.add_main(["--section", "Added", "feat", "new shiny"])
+    assert rc == 0
+    assert (repo / "CHANGELOG" / "unreleased-feat.md").read_bytes() == b"### Added\n\n- new shiny\n"
+
+
+def test_add_section_equals_form(repo):
+    changelog.add_main(["--section=Fixed", "bug", "squashed"])
+    assert (repo / "CHANGELOG" / "unreleased-bug.md").read_bytes() == b"### Fixed\n\n- squashed\n"
+
+
+def test_add_empty_section_writes_bare_bullet(repo):
+    # --section '' opts out of the heading (byte-for-byte old behavior).
+    rc = changelog.add_main(["--section", "", "fix", "Fix the thing (#9)"])
+    assert rc == 0
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
+
+
+def test_add_body_with_own_section_written_verbatim(repo, monkeypatch):
     import io
 
-    # Already-bulleted stdin passes through unchanged (no double-bullet).
-    payload = b"- one\n- two\n\n"
+    # A body that already opens with its own ### heading is a complete fragment:
+    # written verbatim, neither bulleted nor given a second section heading.
+    payload = b"### Removed\n\n- gone\n"
     monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
     changelog.add_main(["multi"])
     assert (repo / "CHANGELOG" / "unreleased-multi.md").read_bytes() == payload
+
+
+def test_add_help_prints_usage(repo, capsys):
+    # --help / -h must print usage and exit 0, never validate as a slug (#686).
+    for flag in ("--help", "-h"):
+        rc = changelog.add_main([flag])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "usage:" in out
+        assert "slug must match" not in out
+
+
+def test_add_help_after_force(repo, capsys):
+    rc = changelog.add_main(["--force", "--help"])
+    assert rc == 0
+    assert "usage:" in capsys.readouterr().out
+
+
+def test_add_help_in_body_is_not_a_help_trigger(repo):
+    # Past the positional <slug>, a literal `--help` is body text, not help
+    # (release#732 review): help is only recognized in the leading-option region.
+    rc = changelog.add_main(["fix", "document the", "--help", "flag"])
+    assert rc == 0
+    assert (
+        repo / "CHANGELOG" / "unreleased-fix.md"
+    ).read_bytes() == b"- document the --help flag\n"
+
+
+def test_add_help_after_terminator_is_body(repo):
+    # A bare `--` terminates option scanning, so help is no longer recognized:
+    # `--help` past the terminator is the slug/body, never a help trigger.
+    rc = changelog.add_main(["--", "fix", "--help"])
+    assert rc == 0
+    # `--help` became the body (already `-`-led, so no extra bullet), not help.
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"--help\n"
+
+
+def test_add_stdin_already_bulleted_stays_bare(repo, monkeypatch):
+    import io
+
+    # Already-bulleted stdin keeps its bullets (no double-bullet) and, by
+    # default, no section heading is added.
+    payload = b"- one\n- two\n\n"
+    monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
+    changelog.add_main(["multi"])
+    assert (repo / "CHANGELOG" / "unreleased-multi.md").read_bytes() == _SECTION + payload
 
 
 def test_add_prepends_bullet_when_missing(repo):
     # Body without a leading bullet gets the mandated `- ` convention applied.
     rc = changelog.add_main(["fix", "Fix the thing (#9)"])
     assert rc == 0
-    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
+    assert (
+        repo / "CHANGELOG" / "unreleased-fix.md"
+    ).read_bytes() == _SECTION + b"- Fix the thing (#9)\n"
 
 
 def test_add_already_bulleted_inline_unchanged(repo):
     # A body that already starts with `-` is never double-bulleted.
     changelog.add_main(["fix", "- already a bullet"])
-    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- already a bullet\n"
+    assert (
+        repo / "CHANGELOG" / "unreleased-fix.md"
+    ).read_bytes() == _SECTION + b"- already a bullet\n"
 
 
 def test_add_stdin_unbulleted_gets_bullet(repo, monkeypatch):
@@ -87,7 +172,7 @@ def test_add_stdin_unbulleted_gets_bullet(repo, monkeypatch):
     payload = b"plain line\n"
     monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
     changelog.add_main(["plain"])
-    assert (repo / "CHANGELOG" / "unreleased-plain.md").read_bytes() == b"- plain line\n"
+    assert (repo / "CHANGELOG" / "unreleased-plain.md").read_bytes() == _SECTION + b"- plain line\n"
 
 
 def test_add_stdin_leading_blank_lines_bullets_first_content(repo, monkeypatch):
@@ -98,7 +183,9 @@ def test_add_stdin_leading_blank_lines_bullets_first_content(repo, monkeypatch):
     payload = b"\n\ntext body\n"
     monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
     changelog.add_main(["blanks"])
-    assert (repo / "CHANGELOG" / "unreleased-blanks.md").read_bytes() == b"\n\n- text body\n"
+    assert (
+        repo / "CHANGELOG" / "unreleased-blanks.md"
+    ).read_bytes() == _SECTION + b"\n\n- text body\n"
 
 
 def test_ensure_bullet_unit():

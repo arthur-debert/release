@@ -125,6 +125,13 @@ def _vitest_extra(body: str) -> list[str]:
     return []
 
 
+def _is_tree_sitter_test(body: str) -> bool:
+    """True iff a node ``test`` script drives the tree-sitter CLI (``tree-sitter
+    test``). That CLI has NO coverage flag — forwarding ``--coverage`` errors
+    (release#696) — so the coverage resolver must not synthesize one onto it."""
+    return "tree-sitter test" in body or "tree-sitter-test" in body
+
+
 # --- component detectors --------------------------------------------------
 
 
@@ -348,9 +355,14 @@ def coverage_commands(root: str) -> list[Cmd]:
     Node prefers a dedicated ``coverage``/``test:coverage`` script when the repo
     wired one; otherwise it reuses the unit script and forwards ``--coverage``
     (vitest and jest both take it; the vitest ``--run`` injection applies so the
-    suite exits instead of watching). Empty means NO component has a
-    coverage-capable toolchain — the verb errors loudly on that (coverage was
-    asked for; there is nothing to "skip", per the hard-gate philosophy)."""
+    suite exits instead of watching) — UNLESS the unit script is a
+    ``tree-sitter test`` (the tree-sitter CLI rejects ``--coverage`` with
+    ``error: unexpected argument '--coverage'``; release#696). A tree-sitter
+    grammar has no coverage tool, so it falls through to the empty result and
+    the no-coverage notice, consistent with nvim-plugin. Empty means NO
+    component has a coverage-capable toolchain — the verb prints the
+    no-coverage-for-this-Kind notice on that (coverage was asked for; there is
+    nothing to "skip")."""
     cmds: list[Cmd] = []
     scripts = _scripts(root)
     if scripts:
@@ -360,7 +372,11 @@ def coverage_commands(root: str) -> list[Cmd]:
             cmds.append(_node_run(pm, named, _vitest_extra(scripts[named])))
         else:
             unit = "test:unit" if "test:unit" in scripts else "test" if "test" in scripts else None
-            if unit:
+            # `tree-sitter test` has no coverage flag — forwarding `--coverage`
+            # to it errors out (release#696). Only synthesize the flag onto a
+            # JS test runner; a tree-sitter grammar's `test` script falls through
+            # to the no-coverage path.
+            if unit and not _is_tree_sitter_test(scripts[unit]):
                 extra = [*_vitest_extra(scripts[unit]), "--coverage"]
                 cmds.append(_node_run(pm, unit, extra))
     for d in _rust_dirs(root):

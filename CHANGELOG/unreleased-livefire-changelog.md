@@ -1,0 +1,1 @@
+- changelog add: print help for `--help`/`-h` instead of a slug error (#686); add an opt-in `--section <name>` flag to write a `### <name>` heading above the bullet, default stays a bare bullet to match the renderer's flat list (#720)

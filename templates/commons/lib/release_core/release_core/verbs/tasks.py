@@ -131,19 +131,101 @@ def test_all(argv: list[str]) -> int:
 # --- coverage --------------------------------------------------------------
 
 
+# How many trailing lines of a coverage tool's output to surface as "the
+# summary" in the default concise view. The per-module/per-file table that
+# cargo-llvm-cov, `go tool cover -func`, and vitest/jest coverage reporters all
+# print lands at the very END of the stream, so a tail captures it Kind-
+# agnostically (release#694 — the user's summary was buried under a ~30KB build
+# log). Generous enough to hold a real module table; `--verbose` shows it all.
+_COVERAGE_SUMMARY_LINES = 40
+
+
+def _coverage_exec(cmd: Cmd, root: str, *, raw: bool) -> int:
+    """Run one coverage command. ``raw`` streams the full output live (the old
+    behavior). Otherwise capture the combined stream and, on success, print only
+    the trailing summary table; on FAILURE print the whole captured stream so the
+    error is diagnosable (release#694)."""
+    cwd = root if cmd.cwd is None else os.path.join(root, cmd.cwd)
+    argv = _resolve_argv(cmd, root)
+    label = f"[{cmd.label}] " if cmd.label else ""
+    print(f"→ {label}{cmd.display}", flush=True)
+    if raw:
+        return subprocess.run(argv, cwd=cwd).returncode
+    proc = subprocess.run(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    output = proc.stdout or ""
+    if proc.returncode != 0:
+        # Failure: the user needs the full context to diagnose — print it all.
+        sys.stdout.write(output)
+        if output and not output.endswith("\n"):
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+        return proc.returncode
+    lines = output.splitlines()
+    if len(lines) > _COVERAGE_SUMMARY_LINES:
+        omitted = len(lines) - _COVERAGE_SUMMARY_LINES
+        print(
+            f"  … {omitted} lines of build/test output hidden "
+            "(re-run with --verbose for the full stream) …"
+        )
+        lines = lines[-_COVERAGE_SUMMARY_LINES:]
+    for line in lines:
+        print(line)
+    sys.stdout.flush()
+    return 0
+
+
+def _coverage_fanout(cmds: list[Cmd], root: str, *, raw: bool) -> int:
+    """Run each coverage command in order; stop at the first non-zero."""
+    for cmd in cmds:
+        rc = _coverage_exec(cmd, root, raw=raw)
+        if rc != 0:
+            return rc
+    return 0
+
+
 def coverage(argv: list[str]) -> int:
     """Run every component's coverage tool and end on its per-module summary
     (release#568). UNLIKE the test verbs this never skips-with-notice: coverage
     was explicitly asked for, so a Kind with no coverage toolchain is a loud
     error, and a missing tool (cargo-llvm-cov) hard-errors with the install
-    command — never a silent skip (the hard-gate philosophy)."""
+    command — never a silent skip (the hard-gate philosophy).
+
+    By default the verbose build/test stream is suppressed and only the trailing
+    per-module summary table is shown (release#694); ``--verbose``/``--raw``
+    restores the full live stream."""
     if _is_help(argv):
         print(
             "release-core coverage — run THIS repo's coverage (kind-aware: "
             "test runner --coverage / cargo llvm-cov / go tool cover) and "
-            "print the per-module summary"
+            "print the per-module summary.\n"
+            "  --verbose, --raw   stream the full build/test output (default: "
+            "show only the summary table)"
         )
         return 0
+    # Parse the optional --verbose/--raw flag in any position; reject anything
+    # else with a usage error rather than silently ignoring typos/extra tokens
+    # (release#732 review). wrap_verb forwards argv verbatim, so this verb owns
+    # its own flag parsing.
+    raw = False
+    extra = []
+    for a in argv:
+        if a in ("--verbose", "--raw"):
+            raw = True
+        else:
+            extra.append(a)
+    if extra:
+        print(
+            "release-core coverage: unexpected argument(s): " + " ".join(extra),
+            file=sys.stderr,
+        )
+        print("  usage: release-core coverage [--verbose|--raw]", file=sys.stderr)
+        return 2
     root = _repo_root()
     cmds = repo_commands.coverage_commands(root)
     if not cmds:
@@ -151,10 +233,25 @@ def coverage(argv: list[str]) -> int:
             kind = manifest.detect_kind(root)
         except manifest.KindError:
             kind = "unknown"
+        # Expected, not a crash: some Kinds (nvim-plugin, tree-sitter) have no
+        # coverage-capable toolchain in this portfolio. Say so plainly and point
+        # at how-to, rather than reading like a failure (release#701, #696).
         print(
-            f"release-core coverage: no coverage tool for kind {kind} — no "
-            "component of this repo has a coverage-capable toolchain "
-            "(node test script, Cargo.toml, or go.mod).",
+            f"release-core coverage: the {kind} Kind has no coverage tool — "
+            "nothing to measure here.",
+            file=sys.stderr,
+        )
+        print(
+            "  This is expected for Kinds with no coverage-capable toolchain "
+            "(e.g. nvim-plugin, tree-sitter). A coverage component is a node "
+            "test runner (vitest/jest), a Cargo.toml (cargo llvm-cov), or a "
+            "go.mod (go tool cover) — this repo has none.",
+            file=sys.stderr,
+        )
+        print(
+            "  See `release-core how-to` for what each verb resolves to in this "
+            "repo. (Exit 1 because coverage was explicitly requested — the verb "
+            "never silently no-ops; it just had nothing to run.)",
             file=sys.stderr,
         )
         return 1
@@ -167,7 +264,7 @@ def coverage(argv: list[str]) -> int:
                 file=sys.stderr,
             )
             return 1
-    return _fanout(cmds, root)
+    return _coverage_fanout(cmds, root, raw=raw)
 
 
 # --- build / run (single app-root command) --------------------------------

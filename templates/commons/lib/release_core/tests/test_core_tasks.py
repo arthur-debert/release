@@ -93,12 +93,24 @@ def test_test_all_stops_if_unit_fails(monkeypatch):
 
 def test_coverage_errors_loudly_when_no_tool_for_kind(monkeypatch, capsys):
     # UNLIKE the test verbs, coverage never skips-with-notice: asked-for
-    # coverage with no coverage-capable component is exit 1 + a kind-naming msg.
+    # coverage with no coverage-capable component is exit 1 + a clear, non-
+    # alarming kind-naming notice that points at how-to (release#701).
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks.repo_commands, "coverage_commands", lambda r: [])
     monkeypatch.setattr(tasks.manifest, "detect_kind", lambda r: "nvim-plugin")
     assert tasks.coverage([]) == 1
-    assert "no coverage tool for kind nvim-plugin" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "nvim-plugin Kind has no coverage tool" in err
+    assert "expected" in err  # reads as an expected notice, not a crash
+    assert "release-core how-to" in err  # points at the discoverability path
+
+
+def test_coverage_rejects_unknown_args(capsys):
+    # An unknown/typo'd arg is a usage error, not silently ignored (#732 review).
+    assert tasks.coverage(["--verbsoe"]) == 2
+    err = capsys.readouterr().err
+    assert "unexpected argument" in err
+    assert "--verbsoe" in err
 
 
 def test_coverage_kind_detection_failure_still_errors(monkeypatch, capsys):
@@ -110,7 +122,7 @@ def test_coverage_kind_detection_failure_still_errors(monkeypatch, capsys):
 
     monkeypatch.setattr(tasks.manifest, "detect_kind", _boom)
     assert tasks.coverage([]) == 1
-    assert "no coverage tool for kind unknown" in capsys.readouterr().err
+    assert "unknown Kind has no coverage tool" in capsys.readouterr().err
 
 
 def test_coverage_hard_errors_when_cargo_llvm_cov_missing(monkeypatch, capsys):
@@ -135,11 +147,11 @@ def test_coverage_fans_out_and_propagates_failure(monkeypatch):
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
 
-    def _fake_exec(cmd, root):
+    def _fake_exec(cmd, root, *, raw):
         calls.append(cmd.argv)
         return 0 if cmd.label == "node" else 5  # rust leg fails
 
-    monkeypatch.setattr(tasks, "_exec", _fake_exec)
+    monkeypatch.setattr(tasks, "_coverage_exec", _fake_exec)
     monkeypatch.setattr(
         tasks.repo_commands,
         "coverage_commands",
@@ -157,7 +169,9 @@ def test_coverage_go_pair_stops_at_failed_test_leg(monkeypatch):
     # leg — the && semantics of the issue's go command.
     calls: list[list[str]] = []
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: calls.append(cmd.argv) or 2)
+    monkeypatch.setattr(
+        tasks, "_coverage_exec", lambda cmd, root, *, raw: calls.append(cmd.argv) or 2
+    )
     monkeypatch.setattr(
         tasks.repo_commands,
         "coverage_commands",
@@ -168,6 +182,74 @@ def test_coverage_go_pair_stops_at_failed_test_leg(monkeypatch):
     )
     assert tasks.coverage([]) == 2
     assert calls == [["go", "test", "-coverprofile=/tmp/c.out", "./..."]]
+
+
+# --- coverage: concise default output, --verbose/--raw opt-in (release#694) -
+
+
+def _coverage_one(monkeypatch, run_returncode, run_stdout):
+    """Wire a single coverage command + a fake subprocess.run for _coverage_exec."""
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "coverage_commands",
+        lambda r: [Cmd(["cargo", "llvm-cov", "--all-features"], "cargo llvm-cov", label="rust")],
+    )
+
+    class _Proc:
+        def __init__(self):
+            self.returncode = run_returncode
+            self.stdout = run_stdout
+
+    recorded = {}
+
+    def _fake_run(argv, **kw):
+        recorded["kw"] = kw
+        return _Proc()
+
+    monkeypatch.setattr(tasks.subprocess, "run", _fake_run)
+    return recorded
+
+
+def test_coverage_default_hides_verbose_stream_shows_tail(monkeypatch, capsys):
+    # A long build log + a trailing table: default view hides the body and shows
+    # the tail (the summary), with a hidden-lines notice (release#694).
+    body = "\n".join(f"compiling crate line {i}" for i in range(200))
+    table = "TOTAL    1234    56    95.46%"
+    _coverage_one(monkeypatch, 0, body + "\n" + table + "\n")
+    assert tasks.coverage([]) == 0
+    out = capsys.readouterr().out
+    assert table in out  # the summary survived
+    assert "lines of build/test output hidden" in out
+    assert "compiling crate line 5" not in out  # the body was suppressed
+
+
+def test_coverage_default_captures_not_streams(monkeypatch):
+    # Default (non-raw) must capture: subprocess.run gets stdout=PIPE.
+    recorded = _coverage_one(monkeypatch, 0, "TOTAL 95%\n")
+    assert tasks.coverage([]) == 0
+    assert recorded["kw"].get("stdout") is tasks.subprocess.PIPE
+
+
+def test_coverage_verbose_streams_full_output(monkeypatch):
+    # --verbose/--raw streams live: subprocess.run is NOT given a PIPE.
+    for flag in ("--verbose", "--raw"):
+        recorded = _coverage_one(monkeypatch, 0, None)
+        assert tasks.coverage([flag]) == 0
+        assert "stdout" not in recorded["kw"]  # streamed, not captured
+
+
+def test_coverage_failure_prints_full_output_for_diagnosis(monkeypatch, capsys):
+    # On failure the captured stream is printed in full so the error is
+    # diagnosable, and the failing exit code propagates.
+    body = "\n".join(f"line {i}" for i in range(100))
+    _coverage_one(monkeypatch, 7, body + "\nerror: coverage run failed\n")
+    assert tasks.coverage([]) == 7
+    out = capsys.readouterr().out
+    assert "error: coverage run failed" in out
+    assert "line 5" in out  # full body shown, not tailed
+    assert "hidden" not in out
 
 
 # --- build / run: error when no command ----------------------------------

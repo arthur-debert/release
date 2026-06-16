@@ -109,9 +109,20 @@ jobs:
       - name: Install bats-core
         # Modern standard install. Replaces the per-consumer `git clone` +
         # `install.sh` boilerplate that exists in dodot et al today.
+        #
+        # Helper-lib paths point at a runner-writable workspace dir rather
+        # than the action's `/usr/lib/bats-*` default: the default save (as
+        # root, cache MISS) + restore (as runner, cache HIT) mismatch makes
+        # the cache restore fail with "Permission denied" on alternating
+        # runs (release#690). The action exports BATS_LIB_PATH from these
+        # paths, so `bats_load_library` still resolves the libs at runtime.
         uses: bats-core/bats-action@4.0.0
         with:
           bats-version: ${{ inputs.bats-version }}
+          support-path: ${{ github.workspace }}/.bats/bats-support
+          assert-path: ${{ github.workspace }}/.bats/bats-assert
+          detik-path: ${{ github.workspace }}/.bats/bats-detik
+          file-path: ${{ github.workspace }}/.bats/bats-file
 
       - name: Run setup script
         if: inputs.setup-script != ''

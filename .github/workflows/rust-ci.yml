@@ -305,7 +305,22 @@ jobs:
       - name: Install bats-core
         # Standard install via the bats-core marketplace action — same
         # one used by bats-e2e.yml. Matches the `bats` Component docs.
+        #
+        # Point the helper-lib install/cache paths at a runner-writable
+        # dir under the workspace instead of the action's `/usr/lib/bats-*`
+        # default. The default install runs as root via sudo on a cache
+        # MISS, but the resulting `actions/cache` save captures /usr/lib;
+        # on a cache HIT the restore runs as the non-root runner user and
+        # fails with "Cannot mkdir: Permission denied" (release#690). A
+        # workspace path makes save AND restore both happen as the runner
+        # user. The action still exports BATS_LIB_PATH from these paths, so
+        # `bats_load_library` keeps resolving the libs at runtime.
         uses: bats-core/bats-action@4.0.0
+        with:
+          support-path: ${{ github.workspace }}/.bats/bats-support
+          assert-path: ${{ github.workspace }}/.bats/bats-assert
+          detik-path: ${{ github.workspace }}/.bats/bats-detik
+          file-path: ${{ github.workspace }}/.bats/bats-file
 
       - name: Run E2E tests
         env:

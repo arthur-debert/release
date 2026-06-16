@@ -323,4 +323,73 @@ def test_show_prints_all_threads_regardless_of_author(fakes, context, capsys):
     ctx = context("multi_bot_threads")
     review.render_show(ctx, [alpha])
     out = capsys.readouterr().out
-    assert out.count("(thread ") == len(ctx.threads)
+    assert out.count("graphql thread id ") == len(ctx.threads)
+
+
+def test_show_labels_the_ids_so_the_consumable_one_is_unambiguous(fakes, context, capsys):
+    # #687: each thread prints a GraphQL node id (PRRT_…) AND a numeric comment
+    # id; the output must LABEL them so it's clear the numeric comment-id is the
+    # one `pr resolve-thread` / `pr review reply` consume.
+    alpha, _, _ = fakes
+    ctx = context("multi_bot_threads")
+    review.render_show(ctx, [alpha])
+    out = capsys.readouterr().out
+    assert "graphql thread id " in out
+    assert "comment-id " in out
+    # the legend points at the consumable verbs + the numeric comment id
+    assert "resolve-thread" in out
+    assert "reply" in out
+
+
+# --- reply (#695) -------------------------------------------------------------
+
+
+@pytest.fixture
+def reply_calls(monkeypatch):
+    """Record `ghapi.pr_review_reply(pr, comment_id, body)` calls."""
+    calls: list[tuple[int, int, str]] = []
+    monkeypatch.setattr(
+        ghapi, "pr_review_reply", lambda pr, comment_id, body: calls.append((pr, comment_id, body))
+    )
+    return calls
+
+
+def test_reply_help_exits_zero(capsys):
+    assert review.reply_main(["--help"]) == 0
+    assert "pr review reply" in capsys.readouterr().out
+
+
+def test_reply_posts_to_resolved_pr_with_explicit_pr(reply_calls, capsys):
+    assert review.reply_main(["3418556677", "I disagree, here's why", "--pr", "42"]) == 0
+    assert reply_calls == [(42, 3418556677, "I disagree, here's why")]
+    assert "replied to comment 3418556677 on #42" in capsys.readouterr().out
+
+
+def test_reply_resolves_pr_from_current_branch(monkeypatch, reply_calls, capsys):
+    monkeypatch.setattr(ghapi, "_gh", lambda args, **kwargs: '{"number": 12}')
+    assert review.reply_main(["999", "ack"]) == 0
+    assert reply_calls == [(12, 999, "ack")]
+
+
+def test_reply_needs_comment_id_and_body(capsys):
+    assert review.reply_main(["999"]) == 64
+    assert "needs a <comment-id> and a <body>" in capsys.readouterr().err
+
+
+def test_reply_comment_id_must_be_numeric(capsys):
+    assert review.reply_main(["PRRT_kwDO", "body"]) == 64
+    assert "comment id must be numeric" in capsys.readouterr().err
+
+
+def test_reply_too_many_args_is_usage_error(capsys):
+    assert review.reply_main(["1", "body", "extra"]) == 64
+    assert "too many arguments" in capsys.readouterr().err
+
+
+def test_reply_gh_failure_is_exit_1(monkeypatch, capsys):
+    def _boom(pr, comment_id, body):
+        raise ghapi.GhError("gh api failed (1): nope")
+
+    monkeypatch.setattr(ghapi, "pr_review_reply", _boom)
+    assert review.reply_main(["1", "body", "--pr", "5"]) == 1
+    assert "nope" in capsys.readouterr().err

@@ -20,7 +20,36 @@ pre-commit:
         - "*.rs"
         - "rustfmt.toml"
         - "**/rustfmt.toml"
-      run: cargo fmt --all -- --check
+      # Check-only, but SUMMARIZE the failure instead of dumping rustfmt's
+      # colorized unified diff (release#691). A bare `cargo fmt -- --check`
+      # spews a long, escape-code-laden diff on the very first run of a repo
+      # with unformatted code — noisy and hard to action. We add `-l` so
+      # rustfmt lists the files that need formatting (one per line) instead,
+      # and on failure print that list plus the one remedy: `cargo fmt`.
+      #
+      # We deliberately do NOT auto-apply (`cargo fmt` without `--check`):
+      # auto-formatting inside the gate would silently modify files the
+      # commit didn't touch — the same class of bug as the #713 prettier
+      # `--write`-on-`--all-files` problem. The author runs `cargo fmt`
+      # deliberately. Exit stays non-zero on a fmt nit, consistent with the
+      # check-only cargo-clippy step below.
+      run: >-
+        errf="$(mktemp "${TMPDIR:-/tmp}/cargo-fmt.XXXXXX")";
+        out="$(cargo fmt --all -- --check -l 2>"$errf")";
+        rc=$?;
+        if [ "$rc" -ne 0 ]; then
+          if [ -n "$out" ]; then
+            n="$(printf '%s\n' "$out" | grep -c .)";
+            echo "cargo-fmt: ${n} file(s) need formatting — run \`cargo fmt\` to fix:" >&2;
+            printf '%s\n' "$out" | sed 's/^/  /' >&2;
+          else
+            echo "cargo-fmt: failed (not a formatting diff) — rustfmt/toolchain error:" >&2;
+            cat "$errf" >&2;
+          fi;
+          rm -f "$errf";
+          exit "$rc";
+        fi;
+        rm -f "$errf"
       priority: 2
     cargo-clippy:
       # Match any Rust source OR Cargo manifest OR Cargo.lock. Dependency
