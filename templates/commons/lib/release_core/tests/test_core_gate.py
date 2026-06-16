@@ -257,3 +257,51 @@ def test_unbuilt_gate_fails_loud_even_with_the_stub_present(tmp_path, capsys, mo
     out = capsys.readouterr().out
     assert rc == 1
     assert "GATE: FAILED (gate config not built)" in out
+
+
+# --- node-deps preflight: friendly-fail on a bare node checkout (release#718) ---
+# A fresh node-consumer checkout (package.json present, node_modules absent) makes
+# the gate's eslint / svelte-check hooks surface a raw `svelte-check: command not
+# found`. The gate fails FRIENDLY with a one-line remediation BEFORE invoking
+# lefthook instead, mirroring the runnable-verb preflight (release#735).
+
+
+def test_node_consumer_without_node_modules_friendly_fails(tmp_path, capsys):
+    (tmp_path / "package.json").write_text('{"name": "x"}')
+    rc = gate._node_deps_preflight(str(tmp_path))
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "release-core gate: dependencies not installed — run `npm install` first" in err
+
+
+def test_node_deps_preflight_uses_the_detected_pm(tmp_path, capsys):
+    (tmp_path / "package.json").write_text('{"name": "x"}')
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    rc = gate._node_deps_preflight(str(tmp_path))
+    err = capsys.readouterr().err
+    assert rc == 1
+    assert "run `pnpm install` first" in err
+
+
+def test_node_consumer_with_node_modules_proceeds(tmp_path):
+    (tmp_path / "package.json").write_text('{"name": "x"}')
+    (tmp_path / "node_modules").mkdir()
+    assert gate._node_deps_preflight(str(tmp_path)) == 0
+
+
+def test_non_node_repo_proceeds(tmp_path):
+    # release's own repo has no package.json — its gate must be unaffected.
+    assert gate._node_deps_preflight(str(tmp_path)) == 0
+
+
+def test_main_friendly_fails_a_bare_node_checkout_before_lefthook(tmp_path, capsys, monkeypatch):
+    # End-to-end through main(): the preflight fires BEFORE lefthook resolution, so
+    # no fake runner is needed — the deps remediation + GATE: FAILED verdict win.
+    _git_init(tmp_path)
+    (tmp_path / "package.json").write_text('{"name": "x"}')
+    monkeypatch.chdir(tmp_path)
+    rc = gate.main([])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "dependencies not installed — run `npm install` first" in captured.err
+    assert "GATE: FAILED (node dependencies not installed)" in captured.out
