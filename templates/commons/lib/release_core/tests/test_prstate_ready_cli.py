@@ -13,7 +13,57 @@ from __future__ import annotations
 import pytest
 from release_core.prstate import ghapi, gitstat
 from release_core.prstate.cli import ready
+from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
+from release_core.prstate.reviewers import by_name
 from release_core.prstate.state import TaskState
+
+
+def _capped_ctx(*, threads, is_draft=True, merge_state="CLEAN"):
+    """An otherwise-ready PR with 4 DIVERGENT review cycles (cycle-cap fired).
+
+    Built directly (not from a recorded fixture) because the cap needs four
+    rounds each introducing a new finding location — the #738 escape shape.
+    """
+    reviews = [
+        Review(review_id=i, author="Copilot", state="COMMENTED", commit_id=f"c{i}", body="")
+        for i in range(1, 5)
+    ]
+    findings = [
+        Thread(
+            thread_id=f"PRT_{i}",
+            is_resolved=True,
+            comments=(
+                ReviewComment(
+                    comment_id=i, path=f"f{i}.py", line=i, body="x", author="Copilot", review_id=i
+                ),
+            ),
+        )
+        for i in range(1, 5)
+    ]
+    return PullContext(
+        number=738,
+        head_sha="c4",
+        is_draft=is_draft,
+        base_ref="main",
+        mergeable="MERGEABLE",
+        merge_state=merge_state,
+        reviews=reviews,
+        threads=[*findings, *threads],
+        checks=[{"status": "COMPLETED", "conclusion": "SUCCESS"}],
+    )
+
+
+@pytest.fixture
+def capped(monkeypatch):
+    """Point `ready` at a directly-built capped context + Copilot-only required."""
+    monkeypatch.setattr(gitstat, "diff_sizer", lambda base_ref: None)
+    monkeypatch.setattr(ready, "required_reviewers", lambda: [by_name("copilot")])
+
+    def use(ctx):
+        monkeypatch.setattr(ready, "gather", lambda pr: ctx)
+        return ctx
+
+    return use
 
 
 @pytest.fixture
@@ -195,3 +245,62 @@ def test_ready_next_action_names_the_command(context):
     status = evaluate(context("ready_checks_green"))
     assert status.state is TaskState.READY
     assert "release-core pr ready" in status.next_action
+
+
+# --- --ack-cycle-cap: the cycle-cap escape (release#738) ----------------------
+
+
+def test_help_documents_the_ack_flag(capsys):
+    assert ready.main(["--help"]) == 0
+    out = capsys.readouterr().out
+    assert "--ack-cycle-cap" in out
+
+
+def test_unknown_flag_still_rejected_alongside_ack(capsys):
+    assert ready.main(["--bogus"]) == 64
+    assert "unknown option" in capsys.readouterr().err
+
+
+def test_capped_pr_refuses_without_the_ack_flag(capped, flips, capsys):
+    capped(_capped_ctx(threads=[]))  # converged but cycle-capped
+    assert ready.main(["738"]) == 1
+    assert flips == []  # no flip without the ack
+    captured = capsys.readouterr()
+    assert "refusing to flip" in captured.err
+    assert "BLOCKED" in captured.err
+    # the engine's next action points the human at the ack route
+    assert "--ack-cycle-cap" in captured.out
+
+
+def test_ack_flag_flips_an_otherwise_ready_capped_pr(capped, flips, capsys):
+    capped(_capped_ctx(threads=[]))
+    assert ready.main(["738", "--ack-cycle-cap"]) == 0
+    assert flips == [(738, False)]
+    assert "draft -> ready" in capsys.readouterr().out
+
+
+def test_ack_flag_does_not_bypass_an_open_thread(capped, flips, capsys):
+    open_thread = Thread(
+        thread_id="PRT_open",
+        is_resolved=False,
+        comments=(ReviewComment(comment_id=99, path="z.py", line=1, body="x", author="Copilot"),),
+    )
+    capped(_capped_ctx(threads=[open_thread]))
+    # cap acked, but an open thread still holds the PR -> refuse, no flip
+    assert ready.main(["738", "--ack-cycle-cap"]) == 1
+    assert flips == []
+    assert "refusing to flip" in capsys.readouterr().err
+
+
+def test_ack_flag_does_not_bypass_a_merge_conflict(capped, flips, capsys):
+    capped(_capped_ctx(threads=[], merge_state="DIRTY"))
+    assert ready.main(["738", "--ack-cycle-cap"]) == 1
+    assert flips == []
+    assert "refusing to flip" in capsys.readouterr().err
+
+
+def test_ack_flag_is_a_noop_on_an_already_ready_capped_pr(capped, flips, capsys):
+    capped(_capped_ctx(threads=[], is_draft=False))  # cap acked + already ready-for-review
+    assert ready.main(["738", "--ack-cycle-cap"]) == 0
+    assert flips == []
+    assert "already ready-for-review" in capsys.readouterr().out

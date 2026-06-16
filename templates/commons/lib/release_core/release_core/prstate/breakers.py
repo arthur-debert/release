@@ -95,6 +95,34 @@ def build_cycles(
     return cycles
 
 
+def divergent_cycle_count(cycles: list[Cycle]) -> int:
+    """How many cycles advanced the *divergence* counter — the cap's metric.
+
+    A cycle counts only if it introduced at least one finding LOCATION
+    (`(path, line)`) not seen in any earlier cycle. A round whose findings were
+    all already-seen locations — or that produced none at all (a cosmetic /
+    false-positive / fully-resolved round) — adds NO new divergence signal, so
+    it does NOT advance the counter (release#738).
+
+    This is the persistence model the `repeat-finding` breaker already keys on
+    (`REPEAT_WINDOW`): the divergence signal is NEW, accumulating finding
+    locations, not raw round count. A genuinely diverging loop keeps surfacing
+    fresh problems and still trips the cap; a converging loop whose later rounds
+    only re-touch known areas (or nitpick cosmetically) is not guillotined.
+
+    Conservative by construction: it can only ever return <= len(cycles), so it
+    never makes the cap fire EARLIER than the raw round count would have.
+    """
+    seen: set = set()
+    count = 0
+    for cycle in cycles:
+        new_locations = set(cycle.comment_keys) - seen
+        if new_locations:
+            count += 1
+            seen |= new_locations
+    return count
+
+
 def evaluate_breakers(
     ctx: PullContext,
     diff_sizer: DiffSizer | None = None,
@@ -103,13 +131,22 @@ def evaluate_breakers(
     """Run the breaker stack (priority order); first to fire wins.
 
     `required` is threaded through to `build_cycles` so cycle counting uses the
-    SAME required set the engine gates on (release#622)."""
+    SAME required set the engine gates on (release#622).
+
+    The reported `cycles` is the raw round count (what the human sees), but the
+    cycle-cap fires on the DIVERGENT count — rounds that introduced a new
+    finding location — so a converging loop whose later rounds were
+    cosmetic/false-positive/fully-resolved is not capped (release#738)."""
     cycles = build_cycles(ctx, diff_sizer, required=required)
     n = len(cycles)
+    divergent = divergent_cycle_count(cycles)
 
-    if n > CYCLE_CAP:
+    if divergent > CYCLE_CAP:
         return BreakerVerdict(
-            True, "cycle-cap", f"{n} review cycles exceeds the cap of {CYCLE_CAP}", n
+            True,
+            "cycle-cap",
+            f"{divergent} divergent review cycles exceeds the cap of {CYCLE_CAP}",
+            n,
         )
 
     for check in (_diff_trajectory, _comment_fixed_point, _repeat_finding):
