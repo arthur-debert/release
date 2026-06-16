@@ -5,7 +5,7 @@ Two are EXEMPLARS of the flat ``wrap_verb`` pattern; the rest are now
 IMPLEMENTED (release#460):
 
   cut       ← release_cut.main      (cut a release for this repo)
-  status    ← done_check.main       (this repo's pilot-running gate)
+  status    ← done_check.main       (this repo's conformance gate)
 
 ``init`` and ``selfcheck`` are folded in here too (verb-wraps), replacing the
 hand-rolled dispatcher entries that previously lived in ``cli_entry``.
@@ -79,7 +79,7 @@ def attach(root: click.Group) -> None:
         wrap_verb(
             done_check.main,
             name="status",
-            short_help="This repo's pilot-running gate (done-check).",
+            short_help="This repo's conformance gate (done-check).",
         )
     )
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical vscode-ext build entry point. Same script local + CI.
+# The vscode-ext build entry point. Same script local + CI.
 #
 # Produces a .vsix bundle via `vsce package`. The package manager
 # (npm / pnpm / yarn) is auto-detected from the lockfile, matching
@@ -34,7 +34,7 @@ set -euo pipefail
 
 # Resolve package manager from the lockfile. Check CWD first
 # (monorepo with subdir-local lockfile), fall back to repo root.
-# Lockfile IS the canonical signal; consumers commit exactly one.
+# Lockfile IS the signal; consumers commit exactly one.
 detect_pm() {
     local root
     root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"

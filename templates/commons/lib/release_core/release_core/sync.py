@@ -4,9 +4,9 @@ Ref selection, Kind+Component resolution, the build-into-a-fresh-.release/
 plan, lefthook fragment composition, release-internal classification,
 symlink-target computation, the diff against an existing .release/,
 broken-symlink detection, and the CLAUDE.md orientation block. ``verbs/init.py``
-drives this engine (build_plan → materialize → diff → compute_mirror →
-decide_claude → _apply_mirror); the standalone ``release-sync`` verb that used to
-wrap it was retired in WS4 (release#521).
+drives this engine (build_plan → build_tree → diff → compute_mirror →
+decide_claude → _apply_mirror); init is its only driver (the standalone
+wrapper verb was retired in WS4, release#521).
 
 All git access goes through gh.py (the chokepoint). Filesystem reads/writes use
 the stdlib. Behavior mirrors the bash byte-for-byte — see the per-function notes
@@ -26,11 +26,11 @@ from . import gh
 # ── Source abstraction ────────────────────────────────────────────────────────
 #
 # The sync engine reads its template SOURCE through this minimal interface so the
-# SAME plan/materialize logic serves two backends:
+# SAME plan/build logic serves two backends:
 #
 #   GitSource(release_home, ref)  — the original: a git ref in a release clone,
 #       wrapping gh.git_ls_tree / git_show_bytes / git_cat_file_exists. Behavior
-#       is IDENTICAL to the pre-abstraction engine (release-sync's contract).
+#       is IDENTICAL to the pre-abstraction engine's contract.
 #   BundleSource(bundle_root)     — the wheel bundle: the on-disk template tree
 #       hatch_build.py stages into release_core/_bundled_templates/. Lets `init`
 #       build the full managed tree offline, no release clone, no network.
@@ -58,7 +58,7 @@ class Source:
     "from-source <shortsha>" for a --from-source install. Only the bundle path
     carries it (the wheel is what the stamp describes); GitSource composes from
     a live clone whose ref_sha already says exactly where the content came from.
-    When set, materialize() writes it into .release-sync-source alongside the
+    When set, build_tree() writes it into .release-sync-source alongside the
     ref_sha line, and init labels the managed auto-commit with it.
     """
 
@@ -410,7 +410,7 @@ def is_release_internal(dest: str) -> bool:
 
 
 class SyncError(RuntimeError):
-    """A fatal release-sync condition (maps to exit 1)."""
+    """A fatal managed-tree-build condition (maps to exit 1)."""
 
 
 def select_ref(release_home: str, repo_name: str, kind: str, release_ref: str | None) -> str:
@@ -630,7 +630,7 @@ def link_target(dest: str) -> str:
     return f"{prefix}.release/{dest}"
 
 
-# ── Materialize the new tree into a tempdir ───────────────────────────────────
+# ── Build the new tree into a tempdir ─────────────────────────────────────────
 
 
 def build_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
@@ -666,7 +666,7 @@ def build_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> No
             "# release provenance — the arthur-debert/release commit that generated\n"
             "# this .release/. Purely informational (ADR-0002). Since WS4 (release#521)\n"
             "# the whole .release/ tree is gitignored + recomposed every session, so\n"
-            "# this marker is transient and has no reader — drift-check was retired.\n"
+            "# this marker is transient and has no reader — the out-of-sync check was retired.\n"
             f"{ref_sha}\n"
         )
         if source.release_tag:
@@ -1045,9 +1045,9 @@ def _first_line_has_marker(path: str) -> bool:
 #   blob         the content's git blob SHA-1 is one release's template history
 #                actually shipped (byte-exact; a consumer-MODIFIED copy no
 #                longer matches and is deliberately left alone);
-#   marker       the first line carries the managed-marker signature (the
-#                release-sync state manifest: content varies per repo, header
-#                is stable across both marker wordings);
+#   marker       the first line carries the managed-marker signature (a
+#                managed file: content varies per repo, header is stable
+#                across both marker wordings);
 #   fingerprint  a distinctive header line (the bin/release callers were tailored
 #                per repo at onboarding, so no stable blob exists — but the
 #                header comment is verbatim across every variant).

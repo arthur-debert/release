@@ -76,7 +76,7 @@ def test_build_payload_matches_recorded_jq_bytes():
     """The crux: json.dumps(body, indent=2) must equal the old jq output bytes.
 
     The jq reference (jq . over the yq|jq-built payload) was recorded in the PR
-    via `diff`; here we re-derive the canonical 2-space form and assert the
+    via `diff`; here we re-derive the standard 2-space form and assert the
     contexts array is the only thing that changed vs the template — i.e. the
     structural carry-through that made the diff empty.
     """

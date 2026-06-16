@@ -21,7 +21,7 @@ def _b64(text: str) -> dict:
 # --- workflow-name → stack mapping -----------------------------------
 
 
-def test_workflow_to_stack_canonical_uses_line():
+def test_workflow_to_stack_thin_caller_uses_line():
     rel = "    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1\n"
     assert done_check._workflow_name_from_release_yml(rel) == "rust-cli.yml"
 
@@ -35,12 +35,12 @@ def test_workflow_to_stack_no_match():
     assert done_check._workflow_name_from_release_yml("name: ci\non: push\n") is None
 
 
-def test_canonical_preferred_over_self_call():
+def test_thin_caller_preferred_over_self_call():
     rel = (
         "    uses: ./.github/workflows/gh-action.yml\n"
         "    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1\n"
     )
-    # canonical matched first regardless of file order
+    # thin-caller use matched first regardless of file order
     assert done_check._workflow_name_from_release_yml(rel) == "rust-cli.yml"
 
 
@@ -171,7 +171,7 @@ def test_check_ci_no_runs_warns(monkeypatch):
 # --- check_release ---------------------------------------------------
 
 
-def test_check_release_pass_canonical(monkeypatch):
+def test_check_release_pass_thin_caller(monkeypatch):
     monkeypatch.setattr(gh, "rest", lambda p, **k: {"tag_name": "v1.2.3"})
     monkeypatch.setattr(
         done_check,
@@ -243,7 +243,7 @@ def _agg(stack, ci, per_verb):
     return done_check.aggregate("o/r", stack, ci, per_verb)
 
 
-def test_aggregate_all_pass_is_pilot_running():
+def test_aggregate_all_pass_is_conformant():
     res = _agg(
         "rust-cli",
         "PASS|ci.yml",
@@ -254,7 +254,7 @@ def test_aggregate_all_pass_is_pilot_running():
             "release:local": "PASS|release.yml",
         },
     )
-    assert res["state"] == "pilot-running"
+    assert res["state"] == "conformant"
     assert res["exit_code"] == 0
     assert [r["state"] for r in res["rows"]] == ["PASS", "PASS", "PASS"]
 
@@ -344,7 +344,7 @@ def test_render_json_shape_and_escaping():
     parsed = json.loads(out)
     assert parsed["repo"] == "o/r"
     assert parsed["stack"] == "rust-cli"
-    assert parsed["state"] == "pilot-running"
+    assert parsed["state"] == "conformant"
     assert [v["verb"] for v in parsed["verbs"]] == ["check", "build", "release"]
     assert parsed["verbs"][2]["ci"] == "(n/a)"
 
@@ -362,7 +362,7 @@ def test_render_table_has_header_and_arrow():
     )
     out = done_check.render_table(res, quiet=False)
     assert "| Verb    | local | CI    | result | notes" in out
-    assert "→ o/r/rust-cli : pilot-running" in out
+    assert "→ o/r/rust-cli : conformant" in out
     assert "| check" in out
 
 
@@ -401,14 +401,14 @@ def test_main_requires_repo_or_detects(monkeypatch, capsys):
     assert "could not detect repo" in capsys.readouterr().err
 
 
-def test_main_json_pilot_running(monkeypatch, capsys):
+def test_main_json_conformant(monkeypatch, capsys):
     _wire_main(monkeypatch)
     rc = done_check.main(["--repo", "o/r", "--json"])
     out = capsys.readouterr().out
     assert rc == 0
     # last line is the JSON object (first line is "Detecting stack…", etc.)
     obj = json.loads(out.strip().splitlines()[-1])
-    assert obj["state"] == "pilot-running"
+    assert obj["state"] == "conformant"
     assert obj["repo"] == "o/r"
 
 
@@ -417,7 +417,7 @@ def test_main_human_table(monkeypatch, capsys):
     rc = done_check.main(["--repo", "o/r"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "→ o/r/rust-cli : pilot-running" in out
+    assert "→ o/r/rust-cli : conformant" in out
 
 
 def test_main_brew_tap_out_of_scope(monkeypatch, capsys):

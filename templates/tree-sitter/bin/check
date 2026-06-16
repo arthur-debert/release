@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical tree-sitter check entry point. Same script local + CI.
+# The tree-sitter check entry point. Same script local + CI.
 #
 # Delegates to the consumer's app-bin/test-all if present (the
 # common pattern), else falls back to `npx tree-sitter generate`
 # + `npx tree-sitter test`.
 #
-# app-bin/test-all is the canonical entry point most tree-sitter
+# app-bin/test-all is the entry point most tree-sitter
 # consumers wire — it typically chains generate + test + linting
 # + smoke checks.
 #

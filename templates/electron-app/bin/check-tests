@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical npm-stack unit test runner. Probes scripts in preference
+# The npm-stack unit test runner. Probes scripts in preference
 # order:
 #
 #   1. `test:unit` — explicit unit-only alias (vitest convention used
-#      by lexed, simple-gal-ui, and most take-iii electron consumers).
+#      by lexed, simple-gal-ui, and most electron consumers).
 #      Forwards `-- --run` so vitest runs once instead of entering
 #      watch mode.
 #   2. `test` — generic alias (npm default). Passed through verbatim;

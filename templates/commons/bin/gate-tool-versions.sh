@@ -8,7 +8,7 @@
 #                                                (synced into every consumer)
 # (env/setup.sh — the cloud-snapshot builder — also sources this for the
 # lefthook pin so the baked image matches.)
-# Rather than duplicate the literals (the drift trap this file closes), they
+# Rather than duplicate the literals (the divergence trap this file closes), they
 # all `.`-source this. It is synced alongside setup-dev-env.sh, so a consumer
 # always receives them together in one managed sync — never a new script
 # against a missing file.
@@ -17,11 +17,11 @@
 # the CONFIG (lefthook.yml) but FALSE for the tool binaries it invokes — only
 # ruff + actionlint carried a pin, the other five floated (npm-latest / pip-latest
 # / apt-0.9.0 vs brew-0.11). The same gate could pass on one box and fail on
-# another from pure version drift (the WS3 shellcheck --rcfile detour was exactly
+# another from pure version divergence (the WS3 shellcheck --rcfile detour was exactly
 # this). Worse, the pin only fired install-IF-MISSING, so a pre-existing floating
 # binary silently won — a dev box ran actionlint 1.7.12 while CI ran the pinned
 # 1.7.7. The fix: pin ALL of them, and RECONCILE to the pin (gate_version_matches
-# below) instead of install-if-missing, so a drifted binary is reinstalled at the
+# below) instead of install-if-missing, so a diverged binary is reinstalled at the
 # pin, not accepted.
 #
 # Each is overridable via env (the `:-` default) so CI / a dev can pin a

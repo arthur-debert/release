@@ -30,7 +30,7 @@ def group() -> None:
     ``docs/references/consumer-contract.yaml`` is a generated, PRESCRIPTIVE
     view of release_core/sync.py: what a consumer tree MUST look like
     (tracked real files, untracked ephemeral mirrors, gate-internal set,
-    tombstones, managed-path patterns). ``dump`` regenerates it, ``check``
+    retired_files, managed-path patterns). ``dump`` regenerates it, ``check``
     fails when the committed manifest is out of sync, ``lint`` sweeps every CI
     surface for jobs that reference a managed path without a prior build step.
     Run from inside ``arthur-debert/release``.

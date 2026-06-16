@@ -11,15 +11,15 @@ DISTRIBUTION is pull-only — there is no push mechanism (#476; `orc propagate`
 was removed). The `--push` flag below is unrelated to distribution: it is an
 opt-in plain `git push` of the LOCAL managed auto-commit.
 
-A bare `release-core init` runs the COMPLETE release-sync pipeline (`build_plan` →
-`materialize` → `diff_release` → `compute_mirror` → `decide_claude` → apply) sourced
+A bare `release-core init` runs the COMPLETE managed-tree build (`build_plan` →
+`build_tree` → `diff_release` → `compute_mirror` → `decide_claude` → apply) sourced
 from the wheel bundle — the whole
 `.release/` build dir + every working-tree mirror (skills, configs,
 per-Kind/Component files, real-file workflow copies, the CLAUDE.md managed
 block) — then AUTO-COMMITS ONLY the managed paths iff they actually changed.
 Byte-identical result → no commit, so churn tracks release cadence, not session
-count. This is what SessionStart runs; it is "release-sync sourced from the
-wheel". This is the ONLY mode: the `--config-only` escape hatch (the pre-#476
+count. This is what SessionStart runs; it is the managed-tree build sourced from the
+wheel. This is the ONLY mode: the `--config-only` escape hatch (the pre-#476
 config-subset behavior) was REMOVED in release#532 — post-WS3 it built
 root configs whose gate referenced a `.release/` it never created, an
 internally inconsistent path nothing on the fleet used.
@@ -57,8 +57,8 @@ is the DEFAULT and the only path a pip-installed consumer ever takes.
 
 A `$RELEASE_HOME` git checkout, when explicitly present (release-dev only),
 OVERRIDES the bundle: init then composes from live templates via the full
-release-sync engine (sync.build_plan + sync.materialize) at $RELEASE_REF, the
-same git-clone contract release-sync used. In an editable/source checkout the
+build engine (sync.build_plan + sync.build_tree) at $RELEASE_REF, the
+same git-clone contract the build engine uses. In an editable/source checkout the
 bundle is absent (a gitignored build artifact), so $RELEASE_HOME is required
 there; a fresh wheel install needs neither.
 
@@ -111,14 +111,14 @@ def _read_sync_yaml(repo_root: str) -> str | None:
 
 # ── Full build: the whole managed tree, from the bundle ──────────────────────
 #
-# The full build is the SAME engine pipeline the retired release-sync verb
-# ran (build_plan + materialize + diff + compute_mirror + decide_claude + apply),
+# The full build is the SAME engine pipeline init
+# runs (build_plan + build_tree + diff + compute_mirror + decide_claude + apply),
 # now sourced from the wheel bundle and driven by init: BundleSource by default,
 # or GitSource when a
 # real $RELEASE_HOME clone is present (release-dev override, mirroring how the
 # config path prefers $RELEASE_HOME over the bundle). It builds the full
 # .release/ build dir plus all working-tree mirrors (symlinks, real-file copies,
-# the CLAUDE.md orientation block) — everything release-sync produces.
+# the CLAUDE.md orientation block) — the whole managed tree.
 
 
 def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, str, list[str]]:
@@ -161,7 +161,7 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
         ref_sha = gh.git_rev_parse(ref, cwd=release_home)
         source = sync.GitSource(release_home, ref, ref_sha)
 
-    # Guard the Kind tree exists in the source — same early error release-sync
+    # Guard the Kind tree exists in the source — same early error the build engine
     # raises. Without it a wheel/ref missing templates/<kind>/ would silently
     # build only commons/components/skills and still report success,
     # leaving an incomplete managed tree.
@@ -237,7 +237,7 @@ def _source_label(source: sync.Source) -> str:
 def _run_full_sync(
     repo_root: str, repo_name: str, *, dry_run: bool
 ) -> tuple[int, list[str], str, list[str]]:
-    """Run the full release-sync pipeline (bundle- or clone-sourced) and apply it.
+    """Run the full managed-tree build (bundle- or clone-sourced) and apply it.
 
     Returns (changes, managed_paths, ref_label, conflicts):
       changes        — count of tree/mirror/claude changes (0 == already current).
@@ -249,8 +249,8 @@ def _run_full_sync(
 
     In --dry-run nothing is written/applied; the plan is still computed so the
     change count + paths + conflicts are reported. The apply phase (atomic
-    .release/ swap + :func:`_apply_mirror`) composes the same managed tree the
-    retired ``release-sync`` verb produced for the same Kind.
+    .release/ swap + :func:`_apply_mirror`) composes the full managed tree
+    for the detected Kind.
     """
     source, kind, caps_names = _resolve_full_source(repo_root, repo_name)
     plan = sync.build_plan(source, kind, caps_names, repo_root=repo_root)
@@ -267,7 +267,7 @@ def _run_full_sync(
         # references one of the ephemeral mirror dests this sync owns without
         # building the managed tree first. Every init runs it (a consumer
         # can add a bad job any day), dry-run included (read-only scan).
-        _warn_unmaterialized_workflow_refs(repo_root, mirror.mirror_dests)
+        _warn_unbuilt_workflow_refs(repo_root, mirror.mirror_dests)
 
         claude_change = 1 if claude.action in ("create", "inject", "refresh") else 0
         changes = (
@@ -302,7 +302,7 @@ def _run_full_sync(
     return changes, managed, _source_label(source), list(mirror.conflicts)
 
 
-def _warn_unmaterialized_workflow_refs(repo_root: str, mirror_dests: set[str]) -> None:
+def _warn_unbuilt_workflow_refs(repo_root: str, mirror_dests: set[str]) -> None:
     """The seed-time / every-session tripwire (#581, the supage#163 class).
 
     Post-WS7 the mirror dests (``bin/check*``, ``lib/release_core/``, …) are
@@ -653,7 +653,7 @@ def _main_full(
 ) -> int:
     """The default init path: full managed-tree build + auto-commit-on-change.
 
-    Runs the complete release-sync pipeline (build_plan + materialize +
+    Runs the complete managed-tree build (build_plan + build_tree +
     diff_release + compute_mirror + decide_claude + apply), sourced from the wheel
     bundle by default (or a real
     $RELEASE_HOME clone), then — unless --no-commit/--dry-run — stages ONLY the

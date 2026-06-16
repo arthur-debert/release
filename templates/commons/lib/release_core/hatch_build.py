@@ -1,6 +1,6 @@
 """Hatch build hook: bundle the FULL managed tree into the wheel.
 
-`release-core init` materializes per-repo managed content from these bundled
+`release-core init` builds per-repo managed content from these bundled
 sources. For the pull-model the wheel must be self-contained — it ships the
 template DATA (and the distributable skills) so `init` needs no release clone.
 
@@ -29,7 +29,7 @@ NOTE — config subset vs. full tree: `init` currently CONSUMES only the
 config-composition subset listed in _COMMONS_CONFIGS (lefthook.yml + lint
 configs) plus the per-kind/capability lefthook fragments + manifests. The rest
 of the now-bundled tree is PRESENT but unused until step 2 (#476) teaches `init`
-to do a full offline materialize. This part-1 change is purely additive data.
+to do a full offline build. This part-1 change is purely additive data.
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ _SKIP_FILE_NAMES = frozenset({".DS_Store"})
 # Top-level templates/ dirs that are NOT part of the managed sync/init surface
 # and must not be bundled. `render/` holds render-side material (the Homebrew
 # formula template) consumed at release-cut in CI, not a per-repo managed Kind —
-# sync only ever materializes commons/, components/, and a resolved Kind dir
+# sync only ever builds commons/, components/, and a resolved Kind dir
 # (one carrying a manifest.yaml). Bundling render/ is dead weight.
 _NON_SURFACE_TEMPLATE_DIRS = frozenset({"render"})
 
@@ -98,7 +98,7 @@ def _distributed_skills(repo_root: str) -> list[str]:
     Parsed statically with `ast` from sync.py rather than imported: importing the
     package would run release_core/__init__.py (which pulls in click via the CLI
     subpackage) and need it installed at build time. Static parse avoids that
-    while still reading the canonical lists — a drifted hand-copy is a bug."""
+    while still reading the source lists — an out-of-sync hand-copy is a bug."""
     sync_py = os.path.join(
         repo_root, "templates", "commons", "lib", "release_core", "release_core", "sync.py"
     )

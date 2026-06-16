@@ -54,10 +54,10 @@ def test_manifest_contains_the_contract_anchors():
     assert ".claude/skills/gh-pr-review-loop/SKILL.md" in mirrors
     # Managed-path prefixes are the lint's spine.
     assert data["managed_path_prefixes"] == [".release/", "bin/check", "lib/release_core/"]
-    # Tombstones come from the retired sets, not a re-statement.
-    assert data["tombstones"]["blob"] == sorted(sync.RETIRED_BLOB_FILES)
-    assert data["tombstones"]["fingerprint"] == sorted(sync.RETIRED_FINGERPRINT_FILES)
-    assert "marker" not in data["tombstones"]
+    # Retired-file entries come from the retired sets, not a re-statement.
+    assert data["retired_files"]["blob"] == sorted(sync.RETIRED_BLOB_FILES)
+    assert data["retired_files"]["fingerprint"] == sorted(sync.RETIRED_FINGERPRINT_FILES)
+    assert "marker" not in data["retired_files"]
 
 
 def test_manifest_never_lists_release_internal_or_skipped_sources():

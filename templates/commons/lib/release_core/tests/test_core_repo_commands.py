@@ -107,7 +107,7 @@ def test_unit_make_test_target(tmp_path):
 
 
 def test_unit_nvim_app_bin_test_all_wins(tmp_path):
-    # The canonical fleet nvim runner is app-bin/test-all (NOT `make test`).
+    # The fleet nvim runner is app-bin/test-all (NOT `make test`).
     # It must win over a Makefile target when both exist.
     appbin = tmp_path / "app-bin"
     appbin.mkdir()
@@ -181,7 +181,7 @@ def _stub_workflows(tmp_path, monkeypatch, docs):
 
 
 def test_unit_falls_back_to_ci_check_command(tmp_path, monkeypatch):
-    # lex-fmt/nvim's shape: NO manifest test, real suite wired via the canonical
+    # lex-fmt/nvim's shape: NO manifest test, real suite wired via the shared
     # caller's check-command:. The fallback must surface it (label "ci").
     _stub_workflows(
         tmp_path, monkeypatch, {"ci.yml": _wf_caller_doc("cd test && bash run_tests.sh")}

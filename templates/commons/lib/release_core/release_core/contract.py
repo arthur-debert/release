@@ -160,7 +160,7 @@ def build_manifest(repo_root: str) -> dict:
         "gitignored": [".release/"],
         "untracked_mirrors": mirrors,
         "gate_internal": sorted(sync.GATE_INTERNAL_FILES),
-        "tombstones": {
+        "retired_files": {
             "blob": sorted(sync.RETIRED_BLOB_FILES),
             "fingerprint": sorted(sync.RETIRED_FINGERPRINT_FILES),
         },
@@ -182,7 +182,7 @@ _HEADER = """\
 #   release-core admin contract dump
 #
 # A PR that changes the contract (sync.py classification, templates/ dests,
-# tombstones) MUST regenerate this file in the same PR — the root lefthook.yml
+# retired_files) MUST regenerate this file in the same PR — the root lefthook.yml
 # `consumer-contract-check` gate entry fails when the file is out of sync.
 #
 # This manifest is PRESCRIPTIVE, not descriptive (#583 owner constraint): it
@@ -199,7 +199,7 @@ _HEADER = """\
 #   untracked_mirrors     — symlink dests recomposed every init, excluded via
 #                           .git/info/exclude, NEVER tracked (WS7).
 #   gate_internal         — live only inside .release/ (WS3).
-#   tombstones            — retired dests init removes (provenance-gated, WS6).
+#   retired_files         — retired dests init removes (provenance-gated, WS6).
 #   managed_path_prefixes — path prefixes whose presence in a CI job means the
 #                           job MUST build first (arm-gate /
 #                           release-core init); the assumption lint

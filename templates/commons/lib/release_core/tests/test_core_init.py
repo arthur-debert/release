@@ -1,11 +1,11 @@
-"""init verb (verbs/init.py): the managed-tree materializer.
+"""init verb (verbs/init.py): the managed-tree builder.
 
-A bare `release-core init` runs the FULL managed-tree materialize +
+A bare `release-core init` runs the FULL managed-tree build +
 auto-commit-on-change — the ONLY mode since release#532 removed the
 `--config-only` escape hatch (post-WS3 it composed root configs whose gate
 referenced a `.release/` it never created). The release-sync engine that
 composes the source content is exercised by test_core_sync.py; here we pin
-init's OWN contract: the full materialize + mirror apply, auto-commit scoping
+init's OWN contract: the full build + mirror apply, auto-commit scoping
 (only managed paths, never a user's work), the push guards, idempotency,
 --dry-run/--no-commit, the tolerated legacy --commit/--force flags, and the
 resolution-failure surfaces (Kind / source / YAML) → clean exit 1.
@@ -108,7 +108,7 @@ def test_init_help_exits_0_and_prints_usage(capsys):
     assert rc == 0
     assert "Usage:" in out
     assert "release-core init" in out
-    # Post-#532: a single mode — help documents the full materialize, the
+    # Post-#532: a single mode — help documents the full build, the
     # real flags, and the tolerated legacy --commit/--force no-ops.
     assert "--no-commit" in out
     assert "--push" in out
@@ -181,7 +181,7 @@ def _patch_full(monkeypatch, repo, files):
     """Wire init to the fixture repo with a stubbed full sync that "writes" the
     given managed files into the repo and reports them as changed — so these
     tests exercise the REAL _auto_commit staging/commit/push scoping against a
-    real git repo, with the heavy materialize stubbed out."""
+    real git repo, with the heavy build stubbed out."""
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
 
     def fake_sync(root, name, *, dry_run):
@@ -289,7 +289,7 @@ def test_commit_does_not_fold_in_pre_staged_unrelated_changes(tmp_path, monkeypa
 
 def test_commit_in_non_git_dir_is_safe_no_op(tmp_path, monkeypatch, capsys):
     # repo_root is monkeypatched to a plain dir (no .git). init must still
-    # materialize and succeed; --commit is a quiet no-op.
+    # build and succeed; --commit is a quiet no-op.
     repo = tmp_path / "repo"
     repo.mkdir()
     _patch_full(monkeypatch, repo, _MANAGED)
@@ -319,7 +319,7 @@ def test_commit_on_unborn_branch_is_safe_no_op(tmp_path, monkeypatch, capsys):
     rc = init.main([])
     captured = capsys.readouterr()
     assert rc == 0
-    # Files were still materialized.
+    # Files were still built.
     for dest in _MANAGED:
         assert (repo / dest).is_file()
     # No commit, and no noisy "cannot do partial commit" failure surfaced.
@@ -511,12 +511,12 @@ def test_commit_failure_does_not_fail_init(tmp_path, monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------
-# the full managed-tree materialize + auto-commit-on-change (the ONLY mode)
+# the full managed-tree build + auto-commit-on-change (the ONLY mode)
 # --------------------------------------------------------------------------
 # A synthetic full source (a tiny commons/ + a manifest-less kind + one
 # distributed skill) is built once, then used BOTH as a wheel bundle (the
 # BundleSource path) AND as a git release clone (the GitSource path). The two
-# materialized trees must be byte-identical modulo the provenance-marker line —
+# built trees must be byte-identical modulo the provenance-marker line —
 # this is the load-bearing proof that init --full == release-sync.
 
 
@@ -562,7 +562,7 @@ def _git_clone_from(src_root, dest) -> str:
     return str(dest)
 
 
-def _materialize_via_bundle(tmp_path, src_root, kind):
+def _build_via_bundle(tmp_path, src_root, kind):
     out = tmp_path / "out-bundle"
     out.mkdir()
     source = sync.BundleSource(str(src_root), ref_sha="release-core test")
@@ -571,7 +571,7 @@ def _materialize_via_bundle(tmp_path, src_root, kind):
     return out
 
 
-def _materialize_via_git(tmp_path, clone, kind):
+def _build_via_git(tmp_path, clone, kind):
     out = tmp_path / "out-git"
     out.mkdir()
     source = sync.GitSource(str(clone), "HEAD", "abc123sha")
@@ -593,19 +593,19 @@ def _tree_files(root):
 
 @_needs_yq
 @_needs_git
-def test_full_bundle_materialize_matches_git_sync(tmp_path):
+def test_full_bundle_build_matches_git_sync(tmp_path):
     # THE core proof: the BundleSource (init --full) tree is byte-identical to the
     # GitSource (release-sync) tree for the same Kind, modulo only the provenance
     # marker line (.release-sync-source) and the lefthook header sha line.
     src = _full_source_tree(tmp_path / "src")
     clone = _git_clone_from(src, tmp_path / "clone")
 
-    b = _materialize_via_bundle(tmp_path, src, "tree-sitter")
-    g = _materialize_via_git(tmp_path, clone, "tree-sitter")
+    b = _build_via_bundle(tmp_path, src, "tree-sitter")
+    g = _build_via_git(tmp_path, clone, "tree-sitter")
 
     bf = _tree_files(b)
     gf = _tree_files(g)
-    assert set(bf) == set(gf), "the two materialized trees must list the same files"
+    assert set(bf) == set(gf), "the two built trees must list the same files"
 
     for rel in sorted(gf):
         if rel == ".release-sync-source":
@@ -639,9 +639,9 @@ def _setup_full_repo(tmp_path, monkeypatch, src_root):
 
 @_needs_yq
 @_needs_git
-def test_bare_init_does_full_materialize_and_auto_commits(tmp_path, monkeypatch, capsys):
+def test_bare_init_does_full_build_and_auto_commits(tmp_path, monkeypatch, capsys):
     # THE cutover contract: a BARE `release-core init` (exactly what SessionStart
-    # runs, no flags) materializes the FULL managed tree from the bundle AND
+    # runs, no flags) builds the FULL managed tree from the bundle AND
     # auto-commits the managed change. This is the #476 default.
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
@@ -666,7 +666,7 @@ def test_bare_init_does_full_materialize_and_auto_commits(tmp_path, monkeypatch,
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
     # WS4 (release#521): the ephemeral .release/ tree is gitignored and never
     # committed. WS7 (release#528): the symlink mirrors are EPHEMERAL too —
-    # materialized + excluded, never tracked — so only real-file copies and the
+    # built + excluded, never tracked — so only real-file copies and the
     # CLAUDE.md block commit.
     assert "bin/check" not in committed
     assert _git(repo, "ls-files", "bin/check") == ""
@@ -720,7 +720,7 @@ def test_bare_init_commits_removals(tmp_path, monkeypatch, capsys):
 
 @_needs_yq
 @_needs_git
-def test_full_materializes_tree_and_symlinks(tmp_path, monkeypatch, capsys):
+def test_full_builds_tree_and_symlinks(tmp_path, monkeypatch, capsys):
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
@@ -728,7 +728,7 @@ def test_full_materializes_tree_and_symlinks(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert rc == 0
     assert "managed-tree change(s) applied" in out
-    # .release/ build dir materialized.
+    # .release/ build dir built.
     assert (repo / ".release" / "bin" / "check").is_file()
     assert (repo / ".release" / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_file()
     # Working-tree symlinks mirrored.
@@ -833,7 +833,7 @@ def test_full_no_commit_skips_commit(tmp_path, monkeypatch, capsys):
     rc = init.main(["--no-commit"])
     assert rc == 0
     capsys.readouterr()
-    # Tree materialized but no commit made; managed changes left in the worktree.
+    # Tree built but no commit made; managed changes left in the worktree.
     assert _git(repo, "rev-parse", "HEAD") == head_before
     assert _git(repo, "status", "--porcelain") != ""
 
@@ -858,7 +858,7 @@ def test_full_dry_run_writes_nothing(tmp_path, monkeypatch, capsys):
 @_needs_git
 def test_full_errors_when_source_lacks_kind_tree(tmp_path, monkeypatch, capsys):
     # A source missing templates/<kind>/ must hard-fail (exit 1) rather than
-    # silently materialize an incomplete tree (commons/skills only).
+    # silently build an incomplete tree (commons/skills only).
     src = _full_source_tree(tmp_path / "src")
     repo = _init_git_repo(tmp_path / "consumer")
     monkeypatch.delenv("RELEASE_HOME", raising=False)
@@ -912,7 +912,7 @@ def test_full_commits_removals(tmp_path, monkeypatch, capsys):
 
 
 # --------------------------------------------------------------------------
-# Flag-combo guards (full materialize is the ONLY mode since release#532).
+# Flag-combo guards (full build is the ONLY mode since release#532).
 # --------------------------------------------------------------------------
 
 
@@ -930,7 +930,7 @@ def test_push_and_no_commit_is_bad_usage(capsys):
 def test_no_commit_in_default_full_mode_is_valid(tmp_path, monkeypatch, capsys):
     # The flip: a BARE `--no-commit` (default full mode) is now VALID — it skips
     # the auto-commit (was a usage error pre-#476). Run it for real and confirm
-    # rc 0, the tree materialized, and NO commit was made.
+    # rc 0, the tree built, and NO commit was made.
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     head_before = _git(repo, "rev-parse", "HEAD")
@@ -938,7 +938,7 @@ def test_no_commit_in_default_full_mode_is_valid(tmp_path, monkeypatch, capsys):
     rc = init.main(["--no-commit"])
     assert rc == 0
     capsys.readouterr()
-    assert (repo / ".release" / "bin" / "check").is_file()  # full tree materialized
+    assert (repo / ".release" / "bin" / "check").is_file()  # full tree built
     assert _git(repo, "rev-parse", "HEAD") == head_before  # but no commit
 
 
@@ -1106,7 +1106,7 @@ def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
     assert "v2.17.1" not in marker
 
 
-# ── WS5 (release#526): the bootstrap quartet materializes as REAL files ───────
+# ── WS5 (release#526): the bootstrap quartet is written as REAL files ────────
 
 
 def _ws5_source_tree(root) -> str:
@@ -1185,7 +1185,7 @@ def test_full_init_migrates_bootstrap_symlinks_and_replaces_atomically(
 
 @_needs_yq
 @_needs_git
-def test_full_removes_retired_tombstoned_files_in_managed_commit(tmp_path, monkeypatch, capsys):
+def test_full_removes_retired_files_in_managed_commit(tmp_path, monkeypatch, capsys):
     """WS6 (release#527): a pre-pull consumer carries retired release-distributed
     real files (e.g. the release-cut shim). A bare init removes them —
     provenance-gated — and the deletions ride the managed auto-commit;
@@ -1220,9 +1220,9 @@ def test_full_removes_retired_tombstoned_files_in_managed_commit(tmp_path, monke
 @_needs_git
 def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch, capsys):
     """release#563: a pre-WS4 seed TRACKS .release/ORIENTATION.md (stale,
-    doctrine-contradicting) and carries the OLD @.release/ORIENTATION.md
+    rule-contradicting) and carries the OLD @.release/ORIENTATION.md
     CLAUDE.md import. One bare init converges BOTH: the recompose removes the
-    on-disk copy and never re-materializes it, the tombstone + WS4 untracking
+    on-disk copy and never re-builds it, the retired-file removal + WS4 untracking
     record the deletion, and the stub refresh rewrites the managed block to
     the how-to-pointing form. The second init is a no-op."""
     src = _full_source_tree(tmp_path / "src")
@@ -1246,7 +1246,7 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
     assert init.main([]) == 0
     out = capsys.readouterr().out
     assert "committed" in out
-    # Gone from disk, NOT re-materialized by the recompose.
+    # Gone from disk, NOT rebuilt by the recompose.
     assert not orientation.exists()
     # Untracked — the deletion is recorded, not resurrected by the pathspec commit.
     assert _git(repo, "ls-files", ".release/ORIENTATION.md") == ""
@@ -1479,7 +1479,7 @@ def test_warn_names_file_job_step_and_the_next_action(tmp_path, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()
     _write_consumer_wf(repo, _BAD_WF)
-    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check", "bin/check-e2e"})
+    init._warn_unbuilt_workflow_refs(str(repo), {"bin/check", "bin/check-e2e"})
     err = capsys.readouterr().err
     assert "WARNING" in err
     assert ".github/workflows/e2e.yml -> integration -> Run E2E tests" in err
@@ -1495,14 +1495,14 @@ def test_warn_silent_when_job_materializes_first(tmp_path, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()
     _write_consumer_wf(repo, _MATERIALIZED_WF)
-    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check", "bin/check-e2e"})
+    init._warn_unbuilt_workflow_refs(str(repo), {"bin/check", "bin/check-e2e"})
     assert capsys.readouterr().err == ""
 
 
 def test_warn_silent_when_repo_has_no_workflows(tmp_path, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()
-    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check"})
+    init._warn_unbuilt_workflow_refs(str(repo), {"bin/check"})
     assert capsys.readouterr().err == ""
 
 
@@ -1517,7 +1517,7 @@ def test_warn_never_raises_on_scan_failure(tmp_path, monkeypatch, capsys):
     repo = tmp_path / "consumer"
     repo.mkdir()
     _write_consumer_wf(repo, _BAD_WF)
-    init._warn_unmaterialized_workflow_refs(str(repo), {"bin/check"})
+    init._warn_unbuilt_workflow_refs(str(repo), {"bin/check"})
     assert capsys.readouterr().err == ""
 
 

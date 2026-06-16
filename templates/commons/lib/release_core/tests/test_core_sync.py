@@ -905,7 +905,7 @@ def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
         # an older inlined-prose body
         (
             f"{sync.CLAUDE_BEGIN}\n"
-            "Open a live PR (never a draft — stale pre-#456 doctrine).\n"
+            "Open a live PR (never a draft — stale pre-#456 rule).\n"
             f"{sync.CLAUDE_END}\n"
         ),
     ]
@@ -1084,7 +1084,7 @@ def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
     assert not any(dest in s for s in mp.symlinks_to_create)
 
 
-# ── retired-file tombstones (WS6, release#527) ────────────────────────────────
+# ── retired-file removal (WS6, release#527) ───────────────────────────────────
 
 
 def test_git_blob_sha1_matches_git_hash_object(tmp_path):
@@ -1127,8 +1127,8 @@ def test_retired_fingerprint_file_swept_and_plain_kept(tmp_path):
 
 
 def test_retired_symlink_is_skipped(tmp_path):
-    """Symlinks at tombstoned dests belong to the broken-symlink sweep, never
-    the tombstone path (which would unlink based on the TARGET's content)."""
+    """Symlinks at retired dests belong to the broken-symlink sweep, never
+    the retired-file path (which would unlink based on the TARGET's content)."""
     (tmp_path / "bin").mkdir()
     os.symlink("../.release/bin/release", tmp_path / "bin" / "release")
     (tmp_path / ".release" / "bin").mkdir(parents=True)
@@ -1138,9 +1138,9 @@ def test_retired_symlink_is_skipped(tmp_path):
     assert "bin/release" not in sync._find_retired_files(str(tmp_path))
 
 
-def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
+def test_compute_mirror_planned_dest_never_retired(tmp_path, monkeypatch):
     """A dest this sync still distributes is LIVE — if a future kind re-ships a
-    retired name, the plan wins and the tombstone is suppressed."""
+    retired name, the plan wins and the removal is suppressed."""
     dest = "bin/check-fmt"
     tmp_release = tmp_path / "tmpbuild"
     (tmp_release / "bin").mkdir(parents=True)
@@ -1155,7 +1155,7 @@ def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
     assert mp.retired_to_remove == []
 
-    # Absent from the plan, the same file IS tombstoned.
+    # Absent from the plan, the same file IS retired.
     mp = sync.compute_mirror([], str(tmp_path), str(tmp_release), migrate=False)
     assert mp.retired_to_remove == [dest]
 
@@ -1253,13 +1253,13 @@ def test_retired_catalog_pins_the_live_fleet_misses():
 
 
 def test_retired_orientation_inside_release_dir_is_swept(tmp_path, monkeypatch):
-    """A pre-WS4 seed's tracked .release/ORIENTATION.md is tombstoned: the
+    """A pre-WS4 seed's tracked .release/ORIENTATION.md is retired: the
     dotted-dir dest resolves and lands in retired_to_remove so the managed
     commit pathspec records the deletion explicitly."""
     rel = tmp_path / ".release"
     rel.mkdir()
     orientation = rel / "ORIENTATION.md"
-    orientation.write_text("# Orientation\n\nstale doctrine\n")
+    orientation.write_text("# Orientation\n\nstale rule\n")
     monkeypatch.setitem(
         sync.RETIRED_BLOB_FILES,
         ".release/ORIENTATION.md",

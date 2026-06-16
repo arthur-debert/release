@@ -3,12 +3,12 @@
 #
 # The single place "run the gate" lives. Every Kind's bin/check calls this
 # instead of open-coding the lefthook invocation, so the gate has ONE
-# definition — green here means green everywhere (the unified-gate doctrine,
+# definition — green here means green everywhere (the unified-gate rule,
 # release#348 + CLAUDE.md "The gate is ONE definition, run everywhere").
 #
 # Invoked identically by every consumer's bin/check (local), by CI, and by
 # release-verify-fleet — one implementation, so there is no copy-paste block
-# to drift across Kinds and no Kind that silently skips the gate.
+# to diverge across Kinds and no Kind that silently skips the gate.
 #
 # Resolves lefthook from the npm-local install first (node-stack consumers
 # vendor it under node_modules/.bin), then a PATH-global install. A missing
