@@ -1,0 +1,4 @@
+### Fixed
+
+- `release-core cut --help` now documents the reserved `-release-rc` verification suffix. The cut verb's module docstring already described it, but `cut --help` prints the `USAGE` string (not the docstring), which only covered the version grammar + pre-release stripping — so the live-fire-only `-release-rc` reservation was invisible to consumers. Added the pre-release + `-release-rc` reservation paragraphs to `USAGE` (#693)
+- `release-core cut` now names the remediation when `gh workflow run` fails with HTTP 422 "Workflow does not have 'workflow_dispatch' trigger". The consumer's `release.yml` (e.g. a docs-site repo that authored its own thin caller) needs an `on: workflow_dispatch:` trigger so `cut` can dispatch it; previously cut just forwarded the raw gh error with no guidance on what to add (#725)
