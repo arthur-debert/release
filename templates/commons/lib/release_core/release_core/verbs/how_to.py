@@ -222,11 +222,15 @@ def _dev_cycle_section() -> list[str]:
     lines: list[str] = []
     lines.append("The dev cycle (the ONE flow — draft-first)")
     lines.append(
-        "  1. Branch off origin/<default-branch> (`git fetch origin && "
-        "git switch -c <branch> origin/<default-branch>`), NOT the local "
-        "default branch: the SessionStart boot may have auto-committed a "
-        "managed sync there, and branching from it carries that alien "
-        "commit into your PR diff."
+        "  1. Branch off origin/<default-branch> BEFORE you commit anything "
+        "(`git fetch origin && git switch -c <branch> origin/<default-branch>`), "
+        "NOT the local default branch. WHY (don't skip this): the SessionStart "
+        "boot runs `release-core init`, which can AUTO-COMMIT a managed sync "
+        "onto your local default branch. Branch (or commit) off that local tip "
+        "and the auto-commit rides along as an `alien commit` in your PR diff — "
+        "noise the reviewer flags and you can't easily drop. Always re-base your "
+        "branch point on the FETCHED origin tip so the PR diff is only your "
+        "change."
     )
     lines.append("  2. Make the change.")
     lines.append(
