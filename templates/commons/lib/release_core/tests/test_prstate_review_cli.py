@@ -393,3 +393,22 @@ def test_reply_gh_failure_is_exit_1(monkeypatch, capsys):
     monkeypatch.setattr(ghapi, "pr_review_reply", _boom)
     assert review.reply_main(["1", "body", "--pr", "5"]) == 1
     assert "nope" in capsys.readouterr().err
+
+
+def test_reply_body_starting_with_dash_is_not_an_option(reply_calls, capsys):
+    # A reply body that begins with `-` (a markdown list item) is body, not an
+    # unknown option — the dash-prefixed token follows the <comment-id> (#733).
+    assert review.reply_main(["7", "- one\n- two", "--pr", "9"]) == 0
+    assert reply_calls == [(9, 7, "- one\n- two")]
+
+
+def test_reply_body_starting_with_double_dash_is_not_an_option(reply_calls):
+    # A `--`-prefixed body (a diff hunk header) is body once the comment-id is set.
+    assert review.reply_main(["7", "--- a/file.py", "--pr", "9"]) == 0
+    assert reply_calls == [(9, 7, "--- a/file.py")]
+
+
+def test_reply_leading_unknown_option_before_comment_id_still_errors(capsys):
+    # Before the positional <comment-id>, an unknown dash option is still rejected.
+    assert review.reply_main(["--bogus", "7", "body"]) == 64
+    assert "unknown option --bogus" in capsys.readouterr().err

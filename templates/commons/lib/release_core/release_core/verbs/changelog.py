@@ -227,7 +227,13 @@ def add_main(argv: list[str]) -> int:
 def _with_section(body: bytes, section: str) -> bytes:
     """Prepend a ``### <section>`` heading + blank line to ``body``.
 
-    ``section`` empty → ``body`` unchanged (bare-bullet, the old behavior)."""
+    ``section`` empty → ``body`` unchanged (bare-bullet, the old behavior).
+    A ``section`` containing newlines would otherwise emit a multi-line `###`
+    heading (scattering stray headings / breaking the bullet grouping), so the
+    name is collapsed to a single line first — interior whitespace runs become a
+    single space, leading/trailing whitespace stripped. An all-whitespace name
+    collapses to empty → no heading."""
+    section = " ".join(section.split())
     if not section:
         return body
     return f"### {section}\n\n".encode() + body

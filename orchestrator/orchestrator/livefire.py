@@ -168,7 +168,9 @@ def extract_rc_tag(transcript: str) -> str | None:
     if not matches:
         return None
     # findall with a capturing group returns the GROUP, not the whole match; use
-    # finditer to recover the full matched tag, last-first.
+    # finditer to recover the full matched tag, iterating forward and keeping the
+    # last match (finditer yields matches in source order, so the final one is
+    # the last occurrence in the transcript).
     last = None
     for m in _VERIFY_TAG_RE.finditer(transcript):
         last = m.group(0)

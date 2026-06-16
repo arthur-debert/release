@@ -340,7 +340,14 @@ def reply_main(argv: list[str]) -> int:
                 return 64
         elif arg.startswith("--pr="):
             pr_arg = arg.split("=", 1)[1]
-        elif arg.startswith("-") and arg != "-":
+        # A dash-prefixed token is only an unknown-option error BEFORE the
+        # positional <comment-id>. Once the comment-id is consumed, the next
+        # positional is the reply body, which legitimately starts with `-`/`--`
+        # (a markdown list item, a diff hunk header). So only the LEADING option
+        # region rejects unknown options; after the comment-id, anything that
+        # isn't a recognized option (--pr, handled above) is body. Mirrors the
+        # leading-option scoping applied to `changelog add` in release#732.
+        elif comment_arg is None and arg.startswith("-") and arg != "-":
             print(f"error: unknown option {arg}", file=sys.stderr)
             return 64
         elif comment_arg is None:

@@ -92,6 +92,26 @@ def test_add_empty_section_writes_bare_bullet(repo):
     assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
 
 
+def test_with_section_collapses_newlines_to_one_line(repo):
+    # A section name containing newlines would otherwise emit a multi-line `###`
+    # heading; it is collapsed to a single line first (#733).
+    assert changelog._with_section(b"- x\n", "Added\nbroken") == b"### Added broken\n\n- x\n"
+
+
+def test_add_section_with_newline_yields_single_line_heading(repo):
+    rc = changelog.add_main(["--section", "Added\n### Injected", "feat", "shiny"])
+    assert rc == 0
+    body = (repo / "CHANGELOG" / "unreleased-feat.md").read_bytes()
+    assert body == b"### Added ### Injected\n\n- shiny\n"
+    # exactly one `###`-prefixed heading line
+    assert sum(1 for line in body.splitlines() if line.startswith(b"### ")) == 1
+
+
+def test_with_section_all_whitespace_name_writes_bare_bullet(repo):
+    # An all-whitespace name collapses to empty → no heading (opt-out).
+    assert changelog._with_section(b"- x\n", "  \n\t") == b"- x\n"
+
+
 def test_add_body_with_own_section_written_verbatim(repo, monkeypatch):
     import io
 
