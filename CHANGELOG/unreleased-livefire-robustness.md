@@ -1,1 +1,0 @@
-- orc livefire: tolerate agent-fenced feedback YAML + force blocking stdio (verbose EAGAIN)

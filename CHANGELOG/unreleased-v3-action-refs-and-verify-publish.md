@@ -1,1 +1,0 @@
-- Reusable workflows now reference internal composite actions at @v3 (not the frozen @v2), so consumers on @v3 run current action code; a -release-rc verification cut builds + tags + creates the GH release but never publishes to any external registry (crates.io, npm, PyPI, OpenVSX).

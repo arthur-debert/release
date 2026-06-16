@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+## 3.1.2 - 2026-06-16
+
+- Correct audit/model notes: comms docs workflow pin is @v3
+- De-jargon release-internal surface (docs, orchestrator, tests, env) — #655 item 2
+- orc livefire: require a verdict block + prod the agent once for skipped feedback (#683)
+- orc livefire: tolerate agent-fenced feedback YAML + force blocking stdio (verbose EAGAIN)
+- Reusable workflows now reference internal composite actions at @v3 (not the frozen @v2), so consumers on @v3 run current action code; a -release-rc verification cut builds + tags + creates the GH release but never publishes to any external registry (crates.io, npm, PyPI, OpenVSX).
+
 ## 3.1.1 - 2026-06-16
 
 - de-jargon release_core help strings + docstrings + comments (prose only; code identifiers + schema keys kept)
