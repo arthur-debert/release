@@ -330,7 +330,14 @@ def reply_main(argv: list[str]) -> int:
     pr_arg: str | None = None
     it = iter(argv)
     for arg in it:
-        if arg in ("-h", "--help"):
+        # Help and unknown-option rejection are scoped to the LEADING option
+        # region — BEFORE the positional <comment-id>. Once the comment-id is
+        # consumed, the next positional is the reply body, which legitimately
+        # starts with `-`/`--` (a markdown list item, a diff hunk header) or is
+        # even the literal `-h`/`--help` text — so after the comment-id, anything
+        # that isn't a recognized option (--pr, handled below) is body. Mirrors
+        # the leading-option scoping applied to `changelog add` in release#732.
+        if comment_arg is None and arg in ("-h", "--help"):
             print(USAGE_REPLY)
             return 0
         if arg == "--pr":
@@ -340,7 +347,7 @@ def reply_main(argv: list[str]) -> int:
                 return 64
         elif arg.startswith("--pr="):
             pr_arg = arg.split("=", 1)[1]
-        elif arg.startswith("-") and arg != "-":
+        elif comment_arg is None and arg.startswith("-") and arg != "-":
             print(f"error: unknown option {arg}", file=sys.stderr)
             return 64
         elif comment_arg is None:
