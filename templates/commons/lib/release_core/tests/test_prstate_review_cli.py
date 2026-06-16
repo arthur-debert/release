@@ -395,7 +395,7 @@ def test_reply_gh_failure_is_exit_1(monkeypatch, capsys):
     assert "nope" in capsys.readouterr().err
 
 
-def test_reply_body_starting_with_dash_is_not_an_option(reply_calls, capsys):
+def test_reply_body_starting_with_dash_is_not_an_option(reply_calls):
     # A reply body that begins with `-` (a markdown list item) is body, not an
     # unknown option — the dash-prefixed token follows the <comment-id> (#733).
     assert review.reply_main(["7", "- one\n- two", "--pr", "9"]) == 0

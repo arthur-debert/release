@@ -92,7 +92,7 @@ def test_add_empty_section_writes_bare_bullet(repo):
     assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
 
 
-def test_with_section_collapses_newlines_to_one_line(repo):
+def test_with_section_collapses_newlines_to_one_line():
     # A section name containing newlines would otherwise emit a multi-line `###`
     # heading; it is collapsed to a single line first (#733).
     assert changelog._with_section(b"- x\n", "Added\nbroken") == b"### Added broken\n\n- x\n"
@@ -107,7 +107,7 @@ def test_add_section_with_newline_yields_single_line_heading(repo):
     assert sum(1 for line in body.splitlines() if line.startswith(b"### ")) == 1
 
 
-def test_with_section_all_whitespace_name_writes_bare_bullet(repo):
+def test_with_section_all_whitespace_name_writes_bare_bullet():
     # An all-whitespace name collapses to empty → no heading (opt-out).
     assert changelog._with_section(b"- x\n", "  \n\t") == b"- x\n"
 
