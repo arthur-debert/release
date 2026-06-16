@@ -31,6 +31,7 @@ EOF
 }
 
 teardown() {
+  cd / || true  # leave $TMP before removing it (avoid getcwd/ENOENT in later setup())
   rm -rf "$TMP"
 }
 
