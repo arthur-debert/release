@@ -100,18 +100,21 @@ def main():
         commits = sorted(
             ((c["sha"], c["commit"]["committer"]["date"]) for c in raw["commits"]),
             key=lambda x: x[1])
-        rev_reviews = sorted(
-            r["submitted_at"] for r in raw["reviews"]
-            if r.get("submitted_at") and r.get("user")
-            and (r["user"].get("login") or "").lower().startswith(reviewer[:6]))
-        # fall back to slim ordering if login heuristic missed
         slim = json.loads((slim_dir / f"pr-{n}.json").read_text())
-        if len(rev_reviews) < 2:
-            rev_reviews = sorted(
-                rv["submitted_at"] for rv in slim["reviews"]
-                if rv["reviewer"] == reviewer and rv.get("submitted_at"))
-        if len(rev_reviews) < 2:
+        # Round timing comes ONLY from the canonical per-reviewer rounds the
+        # slim files already carry (extract.py groups each bot's reviews and
+        # numbers them by submit time). Map round -> submit timestamp; no
+        # raw-login heuristic, so a window can't be misaligned by a login that
+        # merely shares a prefix or by canonical names that don't.
+        round_at = {
+            rv["round"]: rv["submitted_at"]
+            for rv in slim["reviews"]
+            if rv["reviewer"] == reviewer and rv.get("round")
+            and rv.get("submitted_at")
+        }
+        if len(round_at) < 2:
             continue
+        first_at = round_at[min(round_at)]
         for t in slim["threads"]:
             if t["reviewer"] != reviewer:
                 continue
@@ -130,18 +133,19 @@ def main():
                 # Brand-new thread opened at round r>=2: classify by whether
                 # the file it targets was changed in the push that triggered
                 # this round (vs. a re-scan of code unchanged since round 1).
-                if r - 1 < len(rev_reviews):
-                    prev_t = rev_reviews[r - 2] if r - 2 >= 0 else ""
-                    this_t = rev_reviews[r - 1]
-                else:
-                    prev_t, this_t = rev_reviews[-2], rev_reviews[-1]
+                # Window = (prev round's submit, this round's submit]; look the
+                # bounds up by round number, falling back to the nearest known
+                # earlier round if r-1 wasn't recorded.
+                this_t = round_at.get(r) or round_at[max(round_at)]
+                earlier = [round_at[k] for k in round_at if k < r]
+                prev_t = max(earlier) if earlier else ""
                 changed = set()
                 for sha, date in commits:
                     if prev_t < date <= this_t:
                         changed |= set(files_for(sha))
                 changed_any = set()
                 for sha, date in commits:
-                    if date > rev_reviews[0]:
+                    if date > first_at:
                         changed_any |= set(files_for(sha))
                 if t.get("path") in changed:
                     cls = "on_changed"

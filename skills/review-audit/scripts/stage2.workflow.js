@@ -27,8 +27,15 @@ export const meta = {
 const cfg = (typeof args === 'object' && args && !Array.isArray(args)) ? args : {}
 const DIR = cfg.dir || process.env.REVIEW_AUDIT_DIR
 if (!DIR) throw new Error('review-audit: pass args.dir (the analysis/reviews output dir) or set REVIEW_AUDIT_DIR')
-const REVIEWERS = cfg.reviewers || ['copilot', 'gemini', 'coderabbit']
-const BATCH = cfg.batch || 4
+// Fall back to defaults only when the provided value is actually usable:
+// reviewers must be a non-empty array (an empty enum makes the schema reject
+// every finding); batch must be a positive integer (<=0 loops forever below).
+const REVIEWERS =
+  Array.isArray(cfg.reviewers) && cfg.reviewers.length
+    ? cfg.reviewers
+    : ['copilot', 'gemini', 'coderabbit']
+const BATCH =
+  Number.isInteger(cfg.batch) && cfg.batch > 0 ? cfg.batch : 4
 
 // Derive the reviewed-PR list from the slim files unless given explicitly.
 let reviewed = cfg.reviewed
