@@ -1,1 +1,0 @@
-- de-jargon release_core help strings + docstrings + comments (prose only; code identifiers + schema keys kept)

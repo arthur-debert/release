@@ -1,1 +1,0 @@
-- Add orc livefire — single-consumer live-fire verification runner (clone → standard prompt → harvest feedback → file to #348 inbox → teardown rc) (#663.3 phase 1)

@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 3.1.1 - 2026-06-16
+
+- de-jargon release_core help strings + docstrings + comments (prose only; code identifiers + schema keys kept)
+- Remove release-sync/jargon legacy: delete redundant retired-skill list, rename compose-engine + contract identifiers off canonical/materialize/tombstone/pilot-running, migrate CLAUDE.md marker to release-core
+- de-jargon docs/: retire stale release-sync/materialize/canonical/drift vocabulary, keep ADRs + live filenames
+- strip lefthook's hardcoded ANSI escapes from release-core gate output when stdout is not a TTY
+- Add the canonical standard live-fire verification prompt + structured-feedback schema (#663.2)
+- orc livefire: parallel fan-out across N consumers (--all + --concurrency) with an aggregated rollout report (#663.3 phase 2)
+- Add orc livefire — single-consumer live-fire verification runner (clone → standard prompt → harvest feedback → file to #348 inbox → teardown rc) (#663.3 phase 1)
+- orc livefire: attempt rc teardown even when finding-filing fails, then re-raise (no stranded -release-rc)
+- pr ready/status now gate on mergeStateStatus (CLEAN), not just the async-stale mergeable field — a conflicting/behind/uncomputed PR no longer flips to ready
+- Reserve the -release-rc pre-release suffix as a no-trace verification cut (tag-only; bump commit not pushed to the branch) for the live-fire harness (#663)
+- Add the standardization model + fleet audit docs; surface the standardize-default philosophy in README + GLOSSARY (#656)
+
 ## 3.1.0 - 2026-06-14
 
 - Remove run-precommit-gate.sh's pre-WS3 root-lefthook.yml consumer fallback (#569 B4): 0/19 consumers track a root gate config, and release-self self-releases via gh-action.yml so this script never runs there. The managed .release/lefthook.yml path via LEFTHOOK_CONFIG plus the release-core materialize branch cover all live cases; an explicit caller-provided LEFTHOOK_CONFIG is now honored over the managed copy.
