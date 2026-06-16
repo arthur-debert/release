@@ -93,12 +93,16 @@ def test_test_all_stops_if_unit_fails(monkeypatch):
 
 def test_coverage_errors_loudly_when_no_tool_for_kind(monkeypatch, capsys):
     # UNLIKE the test verbs, coverage never skips-with-notice: asked-for
-    # coverage with no coverage-capable component is exit 1 + a kind-naming msg.
+    # coverage with no coverage-capable component is exit 1 + a clear, non-
+    # alarming kind-naming notice that points at how-to (release#701).
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks.repo_commands, "coverage_commands", lambda r: [])
     monkeypatch.setattr(tasks.manifest, "detect_kind", lambda r: "nvim-plugin")
     assert tasks.coverage([]) == 1
-    assert "no coverage tool for kind nvim-plugin" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "nvim-plugin Kind has no coverage tool" in err
+    assert "expected" in err  # reads as an expected notice, not a crash
+    assert "release-core how-to" in err  # points at the discoverability path
 
 
 def test_coverage_kind_detection_failure_still_errors(monkeypatch, capsys):
@@ -110,7 +114,7 @@ def test_coverage_kind_detection_failure_still_errors(monkeypatch, capsys):
 
     monkeypatch.setattr(tasks.manifest, "detect_kind", _boom)
     assert tasks.coverage([]) == 1
-    assert "no coverage tool for kind unknown" in capsys.readouterr().err
+    assert "unknown Kind has no coverage tool" in capsys.readouterr().err
 
 
 def test_coverage_hard_errors_when_cargo_llvm_cov_missing(monkeypatch, capsys):

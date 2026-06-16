@@ -151,10 +151,25 @@ def coverage(argv: list[str]) -> int:
             kind = manifest.detect_kind(root)
         except manifest.KindError:
             kind = "unknown"
+        # Expected, not a crash: some Kinds (nvim-plugin, tree-sitter) have no
+        # coverage-capable toolchain in this portfolio. Say so plainly and point
+        # at how-to, rather than reading like a failure (release#701, #696).
         print(
-            f"release-core coverage: no coverage tool for kind {kind} — no "
-            "component of this repo has a coverage-capable toolchain "
-            "(node test script, Cargo.toml, or go.mod).",
+            f"release-core coverage: the {kind} Kind has no coverage tool — "
+            "nothing to measure here.",
+            file=sys.stderr,
+        )
+        print(
+            "  This is expected for Kinds with no coverage-capable toolchain "
+            "(e.g. nvim-plugin, tree-sitter). A coverage component is a node "
+            "test runner (vitest/jest), a Cargo.toml (cargo llvm-cov), or a "
+            "go.mod (go tool cover) — this repo has none.",
+            file=sys.stderr,
+        )
+        print(
+            "  See `release-core how-to` for what each verb resolves to in this "
+            "repo. (Exit 1 because coverage was explicitly requested — the verb "
+            "never silently no-ops; it just had nothing to run.)",
             file=sys.stderr,
         )
         return 1
