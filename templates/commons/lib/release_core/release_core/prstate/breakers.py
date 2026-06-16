@@ -113,7 +113,7 @@ def divergent_cycle_count(cycles: list[Cycle]) -> int:
     Conservative by construction: it can only ever return <= len(cycles), so it
     never makes the cap fire EARLIER than the raw round count would have.
     """
-    seen: set = set()
+    seen: set[str] = set()
     count = 0
     for cycle in cycles:
         new_locations = set(cycle.comment_keys) - seen

@@ -37,7 +37,8 @@ agent cannot hand off early. Flipping an already-ready READY PR is a no-op
 success.
 
 When the cycle-cap circuit breaker has fired on an OTHERWISE-ready PR (0 open
-threads + CI green + CLEAN merge), the engine reports BLOCKED and routes you
+threads + CI green + a CLEAN merge, or a transient UNSTABLE while the rollup is
+green), the engine reports BLOCKED and routes you
 here with --ack-cycle-cap. That flag acknowledges the cap so the flip
 proceeds — but ONLY the cap is waived: every other readiness gate (open
 threads, CI, merge state) still applies, so you never drop to a raw

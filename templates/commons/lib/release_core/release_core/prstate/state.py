@@ -126,7 +126,8 @@ def evaluate(
 
     `ack_cycle_cap` is the human's explicit acknowledgement of the cycle-cap
     breaker (release#738): when True, a fired cycle-cap is suppressed so an
-    OTHERWISE-ready PR (0 open threads + CI green + CLEAN merge) flips to READY.
+    OTHERWISE-ready PR (0 open threads + CI green + a CLEAN merge, or a transient
+    UNSTABLE while the rollup is green) flips to READY.
     It suppresses ONLY the cycle-cap — every other breaker and every other
     readiness gate (merge-state / CI / open threads) still applies, so the ack
     can never flip a PR that isn't genuinely converged. `release-core pr ready
@@ -285,7 +286,8 @@ def evaluate(
             status.breaker = breaker.breaker
             status.next_action = (
                 f"converged but cycle-capped: {breaker.reason} — the PR is otherwise "
-                "ready (reviews in, 0 open threads, CI green, merge state clean). "
+                "ready (reviews in, 0 open threads, CI green, merge state CLEAN — or "
+                "a transient UNSTABLE while the rollup is green). "
                 "Flip it with `release-core pr ready --ack-cycle-cap` (it re-checks "
                 "every other readiness gate); do NOT open another review round."
             )
