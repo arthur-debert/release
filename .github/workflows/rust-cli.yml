@@ -524,7 +524,7 @@ jobs:
     needs: [prepare, create-release]
     # A `-release-rc` cut is a throwaway live-fire verification (release#663):
     # build + tag + GH release, but NEVER publish to an external registry.
-    if: always() && !failure() && !cancelled() && inputs.publish-crates && !contains(needs.prepare.outputs.version, '-release-rc')
+    if: always() && !failure() && !cancelled() && inputs.publish-crates && !(endsWith(needs.prepare.outputs.version, '-release-rc') || contains(needs.prepare.outputs.version, '-release-rc.'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -789,7 +789,7 @@ jobs:
     needs: [prepare, build-wasm, wasm-setup]
     # A `-release-rc` cut is a throwaway live-fire verification (release#663):
     # build the wasm pkg + attach to the GH release, but NEVER publish to npm.
-    if: always() && !failure() && !cancelled() && inputs.wasm-packages != '' && !contains(needs.prepare.outputs.version, '-release-rc')
+    if: always() && !failure() && !cancelled() && inputs.wasm-packages != '' && !(endsWith(needs.prepare.outputs.version, '-release-rc') || contains(needs.prepare.outputs.version, '-release-rc.'))
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

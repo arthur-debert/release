@@ -215,7 +215,7 @@ jobs:
     needs: [prepare, build]
     # A `-release-rc` cut is a throwaway live-fire verification (release#663):
     # build + tag + GH release, but NEVER publish to PyPI.
-    if: inputs.publish-pypi && !contains(needs.prepare.outputs.version, '-release-rc')
+    if: inputs.publish-pypi && !(endsWith(needs.prepare.outputs.version, '-release-rc') || contains(needs.prepare.outputs.version, '-release-rc.'))
     runs-on: ubuntu-latest
     steps:
       - name: Install uv
@@ -260,7 +260,7 @@ jobs:
     needs: [prepare, build]
     # A `-release-rc` cut is a throwaway live-fire verification (release#663):
     # build + tag + GH release, but NEVER publish to TestPyPI.
-    if: inputs.publish-testpypi && !contains(needs.prepare.outputs.version, '-release-rc')
+    if: inputs.publish-testpypi && !(endsWith(needs.prepare.outputs.version, '-release-rc') || contains(needs.prepare.outputs.version, '-release-rc.'))
     runs-on: ubuntu-latest
     steps:
       - name: Install uv
