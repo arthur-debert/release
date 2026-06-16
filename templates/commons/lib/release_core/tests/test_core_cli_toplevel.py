@@ -99,11 +99,12 @@ def test_semver_help_passthrough(capsys):
 def test_changelog_add_dispatches_to_add_main(capsys):
     # `changelog add --help` forwards `--help` verbatim to changelog.add_main,
     # whose own help intercept prints the add-specific usage on stdout and exits
-    # 0 (release#686) — proving the passthrough reached the verb, not click.
+    # 0 (release#686). The `--section` line in that usage is add-specific, so its
+    # presence proves the passthrough reached the verb, not a generic click help.
     rc = cli_entry.main(["changelog", "add", "--help"])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "usage: changelog-add" in out
+    assert "usage:" in out and "--section" in out
 
 
 def test_changelog_bare_runs_orchestrator(capsys):

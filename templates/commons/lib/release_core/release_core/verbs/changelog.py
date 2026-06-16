@@ -96,13 +96,29 @@ def _sorted_fragments(changelog_dir: str) -> list[str]:
 
 # --- changelog-add ----------------------------------------------------------
 
-ADD_USAGE = "usage: changelog-add [--force] <slug> [body...]"
+ADD_USAGE = (
+    "usage: changelog-add [--force] [--section <name>] <slug> [body...]\n"
+    "\n"
+    "Write CHANGELOG/unreleased-<slug>.md from [body...] (or stdin).\n"
+    "\n"
+    "Options:\n"
+    "  --force            overwrite an existing fragment\n"
+    "  --section <name>   group heading for the fragment (default: Changed);\n"
+    "                     pass --section '' to omit the heading\n"
+    "  -h, --help         show this help and exit"
+)
+
+# Default group heading written above the bullet so a fragment reads as a
+# keepachangelog-style section (### Changed / Added / Fixed …). The renderer
+# concatenates fragment bytes verbatim, so the heading flows straight into the
+# Unreleased block. Pass `--section ''` to write a bare bullet (old behavior).
+DEFAULT_SECTION = "Changed"
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def add_main(argv: list[str]) -> int:
-    """changelog-add [--force] <slug> [body...]"""
+    """changelog-add [--force] [--section <name>] <slug> [body...]"""
     args = list(argv)
 
     # Intercept help before any validation so `add --help` / `add -h` (and
@@ -122,9 +138,27 @@ def add_main(argv: list[str]) -> int:
     os.chdir(root)
 
     force = False
-    if args and args[0] == "--force":
-        force = True
-        args = args[1:]
+    section = DEFAULT_SECTION
+    # Parse leading options (--force, --section <name>) in any order before the
+    # positional slug. A bare "--" terminates option parsing.
+    while args:
+        if args[0] == "--force":
+            force = True
+            args = args[1:]
+        elif args[0] == "--section":
+            if len(args) < 2:
+                print(ADD_USAGE, file=sys.stderr)
+                return 2
+            section = args[1]
+            args = args[2:]
+        elif args[0].startswith("--section="):
+            section = args[0][len("--section=") :]
+            args = args[1:]
+        elif args[0] == "--":
+            args = args[1:]
+            break
+        else:
+            break
 
     slug = args[0] if args else ""
     if not slug:
@@ -155,15 +189,30 @@ def add_main(argv: list[str]) -> int:
     # Inline args: joined by a single space + one trailing newline (printf
     # '%s\n' "$*"). No args: stdin bytes (cat > target).
     body = (" ".join(args) + "\n").encode() if args else sys.stdin.buffer.read()
-    # CHANGELOG/README.txt mandates a leading `- ` markdown bullet per fragment
-    # line (the renderer concatenates fragment bytes verbatim into the rendered
-    # list). Apply the convention only when the body isn't already a bullet, so
-    # an already-`- `-prefixed body is never double-bulleted.
-    body = _ensure_bullet(body)
+    # A body the caller already opened with its own `###` section heading is a
+    # complete fragment — write it verbatim (don't bullet the heading line, and
+    # don't prepend a second section). Otherwise apply the conventions:
+    #   1. `- ` bullet (CHANGELOG/README.txt mandates a leading bullet; the
+    #      renderer concatenates fragment bytes verbatim into the rendered list).
+    #      Skipped when the body already starts with `-` (never double-bulleted).
+    #   2. a `### <section>` heading above the bullet (release#720) so a fragment
+    #      reads as a keepachangelog section; `--section ''` opts out.
+    if not body.lstrip().startswith(b"###"):
+        body = _ensure_bullet(body)
+        body = _with_section(body, section)
     with open(target, "wb") as fh:
         fh.write(body)
     print(f"wrote {target}")
     return 0
+
+
+def _with_section(body: bytes, section: str) -> bytes:
+    """Prepend a ``### <section>`` heading + blank line to ``body``.
+
+    ``section`` empty → ``body`` unchanged (bare-bullet, the old behavior)."""
+    if not section:
+        return body
+    return f"### {section}\n\n".encode() + body
 
 
 def _ensure_bullet(body: bytes) -> bytes:
@@ -369,7 +418,8 @@ def _sort_versions(versions: list[str]) -> list[str]:
 ORCHESTRATOR_USAGE = """usage: changelog <command> [args...]
 
 Commands:
-  add [--force] <slug> [body...]   add an unreleased fragment
+  add [--force] [--section <name>] <slug> [body...]
+                                   add an unreleased fragment
   cut <version>                    cut unreleased fragments into a version file
   render                           regenerate CHANGELOG.md
   new-version <version>            cut + render
