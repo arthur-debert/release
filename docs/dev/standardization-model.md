@@ -257,9 +257,13 @@ Distilled from the 17-repo audit (full detail + per-repo scorecard:
    output to the cut (phos-core corpus/fixtures, tree-sitter-lex).
 4. **Ordinary checks as shared inputs** — `lua-lint`, `cargo-doc`,
    docs-spellcheck (nvim, lex, standout hand-roll these).
-5. **New Kinds release/ doesn't ship yet** — a Jekyll docs-site Kind (comms,
-   lex), a go-server / Cloud-Run Kind (supage), a standalone cascade fan-out
-   callable (comms hand-rolls tar+gh-release+dispatch).
+5. **New Kinds release/ doesn't ship yet** — a go-server / Cloud-Run Kind
+   (supage), a standalone cascade fan-out callable (comms hand-rolls
+   tar+gh-release+dispatch). (~~Jekyll docs-site Kind~~ — dropped 2026-06-16:
+   comms migrated its docs off Jekyll onto the existing `mkdocs.yml@v2` workflow
+   and onboarded to the fleet (comms#75); lex's orphan `pages.yml` was deleted.
+   `lex.ing` is now published solely by comms via mkdocs + mkdocs-lex, so no
+   Jekyll Kind is needed.)
 
 **Pure deletes (zero upstream work):** dead-orphan brew-render pairs (5 repos),
 `rust-setup/action.yml` (2), vscode's husky gate, `bin/check-fmt`/`check-lint`
