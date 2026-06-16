@@ -153,19 +153,23 @@ jobs:
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          prerelease_flag=""
+          # Re-assert prerelease on BOTH paths: `gh release edit` leaves it
+          # UNCHANGED unless --prerelease is passed, so the resume/exists path
+          # would otherwise drop the flag for a `-rc`/`-release-rc` version
+          # (release#726). Explicit boolean form makes it idempotent.
+          prerelease_bool=false
           if [ "$PRERELEASE" = "true" ]; then
-            prerelease_flag="--prerelease"
+            prerelease_bool=true
           fi
           # Resume-on-existing: if the release already exists for this
           # tag (rare, but possible if create-release is re-run), edit
           # the notes in place; else create it.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG exists — updating notes."
-            gh release edit "$TAG" --notes-file release-notes.md
+            gh release edit "$TAG" --notes-file release-notes.md --prerelease="$prerelease_bool"
           else
             gh release create "$TAG" \
-              $prerelease_flag \
+              --prerelease="$prerelease_bool" \
               --title "$TAG" \
               --notes-file release-notes.md
           fi

@@ -1,0 +1,32 @@
+name: create-github-release tests
+
+# BATS contract suite for bin-internal/create-github-release.sh — the shared
+# GH-release create/update unit. Fully offline: a stub `gh` on PATH logs every
+# invocation so the suite asserts that BOTH the create and the resume/edit path
+# re-assert the prerelease status (release#726).
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin-internal/create-github-release.sh"
+      - "tests/create-github-release/**"
+      - ".github/workflows/create-github-release-tests.yml"
+  pull_request:
+    paths:
+      - "bin-internal/create-github-release.sh"
+      - "tests/create-github-release/**"
+      - ".github/workflows/create-github-release-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/create-github-release/

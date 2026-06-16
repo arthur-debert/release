@@ -364,17 +364,21 @@ jobs:
             ls -la
             exit 1
           fi
-          prerelease_flag=""
+          # Re-assert prerelease on BOTH paths: `gh release edit` leaves it
+          # UNCHANGED unless --prerelease is passed, so the resume/exists path
+          # would otherwise drop the flag for a `-rc`/`-release-rc` version
+          # (release#726). Explicit boolean form makes it idempotent.
+          prerelease_bool=false
           if [ "${PRERELEASE}" = "true" ]; then
-            prerelease_flag="--prerelease"
+            prerelease_bool=true
           fi
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "Release ${TAG} exists — updating notes + re-uploading bundle"
-            gh release edit "${TAG}" --notes-file release-notes.md
+            gh release edit "${TAG}" --notes-file release-notes.md --prerelease="${prerelease_bool}"
             gh release upload "${TAG}" "${tarball}" --clobber
           else
             gh release create "${TAG}" \
-              ${prerelease_flag} \
+              --prerelease="${prerelease_bool}" \
               --title "${TAG}" \
               --notes-file release-notes.md \
               "${tarball}"
