@@ -323,7 +323,22 @@ def test_show_prints_all_threads_regardless_of_author(fakes, context, capsys):
     ctx = context("multi_bot_threads")
     review.render_show(ctx, [alpha])
     out = capsys.readouterr().out
-    assert out.count("(thread ") == len(ctx.threads)
+    assert out.count("graphql thread id ") == len(ctx.threads)
+
+
+def test_show_labels_the_ids_so_the_consumable_one_is_unambiguous(fakes, context, capsys):
+    # #687: each thread prints a GraphQL node id (PRRT_…) AND a numeric comment
+    # id; the output must LABEL them so it's clear the numeric comment-id is the
+    # one `pr resolve-thread` / `pr review reply` consume.
+    alpha, _, _ = fakes
+    ctx = context("multi_bot_threads")
+    review.render_show(ctx, [alpha])
+    out = capsys.readouterr().out
+    assert "graphql thread id " in out
+    assert "comment-id " in out
+    # the legend points at the consumable verbs + the numeric comment id
+    assert "resolve-thread" in out
+    assert "reply" in out
 
 
 # --- reply (#695) -------------------------------------------------------------

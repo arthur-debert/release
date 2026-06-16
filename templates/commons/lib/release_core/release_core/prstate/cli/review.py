@@ -416,9 +416,13 @@ def render_show(ctx: PullContext, adapters: list[ReviewerAdapter]) -> None:
             print(review.body or "")
     print()
     print("=== review threads ===")
+    print(
+        "(reply with `pr review reply <comment-id> <body>`; resolve with "
+        "`pr resolve-thread <pr> <comment-id>` — both take the numeric comment id)"
+    )
     for t in ctx.threads:
         marker = "resolved" if t.is_resolved else "open"
-        print(f"[{marker}] {t.path or '?'}:{t.line or '?'} (thread {t.thread_id})")
+        print(f"[{marker}] {t.path or '?'}:{t.line or '?'} (graphql thread id {t.thread_id})")
         for c in t.comments:
-            print(f"  [{c.comment_id}] {c.author}: {c.body}")
+            print(f"  comment-id {c.comment_id} | {c.author}: {c.body}")
         print()
