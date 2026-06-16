@@ -260,8 +260,9 @@ Distilled from the 17-repo audit (full detail + per-repo scorecard:
 5. **New Kinds release/ doesn't ship yet** — a go-server / Cloud-Run Kind
    (supage), a standalone cascade fan-out callable (comms hand-rolls
    tar+gh-release+dispatch). (~~Jekyll docs-site Kind~~ — dropped 2026-06-16:
-   comms migrated its docs off Jekyll onto the existing `mkdocs.yml@v2` workflow
-   and onboarded to the fleet (comms#75); lex's orphan `pages.yml` was deleted.
+   comms migrated its docs off Jekyll onto the shared `mkdocs.yml` workflow
+   (comms now pins `@v3`) and onboarded to the fleet (comms#75); lex's orphan
+   `pages.yml` was deleted.
    `lex.ing` is now published solely by comms via mkdocs + mkdocs-lex, so no
    Jekyll Kind is needed.)
 
