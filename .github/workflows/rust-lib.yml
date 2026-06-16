@@ -80,9 +80,9 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v2
+      - uses: arthur-debert/release/.github/actions/setup-rust@v3
 
-      - uses: arthur-debert/release/.github/actions/prepare-release@v2
+      - uses: arthur-debert/release/.github/actions/prepare-release@v3
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -98,6 +98,9 @@ jobs:
   # -------------------------------------------------------------------
   publish-crates:
     needs: prepare
+    # A `-release-rc` cut is a throwaway live-fire verification (release#663):
+    # build + tag + GH release, but NEVER publish to crates.io.
+    if: ${{ !(endsWith(needs.prepare.outputs.version, '-release-rc') || contains(needs.prepare.outputs.version, '-release-rc.')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -105,9 +108,9 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v2
+      - uses: arthur-debert/release/.github/actions/setup-rust@v3
 
-      - uses: arthur-debert/release/.github/actions/publish-crate@v2
+      - uses: arthur-debert/release/.github/actions/publish-crate@v3
         with:
           crates: ${{ inputs.crates }}
           token: ${{ secrets.CRATES_IO_KEY }}
@@ -124,6 +127,13 @@ jobs:
   # -------------------------------------------------------------------
   create-release:
     needs: [prepare, publish-crates]
+    # publish-crates is skipped for a `-release-rc` verification cut (no external
+    # publish), so guard with always() + accept a skipped publish — otherwise a
+    # skipped need would cascade-skip the GH release we DO want on a verify cut.
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

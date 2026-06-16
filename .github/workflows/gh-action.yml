@@ -151,7 +151,7 @@ jobs:
         # bumps to @v3. Without an armed+installed gate this workflow's bot gate
         # had NOTHING to run on a post-WS3 consumer (no root lefthook.yml) and
         # silently skipped (release#531 F1).
-        uses: arthur-debert/release/.github/actions/arm-gate@v2
+        uses: arthur-debert/release/.github/actions/arm-gate@v3
         with:
           materialize: 'false'
 
