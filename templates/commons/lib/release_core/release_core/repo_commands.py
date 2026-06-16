@@ -483,15 +483,13 @@ def docs_commands(root: str) -> DocsCommands | None:
 # must not pretend to be the consumer's CI).
 
 
-def _is_node_run(cmd: Cmd, root: str) -> bool:
+def _is_node_run(cmd: Cmd, root: str) -> bool:  # noqa: ARG001 (root kept for a uniform predicate signature)
     """True iff this command runs through the node package manager — its head is
-    the detected pm (``pnpm``/``yarn``/``npm``, covering ``<pm> run …`` AND direct
+    one of ``npm``/``pnpm``/``yarn`` (covering both ``<pm> run …`` and direct
     invocations like ``pnpm tauri build``) or ``npx``. Any of these needs
-    ``node_modules`` installed."""
-    if not cmd.argv:
-        return False
-    head = cmd.argv[0]
-    return head == detect_pm(root) or head in ("npm", "pnpm", "yarn", "npx")
+    ``node_modules`` installed. (The detected pm is always one of these names, so
+    a per-call ``detect_pm`` probe would be redundant — release#735 review.)"""
+    return bool(cmd.argv) and cmd.argv[0] in ("npm", "pnpm", "yarn", "npx")
 
 
 def _wasm_crate_dirs_missing_pkg(root: str) -> list[str]:
