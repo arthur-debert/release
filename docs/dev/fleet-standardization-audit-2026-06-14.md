@@ -194,7 +194,7 @@ The honest tradeoff line: **content is bespoke, the hook/interface is ordinary.*
 | **padz** | small | 1) delete brew-render pair + `docs/release-pipeline.lex` 2) retire `release.toml` local flow 3) review `live-tests/` vs managed e2e |
 | **simple-gal** | small | 1) delete brew-render pair 2) fix `release.toml` dead `bin/changelog` hook 3) `@v2→v3` + trim CLAUDE.md |
 | **standout** | small-med | 1) delete dead readthedocs/mkdocs system 2) `docs-spellcheck`→gate, `docs-book` remove 3) `@v1/v2→v3` |
-| **supage** | med (server gap) | 1) trim stale CLAUDE.md (`scripts/` refs) 2) collapse `deploy.yml`/`deploy.sh` (await go-server Kind) 3) fold ci.yml `materialize` step into shared composite |
+| **supage** | med (server gap) | 1) trim stale CLAUDE.md (`scripts/` refs) 2) collapse `deploy.yml`/`deploy.sh` (await go-server Kind) 3) fold ci.yml `init` step into shared composite |
 | **tree-sitter-lex** | med | 1) drop legacy `bin/check`/`bin/build` + dual umbrella (use release-core gate) 2) `@v2→v3` 3) trim CLAUDE.md |
 | **phos-core** | med | 1) `wasm.yml`→shared wasm input 2) trim 265-line CLAUDE.md + fix stale `@v1`/`scripts/check-rust.sh` 3) extra-asset hook for corpus/fixtures |
 | **phos-app** | med (high bespoke, mostly legit) | 1) move `scripts/release/update-release`→app-bin; fix dead `trigger-release` ref 2) trim 266-line CLAUDE.md 3) `@v1→v3` copilot + wheel `v2.21.0→v3` |

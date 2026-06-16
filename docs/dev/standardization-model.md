@@ -246,7 +246,7 @@ Distilled from the 17-repo audit (full detail + per-repo scorecard:
 
 1. **Stale `@v3` re-seed across the fleet** — almost every consumer is pinned
    `@v2`/`@v1` on the `v2.21.0` wheel with retired `release-sync` / `ORIENTATION`
-   / `canonical` / `take-iii` jargon baked into managed stubs. One fleet action
+   / old jargon (`canonical`, `take-iii`) baked into managed stubs. One fleet action
    refreshes markers, lefthook shape, and `bin/check` residue for ~14 repos.
    **lex + vscode are still on the retired tracked-`.release/` seed model** (need
    an explicit one-time re-seed, not a pin bump); **comms isn't onboarded at all**

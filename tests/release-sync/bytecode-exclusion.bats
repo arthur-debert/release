@@ -3,20 +3,20 @@
 load helper
 
 # ---------------------------------------------------------------------
-# The ephemeral .release/ is self-ignoring; bytecode never materializes
+# The ephemeral .release/ is self-ignoring; bytecode is never written
 # (release#450 + WS4, release#521)
 #
-# WS4 makes the whole .release/ build dir ephemeral: a managed .release/.gitignore
+# WS4 makes the whole .release/ temp dir ephemeral: a managed .release/.gitignore
 # of `*` keeps git from seeing ANY of it (bytecode included), so it is never
 # committed and drift is impossible by construction. Defense-in-depth: the
-# materializer still skips Python bytecode sources outright.
+# installer still skips Python bytecode sources outright.
 # ---------------------------------------------------------------------
 
 @test "init ships a self-ignoring managed .release/.gitignore" {
   run release_sync
   [ "$status" -eq 0 ]
   [ -f .release/.gitignore ]
-  # `*` on its own line ignores the entire build dir (the .gitignore included).
+  # `*` on its own line ignores the entire temp dir (the .gitignore included).
   grep -qx '\*' .release/.gitignore
 }
 
@@ -29,7 +29,7 @@ load helper
   [ -z "$output" ]
 }
 
-@test "a source tree carrying __pycache__/*.pyc never materializes bytecode" {
+@test "a source tree carrying __pycache__/*.pyc never writes bytecode into .release/" {
   # Build a throwaway commit that adds a poison .pyc under the commons engine
   # package, then sync FROM it (pinned via RELEASE_REF) and prove the bytecode
   # is dropped: ls-tree lists it, but should_skip_source filters it from the
@@ -52,7 +52,7 @@ load helper
     git -C "$clone" commit-tree "$poison_tree" -p HEAD -m "test: poison pyc")
 
   # Sanity: the poison blob really is in that commit's tree (so the test would
-  # fail loudly if the materializer ever stopped filtering).
+  # fail loudly if the installer ever stopped filtering).
   git -C "$clone" ls-tree -r --name-only "$poison_commit" | grep -qx "$poison_rel"
 
   RELEASE_HOME="$clone" RELEASE_REF="$poison_commit" run release_sync

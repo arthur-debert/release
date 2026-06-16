@@ -75,7 +75,7 @@ For domain vocabulary see CONTEXT.md. For project status and roadmap see the roa
 
     4.1. Files In Repo
 
-        All release-managed files live in a build directory (.release/), materialized by release-core from the versioned binary. Consumer locations (bin/check, lefthook.yml, CLAUDE.md, etc.) are symlinks pointing into .release/, which keeps ownership of managed files clear. .release/ is committed today, but the direction (ADR-0004 / ADR-0005) is to gitignore it and regenerate it each session from the binary — invoke, don't discover.
+        All release-managed files live in a temp directory (.release/), installed by release-core from the versioned binary. Consumer locations (bin/check, lefthook.yml, CLAUDE.md, etc.) are symlinks pointing into .release/, which keeps ownership of managed files clear. .release/ is gitignored and regenerated each session from the binary (ADR-0004 / ADR-0005) — invoke, don't discover.
 
         4.1.1. Executables:
             bin/: symlinks to release-supplied tools for tasks like check, build, release. Never repo or app-specific.
@@ -90,9 +90,9 @@ For domain vocabulary see CONTEXT.md. For project status and roadmap see the roa
 
         The shared workflows handle provisioning, secrets, and output formatting, but delegate core logic to the tool library, else a parallel implementation would drift.
 
-    4.3. release-sync
+    4.3. Installing the managed files
 
-        release-sync materializes the resolved set of files (from the consumer's Kind and Capabilities) into the .release/ build directory. It rebuilds from scratch every time: no state tracking, no incremental diffs. Symlinks at expected locations point into .release/; when a file is removed from templates, its symlink breaks and cleanup removes it.
+        release-core init installs the resolved set of files (from the consumer's Kind and Capabilities) into the .release/ temp directory. It rebuilds from scratch every time: no state tracking, no incremental diffs. Symlinks at expected locations point into .release/; when a file is removed from templates, its symlink breaks and cleanup removes it. (The standalone release-sync verb this section once described was retired in WS4 — init is the only installer.)
 
         Consumers can override default Capabilities via a .release-sync.yaml at their repo root. A branch dial allows testing release changes before merging to main.
 

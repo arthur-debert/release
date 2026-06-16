@@ -95,7 +95,7 @@ point — restructure the consumer.
 
 **Pull model** — How release reaches consumers. There is **no push**. Session start
 installs OS deps and the `release-core` wheel pinned to the floating major; a bare
-`release-core init` rebuilds the managed tree from the wheel. The wheel is the
+`release-core init` reinstalls the managed files from the wheel. The wheel is the
 carrier; consumers self-update. So we can always assume a consumer has the latest.
 
 **Floating major** — The major-version branch a consumer pins (e.g. `@v3`). It
@@ -204,7 +204,7 @@ and memory. Each accreted multiple meanings across redesigns.
 
 | Banned | What it tried to mean | Say instead |
 |---|---|---|
-| **materialize / materialized** | compose the `.release/` tree from the wheel | **build** / **set up** the `.release/` tree |
+| **materialize / materialized** | compose the `.release/` tree from the wheel | **install** the `.release/` temp dir (it's a temp dir, not a "tree"); engine fn is `install_tree` |
 | **canonical** | the single shared implementation | drop the word — "the shared X" / "the one X" |
 | **doctrine** | an operating rule or principle | **principle** / **rule** |
 | **tombstone** | a retired file consumers should delete | **retired file** + "cleanup sweep" |

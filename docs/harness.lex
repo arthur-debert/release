@@ -5,7 +5,7 @@ The Agent Harness
     how this repo works, and the skill set it can invoke. This document absorbs
     the former `skills` doc and the agent-facing half of `injected-files`.
 
-    The machinery that builds these files (the sync engine, the gate, the
+    The machinery that installs these files (the installer, the gate, the
     CLI) lives in `tooling.lex`. The dev cycle the agent then follows lives in
     `dev-cycle.lex`.
 
@@ -26,11 +26,11 @@ The Agent Harness
       resolves the `release_core` wheel from that line's latest GitHub
       release, `pip install --force-reinstall`s it into an isolated venv
       (deps from PyPI), then runs a bare `release-core init`. That init
-      builds the managed tree from the wheel bundle — the ephemeral
-      `.release/` build dir, the untracked mirrors (skills, `bin/` verbs,
+      installs the managed files from the wheel bundle — the ephemeral
+      `.release/` temp dir, the untracked mirrors (skills, `bin/` verbs,
       `.editorconfig`), the real-file quartet + workflow copies, and the
-      CLAUDE.md stub — and auto-commits any managed change. The wheel pull
-      carries everything; there is no push step.
+      CLAUDE.md header block — and auto-commits any managed change. The wheel
+      pull carries everything; there is no push step.
     - §1+ (cloud only) — submodule/tag restore, dependency cache warm-up, venv
       setup, CA cert import, optional per-repo `app-bin/post-setup-hook.sh`.
 
@@ -60,7 +60,7 @@ The Agent Harness
     the dev-cycle text — kept in lockstep with `dev-cycle.lex` and the
     `gh-pr-review-loop` skill.
 
-    Orientation reaches the consumer agent through a small managed STUB injected
+    Orientation reaches the consumer agent through a small managed header block injected
     at the top of the consumer's `CLAUDE.md` (WS2, release#523):
 
         <!-- BEGIN release-managed orientation -->
@@ -74,15 +74,15 @@ The Agent Harness
     :: text ::
 
     It is a block, not a whole file, because half the fleet already owns a
-    `CLAUDE.md` with its own project content; sync injects or refreshes the block
-    and leaves the rest untouched. If `CLAUDE.md` is itself a symlink, sync
+    `CLAUDE.md` with its own project content; init injects or refreshes the block
+    and leaves the rest untouched. If `CLAUDE.md` is itself a symlink, init
     leaves it alone.
 
     The procedural truth lives in exactly ONE place — the binary's `release-core
     how-to` (kind-aware; renders the dev cycle). The old synced `ORIENTATION.md`
     (and the block's `@.release/ORIENTATION.md` import) were RETIRED in WS2: the
-    stub points at `how-to` instead. An existing consumer's old import block is
-    refreshed in place to this stub on the next `init` (the BEGIN/END markers are
+    header block points at `how-to` instead. An existing consumer's old import block is
+    refreshed in place to this header block on the next `init` (the BEGIN/END markers are
     unchanged, so it's recognized, not duplicated).
 
 3. Skills
@@ -127,16 +127,18 @@ The Agent Harness
         a file
         on disk for — `gh-pr-review-loop` (the `/`-triggered PR-loop driver).
         `release-issue-relay` was dropped from distribution: the escalation
-        contract is binary-carried (the CLAUDE.md stub, `release-core how-to`,
+        contract is binary-carried (the CLAUDE.md header block, `release-core how-to`,
         and the `release-core issue file` console path). The general
         development-cycle guidance likewise lives in `release-core how-to`,
         rendered from the binary. A consumer owns its own application-domain
         skills; general dev-cycle skills are the agent's own (global) skills,
         not release's to push.
 
-        The distributed skill is still synced (never hand-copied) as a symlink
-        into the `.release/` build tree — and since WS7 that mirror is EPHEMERAL
-        (untracked, listed in `.git/info/exclude`, recomposed by every init), so
+        The distributed skill's real file is written (never hand-copied) into
+        the `.release/` temp dir, and the consumer-discovery path
+        (`.claude/skills/...`) is a symlink into it — and since WS7 that symlink
+        mirror is EPHEMERAL (untracked, in `.git/info/exclude`, reinstalled by
+        every init), so
         a consumer's copy cannot fall out of sync with release's official blob
         and leaves no tracked footprint.
 
@@ -178,9 +180,9 @@ The Agent Harness
 
     3.4. How a skill reaches a consumer
 
-        Distribution is whole-directory and rides the same build-dir + symlink
+        Distribution is whole-directory and rides the same temp dir + symlink
         mechanism as every other injected file (tooling.lex §5). For each
-        distributed skill, EVERY file under `skills/<name>/` is built — so
+        distributed skill, EVERY file under `skills/<name>/` is written — so
         a multi-file skill (e.g. `tdd`, `triage`) arrives complete, not just its
         `SKILL.md`.
 
@@ -188,7 +190,7 @@ The Agent Harness
             - Source of truth: `skills/<name>/<subpath>` in this repo (shipped
               inside the wheel bundle).
             - `release-core init`, run in the consumer, writes the file into
-              the EPHEMERAL `.release/` build tree at
+              the EPHEMERAL `.release/` temp dir at
               `.release/.claude/skills/<name>/<subpath>`.
             - It then creates a relative symlink at the discovery path
               `.claude/skills/<name>/<subpath>` pointing back into `.release/`
@@ -197,12 +199,12 @@ The Agent Harness
               symlink, and reads it.
 
         If the consumer already has a REAL file or directory at a managed skill
-        dest (a hand-copied skill from before this policy), the sync removes it
+        dest (a hand-copied skill from before this policy), init removes it
         and replaces it with the managed symlink — no `--migrate` flag needed.
         Skill dests are release-owned, so a stale hand-copy is always upgraded
         rather than flagged as a conflict.
 
-        One source, one built copy, one symlink — no hand-copied skill
+        One source, one installed copy, one symlink — no hand-copied skill
         files in the consumer, so nothing can fall out of step with upstream.
 
     3.5. Linting

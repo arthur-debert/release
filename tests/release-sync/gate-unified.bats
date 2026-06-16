@@ -69,7 +69,7 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
 
 @test "the gate config + tool configs land in .release/ but NOT at the consumer root" {
   release_sync >/dev/null
-  # Materialized into the ephemeral build dir...
+  # Installed into the ephemeral temp dir...
   [ -f .release/lefthook.yml ]
   for c in .markdownlint.json .markdownlintignore .yamllint .prettierignore; do
     [ -f ".release/$c" ] || { echo "missing .release/$c"; false; }

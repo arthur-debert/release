@@ -118,7 +118,7 @@ fi
 #   xvfb            — virtual framebuffer; binary is env-side, starting the
 #                     :99 daemon is per-repo in bin/setup-dev-env.sh for
 #                     GUI-test consumers (lexed, phos-app, future Electron)
-#   libnss3-tools   — provides `certutil` so the canonical setup-dev-env.sh
+#   libnss3-tools   — provides `certutil` so the shared setup-dev-env.sh
 #                     can import the sandbox-egress CA into the per-user
 #                     Chromium NSS DB (needed by every Electron / Playwright
 #                     consumer; lexed surfaced this first)
@@ -188,7 +188,7 @@ if ! command -v Xvfb >/dev/null 2>&1; then
   command -v Xvfb >/dev/null 2>&1 && echo "installed xvfb: $(Xvfb -help 2>&1 | head -1)"
 fi
 
-# libnss3-tools — provides `certutil`, used by the canonical
+# libnss3-tools — provides `certutil`, used by the shared
 # setup-dev-env.sh to import the sandbox-egress TLS-inspection CA into
 # ~/.pki/nssdb so Chromium / Electron renderers stop throwing
 # ERR_CERT_AUTHORITY_INVALID on HTTPS resources. The cert import is

@@ -60,7 +60,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     boot report on stderr. A boot failure aborts: an unbooted probe is
     invalid by design. The prompt stays hint-free; only the boot is added.
 
-    See orchestrator/README.md for the canonical eval-prompt pattern.
+    See orchestrator/README.md for the shared eval-prompt pattern.
     """
     if not args.yes:
         print(

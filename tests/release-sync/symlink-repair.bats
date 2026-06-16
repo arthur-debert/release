@@ -3,19 +3,19 @@
 load helper
 
 # ---------------------------------------------------------------------
-# Broken-symlink sweep must not drop a link whose target is materialized
+# Broken-symlink sweep must not drop a link whose target is installed
 # THIS sync (regression: nvim/tree-sitter-lex/supage shipped with
 # bin/check-shell + bin/gh-release-issue dropped during the #348 fleet
 # propagation).
 #
 # The trigger: a consumer committed a bin/ symlink (e.g. bin/check-shell)
 # but never committed its .release/ target — a dangling link. `release-core init`
-# materializes the target this run, but the sweep checked only the OLD
+# installs the target this run, but the sweep checked only the OLD
 # .release/, saw a dangling link, and removed it; the create loop didn't
 # re-add it (the link already pointed correctly). Net: the tool vanished.
 # ---------------------------------------------------------------------
 
-@test "a dangling link whose target is materialized this sync survives + resolves" {
+@test "a dangling link whose target is installed this sync survives + resolves" {
   # The botched-prior-sync state: committed symlink, target absent.
   mkdir -p bin
   ln -s ../.release/bin/check-shell bin/check-shell
@@ -24,7 +24,7 @@ load helper
   run release_sync
   [ "$status" -eq 0 ]
 
-  # check-shell is a commons tool, so this sync materializes the target —
+  # check-shell is a commons tool, so this sync installs the target —
   # the link must be kept and now resolve, not swept.
   [ -e bin/check-shell ]
   [ "$(readlink bin/check-shell)" = "../.release/bin/check-shell" ]
@@ -35,7 +35,7 @@ load helper
   ln -s ../.release/bin/does-not-exist bin/stale-tool
   run release_sync
   [ "$status" -eq 0 ]
-  [ ! -L bin/stale-tool ]   # nothing materializes it → correctly swept
+  [ ! -L bin/stale-tool ]   # nothing installs it → correctly swept
 }
 
 # ---------------------------------------------------------------------
@@ -58,7 +58,7 @@ load helper
   run release_sync
   [ "$status" -eq 0 ]
 
-  # retired-tool is not a managed tool → absent from the new tree → the
+  # retired-tool is not a managed tool → absent from the new `.release/` temp dir → the
   # link must be gone entirely, not a dangling symlink.
   [ ! -L bin/retired-tool ]
   [ ! -e bin/retired-tool ]

@@ -10,7 +10,7 @@ Accepted. Supersedes parts of [ADR-0001](0001-release-sync-build-dir-with-symlin
 [ADR-0001](0001-release-sync-build-dir-with-symlinks.md) makes `release-sync`
 build _all_ managed content — both per-repo config (`lefthook.yml`, lint
 configs, skills) **and** the `release_core` package code — into a committed
-`.release/` build directory, with symlinks pointing at it. The package itself is
+`.release/` temp directory, with symlinks pointing at it. The package itself is
 not installed anywhere; consumers run it off `sys.path` reaching into the synced
 tree, the `bin/` tool entries are symlinks into `.release/`, and tooling updates
 arrive by re-running `release-sync` (driven fleet-wide by `orc propagate`).
@@ -66,13 +66,13 @@ followed by `release-core init`.**
   `lefthook.yml`, lint configs) are written by an idempotent `release-core init`
   subcommand. Init is the seam that replaces sync's _config_ build step.
 
-  > **Update (#476 cutover):** `init` now defaults to building the WHOLE
-  > managed tree (the `.release/` build dir + every working-tree mirror — skills,
+  > **Update (#476 cutover):** `init` now defaults to installing the WHOLE
+  > managed file set (the `.release/` temp dir + every working-tree mirror — skills,
   > ORIENTATION, configs, the CLAUDE.md block) from the wheel bundle and
   > auto-committing managed changes — "release-sync sourced from the wheel". The
   > config-subset behavior described here became the `--config-only` escape
-  > hatch — then was REMOVED outright in #532 (post-WS3 it composed root configs
-  > whose gate referenced a `.release/` it never created; the full build is
+  > hatch — then was REMOVED outright in #532 (post-WS3 it wrote root configs
+  > whose gate referenced a `.release/` it never created; the full install is
   > the only mode). So the wheel pull now carries the full tree, retiring
   > `orc propagate` in steady state (see "What this changes" → propagate bullet
   > below, now realized).
@@ -101,14 +101,14 @@ constraints. Concretely:
 
 - **ADR-0001 `.release/` build of the package is superseded.**
   `release_core` now arrives via `pip install`, not as committed code symlinked
-  out of `.release/`. ADR-0001's build-dir + symlink mechanism remains the model
-  for any _config_ still built into the consumer tree until `init` fully
-  absorbs it — the build directory stops being the package's delivery vehicle.
+  out of `.release/`. ADR-0001's temp dir + symlink mechanism remains the model
+  for any _config_ still written into the consumer tree until `init` fully
+  absorbs it — the temp dir stops being the package's delivery vehicle.
 - **`orc propagate` is no longer the tooling-update path.** `pip install -U` is
   the update: a consumer re-resolves the latest release wheel and installs it.
   Propagate's role narrows to per-repo config changes, not shipping new tool code.
-  _(#476 update: with the default `init` now building the whole managed tree
-  from the wheel + auto-committing, even per-repo config/tree changes ride the
+  _(#476 update: with the default `init` now installing the whole managed file set
+  from the wheel + auto-committing, even per-repo config changes ride the
   pull. `orc propagate` is demoted to a "force the fleet now" override — the
   steady-state push is retired.)_
 - **The stdlib-only rationale is retired.** It existed solely because the

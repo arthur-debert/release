@@ -28,7 +28,7 @@ These are the rules of the road in Claude Code on the web that don't apply to lo
 
 ### Opening a PR
 
-- **First PR for a feature**: open it as draft from your session-assigned branch. Both Gemini and Copilot auto-review drafts under the canonical policy (as of 2026-05-15 — `copilot-review.yml` fires on `pull_request: [opened]` regardless of `draft` state; previously Copilot waited for ready, but that produced an awkward "two state transitions per PR" pattern). Drafts get both bots' input; the Auto-fix loop addresses comments while the PR is still draft.
+- **First PR for a feature**: open it as draft from your session-assigned branch. Both Gemini and Copilot auto-review drafts under the shared review policy (as of 2026-05-15 — `copilot-review.yml` fires on `pull_request: [opened]` regardless of `draft` state; previously Copilot waited for ready, but that produced an awkward "two state transitions per PR" pattern). Drafts get both bots' input; the Auto-fix loop addresses comments while the PR is still draft.
 - **Immediately after `gh pr create`, enable Auto-fix on the PR.** Auto-fix is per-PR opt-in — without it, neither this session nor a future session gets webhook events for new review comments or CI failures. Toggle via the CI status bar in claude.ai/code, or tell Claude "auto-fix this PR." Requires the Claude GitHub App installed on the org that owns the PR (e.g. for the current portfolio: `arthur-debert`, `lex-fmt`).
 - **Flip the PR to ready** when you're done iterating — both bots have already reviewed at open under the current policy, so `gh pr ready` is purely a state-transition signal to the user ("I'm done, please final-read and merge"). It does not re-trigger Copilot.
 
@@ -36,21 +36,21 @@ These are the rules of the road in Claude Code on the web that don't apply to lo
 
 The cloud orchestrator scopes git-push auth to your session's assigned branch (named `claude/<task>-XXXXX`), so you usually **can't push fixups directly to the existing PR's feature branch**. Two patterns:
 
-1. **Stacked sub-PR (default in cloud).** Make your changes, push to your session branch, open a sub-PR targeting the *original PR's feature branch* (not main). Squash-merge the sub-PR into the feature branch; the original PR picks up the new commits automatically. This is the canonical cloud pattern when the agent can't push to the existing branch.
+1. **Stacked sub-PR (default in cloud).** Make your changes, push to your session branch, open a sub-PR targeting the *original PR's feature branch* (not main). Squash-merge the sub-PR into the feature branch; the original PR picks up the new commits automatically. This is the standard cloud pattern when the agent can't push to the existing branch.
 2. **`/teleport` the session local.** If you need to push directly to the original branch (e.g. the stacked-PR overhead isn't worth it for a one-line fix), pull the cloud session down to local Claude Code via `/teleport`, push there, and the local push doesn't go through the cloud orchestrator's branch restriction.
 
 The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR description so the human reviewer doesn't think it's a duplicate.
 
 ### Addressing review comments
 
-Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot's initial pass before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). Both reviewers fire at PR open under the current canonical policy, so the wait is "until both have posted reviews" — typically a few minutes for Gemini, ~7 min for Copilot.
+Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot's initial pass before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). Both reviewers fire at PR open under the current shared review policy, so the wait is "until both have posted reviews" — typically a few minutes for Gemini, ~7 min for Copilot.
 
 ### The PR state-transition the agent owns
 
 The agent — not the user — owns these state transitions:
 
 1. **`gh pr create --draft`** — at the start of a feature.
-2. **`gh pr ready`** — after addressing both reviewers' comments and CI is green. This is the agent's explicit signal to the user that iteration is done. Under the current canonical policy (since 2026-05-15) flipping to ready does **not** re-trigger Copilot — both reviewers fired at PR open while still draft. The flip is purely a state transition signaling "agent is done, user please review and merge." **Without this step the loop doesn't close** and the user has to manually flip every PR. The skill walks the agent through this; the principle is that `pr ready` is the agent's job, not the user's.
+2. **`gh pr ready`** — after addressing both reviewers' comments and CI is green. This is the agent's explicit signal to the user that iteration is done. Under the current shared review policy (since 2026-05-15) flipping to ready does **not** re-trigger Copilot — both reviewers fired at PR open while still draft. The flip is purely a state transition signaling "agent is done, user please review and merge." **Without this step the loop doesn't close** and the user has to manually flip every PR. The skill walks the agent through this; the principle is that `pr ready` is the agent's job, not the user's.
 3. **Stop and notify the user** — once both reviewers have weighed in, all threads are resolved, CI is green, and `mergeStateStatus=CLEAN`. The user does the final read and merges.
 
 Don't rely on the Claude UI's "CI monitoring" feature to drive these transitions — it has its own gh-auth setup that may report `CI checks unavailable` even when the agent's `gh` works fine. The agent should poll with `gh pr checks "$PR" --watch` directly.
@@ -63,11 +63,11 @@ Recurring traps worth knowing so background watchers and long-running commands d
 
 ## Available skills
 
-`~/.claude/skills/pr-review-respond/SKILL.md` is the canonical flow for
+`~/.claude/skills/pr-review-respond/SKILL.md` is the standard flow for
 replying to and resolving PR review comments. Invoke it for any review-
 feedback handling.
 
-`~/.claude/skills/gh-repo-setup/SKILL.md` brings a repo up to the canonical
+`~/.claude/skills/gh-repo-setup/SKILL.md` brings a repo up to the shared
 release-loop setup (branch protection ruleset, per-stack policy files,
 copilot-review wiring). Idempotent. Invoke when onboarding a new repo or
 verifying alignment.
@@ -97,7 +97,7 @@ Pre-installed by the env setup script — don't reinstall:
   current `nvim-lspconfig`)
 - **GUI tests:** `xvfb` binary (start `Xvfb :99 &` per-session in your
   bin/setup-dev-env.sh, then `export DISPLAY=:99`). `certutil`
-  (libnss3-tools) is also installed so the canonical setup-dev-env.sh
+  (libnss3-tools) is also installed so the shared setup-dev-env.sh
   can import the sandbox-egress CA into the per-user Chromium NSS DB
   (`~/.pki/nssdb`) — required for Electron / Playwright tests to load
   HTTPS resources without `ERR_CERT_AUTHORITY_INVALID`.
@@ -117,7 +117,7 @@ Pre-installed by the env setup script — don't reinstall:
   automatically — explicit `playwright install` is rarely needed.
 - **Misc:** `uuidgen` (via uuid-runtime)
 - **Cross-repo artifact fetcher:** `fetch-artifact` (installed at
-  `/usr/local/bin/fetch-artifact`). Reads `./artifacts.json` (canonical
+  `/usr/local/bin/fetch-artifact`). Reads `./artifacts.json` (shared
   schema in `arthur-debert/release` `docs/artifacts-schema.md`) and
   pulls pinned binaries / source trees from upstream GH releases.
   `bin/setup-dev-env.sh` in consumers that depend on cross-repo
@@ -153,7 +153,7 @@ only what the hook process exports back to its parent (nothing).
 
 Two layers handle this. Use both:
 
-1. **`.claude/settings.json` `"env"` block** — the canonical Claude
+1. **`.claude/settings.json` `"env"` block** — the standard Claude
    Code mechanism for env vars. Propagates into every Bash tool
    subshell the agent spawns. Example:
    ```json

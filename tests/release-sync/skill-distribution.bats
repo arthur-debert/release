@@ -19,7 +19,7 @@ load helper
 # skill that's been dropped has its now-dangling symlink swept on re-sync.
 # ---------------------------------------------------------------------
 
-@test "sync materializes the PR-loop skill into .release/.claude/skills/" {
+@test "sync installs the PR-loop skill into .release/.claude/skills/" {
   run release_sync
   [ "$status" -eq 0 ]
   [ -f .release/.claude/skills/gh-pr-review-loop/SKILL.md ]
@@ -45,7 +45,7 @@ load helper
   release_sync >/dev/null
   for s in gh-pr-review-loop; do
     [ -f ".release/.claude/skills/$s/SKILL.md" ] \
-      || { echo "missing materialized $s"; false; }
+      || { echo "missing installed $s"; false; }
     [ -L ".claude/skills/$s/SKILL.md" ] \
       || { echo "missing symlink $s"; false; }
   done
@@ -58,7 +58,7 @@ load helper
   for s in pr-review-respond release-issue-relay diagnose tdd review triage to-issues handoff qa \
            grill-me grill-with-docs improve-codebase-architecture \
            request-refactor-plan ubiquitous-language zoom-out teach padz-for-agents; do
-    [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked materialized $s"; false; }
+    [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked installed $s"; false; }
     [ ! -e ".claude/skills/$s" ]          || { echo "leaked symlink $s"; false; }
   done
 }
@@ -79,7 +79,7 @@ load helper
   release_sync >/dev/null
   for s in release-fleet-ops release-fleet-triage gh-repo-setup \
            setup-matt-pocock-skills; do
-    [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked $s"; false; }
+    [ ! -e ".release/.claude/skills/$s" ] || { echo "leaked installed $s"; false; }
     [ ! -e ".claude/skills/$s" ]          || { echo "leaked symlink $s"; false; }
   done
 }

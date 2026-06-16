@@ -95,7 +95,7 @@ jobs:
    docs sites), each paired with a `<kind>-ci.yml` PR gate where one exists. Catalog:
    [docs/tooling.lex](docs/tooling.lex) §6.
 2. **The wheel** — the files a consumer needs locally ride the wheel; `release-core
-   init` composes them per-Kind from `templates/` (commons → components → Kind; see
+   init` installs them per-Kind from `templates/` (commons → components → Kind; see
    [docs/references/component-model.md](docs/references/component-model.md)).
 
 ## The quality gate
@@ -161,7 +161,7 @@ bin/                  NOT a consumer surface — only what can't be a
                       release-core subcommand (dev entry, pre-boot scripts,
                       HTTP-fetched fetchers, fleet-operator tools)
 bin-internal/         CI-glue scripts; they CALL release-core, never reimplement it
-templates/            what `release-core init` composes per consumer:
+templates/            what `release-core init` installs per consumer:
   commons/            universal set (incl. lib/release_core — the Python
                       package, shipped as the wheel)
   components/<c>/     one per Component
@@ -179,7 +179,7 @@ examples/             paste-ready consumer release.yml files
 - [GLOSSARY.md](GLOSSARY.md) — the authoritative vocabulary.
 - [docs/README.lex](docs/README.lex) — the map and reading order.
 - [docs/tooling.lex](docs/tooling.lex) — the CLI, gate, PR state machine, pull
-  model, compose engine, workflow catalog.
+  model, installer, workflow catalog.
 - [docs/harness.lex](docs/harness.lex) — the agent harness: bootstrap, orientation,
   skills.
 - [docs/dev-cycle.lex](docs/dev-cycle.lex) — the development lifecycle.

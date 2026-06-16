@@ -83,7 +83,7 @@ _write_release_yml() {
 
 @test "no release.yml workflow: exits 0 with informative message" {
   # github-action repos and tree-sitter standalone grammars ship the
-  # canonical shim but have nothing to dispatch.
+  # shared shim but have nothing to dispatch.
   run "$BIN/release-core" cut minor
   [ "$status" -eq 0 ]
   [[ "$output" == *"no .github/workflows/release.yml"* ]]
@@ -139,7 +139,7 @@ EOF
 
 @test "rust-cli workspace-only root: probes members (dodot pattern)" {
   # Root Cargo.toml has [workspace] but no [workspace.package].version.
-  # The canonical version lives in the lib crate.
+  # The authoritative version lives in the lib crate.
   _write_release_yml
   cat > Cargo.toml <<EOF
 [workspace]

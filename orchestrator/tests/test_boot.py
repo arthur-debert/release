@@ -1,7 +1,7 @@
 """Unit tests for orchestrator.boot.boot_clone (release#578).
 
 No network, no Claude Agent SDK, no real install-release-core: each test
-builds a tmp git repo carrying a FAKE bin/setup-dev-env.sh that materializes
+builds a tmp git repo carrying a FAKE bin/setup-dev-env.sh that writes
 (or deliberately omits) the two boot-assert artifacts:
 
   (a) .release/.release-sync-source — provenance marker with the source sha
