@@ -289,7 +289,7 @@ def test_commit_does_not_fold_in_pre_staged_unrelated_changes(tmp_path, monkeypa
 
 def test_commit_in_non_git_dir_is_safe_no_op(tmp_path, monkeypatch, capsys):
     # repo_root is monkeypatched to a plain dir (no .git). init must still
-    # build and succeed; --commit is a quiet no-op.
+    # install the managed files and succeed; --commit is a quiet no-op.
     repo = tmp_path / "repo"
     repo.mkdir()
     _patch_full(monkeypatch, repo, _MANAGED)
@@ -319,7 +319,7 @@ def test_commit_on_unborn_branch_is_safe_no_op(tmp_path, monkeypatch, capsys):
     rc = init.main([])
     captured = capsys.readouterr()
     assert rc == 0
-    # Files were still built.
+    # Files were still installed.
     for dest in _MANAGED:
         assert (repo / dest).is_file()
     # No commit, and no noisy "cannot do partial commit" failure surfaced.
@@ -834,7 +834,7 @@ def test_full_no_commit_skips_commit(tmp_path, monkeypatch, capsys):
     rc = init.main(["--no-commit"])
     assert rc == 0
     capsys.readouterr()
-    # Tree built but no commit made; managed changes left in the worktree.
+    # Files installed but no commit made; managed changes left in the worktree.
     assert _git(repo, "rev-parse", "HEAD") == head_before
     assert _git(repo, "status", "--porcelain") != ""
 
