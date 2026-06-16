@@ -41,7 +41,7 @@ def test_test_unit_fans_out_and_propagates_failure(monkeypatch):
         return 0 if cmd.label == "node" else 2  # rust fails
 
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
-    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
+    monkeypatch.setattr(tasks, "_preflight", lambda cmd, root: 0)  # clean tree
     monkeypatch.setattr(tasks, "_exec", _fake_exec)
     monkeypatch.setattr(
         tasks.repo_commands,
@@ -135,7 +135,7 @@ def test_coverage_fans_out_and_propagates_failure(monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
-    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
+    monkeypatch.setattr(tasks, "_preflight", lambda cmd, root: 0)  # clean tree
 
     def _fake_exec(cmd, root):
         calls.append(cmd.argv)
@@ -214,7 +214,7 @@ def test_build_forwards_args_npm_needs_dashdash(monkeypatch):
     captured = {}
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks.repo_commands, "detect_pm", lambda r: "npm")
-    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
+    monkeypatch.setattr(tasks, "_preflight", lambda cmd, root: 0)  # clean tree
     monkeypatch.setattr(
         tasks.repo_commands,
         "build_command",

@@ -468,8 +468,10 @@ def docs_commands(root: str) -> DocsCommands | None:
 
 
 def _is_node_run(cmd: Cmd, root: str) -> bool:
-    """True iff this command drives a node script through the package manager
-    (``<pm> run …``) or ``npx`` — i.e. it needs ``node_modules`` installed."""
+    """True iff this command runs through the node package manager — its head is
+    the detected pm (``pnpm``/``yarn``/``npm``, covering ``<pm> run …`` AND direct
+    invocations like ``pnpm tauri build``) or ``npx``. Any of these needs
+    ``node_modules`` installed."""
     if not cmd.argv:
         return False
     head = cmd.argv[0]
