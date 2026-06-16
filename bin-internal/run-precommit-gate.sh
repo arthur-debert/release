@@ -5,8 +5,8 @@
 #   1. lefthook  (LEFTHOOK_CONFIG / managed .release/lefthook.yml)
 #   2. husky  (.husky/pre-commit)
 #   3. release-core managed-gate fallback — when no gate config is
-#      present but release-core is on PATH, materialize the managed
-#      tree from the wheel bundle and run the gate through the binary
+#      present but release-core is on PATH, install the managed
+#      files from the wheel bundle and run the gate through the binary
 #      (`release-core gate --hook`). This is the post-WS3 path: the
 #      gate config lives only in the ephemeral .release/, so there is
 #      no root file to detect.
@@ -74,15 +74,15 @@ run_husky() {
   bash .husky/pre-commit
 }
 
-# WS3 (release#524): the gate config lives in the ephemeral .release/ build dir;
+# WS3 (release#524): the gate config lives in the ephemeral .release/ temp dir;
 # there is no tracked root lefthook.yml. Point lefthook at the managed config via
-# LEFTHOOK_CONFIG. .release/lefthook.yml exists only when the caller materialized
+# LEFTHOOK_CONFIG. .release/lefthook.yml exists only when the caller wrote
 # it (e.g. rust-cli's arm-gate before prepare-release); when it is absent this is a
-# no-op and detection falls through to the release-core branch, which materializes
-# the managed tree from the wheel bundle. The pre-WS3 root-config fallback
+# no-op and detection falls through to the release-core branch, which installs
+# the managed files from the wheel bundle. The pre-WS3 root-config fallback
 # (lefthook.yml / .lefthook.yml / lefthook.yaml) was removed in #569 B4 — 0/19
 # consumers track a root config, this script never runs against release's own repo
-# (it self-releases via gh-action.yml), and an un-materialized managed consumer is
+# (it self-releases via gh-action.yml), and an unbuilt managed consumer is
 # handled by the release-core branch below.
 #
 # An explicit caller-provided LEFTHOOK_CONFIG is authoritative (matching the
@@ -107,17 +107,17 @@ elif [ -d .husky ] && [ -f .husky/pre-commit ]; then
 elif command -v release-core >/dev/null 2>&1; then
   # The hollow-green spot (release#531 F1): a post-WS3 managed consumer has NO
   # root gate config (the gate lives in the ephemeral .release/, WS4), and
-  # outside rust-cli's arm-gate nothing materialized .release/ — so this branch
+  # outside rust-cli's arm-gate nothing wrote .release/ — so this branch
   # used to fall through to "skipping" and the bot commit went UNGATED. The
   # release flows install release-core earlier (install-release-core-pkg.sh /
-  # install-release-core), so: materialize the managed tree from the wheel
+  # install-release-core), so: install the managed files from the wheel
   # bundle (offline — BundleSource, no network/token), then run the real gate
   # through the binary. `release-core gate --hook` resolves lefthook (PATH or
   # node_modules/.bin), points it at .release/lefthook.yml via LEFTHOOK_CONFIG,
   # and forwards the --file args; node consumers get their gate deps installed
   # first, same as the root-config path. Failures here are LOUD (set -e; the
   # gate verb exits 1 on a missing lefthook — it never skips).
-  echo "No root gate config but release-core is present — materializing the managed gate."
+  echo "No root gate config but release-core is present — installing the managed gate."
   if [ ! -f .release/lefthook.yml ]; then
     release-core init --no-commit
   fi

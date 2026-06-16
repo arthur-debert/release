@@ -20,7 +20,7 @@
 #   clone-lex-stack --all [options]
 #
 # Options:
-#   --all              Clone every repo in the canonical lex-fmt stack.
+#   --all              Clone every repo in the lex-fmt stack.
 #                      Mutually exclusive with positional <repo> args.
 #   --with-setup       After clone, run bin/setup-dev-env.sh in each
 #                      repo if it exists. Opt-in; most read-only tasks
@@ -58,7 +58,7 @@ set -euo pipefail
 # When a new sibling repo joins the lex-fmt stack, add it here and
 # re-publish via env-setup. Q6 of the multi-repo bootstrap plan covers
 # why this is hardcoded for v1 rather than dynamic.
-CANONICAL_REPOS=(
+LEX_STACK_REPOS=(
   lex
   comms
   mkdocs-lex
@@ -106,20 +106,20 @@ if $all && [ ${#requested[@]} -gt 0 ]; then
 fi
 
 if ! $all && [ ${#requested[@]} -eq 0 ]; then
-  die "specify one or more repos, or pass --all (canonical list: ${CANONICAL_REPOS[*]})"
+  die "specify one or more repos, or pass --all (stack list: ${LEX_STACK_REPOS[*]})"
 fi
 
 if $all; then
-  requested=("${CANONICAL_REPOS[@]}")
+  requested=("${LEX_STACK_REPOS[@]}")
 fi
 
-# Validate every requested name against the canonical list.
+# Validate every requested name against the stack list.
 for r in "${requested[@]}"; do
   found=false
-  for c in "${CANONICAL_REPOS[@]}"; do
+  for c in "${LEX_STACK_REPOS[@]}"; do
     [ "$r" = "$c" ] && { found=true; break; }
   done
-  $found || die "unknown repo: '$r' (canonical: ${CANONICAL_REPOS[*]})"
+  $found || die "unknown repo: '$r' (stack: ${LEX_STACK_REPOS[*]})"
 done
 
 # --- Prereq checks ---------------------------------------------------

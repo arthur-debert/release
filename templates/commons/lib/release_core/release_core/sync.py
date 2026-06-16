@@ -1,12 +1,12 @@
-"""sync — the managed-tree compose engine (build-dir + symlinks, ADR-0001).
+"""sync — installs the `.release/` temp dir (its files + the symlink mirrors, ADR-0001).
 
-Ref selection, Kind+Component resolution, the build-into-a-fresh-.release/
-plan, lefthook fragment composition, release-internal classification,
-symlink-target computation, the diff against an existing .release/,
-broken-symlink detection, and the CLAUDE.md orientation block. ``verbs/init.py``
-drives this engine (build_plan → materialize → diff → compute_mirror →
-decide_claude → _apply_mirror); the standalone ``release-sync`` verb that used to
-wrap it was retired in WS4 (release#521).
+Ref selection, Kind+Component resolution, the plan for a fresh `.release/`,
+lefthook fragment composition, release-internal classification,
+symlink-target computation, the diff against an existing `.release/`,
+broken-symlink detection, and the CLAUDE.md header block. ``verbs/init.py``
+calls these steps (install_plan → install_tree → diff → compute_mirror →
+decide_claude → _apply_mirror); init is the only caller (the standalone
+wrapper verb was retired in WS4, release#521).
 
 All git access goes through gh.py (the chokepoint). Filesystem reads/writes use
 the stdlib. Behavior mirrors the bash byte-for-byte — see the per-function notes
@@ -25,15 +25,15 @@ from . import gh
 
 # ── Source abstraction ────────────────────────────────────────────────────────
 #
-# The sync engine reads its template SOURCE through this minimal interface so the
-# SAME plan/materialize logic serves two backends:
+# The install engine reads its template SOURCE through this minimal interface so the
+# SAME plan/install logic serves two backends:
 #
 #   GitSource(release_home, ref)  — the original: a git ref in a release clone,
 #       wrapping gh.git_ls_tree / git_show_bytes / git_cat_file_exists. Behavior
-#       is IDENTICAL to the pre-abstraction engine (release-sync's contract).
+#       is IDENTICAL to the pre-abstraction engine's contract.
 #   BundleSource(bundle_root)     — the wheel bundle: the on-disk template tree
 #       hatch_build.py stages into release_core/_bundled_templates/. Lets `init`
-#       build the full managed tree offline, no release clone, no network.
+#       install the managed files offline, no release clone, no network.
 #
 # Paths are always git-style (POSIX, '/'-separated, relative to the source root,
 # e.g. "templates/commons/bin/check" or "skills/tdd/SKILL.md"). list_tree returns
@@ -58,7 +58,7 @@ class Source:
     "from-source <shortsha>" for a --from-source install. Only the bundle path
     carries it (the wheel is what the stamp describes); GitSource composes from
     a live clone whose ref_sha already says exactly where the content came from.
-    When set, materialize() writes it into .release-sync-source alongside the
+    When set, install_tree() writes it into .release-sync-source alongside the
     ref_sha line, and init labels the managed auto-commit with it.
     """
 
@@ -220,10 +220,10 @@ def read_source_tag() -> str | None:
         return None
 
 
-# WS4 (release#521): the whole `.release/` build dir is EPHEMERAL — gitignored
-# and recomposed every session/CI from the pinned wheel, never committed. A
+# WS4 (release#521): the whole `.release/` temp dir is EPHEMERAL — gitignored
+# and regenerated every session/CI from the pinned wheel, never committed. A
 # `.gitignore` of `*` inside the dir makes it self-ignoring: git sees nothing
-# under `.release/` (including this file), so the build dir can't fall out of
+# under `.release/` (including this file), so the temp dir can't fall out of
 # sync by construction (ADR-0005 supersedes the committed-tree model of
 # ADR-0001/0002). This subsumes the old `__pycache__`-only ignore (release#450).
 GITIGNORE_BODY = (
@@ -234,13 +234,20 @@ GITIGNORE_BODY = (
 )
 
 CLAUDE_FILE = "CLAUDE.md"
-CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
+CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-core; do not edit -->"
+# The pre-de-jargon BEGIN marker an already-seeded consumer carries. The block is
+# located by EITHER marker (see _has_claude_begin) so an existing consumer whose
+# CLAUDE.md still opens with this legacy line is RECOGNIZED and REWRITTEN to the
+# CLAUDE_BEGIN above on its next init — never duplicated.
+CLAUDE_BEGIN_LEGACY = (
+    "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
+)
 CLAUDE_END = "<!-- END release-managed orientation -->"
-# WS2 (release#523): the managed block is a small managed block (~7 lines)
+# WS2 (release#523): the managed block is a small header block (~7 lines)
 # pointing at the CLI — `release-core how-to` is the single source of orientation
 # (kind-aware, renders the dev cycle), so there is no synced ORIENTATION.md to
-# fall out of sync (discovery is the CLI, not docs). The BEGIN/END markers are
-# kept byte-identical so an existing
+# fall out of sync (discovery is the CLI, not docs). The block is located by the
+# BEGIN marker (current OR legacy — see _has_claude_begin), so an existing
 # consumer's block (which imported @.release/ORIENTATION.md) is recognized and
 # REFRESHED to this stub, not duplicated.
 CLAUDE_STUB_BODY = (
@@ -260,7 +267,7 @@ CLAUDE_STUB_BODY = (
 # skill files. WS7 (release#528) trimmed PUSH_ALL_SKILLS to the ONE skill the
 # harness needs a file on disk for — the `/`-triggered PR-loop driver ("at most
 # one thin delegating skill", the WS2 exit). release-issue-relay was dropped from
-# distribution: the escalation contract lives in the CLAUDE.md stub + `release-core
+# distribution: the escalation contract lives in the CLAUDE.md header block + `release-core
 # how-to`, and the mechanism (`gh-release-issue`) is a console-script on PATH. The
 # 15 general dev-cycle skills (tdd, review, diagnose, …), pr-review-respond, and
 # now release-issue-relay are no longer pushed; on a consumer's next `init` their
@@ -275,7 +282,7 @@ CLAUDE_STUB_BODY = (
 #                               consumer that doesn't already carry it.
 #
 # Everything else under skills/ (release-fleet-ops, release-fleet-triage,
-# setup-matt-pocock-skills, gh-repo-setup, migrate-consumer-to-build-dir) is
+# setup-matt-pocock-skills, gh-repo-setup) is
 # release-only and NEVER distributed.
 PUSH_ALL_SKILLS = [
     "gh-pr-review-loop",  # the `/`-triggered PR-loop driver (arms the guard)
@@ -352,7 +359,7 @@ def is_distributed_skill_dest(dest: str) -> bool:
 
 
 # The gate definition + most of its tool configs live ONLY in the ephemeral
-# .release/ build dir now (WS3, release#524): they are built into .release/
+# .release/ temp dir now (WS3, release#524): they are installed into .release/
 # but no longer mirrored out to the consumer root. `release-core gate` points
 # lefthook at .release/lefthook.yml (LEFTHOOK_CONFIG) and each tool is handed its
 # config EXPLICITLY (markdownlint --config/--ignore-path, yamllint -c, prettier
@@ -367,8 +374,8 @@ def is_distributed_skill_dest(dest: str) -> bool:
 # equalization (release#536) pins shellcheck 0.11 everywhere via the
 # shellcheck-py wheel, so `--rcfile .release/.shellcheckrc` (shellcheck >= 0.10)
 # is now portable across the whole fleet and check-shell passes it explicitly —
-# the root-discovered dotfile is no longer needed. The de-mirrored root symlink
-# in already-seeded consumers is removed by the mirrored-dest sweep on re-init.
+# the root-discovered dotfile is no longer needed. The stale root symlink in
+# already-seeded consumers is removed by the mirrored-dest sweep on re-init.
 GATE_INTERNAL_FILES: frozenset[str] = frozenset(
     {
         "lefthook.yml",
@@ -382,7 +389,7 @@ GATE_INTERNAL_FILES: frozenset[str] = frozenset(
 
 
 def is_release_internal(dest: str) -> bool:
-    """Content built into .release/ but NOT mirrored out as a symlink/copy:
+    """Content written into .release/ but NOT mirrored out as a symlink/copy:
     the provenance marker, the managed .gitignore (release#450), the Python engine
     package (lib/release_core/* — the folded PR state engine ships by pip wheel
     now, not sync; release#459), and the gate definition + tool configs
@@ -403,7 +410,7 @@ def is_release_internal(dest: str) -> bool:
 
 
 class SyncError(RuntimeError):
-    """A fatal release-sync condition (maps to exit 1)."""
+    """A fatal condition during the `.release/` temp dir install (maps to exit 1)."""
 
 
 def select_ref(release_home: str, repo_name: str, kind: str, release_ref: str | None) -> str:
@@ -485,7 +492,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
     templates/components/<c>/ tree in the source.
 
     A cheap existence probe (source.exists on the tree path) — NOT a recursive
-    list_tree that build_plan immediately re-walks. A git tree is never empty,
+    list_tree that install_plan immediately re-walks. A git tree is never empty,
     and the bundle never stages an empty dir, so existence == the original
     'non-empty tree' contract."""
     for c in capabilities:
@@ -503,7 +510,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
 
 @dataclass
 class Plan:
-    """The build plan. ``order`` preserves first-seen dest order
+    """The install plan. ``order`` preserves first-seen dest order
     (mirrors plan_order); ``mode``/``source`` map dest → git filemode / source
     path (last write wins, mirroring the bash assoc-array overwrite)."""
 
@@ -523,7 +530,7 @@ def subtree_list(kind: str, capabilities: list[str]) -> list[str]:
     return subtrees
 
 
-def build_plan(
+def install_plan(
     source: Source,
     kind: str,
     capabilities: list[str],
@@ -532,7 +539,7 @@ def build_plan(
 ) -> Plan:
     """Mirror the `--- Plan ---` block: walk each subtree, skip the
     should_skip_source paths, strip the subtree prefix to get the dest, then add
-    the distributed skills and compose the lefthook fragment list.
+    the distributed skills and assemble the lefthook fragment list.
 
     ``repo_root`` is the consumer working tree. It gates the REPLACE_IF_PRESENT
     skills (synced only when the consumer already carries .claude/skills/<name>);
@@ -561,7 +568,7 @@ def build_plan(
             if _consumer_has_skill(repo_root, name):
                 _add_skill_dir(plan, source, name)
 
-    # Compose lefthook.yml fragment list: base < commons < each capability < kind.
+    # Assemble lefthook.yml fragment list: base < commons < each capability < kind.
     frags: list[str] = []
     base = "templates/components/_lefthook-base.yaml"
     if source.exists(base):
@@ -623,12 +630,12 @@ def link_target(dest: str) -> str:
     return f"{prefix}.release/{dest}"
 
 
-# ── Materialize the new tree into a tempdir ───────────────────────────────────
+# ── Build the new tree into a tempdir ─────────────────────────────────────────
 
 
-def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
-    """Mirror `--- Build the new .release/ tree in a tempdir ---`: write each
-    planned blob (preserving the 100755/100644 mode), the composed lefthook.yml,
+def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
+    """Write the new .release/ temp dir into a tempdir: write each
+    planned blob (preserving the 100755/100644 mode), the assembled lefthook.yml,
     and the provenance marker into ``tmp_release``."""
     for dest in plan.order:
         src = plan.source[dest]
@@ -643,8 +650,8 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
     if plan.lefthook_frags:
         _write_lefthook(source, ref_sha, plan.lefthook_frags, tmp_release)
 
-    # Managed .gitignore (release#450): keeps bytecode out of the committed
-    # .release/ even when a consumer regenerates from the working tree.
+    # Managed .gitignore (release#450): keeps bytecode out of the ephemeral
+    # .release/ even when a consumer rebuilds from the working tree.
     gitignore = os.path.join(tmp_release, GITIGNORE_FILE)
     with open(gitignore, "w", encoding="utf-8") as fh:
         fh.write(GITIGNORE_BODY)
@@ -659,7 +666,7 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
             "# release provenance — the arthur-debert/release commit that generated\n"
             "# this .release/. Purely informational (ADR-0002). Since WS4 (release#521)\n"
             "# the whole .release/ tree is gitignored + recomposed every session, so\n"
-            "# this marker is transient and has no reader — drift-check was retired.\n"
+            "# this marker is transient and has no reader — the out-of-sync check was retired.\n"
             f"{ref_sha}\n"
         )
         if source.release_tag:
@@ -671,7 +678,7 @@ def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> N
 
 
 def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release: str) -> None:
-    """Mirror the lefthook.yml generation: build each fragment to a
+    """Mirror the lefthook.yml generation: write each fragment to a
     NN-<dir>.yaml temp file (the numeric prefix fixes the merge order), then
     `yq eval-all '. as $i ireduce({}; . *+ $i) | ... comments=""'` over them,
     under the generated-by header. The `*+` deep-merges with array concat; the
@@ -775,7 +782,7 @@ def _files_equal(a: str, b: str) -> bool:
 
 def _expected_copy_bytes(f: str, tmp_release: str) -> bytes:
     """The exact bytes ``_apply_mirror`` would write for the real-file copy ``f`` —
-    the built source under ``tmp_release``, with the managed-marker header
+    the installed source under ``tmp_release``, with the managed-marker header
     prepended for YAML (mirrors init._apply_mirror's copy branch). Used to tell a
     genuine copy change from a byte-identical rebuild so a steady-state
     sync is a true no-op (no phantom change count, no failed auto-commit)."""
@@ -893,7 +900,7 @@ def compute_mirror(
     # The dests this sync mirrors OUT as symlinks into .release/ (everything in
     # new_files that is neither release-internal nor a real-file copy). The sweep
     # removes any .release/-pointing symlink whose target dest is absent from this
-    # set — a dropped target OR a de-mirrored one (WS3: root lefthook.yml + configs).
+    # set — a dropped target OR one no longer mirrored (WS3: root lefthook.yml + configs).
     mirrored_dests = {f for f in new_files if not is_release_internal(f) and not needs_real_file(f)}
     mp.mirror_dests = mirrored_dests
     mp.symlinks_to_remove = _find_broken_release_links(repo_root, mirrored_dests)
@@ -1038,9 +1045,9 @@ def _first_line_has_marker(path: str) -> bool:
 #   blob         the content's git blob SHA-1 is one release's template history
 #                actually shipped (byte-exact; a consumer-MODIFIED copy no
 #                longer matches and is deliberately left alone);
-#   marker       the first line carries the managed-marker signature (the
-#                release-sync state manifest: content varies per repo, header
-#                is stable across both marker wordings);
+#   marker       the first line carries the managed-marker signature (a
+#                managed file: content varies per repo, header is stable
+#                across both marker wordings);
 #   fingerprint  a distinctive header line (the bin/release callers were tailored
 #                per repo at onboarding, so no stable blob exists — but the
 #                header comment is verbatim across every variant).
@@ -1049,137 +1056,6 @@ def _first_line_has_marker(path: str) -> bool:
 # blob SHA below was re-derived from release's template git history
 # (`git rev-list --all -- <template path>` → `git rev-parse <rev>:<path>`),
 # never taken from a consumer on faith.
-
-# The de-distributed infra/dev-cycle skill set (WS2 #523 / WS7 #528): 17 skills
-# release once pushed to every consumer. Symlinked copies are swept by the
-# broken-symlink sweep; the REAL tracked copies some repos carry need per-file
-# blob retired-file entries. One entry per file ever shipped under skills/<name>/, dest
-# `.claude/skills/<name>/<subpath>` (the _add_skill_dir mapping). The skill dir
-# itself is pruned only when the sweep empties it — a consumer file inside
-# keeps the dir (and that file) alive.
-_RETIRED_SKILL_FILES: dict[str, frozenset[str]] = {
-    ".claude/skills/pr-review-respond/SKILL.md": frozenset(
-        {
-            "019389266ff985d3584e9b940c8d96f741edd4b6",
-            "0ef8240cf5b429fa75cd3081a80f251e78c17eef",
-            "5005e2d0a29b01ddc8d2c8344f5989f9974d93f9",
-            "5b7cae8426408fee61c532f1f4797431e4bcc223",
-            "790d94ed8815049cf4fd3338cff994251af215c0",
-            "99835724c09537055433ffb14cdb97f983775376",
-            "afe397de593acf7d1618abd2bfd84d0c4b1e837d",
-            "c2148b56db5648d5916d0f053213f69a9b70ecef",
-            "d6fb41166e61764e2547a328a570d13f9fe9ccf4",
-            "d705dc6cc815756a0414ca727ad8d4acab2d7e65",
-            "fa3a2a34f64d86dbf0a303c63018287d7f44e73d",
-        }
-    ),
-    ".claude/skills/release-issue-relay/SKILL.md": frozenset(
-        {
-            "00f16c2e90bc2601de2c011f9cb4babf3b0350eb",
-            "0d5bb55a1b390493684c02da34afdcdfb83a86b5",
-            "1fb7ddd6f0d286929210de4bc4b727ec5d9dbac5",
-            "3517044214c927ea64ee5a8fe479d5b456a94891",
-            "689833625d5ccc4beec73f52ba938e5ac021dc93",
-            "981217f2f109948f7182cb2cc11d761b161ada44",
-            "98da93f7a920aa5900458f2567aff82daf1ca981",
-            "a4a6e1b82319496cc48a59c7a396641d9d2a84e3",
-            "b53d9951e73182dc7c2db085729514d2c2ee9052",
-            "bc75321ad6abbfd228157b42e669c6cc12012e0b",
-            "be55e1c26e4ae421efd96f5a0ebc1e9f8eda7353",
-        }
-    ),
-    ".claude/skills/diagnose/.upstream": frozenset({"34f5c05f014978e70f0339c46c741e3879ea13d8"}),
-    ".claude/skills/diagnose/scripts/hitl-loop.template.sh": frozenset(
-        {"40afc4652f6f52fc117b2b00e1fa65fcec235838"}
-    ),
-    ".claude/skills/diagnose/SKILL.md": frozenset({"d3323baef364b6d7af95adf1faf84632df4ca825"}),
-    ".claude/skills/tdd/.upstream": frozenset({"551071897d036893ca78501e1fe424267045df96"}),
-    ".claude/skills/tdd/deep-modules.md": frozenset({"0d9720cf1dce25e51f4ba66d16f9d2de78a12abb"}),
-    ".claude/skills/tdd/interface-design.md": frozenset(
-        {"a0a20ca41f02f18e63b78cde06cec0763923a403"}
-    ),
-    ".claude/skills/tdd/mocking.md": frozenset({"71cbfee674d93244ce81d1830b930ca9a69200bd"}),
-    ".claude/skills/tdd/refactoring.md": frozenset({"8a4443924fbe40c2f865c56a9477d5ec01cc9962"}),
-    ".claude/skills/tdd/SKILL.md": frozenset({"6cb95cb006125524dd48ee7beba8fcfe0122126d"}),
-    ".claude/skills/tdd/tests.md": frozenset({"ff22f809ccbcac26ecd7a3c4bc48ef701a8ac82e"}),
-    ".claude/skills/review/.upstream": frozenset({"c2b6c8e95108805c9c460b741f086b00f74d0dc5"}),
-    ".claude/skills/review/SKILL.md": frozenset({"60f27a3f25f0f1824140abbbbf49e72124524b52"}),
-    ".claude/skills/triage/.upstream": frozenset({"fe247ccab0ea801203c22a3dadb3954a9190cb38"}),
-    ".claude/skills/triage/AGENT-BRIEF.md": frozenset({"2efecdfeb392246430a957de21d5062c2e5c98ba"}),
-    ".claude/skills/triage/OUT-OF-SCOPE.md": frozenset(
-        {"cc8ea2575981f464bcc7429faf401ffd4fe64ede"}
-    ),
-    ".claude/skills/triage/SKILL.md": frozenset({"52a0eefaebd26d8c0f30bade56b12b03ab776e90"}),
-    ".claude/skills/to-issues/.upstream": frozenset({"ad0dd222822313b3ad95ce704cefa9ae9f216d0a"}),
-    ".claude/skills/to-issues/SKILL.md": frozenset({"a3e4d3ab15186ca7b4e7a842a5d0efc8c0499626"}),
-    ".claude/skills/handoff/.upstream": frozenset({"0384ae3ee262e9688ef5f6ed291ebb5296b33dff"}),
-    ".claude/skills/handoff/SKILL.md": frozenset({"a710d8917274826ebd380762ad47edc26d28f10f"}),
-    ".claude/skills/qa/.upstream": frozenset({"701c55eb16648b6b5dca3ccc8c3e3baec55eac6b"}),
-    ".claude/skills/qa/SKILL.md": frozenset({"54c3c289875cd400fd4637424c541d89142b0646"}),
-    ".claude/skills/grill-me/.upstream": frozenset({"875479a3cd7bd7fdd999b8cb68aeea0cba75d151"}),
-    ".claude/skills/grill-me/SKILL.md": frozenset({"33b55c962e8c0896bca184ae97d7ee844d33e8cf"}),
-    ".claude/skills/grill-with-docs/.upstream": frozenset(
-        {"58d7fad0e72cab1cb2cd7f42369bc8c51d482cb6"}
-    ),
-    ".claude/skills/grill-with-docs/ADR-FORMAT.md": frozenset(
-        {"da7e78ec1c220cd0aedf7ad36424c9398034f375"}
-    ),
-    ".claude/skills/grill-with-docs/CONTEXT-FORMAT.md": frozenset(
-        {"08302557cc2ca8de32c02de708a7c8c84ed66f3f"}
-    ),
-    ".claude/skills/grill-with-docs/SKILL.md": frozenset(
-        {"3568a9f5a2b09eb586bc39b3480b2b3579a05360"}
-    ),
-    ".claude/skills/improve-codebase-architecture/.upstream": frozenset(
-        {"1bbd6cdc1721d6913cb9cf51b354be58ab3cd944"}
-    ),
-    ".claude/skills/improve-codebase-architecture/DEEPENING.md": frozenset(
-        {"ecaf5d7dcf7aae2aff6dbc63742dd069351b4f5c"}
-    ),
-    ".claude/skills/improve-codebase-architecture/HTML-REPORT.md": frozenset(
-        {"8adc368ffb30f9e8a6f01ac95621555f4afc2b76"}
-    ),
-    ".claude/skills/improve-codebase-architecture/INTERFACE-DESIGN.md": frozenset(
-        {"3197723a0d04aef73b74fbcf7e48269988a61684"}
-    ),
-    ".claude/skills/improve-codebase-architecture/LANGUAGE.md": frozenset(
-        {"530c27630a045406a66712c8f062e873c3b22449"}
-    ),
-    ".claude/skills/improve-codebase-architecture/SKILL.md": frozenset(
-        {"631a2561492efacb7f363837065330c7d997410b"}
-    ),
-    ".claude/skills/request-refactor-plan/.upstream": frozenset(
-        {"b7c1377147d6c4638d181dc84ba59fd86b028370"}
-    ),
-    ".claude/skills/request-refactor-plan/SKILL.md": frozenset(
-        {"7d9a74a2c9a7ba38f197a90d04c956b62e681d3d"}
-    ),
-    ".claude/skills/ubiquitous-language/.upstream": frozenset(
-        {"810b8a5e25e44643e0bc8e0a9b0c1cfc7da36ea6"}
-    ),
-    ".claude/skills/ubiquitous-language/SKILL.md": frozenset(
-        {"d1e9d84af5c3db2d2d7ba246363db762ed7f29a1"}
-    ),
-    ".claude/skills/zoom-out/.upstream": frozenset({"444197ba1ccd501579abdd6cd74b0dbfaa5e0e5f"}),
-    ".claude/skills/zoom-out/SKILL.md": frozenset({"f82ced573dc190fa2b2f169f5cf6af17b0eefca9"}),
-    ".claude/skills/teach/.upstream": frozenset({"04cb6186f47f5d69009d10fc89d25801805032e6"}),
-    ".claude/skills/teach/GLOSSARY-FORMAT.md": frozenset(
-        {"9cae84c44c8eb5d27b8695d4ef29a2893dc4900c"}
-    ),
-    ".claude/skills/teach/LEARNING-RECORD-FORMAT.md": frozenset(
-        {"2faa7c98fabcdff48eb6bd07e4847d48a6b8d4e1"}
-    ),
-    ".claude/skills/teach/MISSION-FORMAT.md": frozenset(
-        {"5dac184a319308e2ec0c18c16d6b8d52b9be2748"}
-    ),
-    ".claude/skills/teach/RESOURCES-FORMAT.md": frozenset(
-        {"c94aac6a2634cc229fe0b777fc5cc7da3a28c3d2"}
-    ),
-    ".claude/skills/teach/SKILL.md": frozenset({"8c8a3cb41ac29bd5aa4345296109794730a2514c"}),
-    ".claude/skills/padz-for-agents/SKILL.md": frozenset(
-        {"be96007eb67bcc0fad4aaa39b0d7a1d845c76ab8"}
-    ),
-}
 
 RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
     # Pre-unified-gate lint/format entry points, superseded by the composed
@@ -1406,7 +1282,6 @@ RETIRED_BLOB_FILES: dict[str, frozenset[str]] = {
             "8c59bc21b47bd5b49cf61518ac9fdd5892b7adfc",  # templates/tauri-app
         }
     ),
-    **_RETIRED_SKILL_FILES,
 }
 
 RETIRED_FINGERPRINT_FILES: dict[str, str] = {
@@ -1474,13 +1349,13 @@ def _has_fingerprint_header(path: str, needle: str) -> bool:
     return any(line.startswith(f"# {needle}") for line in head)
 
 
-# ── CLAUDE.md orientation block (#348) ────────────────────────────────────────
+# ── CLAUDE.md header block (#348) ─────────────────────────────────────────────
 
 
 def claude_desired(repo_root: str) -> str:
-    """Mirror claude_desired(): the managed block at the top, then the consumer's
-    existing content (with any prior managed block stripped, leading blanks
-    trimmed) below it. Reads $CLAUDE_FILE; returns the candidate content."""
+    """Mirror claude_desired(): the managed header block at the top, then the
+    consumer's existing content (with any prior managed block stripped, leading
+    blanks trimmed) below it. Reads $CLAUDE_FILE; returns the candidate content."""
     rest = ""
     claude_path = os.path.join(repo_root, CLAUDE_FILE)
     if os.path.isfile(claude_path) and not os.path.islink(claude_path):
@@ -1503,7 +1378,7 @@ def _strip_managed_block(path: str) -> str:
     kept: list[str] = []
     skip = False
     for line in lines:
-        if CLAUDE_BEGIN in line:
+        if _has_claude_begin(line):
             skip = True
         if not skip:
             kept.append(line)
@@ -1523,10 +1398,10 @@ class ClaudeDecision:
 
 
 def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
-    """The `--- CLAUDE.md orientation block ---` decision. The managed block is the
+    """The `--- CLAUDE.md header block ---` decision. The managed block is the
     unconditional stub (WS2, release#523) — it points at `release-core how-to` and
-    no longer depends on a composed ORIENTATION.md, so there is no tree-content
-    gate. ``tmp_release`` is unused now (kept for signature stability)."""
+    no longer depends on an installed ORIENTATION.md, so there is no content gate.
+    ``tmp_release`` is unused now (kept for signature stability)."""
     claude_path = os.path.join(repo_root, CLAUDE_FILE)
     if os.path.islink(claude_path):
         return ClaudeDecision("skip-symlink")
@@ -1537,9 +1412,17 @@ def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
     existing = _read_text(claude_path)
     if existing == desired:
         return ClaudeDecision("none", desired)
-    if CLAUDE_BEGIN in existing:
+    if _has_claude_begin(existing):
         return ClaudeDecision("refresh", desired)
     return ClaudeDecision("inject", desired)
+
+
+def _has_claude_begin(text: str) -> bool:
+    """True iff ``text`` carries the managed-block BEGIN marker — the current
+    CLAUDE_BEGIN OR the legacy CLAUDE_BEGIN_LEGACY. Recognizing the legacy line is
+    what lets an already-seeded consumer's block be REWRITTEN to the current
+    marker on the next init rather than a second block injected above it."""
+    return CLAUDE_BEGIN in text or CLAUDE_BEGIN_LEGACY in text
 
 
 def _read_text(path: str) -> str:

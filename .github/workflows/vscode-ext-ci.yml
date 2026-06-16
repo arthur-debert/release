@@ -4,7 +4,7 @@ name: VS Code Extension CI
 #
 # Closes part of #107. Where `vscode-ext.yml` covers the release path,
 # this workflow covers every push / pull_request: install Node, install
-# deps, run the canonical `bin/check` umbrella (or the consumer's
+# deps, run the shared `bin/check` umbrella (or the consumer's
 # scripts/test-all fallback).
 #
 # What's distinct
@@ -56,9 +56,9 @@ on:
         default: ''
       check-command:
         description: |
-          The canonical umbrella check entry point. Defaults to
+          The standard umbrella check entry point. Defaults to
           `bin/check`; override (e.g. `npm run check`) for consumers
-          still mid-take-iii migration.
+          still mid-migration.
         type: string
         required: false
         default: 'bin/check'

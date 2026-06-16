@@ -108,7 +108,7 @@ def test_real_tree_vscode_ext_fixture_is_wired():
     ):
         assert os.path.exists(os.path.join(found, present)), present
     # detect-kind classifies the fixture as vscode-ext (the `@vscode/vsce`
-    # devDependency is the canonical signal release-core init keys off).
+    # devDependency is the signal release-core init keys off).
     from release_core import manifest
 
     assert manifest.detect_kind(found) == "vscode-ext"
@@ -351,7 +351,7 @@ def test_create_if_missing_seeds_and_pushes(seams, monkeypatch, capsys):
     assert calls.pushed == [False]  # a first seed is a plain push, never forced
 
 
-def test_reset_force_pushes_the_canonical_seed(seams):
+def test_reset_force_pushes_the_seed(seams):
     calls, _root = seams
     assert canary_init.main(["--family", "rust", "--reset"]) == 0
     assert calls.built == 1

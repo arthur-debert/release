@@ -3,7 +3,7 @@
 #
 # Regenerates docs/references/consumer-contract.yaml in memory from sync.py's
 # constants + predicates applied to templates/, and diffs against the committed
-# file. Fails (with the diff) on drift — a contract-changing PR must run
+# file. Fails (with the diff) when out of sync — a contract-changing PR must run
 # `release-core admin contract dump` and commit the result in the SAME PR.
 #
 # Runs the WORKING-TREE release_core via PYTHONPATH — NEVER the installed wheel

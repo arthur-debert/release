@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Canonical BATS e2e setup. Synced from arthur-debert/release.
+# The BATS e2e setup. Synced from arthur-debert/release.
 #
 # Reads tests/e2e/bats.conf for project-specific configuration,
 # then provides sandbox_setup/sandbox_teardown for use in .bats files:

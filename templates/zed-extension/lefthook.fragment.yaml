@@ -44,7 +44,7 @@ pre-commit:
         - "**/Cargo.toml"
         - "Cargo.lock"
         - "**/Cargo.lock"
-      # `--target wasm32-wasip2`: the canonical (and only) target for a
+      # `--target wasm32-wasip2`: the only target for a
       # Zed extension. The host can't resolve `zed_extension_api`'s
       # wasm-only ABI; running clippy without this flag fails at link
       # check.

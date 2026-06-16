@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Zed extensions are cdylib crates compiled to wasm32-wasip2 — there's
 # no host target for `cargo test` to run against, and wasm tests don't
-# execute on a developer machine without a wasm runtime. The canonical
+# execute on a developer machine without a wasm runtime. The
 # test surface for an extension is its grammar manifest + tree-sitter
 # queries, exercised via bats.
 #

@@ -1,7 +1,7 @@
 name: fetch-artifact
 description: |
   Install a pinned cross-repo artifact from a GH release. Reads the
-  canonical `artifacts.json` schema (see arthur-debert/release
+  standard `artifacts.json` schema (see arthur-debert/release
   docs/artifacts-schema.md). Idempotent — re-runs with the same pin
   are no-ops via version-stamp files. Wraps the same `bin/fetch-artifact`
   CLI used locally by `scripts/setup-dev-env.sh`, so CI and local paths

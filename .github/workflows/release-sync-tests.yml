@@ -1,9 +1,9 @@
 name: release-sync + fleet tests
 
-# BATS suites for the managed-tree compose engine and the fleet manifest accessor:
-#   tests/release-sync — the `release-core init` compose engine (provenance
+# BATS suites for the managed-files install engine and the fleet manifest accessor:
+#   tests/release-sync — the `release-core init` install engine (provenance
 #     marker ADR-0002, symlink/skill mirroring, the self-ignoring ephemeral
-#     .release/ of WS4 #521), composing a synthetic consumer from this checkout
+#     .release/ of WS4 #521), installing into a synthetic consumer from this checkout
 #     (RELEASE_REF=HEAD). The standalone release-sync/release-drift-check verbs
 #     were retired in WS4; the suite drives the same engine via `release-core init`.
 #   tests/fleet        — `release-core admin repos list` zero-logic path
@@ -43,7 +43,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 0   # the compose engine reads templates from the git ref
+          fetch-depth: 0   # the init engine reads templates from the git ref
       - uses: actions/setup-python@v6
         with:
           python-version: '3.13'

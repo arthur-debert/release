@@ -23,7 +23,7 @@
 # box keep actionlint 1.7.12 while CI ran the pinned 1.7.7, so the same gate gave
 # different verdicts. The pins + the gate_version_matches helper are the SINGLE
 # source of truth in templates/commons/bin/gate-tool-versions.sh, shared with the
-# SessionStart provisioner setup-dev-env.sh so the two can't drift (release#498).
+# SessionStart provisioner setup-dev-env.sh so the two can't diverge (release#498).
 
 set -euo pipefail
 

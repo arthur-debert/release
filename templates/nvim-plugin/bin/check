@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical nvim-plugin check entry point. Same script local + CI.
+# The nvim-plugin check entry point. Same script local + CI.
 #
 # Delegates to the consumer's app-bin/test-all if present (the
 # common pattern for Lua plugins with bats-driven tests), else
@@ -10,7 +10,7 @@ set -euo pipefail
 # Most nvim-plugin consumers in this portfolio use bats to drive
 # Neovim under test (matches the shell-subshell isolation pattern
 # used by other Bash-tested stacks). app-bin/test-all is the
-# canonical entry point for that.
+# entry point for that.
 #
 # Usage:
 #   bin/check                # full suite

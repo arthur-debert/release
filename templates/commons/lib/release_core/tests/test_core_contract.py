@@ -6,8 +6,8 @@ Two layers:
     determinism, the committed manifest's freshness, and that the lint passes
     CLEAN on today's tree (the shrink-only baseline was drained to zero and
     its file deleted in #588).
-  - SYNTHETIC tests in tmp repos — drift detection, the #579-shape violation
-    (managed-path reference, no materialize), step ordering, the composite
+  - SYNTHETIC tests in tmp repos — out-of-sync detection, the #579-shape violation
+    (managed-path reference, no install step), step ordering, the composite
     pseudo-job, the checkout-provider rule, the path boundary, and the
     baseline ratchet (grandfather + stale-entry failure).
 
@@ -44,7 +44,7 @@ def test_manifest_contains_the_contract_anchors():
     assert data["gate_internal"] == sorted(sync.GATE_INTERNAL_FILES)
     # The .github/workflows real-copy rule produces the shipped workflow copy.
     assert ".github/workflows/copilot-review.yml" in data["tracked_real_files"]["workflow_copies"]
-    # The ephemeral build dir.
+    # The ephemeral temp dir.
     assert data["gitignored"] == [".release/"]
     # The #579 family is mirror dests (untracked post-WS7), never tracked files.
     mirrors = data["untracked_mirrors"]
@@ -54,10 +54,10 @@ def test_manifest_contains_the_contract_anchors():
     assert ".claude/skills/gh-pr-review-loop/SKILL.md" in mirrors
     # Managed-path prefixes are the lint's spine.
     assert data["managed_path_prefixes"] == [".release/", "bin/check", "lib/release_core/"]
-    # Tombstones come from the retired sets, not a re-statement.
-    assert data["tombstones"]["blob"] == sorted(sync.RETIRED_BLOB_FILES)
-    assert data["tombstones"]["fingerprint"] == sorted(sync.RETIRED_FINGERPRINT_FILES)
-    assert "marker" not in data["tombstones"]
+    # Retired-file entries come from the retired sets, not a re-statement.
+    assert data["retired_files"]["blob"] == sorted(sync.RETIRED_BLOB_FILES)
+    assert data["retired_files"]["fingerprint"] == sorted(sync.RETIRED_FINGERPRINT_FILES)
+    assert "marker" not in data["retired_files"]
 
 
 def test_manifest_never_lists_release_internal_or_skipped_sources():
@@ -80,7 +80,7 @@ def test_committed_manifest_is_current():
     contract regenerates docs/references/consumer-contract.yaml in the SAME PR."""
     committed = Path(REPO_ROOT, contract.MANIFEST_RELPATH).read_text(encoding="utf-8")
     assert committed == contract.manifest_text(REPO_ROOT), (
-        "consumer-contract.yaml drifted — run: release-core admin contract dump"
+        "consumer-contract.yaml out of sync — run: release-core admin contract dump"
     )
 
 
@@ -112,13 +112,13 @@ def test_lint_passes_on_todays_tree_with_zero_baseline():
 
 def test_rust_ci_e2e_job_is_clean_post_579():
     """The motivating breaker: rust-ci.yml's e2e job references bin/check-e2e —
-    legal ONLY because #579 put the arm-gate materialize before it."""
+    legal ONLY because #579 put the arm-gate install step before it."""
     manifest = contract.build_manifest(REPO_ROOT)
     regex = contract._reference_regex(contract.managed_path_patterns(manifest))
     assert contract.lint_file(REPO_ROOT, ".github/workflows/rust-ci.yml", regex) == []
 
 
-# ── Synthetic: dump / check drift ─────────────────────────────────────────────
+# ── Synthetic: dump / check out-of-sync ───────────────────────────────────────
 
 
 @pytest.fixture
@@ -144,13 +144,13 @@ def test_dump_then_check_roundtrip(synthetic_repo, capsys):
     assert "is current" in out
 
 
-def test_check_detects_drift_with_diff_and_advice(synthetic_repo, capsys):
+def test_check_detects_out_of_sync_with_diff_and_advice(synthetic_repo, capsys):
     assert contract_verb.main(["dump", "--root", synthetic_repo]) == 0
     manifest = Path(synthetic_repo, contract.MANIFEST_RELPATH)
-    manifest.write_text(manifest.read_text().replace("bin/check-gate", "bin/zzz-drifted"))
+    manifest.write_text(manifest.read_text().replace("bin/check-gate", "bin/zzz-stale"))
     assert contract_verb.main(["check", "--root", synthetic_repo]) == 1
     err = capsys.readouterr().err
-    assert "bin/zzz-drifted" in err  # the diff names the drift
+    assert "bin/zzz-stale" in err  # the diff names the out-of-sync entry
     assert "release-core admin contract dump" in err  # and the fix
 
 
@@ -208,7 +208,7 @@ def _write_wf(root: str, text: str, name: str = "wf.yml") -> None:
 
 
 def test_lint_detects_the_579_shape(tmp_path):
-    """A job referencing bin/check-e2e with no materialize — the exact latent
+    """A job referencing bin/check-e2e with no install step — the exact latent
     assumption #579 fixed — must FAIL."""
     root = str(tmp_path)
     _write_wf(root, VIOLATING_WF)
@@ -225,7 +225,7 @@ def test_lint_passes_with_arm_gate_before_the_reference(tmp_path):
     assert contract.lint_repo(root, MANIFEST) == []
 
 
-def test_lint_requires_materialize_BEFORE_the_reference(tmp_path):
+def test_lint_requires_install_step_BEFORE_the_reference(tmp_path):
     """arm-gate AFTER the referencing step does not absolve it — order matters."""
     root = str(tmp_path)
     reordered = VIOLATING_WF + (
@@ -338,9 +338,9 @@ def test_lint_scans_with_and_env_values(tmp_path):
     assert len(contract.lint_repo(root, MANIFEST)) == 1
 
 
-def test_lint_arm_gate_with_materialize_false_earns_no_credit(tmp_path):
+def test_lint_arm_gate_with_install_tree_false_earns_no_credit(tmp_path):
     """arm-gate called with materialize:'false' (release's own ci.yml shape)
-    does NOT compose the tree — a later managed-path reference still fails."""
+    does NOT install the `.release/` temp dir — a later managed-path reference still fails."""
     root = str(tmp_path)
     wf = COMPLIANT_WF.replace(
         "        uses: arthur-debert/release/.github/actions/arm-gate@v2\n",
@@ -354,9 +354,9 @@ def test_lint_arm_gate_with_materialize_false_earns_no_credit(tmp_path):
     assert violations[0].matched == "bin/check-e2e"
 
 
-def test_lint_arm_gate_toolset_false_still_materializes(tmp_path):
-    """The #581 building block: arm-gate with toolset:'false' is materialize-only
-    — it still composes the tree, so the job is compliant."""
+def test_lint_arm_gate_toolset_false_still_installs(tmp_path):
+    """The #581 building block: arm-gate with toolset:'false' is install-only
+    — it still installs the `.release/` temp dir, so the job is compliant."""
     root = str(tmp_path)
     wf = COMPLIANT_WF.replace(
         "        uses: arthur-debert/release/.github/actions/arm-gate@v2\n",
@@ -383,10 +383,10 @@ def test_workflow_dir_sweep_flags_the_bad_job_with_exact_coordinates(tmp_path):
     assert v.matched == "bin/check-e2e"
 
 
-def test_workflow_dir_sweep_silent_when_materialized_or_no_workflows(tmp_path):
+def test_workflow_dir_sweep_silent_when_installed_or_no_workflows(tmp_path):
     # No .github/workflows at all → silent.
     assert contract.lint_workflow_dir(str(tmp_path / "empty"), PATTERNS) == []
-    # A materialized job → silent.
+    # A job with the install step present → silent.
     root = str(tmp_path)
     _write_wf(root, COMPLIANT_WF)
     assert contract.lint_workflow_dir(root, PATTERNS) == []

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical rust-cli build entry point. Same script local + CI.
+# The rust-cli build entry point. Same script local + CI.
 #
 # Runs `cargo build --release` for the current host target. Produces
 # binaries under `target/release/`. Matches what rust-cli.yml's
@@ -18,7 +18,7 @@ set -euo pipefail
 # All args forward to `cargo build` verbatim; cargo handles its own
 # arg parsing (target, package, features, etc.).
 #
-# `bin/build` is the canonical release-build entry point — `--release`
+# `bin/build` is the release-build entry point — `--release`
 # is hardcoded. For a local debug build, invoke `cargo build` directly.
 #
 # CWD: respects the caller's working directory. Cargo resolves the

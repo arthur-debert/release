@@ -102,7 +102,7 @@ on:
         description: |
           Pass `--strict` to `mkdocs build` so warnings (broken refs,
           missing nav entries, unparseable links) fail the build.
-          Default true — the canonical posture. Consumers carrying
+          Default true — the standard posture. Consumers carrying
           historical warnings can opt out (`strict: false`) during
           initial adoption and flip back to true once their docs are
           clean. Don't keep `false` permanently — it silently lets

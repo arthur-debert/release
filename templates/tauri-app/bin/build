@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical tauri-app build entry point. Same script local + CI.
+# The tauri-app build entry point. Same script local + CI.
 #
 # Runs `tauri build` — produces the native binary + the configured
 # bundles (.app / .dmg on macOS, .deb / .AppImage / .rpm on Linux,
@@ -29,7 +29,7 @@ set -euo pipefail
 
 # Resolve package manager from the lockfile (matches tauri-ci.yml and
 # tauri-app.yml's auto-detect convention). The lockfile IS the
-# canonical signal; consumers commit exactly one.
+# signal; consumers commit exactly one.
 #
 # Look up lockfile via repo root (`git rev-parse --show-toplevel`) so
 # detection works regardless of caller CWD — the workflow's build job

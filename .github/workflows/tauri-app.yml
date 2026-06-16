@@ -14,7 +14,7 @@ name: tauri-app release
 #   Single target per platform; universal macOS binary deferred to
 #   slice 2.
 # - macOS code-signing via the Apple Developer p12 cert and
-#   identity (Tauri's canonical APPLE_* env vars — different names
+#   identity (Tauri's standard APPLE_* env vars — different names
 #   from electron-builder's CSC_LINK).
 # - Optional notarization (input + secret-presence gated).
 # - GH release with per-platform bundle assets attached.
@@ -55,7 +55,7 @@ name: tauri-app release
 #
 # Optional `prep-script` input
 # ----------------------------
-# Consumers with extra version-bearing files beyond the canonical
+# Consumers with extra version-bearing files beyond the standard
 # three (package.json + Cargo.toml + tauri.conf.json) can provide a
 # `prep-script` input. The workflow execs it BEFORE the standard
 # three-file bump, in the prepare job, with `NEW_VERSION` in env.
@@ -170,11 +170,11 @@ on:
       prep-script:
         description: |
           Optional path (relative to repo root) to a consumer-supplied
-          prep script. Runs in the prepare job BEFORE the canonical
+          prep script. Runs in the prepare job BEFORE the standard
           three-file version bump, with NEW_VERSION + TAURI_DIR in
           env. The script is responsible for `git add`-ing its own
           mutations. Use for consumer-specific bumps beyond the
-          canonical three files: upstream pins (e.g. phos-app's
+          standard three files: upstream pins (e.g. phos-app's
           deps.json), codegen output, submodule pointers.
           Not invoked in the resume path (when the tag already
           exists).
@@ -395,8 +395,8 @@ jobs:
       # NOTE: the packaged-binary smoke step (app-bin/smoke-hook.sh) was
       # removed as dead code: post-WS7 the hook is an untracked ephemeral
       # mirror, absent on a plain checkout, so its existence guard never
-      # fired (release#588). Restoring packaged smoke testing (materialize
-      # first) vs retiring the hook templates is tracked in release#590.
+      # fired (release#588). Restoring packaged smoke testing (install
+      # bin/check first) vs retiring the hook templates is tracked in release#590.
 
       - name: Upload platform bundle
         uses: actions/upload-artifact@v6

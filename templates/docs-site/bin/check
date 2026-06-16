@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical docs-site check entry point. Same script local + CI.
+# The docs-site check entry point. Same script local + CI.
 #
 # A docs-site repo is an mkdocs site (it is what defines the Kind). This
 # runs `mkdocs build --strict` so broken refs / missing nav entries /
-# plugin errors fail loudly — the same command the canonical mkdocs.yml
+# plugin errors fail loudly — the same command the shared mkdocs.yml
 # reusable workflow runs in CI.
 #
 # Auto-discovers config:
-#   1. ./mkdocs.yml          (canonical — root config)
+#   1. ./mkdocs.yml          (the root config)
 #   2. ./docs/mkdocs.yml     (alt layout)
 #
 # Plugin-agnostic: whatever the active mkdocs.yml + requirements pin in

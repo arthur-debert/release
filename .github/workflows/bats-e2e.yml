@@ -12,7 +12,7 @@ name: BATS e2e
 #         pre-test: scripts/build-for-e2e   # optional
 #         runner:   bin/check-e2e            # default
 #
-# The default runner is the canonical `bin/check-e2e` synced into every
+# The default runner is the shared `bin/check-e2e` synced into every
 # consumer that opts into the `bats` Component. It auto-discovers the
 # consumer's bats layout (see templates/components/bats/bin/check-e2e).
 
@@ -22,7 +22,7 @@ on:
       runner:
         description: |
           Path to the e2e runner script in the consumer repo. Default is
-          the Component-supplied `bin/check-e2e` which discovers the
+          the Component-provided `bin/check-e2e` which discovers the
           layout by convention. Override only if you need a custom
           entry point (e.g. a non-bats e2e harness).
         type: string
@@ -100,14 +100,14 @@ jobs:
         with:
           python-version: '3.13'
       - name: Arm the gate toolset
-        # Materializes the managed tree (arm-gate's materialize step):
+        # Installs the managed paths (arm-gate's install step):
         # the default runner `bin/check-e2e` is an untracked ephemeral
         # mirror post-WS7 (release#528) — it does not exist on a fresh
-        # checkout until `release-core init` composes it.
+        # checkout until `release-core init` writes it.
         uses: arthur-debert/release/.github/actions/arm-gate@v2
 
       - name: Install bats-core
-        # Modern canonical install. Replaces the per-consumer `git clone` +
+        # Modern standard install. Replaces the per-consumer `git clone` +
         # `install.sh` boilerplate that exists in dodot et al today.
         uses: bats-core/bats-action@4.0.0
         with:
@@ -125,7 +125,7 @@ jobs:
         run: |
           if [ ! -x "${{ inputs.runner }}" ]; then
             echo "::error::E2E runner not found or not executable: ${{ inputs.runner }}" >&2
-            echo "Adopt the canonical bats Component (release-sync) or set 'runner:' in the workflow caller." >&2
+            echo "Adopt the shared bats Component (release-sync) or set 'runner:' in the workflow caller." >&2
             exit 1
           fi
           "${{ inputs.runner }}"

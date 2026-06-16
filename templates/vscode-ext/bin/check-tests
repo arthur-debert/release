@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical npm-stack unit test runner for vscode-ext.
+# The npm-stack unit test runner for vscode-ext.
 #
 # VS Code extensions commonly have NO unit test harness (the
 # @vscode/test-electron integration suite is slow, host-dependent, and

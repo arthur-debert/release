@@ -44,7 +44,7 @@ pre-commit:
       priority: 2
     golangci-lint:
       # HARD gate: a missing tool exits non-zero (never skips). CI installs
-      # it via the canonical setup-go action; locally the bootstrap
+      # it via the shared setup-go action; locally the bootstrap
       # (setup-dev-env.sh) installs it for Go repos.
       glob:
         - "*.go"

@@ -1,7 +1,7 @@
-"""done-check — fleet-enforcement gate for the "pilot-running" state contract.
+"""done-check — fleet-enforcement gate for the "conformant" state contract.
 
 Per release/ README §States — the contract: a (Stack, Repo) combo is
-*pilot-running* when every applicable verb's local entry point + CI run is
+*conformant* when every applicable verb's local entry point + CI run is
 green AND the most recent release was cut by the shared `<stack>.yml@v1`
 workflow. The adoption matrix (README) is hand-curated today, easy to let
 fall out of sync; this tool replaces that with a programmatic read of GitHub
@@ -14,8 +14,8 @@ Usage:
   done-check --quiet               # only print failing rows
 
 Exit codes:
-  0   — pilot-running (every applicable verb is PASS)
-  1   — not pilot-running (one or more verbs are FAIL or missing)
+  0   — conformant (every applicable verb is PASS)
+  1   — not conformant (one or more verbs are FAIL or missing)
   2   — only WARN rows (e.g. release column unverified because the
         consumer has no releases yet — not a hard fail for new repos)
   64  — bad usage
@@ -104,7 +104,7 @@ _RELEASE_WORKFLOW_FOR_STACK = {
 }
 
 # `arthur-debert/release/.github/workflows/<name>.yml` — the shared uses-line.
-_CANONICAL_USES_RE = re.compile(r"arthur-debert/release/\.github/workflows/([a-z-]+\.yml)")
+_THIN_CALLER_USES_RE = re.compile(r"arthur-debert/release/\.github/workflows/([a-z-]+\.yml)")
 # `./.github/workflows/<name>.yml` — release/'s own self-call.
 _SELFCALL_USES_RE = re.compile(r"\./\.github/workflows/([a-z-]+\.yml)")
 
@@ -174,7 +174,7 @@ def _file_exists(repo: str, path: str, *, ref: str | None = None) -> bool:
 # ------------------------------------------------------------------
 def _workflow_name_from_release_yml(rel_yml: str) -> str | None:
     """The first shared (or self-call) workflow filename referenced, or None."""
-    m = _CANONICAL_USES_RE.search(rel_yml)
+    m = _THIN_CALLER_USES_RE.search(rel_yml)
     if m:
         return m.group(1)
     m = _SELFCALL_USES_RE.search(rel_yml)
@@ -397,7 +397,7 @@ def aggregate(repo: str, stack: str, ci_result: str, per_verb: dict[str, str]) -
         overall = "implemented+warnings"
         exit_code = 2
     else:
-        overall = "pilot-running"
+        overall = "conformant"
         exit_code = 0
 
     return {"repo": repo, "stack": stack, "state": overall, "exit_code": exit_code, "rows": rows}

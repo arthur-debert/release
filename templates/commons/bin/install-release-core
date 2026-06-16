@@ -29,12 +29,12 @@
 #
 # After installing, this runs `release-core init` in the current repo by default
 # (--no-init to skip) — the "one command does the boot" ergonomic. A bare `init`
-# now materializes the WHOLE managed tree from the wheel bundle (the .release/
-# build dir + every working-tree mirror — skills, ORIENTATION, configs, the
-# CLAUDE.md block) and auto-commits managed changes (#476 cutover) — NOT just the
-# config subset. This is the pull-model self-sync: the wheel pull carries the whole
-# tree, so no push is needed (there is no push mechanism). It is NOT a pip
-# post-install hook (wheels have none, and init is repo-specific while pip is
+# now installs the WHOLE set of managed files from the wheel bundle (the .release/
+# temp dir + every working-tree mirror — skills, configs, the CLAUDE.md header
+# block) and auto-commits managed changes (#476 cutover) — NOT just the config
+# subset. This is the pull-model self-sync: the wheel pull carries the whole set,
+# so no push is needed (there is no push mechanism). It is NOT a pip post-install
+# hook (wheels have none, and init is repo-specific while pip is
 # environment-level): the resolver runs init explicitly, at the repo root, on the
 # JUST-installed console-script (resolved across venv / --user / system layouts).
 # init is best-effort — its failure does NOT fail the resolver (the committed tree
@@ -326,13 +326,13 @@ fi
 # composes no config) must NOT fail the resolver — the install succeeded, and the
 # committed tree degrades gracefully. Runs in the CURRENT repo (the boot caller
 # cd's to the repo root first).
-# A bare `release-core init` is the DEFAULT full materialize (#476 cutover): it
-# materializes the WHOLE managed tree from the wheel bundle (the .release/ build
-# dir + every working-tree mirror — skills, ORIENTATION, configs, per-Kind files,
-# the CLAUDE.md block) and AUTO-COMMITS ONLY the managed paths it wrote, iff they
-# actually changed — never `git add -A`, never a user's other staged/unstaged
+# A bare `release-core init` is the DEFAULT full install (#476 cutover): it
+# installs the WHOLE set of managed files from the wheel bundle (the .release/
+# temp dir + every working-tree mirror — skills, configs, per-Kind files, the
+# CLAUDE.md header block) and AUTO-COMMITS ONLY the managed paths it wrote, iff
+# they actually changed — never `git add -A`, never a user's other staged/unstaged
 # work, no-op when byte-identical. This is the pull-model self-sync: it carries
-# the whole tree, so no push is needed (there is no push mechanism). We pass NO
+# the whole set, so no push is needed (there is no push mechanism). We pass NO
 # flags (auto-commit is the default; do NOT pass --commit — it is redundant and
 # rejected in the default full mode) and NOT --push: the commit is made locally
 # (riding the current branch, excluded from review as a managed change), and
@@ -340,8 +340,8 @@ fi
 # commit/init failure does NOT fail the resolver.
 rc="$VENV_DIR/bin/release-core"
 if [ -x "$rc" ]; then
-  echo "install-release-core: installed; running release-core init (full materialize)" >&2
-  "$rc" init || echo "warning: release-core init failed — managed tree not refreshed" >&2
+  echo "install-release-core: installed; running release-core init (full install)" >&2
+  "$rc" init || echo "warning: release-core init failed — managed files not refreshed" >&2
 else
   echo "warning: release-core not found in the tool venv ($rc) — skipping init" >&2
 fi

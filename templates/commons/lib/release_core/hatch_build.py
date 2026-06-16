@@ -1,6 +1,6 @@
-"""Hatch build hook: bundle the FULL managed tree into the wheel.
+"""Hatch build hook: bundle the FULL managed files into the wheel.
 
-`release-core init` materializes per-repo managed content from these bundled
+`release-core init` installs per-repo managed content from these bundled
 sources. For the pull-model the wheel must be self-contained — it ships the
 template DATA (and the distributable skills) so `init` needs no release clone.
 
@@ -25,11 +25,10 @@ Recursion guard: templates/commons/lib/release_core/ IS this very package (the
 build root). It is excluded entirely so the bundle does not contain a copy of
 itself. Other templates/commons/lib/ content is kept.
 
-NOTE — config subset vs. full tree: `init` currently CONSUMES only the
-config-composition subset listed in _COMMONS_CONFIGS (lefthook.yml + lint
-configs) plus the per-kind/capability lefthook fragments + manifests. The rest
-of the now-bundled tree is PRESENT but unused until step 2 (#476) teaches `init`
-to do a full offline materialize. This part-1 change is purely additive data.
+NOTE: `init` installs the FULL bundled tree offline (#476 shipped — see
+release_core/verbs/init.py, which runs install_plan/install_tree over this
+bundle). The bundle below is the complete source `init` installs from: the
+per-kind/capability trees, lefthook fragments, manifests, configs, and skills.
 """
 
 from __future__ import annotations
@@ -73,10 +72,10 @@ _SKIP_DIR_NAMES = frozenset(
 _SKIP_FILE_SUFFIXES = (".pyc", ".pyo")
 _SKIP_FILE_NAMES = frozenset({".DS_Store"})
 
-# Top-level templates/ dirs that are NOT part of the managed sync/init surface
+# Top-level templates/ dirs that are NOT part of the managed init surface
 # and must not be bundled. `render/` holds render-side material (the Homebrew
 # formula template) consumed at release-cut in CI, not a per-repo managed Kind —
-# sync only ever materializes commons/, components/, and a resolved Kind dir
+# init only ever installs from commons/, components/, and a resolved Kind dir
 # (one carrying a manifest.yaml). Bundling render/ is dead weight.
 _NON_SURFACE_TEMPLATE_DIRS = frozenset({"render"})
 
@@ -98,7 +97,7 @@ def _distributed_skills(repo_root: str) -> list[str]:
     Parsed statically with `ast` from sync.py rather than imported: importing the
     package would run release_core/__init__.py (which pulls in click via the CLI
     subpackage) and need it installed at build time. Static parse avoids that
-    while still reading the canonical lists — a drifted hand-copy is a bug."""
+    while still reading the source lists — an out-of-sync hand-copy is a bug."""
     sync_py = os.path.join(
         repo_root, "templates", "commons", "lib", "release_core", "release_core", "sync.py"
     )

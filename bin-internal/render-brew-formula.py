@@ -78,7 +78,7 @@ def normalize_brew_desc(s: str) -> str:
     Cargo.toml descriptions: must not start with an article ("A ", "An ",
     "The "), must not end with a period, must be ≤79 characters. Normalize
     at render time rather than bending Cargo.toml's `description`, which is
-    the canonical project description that reaches crates.io and other
+    the project description that reaches crates.io and other
     consumers untouched.
     """
     s = s.strip()

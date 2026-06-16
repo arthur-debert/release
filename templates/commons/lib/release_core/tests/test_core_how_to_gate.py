@@ -1,6 +1,6 @@
 """``release-core how-to`` + ``release-core gate`` (release#501, WS1).
 
-how-to is the Kind-aware playbook that replaces the synced ORIENTATION.md /
+how-to is the Kind-aware playbook that replaces the managed ORIENTATION.md /
 per-Kind docs (single source). gate is the one quality entry that wraps the
 lefthook gate over the whole tree (no false-green on unstaged files).
 """
@@ -106,15 +106,15 @@ def test_how_to_dev_cycle_branches_from_origin_not_local_main():
     assert "auto-committed a managed sync" in body
 
 
-def test_how_to_documents_the_materialize_only_ci_pattern(tmp_path):
+def test_how_to_documents_the_install_only_ci_pattern(tmp_path):
     # release#581: a consumer-authored CI job invoking a managed bin/ tool must
-    # materialize the managed tree first — how-to is the consumer-facing home of
+    # run the install step first — how-to is the consumer-facing home of
     # that pattern (arm-gate with toolset:'false'), on BOTH render paths.
     for body in (how_to._render("rust-cli"), how_to._render_repo(str(tmp_path), "unknown")):
         assert "arthur-debert/release/.github/actions/arm-gate@v3" in body
         assert "toolset: 'false'" in body
         assert "DO NOT exist on a fresh CI checkout" in body
-        assert "Never hand-copy the build recipe" in body
+        assert "Never hand-copy the install recipe" in body
 
 
 def test_how_to_distinguishes_gate_from_tests():
@@ -183,8 +183,8 @@ def test_gate_no_lefthook_at_the_pin_is_a_hard_failure(monkeypatch, capsys):
 
 
 def _gated_root(tmp_path):
-    """A repo root whose gate IS materialized (root config), so main() gets past
-    the release#567 unmaterialized-config hard failure."""
+    """A repo root whose gate IS built (root config), so main() gets past
+    the release#567 unbuilt-config hard failure."""
     (tmp_path / "lefthook.yml").write_text("pre-commit:\n")
     return str(tmp_path)
 
@@ -334,10 +334,10 @@ def test_resolve_lefthook_unpinned_takes_first_on_path(tmp_path, monkeypatch):
     assert gate._resolve_lefthook(None) == str(first / "lefthook")
 
 
-# --- fail loud on an unmaterialized gate config (release#567) ---------------
+# --- fail loud on an unbuilt gate config (release#567) ---------------
 
 
-def test_gate_unmaterialized_config_fails_loud(monkeypatch, tmp_path, capsys):
+def test_gate_unbuilt_config_fails_loud(monkeypatch, tmp_path, capsys):
     """No .release/lefthook.yml AND no root config: the gate exits non-zero and
     names `release-core init` — never lefthook's warn-and-pass (the
     first-commit-of-session boot hole)."""

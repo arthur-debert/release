@@ -4,7 +4,7 @@ name: tree-sitter CI
 #
 # Closes part of #107. Where `tree-sitter.yml` covers the release path
 # (corpus test + wasm bundle), this workflow covers every push /
-# pull_request: install Node + tree-sitter CLI deps, run the canonical
+# pull_request: install Node + tree-sitter CLI deps, run the standard
 # `bin/check` umbrella (or scripts/test-all fallback).
 #
 # What's distinct
@@ -58,9 +58,9 @@ on:
         default: ''
       check-command:
         description: |
-          The canonical umbrella check entry point. Defaults to
+          The standard umbrella check entry point. Defaults to
           `bin/check`; override (e.g. `scripts/test-all`) for
-          consumers still mid-take-iii.
+          consumers still mid-migration.
         type: string
         required: false
         default: 'bin/check'
@@ -111,14 +111,14 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Arm the gate toolset (materialize bin/check + lint toolset)
+      - name: Arm the gate toolset (install bin/check + lint toolset)
         # tree-sitter-ci ran the umbrella check (default `bin/check`) WITHOUT
-        # materializing it first — unlike rust-ci/electron-ci/tauri-ci/go-ci/
+        # installing it first — unlike rust-ci/electron-ci/tauri-ci/go-ci/
         # vscode-ext-ci/zed-extension-ci, which all arm-gate. A consumer that
         # doesn't carry a committed bin/check therefore failed with
         # `bin/check: No such file or directory` (exit 127) — caught on
-        # lex-fmt/tree-sitter-lex#72. arm-gate materializes the managed tree
-        # (incl. bin/check) and installs the gate toolset, matching the siblings.
+        # lex-fmt/tree-sitter-lex#72. arm-gate installs bin/check and the gate
+        # toolset into the `.release/` temp dir, matching the siblings.
         uses: arthur-debert/release/.github/actions/arm-gate@v2
 
       - name: Run umbrella check

@@ -4,7 +4,7 @@
 # Scans every CI surface (.github/workflows/*.yml, .github/actions/*/action.yml,
 # the workflow copies under templates/) for any JOB whose steps reference a
 # managed path (per docs/references/consumer-contract.yaml) without a prior
-# materialize step in the same job (arm-gate / `release-core init`). This is
+# install step in the same job (arm-gate / `release-core init`). This is
 # the mechanical "who still assumes the old shape" sweep that would have caught
 # release#579 the day WS7 merged.
 #

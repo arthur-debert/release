@@ -6,7 +6,7 @@
 # shebang, or a .sh/.bash extension — never by path glob. So non-shell files
 # that legitimately live under bin/ (the gh-task-status Python shim,
 # Dockerfiles, etc.) fall out STRUCTURALLY, instead of via per-file `exclude`
-# globs that drift across lefthook invocation modes. Vendored trees under
+# globs that diverge across lefthook invocation modes. Vendored trees under
 # */share/ carry their own provenance and are exempt.
 #
 # Invoked identically by the pre-commit gate, by CI, and by
@@ -71,7 +71,7 @@ done
 # --rcfile (release#531 F3) — same pattern as markdownlint/yamllint/prettier.
 # Portable since release#536 pinned shellcheck 0.11 fleet-wide (--rcfile is
 # >= 0.10; the old apt 0.9.0 was the blocker). When the rc is absent (a repo
-# with no materialized .release/, e.g. release itself or a unit-test tmpdir),
+# with no built .release/, e.g. release itself or a unit-test tmpdir),
 # run WITHOUT it: the rc only relaxes (disable=SC1091, external-sources), so a
 # missing rc lints STRICTER, never hollower — the safe failure direction.
 if [ -f .release/.shellcheckrc ]; then

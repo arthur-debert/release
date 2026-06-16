@@ -99,7 +99,7 @@ jobs:
           # neither publishes to PyPI nor TestPyPI would still create
           # a GH tag + assets via the release job, with no actual
           # package on any index — a phantom release. PyPI is the
-          # canonical distribution channel for this stack; if both
+          # primary distribution channel for this stack; if both
           # publish targets are off the caller likely has a config bug.
           if [ "${PUBLISH_PYPI}" != "true" ] && [ "${PUBLISH_TESTPYPI}" != "true" ]; then
             echo "::error::both publish-pypi=false and publish-testpypi=false — no publish target enabled. Set at least one to true, or don't invoke this workflow."

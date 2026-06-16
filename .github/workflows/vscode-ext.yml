@@ -20,7 +20,7 @@ name: VS Code extension release
 # RUST_TARGET (mapped rust-target-triple, e.g.
 # `aarch64-apple-darwin`) exposed in the env. The script's job is to
 # fetch any native binaries the extension bundles into a known
-# location (typically `resources/`). The canonical fetch-artifact
+# location (typically `resources/`). The fetch-artifact
 # CLI is on PATH (installed by env/setup.sh) for this purpose.
 
 on:
@@ -237,7 +237,7 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # Make the canonical fetch-artifact CLI available on PATH so the
+      # Make the fetch-artifact CLI available on PATH so the
       # pre-package hook can call it without each consumer reinventing
       # the `gh release download` dance. Mirrors what env/setup.sh
       # does in cloud sessions; here we install on the CI runner.

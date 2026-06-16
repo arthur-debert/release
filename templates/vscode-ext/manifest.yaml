@@ -1,6 +1,6 @@
 # Kind default manifest for `vscode-ext` (detected via package.json
 # containing `"@vscode/vsce"` or `"vsce"` — the publisher CLI is the
-# canonical signal for a VS Code extension repo).
+# the signal for a VS Code extension repo).
 # Consumers can override with `.release-sync.yaml` at their repo root.
 
 kind: vscode-ext

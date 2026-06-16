@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical go-cli build entry point. Same script local + CI.
+# The go-cli build entry point. Same script local + CI.
 #
 # Runs `go build ./...` from the repo root. Compiles every package
 # (cmd/ binaries + libraries) without installing. Build artifacts

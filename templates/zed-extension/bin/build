@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical zed-extension build entry point. Same script local + CI.
+# The zed-extension build entry point. Same script local + CI.
 #
 # Zed extensions don't ship native binaries — the published artifact
 # IS the WASM (under target/wasm32-wasip2/release/*.wasm), which Zed
@@ -14,7 +14,7 @@ set -euo pipefail
 #   bin/build -- <extra cargo args>      # pass-through after `--`
 #
 # All args forward to `cargo build` verbatim after the fixed
-# `--release --target wasm32-wasip2`. `bin/build` is the canonical
+# `--release --target wasm32-wasip2`. `bin/build` is the
 # release-build entry point — `--release` and the wasm target are
 # hardcoded; for a local debug build, invoke `cargo build` directly.
 #

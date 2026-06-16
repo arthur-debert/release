@@ -5,9 +5,9 @@ layer — recorded ls-tree/cat-file/show results — never at subprocess. The
 filesystem-walk + symlink + CLAUDE.md helpers run against real tmp_path trees.
 
 These pin the byte-for-byte contract: ref-selection precedence, capability
-resolution, the plan/lefthook composition order, is_release_internal
+resolution, the plan/lefthook assembly order, is_release_internal
 classification, relative symlink-target math, broken-symlink detection, the
-find-style traversal order, and the orientation-block computation.
+find-style traversal order, and the header-block computation.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ from release_core import sync
         ("templates/rust-cli/manifest.yaml", True),
         ("templates/components/_lefthook-base.yaml", True),
         ("templates/commons/.DS_Store", True),
-        # Bytecode never materializes into a consumer's .release/ (release#450).
+        # Bytecode is never installed into a consumer's .release/ (release#450).
         ("templates/commons/lib/release_core/release_core/__pycache__/cli.cpython-313.pyc", True),
         ("templates/commons/lib/release_core/release_core/sync.pyc", True),
         ("templates/commons/lib/release_core/release_core/sync.pyo", True),
@@ -336,7 +336,7 @@ def test_subtree_list_order():
     ]
 
 
-def test_build_plan_precedence_last_write_wins(monkeypatch):
+def test_install_plan_precedence_last_write_wins(monkeypatch):
     """A dest present in both commons and the kind subtree resolves to the kind's
     source (kind is later in precedence) but keeps its first-seen order slot."""
     trees = {
@@ -351,7 +351,7 @@ def test_build_plan_precedence_last_write_wins(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_ls_tree", ls_tree)
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
 
-    plan = sync.build_plan(_git_source(), "rust-cli", [])
+    plan = sync.install_plan(_git_source(), "rust-cli", [])
     assert plan.order == ["bin/check"]  # fragment skipped; single dest
     assert plan.source["bin/check"] == "templates/rust-cli/bin/check"  # last wins
     assert plan.mode["bin/check"] == "100755"
@@ -375,13 +375,13 @@ def _skill_tree_ls(skill_files):
     return ls_tree
 
 
-def test_build_plan_distributes_push_all_skills(monkeypatch):
-    """Every PUSH_ALL skill that exists at the ref materializes whole-directory:
+def test_install_plan_distributes_push_all_skills(monkeypatch):
+    """Every PUSH_ALL skill that exists at the ref is installed whole-directory:
     each file under skills/<name>/ → .claude/skills/<name>/<subpath>."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for name in sync.PUSH_ALL_SKILLS:
         dest = f".claude/skills/{name}/SKILL.md"
         assert dest in plan.order
@@ -389,7 +389,7 @@ def test_build_plan_distributes_push_all_skills(monkeypatch):
         assert plan.mode[dest] == "100644"
 
 
-def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
+def test_install_plan_multifile_skill_distributes_all_files(monkeypatch):
     """A multi-file skill (extra .md alongside SKILL.md) reaches the consumer in
     full, not just its SKILL.md. Uses a kept PUSH_ALL skill (gh-pr-review-loop)."""
     multi = "gh-pr-review-loop"
@@ -400,26 +400,26 @@ def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
     }
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for sub in ("SKILL.md", "mocking.md", "tests.md", "refactoring.md"):
         dest = f".claude/skills/{multi}/{sub}"
         assert dest in plan.order
         assert plan.source[dest] == f"skills/{multi}/{sub}"
 
 
-def test_build_plan_tolerates_missing_skill_dir(monkeypatch):
+def test_install_plan_tolerates_missing_skill_dir(monkeypatch):
     """A PUSH_ALL skill whose dir is absent at the ref is silently skipped."""
     # Only gh-pr-review-loop exists; the rest return "" (missing).
     files = {"gh-pr-review-loop": ["SKILL.md"]}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     assert ".claude/skills/gh-pr-review-loop/SKILL.md" in plan.order
     # A missing skill contributes nothing.
     assert ".claude/skills/diagnose/SKILL.md" not in plan.order
 
 
-def test_build_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tmp_path):
+def test_install_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tmp_path):
     """REPLACE_IF_PRESENT skills are synced ONLY when the consumer already carries
     .claude/skills/<name>; otherwise they are not added to the plan."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
@@ -431,13 +431,13 @@ def test_build_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tm
     have = sync.REPLACE_IF_PRESENT_SKILLS[0]
     (tmp_path / ".claude" / "skills" / have).mkdir(parents=True)
 
-    plan = sync.build_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
+    plan = sync.install_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
     assert f".claude/skills/{have}/SKILL.md" in plan.order
     for name in sync.REPLACE_IF_PRESENT_SKILLS[1:]:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
-def test_build_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
+def test_install_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
     """An existing .claude/skills/<name> SYMLINK also counts as present."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
@@ -449,22 +449,22 @@ def test_build_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
     skills_dir.mkdir(parents=True)
     os.symlink("/nowhere", str(skills_dir / name))  # dangling symlink still counts
 
-    plan = sync.build_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
+    plan = sync.install_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
     assert f".claude/skills/{name}/SKILL.md" in plan.order
 
 
-def test_build_plan_replace_if_present_skipped_without_repo_root(monkeypatch):
+def test_install_plan_replace_if_present_skipped_without_repo_root(monkeypatch):
     """No repo_root (clone-less init) ⇒ REPLACE_IF_PRESENT skills are skipped."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for name in sync.REPLACE_IF_PRESENT_SKILLS:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
-def test_build_plan_never_distributes_release_only_skills(monkeypatch):
+def test_install_plan_never_distributes_release_only_skills(monkeypatch):
     """Release-only skills are never in either catalog ⇒ never planned, even if
     they exist at the ref."""
     release_only = ["release-fleet-ops", "release-fleet-triage", "gh-repo-setup"]
@@ -472,12 +472,12 @@ def test_build_plan_never_distributes_release_only_skills(monkeypatch):
     files.update({name: ["SKILL.md"] for name in release_only})
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for name in release_only:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
-def test_build_plan_lefthook_fragment_order(monkeypatch):
+def test_install_plan_lefthook_fragment_order(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "")
     present = {
         "ref:templates/components/_lefthook-base.yaml",
@@ -486,7 +486,7 @@ def test_build_plan_lefthook_fragment_order(monkeypatch):
         "ref:templates/rust-cli/lefthook.fragment.yaml",
     }
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: rp in present)
-    plan = sync.build_plan(_git_source(), "rust-cli", ["cap"])
+    plan = sync.install_plan(_git_source(), "rust-cli", ["cap"])
     assert plan.lefthook_frags == [
         "templates/components/_lefthook-base.yaml",
         "templates/commons/lefthook.fragment.yaml",
@@ -495,7 +495,7 @@ def test_build_plan_lefthook_fragment_order(monkeypatch):
     ]
 
 
-def test_build_plan_skips_skip_sources(monkeypatch):
+def test_install_plan_skips_skip_sources(monkeypatch):
     listing = (
         "100644 blob a\ttemplates/commons/manifest.yaml\n"
         "100644 blob b\ttemplates/commons/lefthook.fragment.yaml\n"
@@ -510,13 +510,13 @@ def test_build_plan_skips_skip_sources(monkeypatch):
         lambda ref, path, *, cwd, **k: listing if path == "templates/commons" else "",
     )
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     assert plan.order == ["bin/real"]  # bytecode + skip-sources dropped
 
 
-def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
-    """materialize() always writes a self-ignoring .release/.gitignore (`*`) so the
-    whole ephemeral build dir is invisible to git — drift impossible by
+def test_install_tree_writes_managed_gitignore(monkeypatch, tmp_path):
+    """install_tree() always writes a self-ignoring .release/.gitignore (`*`) so the
+    whole ephemeral temp dir is invisible to git — out-of-sync impossible by
     construction (WS4, release#521; supersedes the bytecode-only ignore of #450)."""
     plan = sync.Plan()
     plan.order = ["bin/real"]
@@ -524,7 +524,7 @@ def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
     plan.source = {"bin/real": "templates/commons/bin/real"}
 
     monkeypatch.setattr(sync.gh, "git_show_bytes", lambda spec, *, cwd: b"#!/bin/sh\n")
-    sync.materialize(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
+    sync.install_tree(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
 
     gi = tmp_path / ".gitignore"
     assert gi.is_file()
@@ -590,7 +590,7 @@ def test_link_swept_when_target_removed_this_sync(tmp_path):
 
 def test_demirrored_link_swept_even_when_target_present(tmp_path):
     """WS3 (release#524): the root lefthook.yml + lint/format configs became
-    release-internal — still materialized into .release/ (target RESOLVES) but no
+    release-internal — still installed into .release/ (target RESOLVES) but no
     longer mirrored out. A filesystem-presence test would leave these stale root
     symlinks behind; the mirrored-dest rule sweeps them."""
     # Seed a pre-WS3 consumer: root lefthook.yml symlink whose .release/ target
@@ -758,9 +758,9 @@ def test_compute_mirror_symlinked_skill_root_is_removed_first(tmp_path):
     assert dest not in mp.migrated
 
 
-def test_compute_mirror_real_copy_queued_when_dest_absent_or_drifted(tmp_path):
+def test_compute_mirror_real_copy_queued_when_dest_absent_or_out_of_sync(tmp_path):
     """A managed real-file copy (.github/workflows/*.yml) is queued when the dest
-    is missing or its bytes drift from what _apply would write."""
+    is missing or its bytes differ from what _apply would write."""
     dest = ".github/workflows/copilot-review.yml"
     tmp_release = tmp_path / "tmpbuild"
     (tmp_release / ".github" / "workflows").mkdir(parents=True)
@@ -770,7 +770,7 @@ def test_compute_mirror_real_copy_queued_when_dest_absent_or_drifted(tmp_path):
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
     assert dest in mp.copies_to_write
 
-    # drifted dest (hand-edited) → still queued (drift repaired)
+    # out-of-sync dest (hand-edited) → still queued (repaired)
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / dest).write_text("hand-edited junk\n")
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
@@ -844,7 +844,7 @@ def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
     assert not mp.symlinks_to_create
 
 
-# ── CLAUDE.md orientation block ───────────────────────────────────────────────
+# ── CLAUDE.md header block ────────────────────────────────────────────────────
 
 
 def test_claude_desired_creates_block_only_when_no_file(tmp_path):
@@ -876,7 +876,7 @@ def test_claude_desired_strips_prior_block_idempotent(tmp_path):
 def test_claude_desired_strips_stale_block_and_refreshes(tmp_path):
     p = tmp_path / "CLAUDE.md"
     # An old consumer's block imported @.release/ORIENTATION.md — it must be
-    # stripped (markers kept byte-identical) and refreshed to the stub, not duplicated.
+    # stripped and refreshed to the stub, not duplicated.
     old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
     p.write_text(f"{old}\n# Proj\n\nmine\n")
     desired = sync.claude_desired(str(tmp_path))
@@ -890,8 +890,8 @@ def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
     """release#563: every init must rewrite the managed block to the current
     how-to-pointing stub regardless of WHICH historical form it finds — the
     @.release/ORIENTATION.md import form (padz/phos-app seeds, including the
-    blank-line variant) and any older inlined-prose body. One marker wording
-    ever shipped, so CLAUDE_BEGIN recognizes every historical block."""
+    blank-line variant) and any older inlined-prose body. (The legacy-marker
+    form is covered by test_claude_legacy_marker_is_rewritten_not_duplicated.)"""
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()
     p = tmp_path / "CLAUDE.md"
@@ -905,7 +905,7 @@ def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
         # an older inlined-prose body
         (
             f"{sync.CLAUDE_BEGIN}\n"
-            "Open a live PR (never a draft — stale pre-#456 doctrine).\n"
+            "Open a live PR (never a draft — stale pre-#456 rule).\n"
             f"{sync.CLAUDE_END}\n"
         ),
     ]
@@ -923,6 +923,30 @@ def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
         # Convergence is a fixpoint: applying the refresh ends the loop.
         p.write_text(decision.desired)
         assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
+
+
+def test_claude_legacy_marker_is_rewritten_not_duplicated(tmp_path):
+    """De-jargon (#655): the BEGIN marker moved from 'managed by release-sync' to
+    'managed by release-core'. An already-seeded consumer whose CLAUDE.md still
+    opens with the legacy marker must be RECOGNIZED (so the block is rewritten to
+    the current marker), never have a second block injected above it."""
+    tmp_release = tmp_path / "tmpbuild"
+    tmp_release.mkdir()
+    p = tmp_path / "CLAUDE.md"
+    legacy = f"{sync.CLAUDE_BEGIN_LEGACY}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
+    p.write_text(f"{legacy}\n# Proj\n\nmine\n")
+
+    decision = sync.decide_claude(str(tmp_path), str(tmp_release))
+    assert decision.action == "refresh"  # recognized, not "inject"
+    assert decision.desired is not None
+    # Rewritten to the new marker; the legacy line is gone; no duplicate block.
+    assert decision.desired.count(sync.CLAUDE_BEGIN) == 1
+    assert sync.CLAUDE_BEGIN_LEGACY not in decision.desired
+    assert "release-core how-to" in decision.desired
+    assert "# Proj" in decision.desired
+    # Applying the refresh is a fixpoint — the next init is a no-op.
+    p.write_text(decision.desired)
+    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
 
 
 def test_no_orientation_file_anywhere_in_the_template_source():
@@ -946,7 +970,7 @@ def test_no_orientation_file_anywhere_in_the_template_source():
 
 def test_decide_claude_unconditional_no_orientation_gate(tmp_path):
     # WS2 (#523): the stub block is unconditional — no ORIENTATION.md needs to be
-    # composed in the tree for the block to be created (the old gate is gone).
+    # installed for the header block to be created (the old gate is gone).
     tmp_release = tmp_path / "tmpbuild"
     tmp_release.mkdir()  # no ORIENTATION.md
     assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "create"
@@ -1023,9 +1047,9 @@ def test_diff_release_no_existing(tmp_path):
 
 def test_bootstrap_files_are_classified_real_copies():
     """The SessionStart chain must be readable/executable on a FRESH CLONE —
-    before the ephemeral .release/ exists — so it must never be a symlink into
-    it. Lock the exact set: the hooks config + the boot resolver + the session
-    provisioner + the PreToolUse guard."""
+    before the ephemeral .release/ temp dir exists — so it must never be a
+    symlink into it. Lock the exact set: the hooks config + the boot resolver +
+    the session provisioner + the PreToolUse guard."""
     assert (
         frozenset(
             {
@@ -1046,7 +1070,7 @@ def test_bootstrap_files_are_classified_real_copies():
 
 def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
     """A pre-WS5 consumer carries TRACKED SYMLINKS at the bootstrap paths
-    (pointing into .release/). On re-init those dests are planned as real-copy
+    (pointing into .release/). On re-init those dests are planned as real-file
     writes — the symlink is replaced, never left dangling for a fresh clone."""
     dest = "bin/setup-dev-env.sh"
     tmp_release = tmp_path / "tmpbuild"
@@ -1060,7 +1084,7 @@ def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
     assert not any(dest in s for s in mp.symlinks_to_create)
 
 
-# ── retired-file tombstones (WS6, release#527) ────────────────────────────────
+# ── retired-file removal (WS6, release#527) ───────────────────────────────────
 
 
 def test_git_blob_sha1_matches_git_hash_object(tmp_path):
@@ -1103,8 +1127,8 @@ def test_retired_fingerprint_file_swept_and_plain_kept(tmp_path):
 
 
 def test_retired_symlink_is_skipped(tmp_path):
-    """Symlinks at tombstoned dests belong to the broken-symlink sweep, never
-    the tombstone path (which would unlink based on the TARGET's content)."""
+    """Symlinks at retired dests belong to the broken-symlink sweep, never
+    the retired-file path (which would unlink based on the TARGET's content)."""
     (tmp_path / "bin").mkdir()
     os.symlink("../.release/bin/release", tmp_path / "bin" / "release")
     (tmp_path / ".release" / "bin").mkdir(parents=True)
@@ -1114,9 +1138,9 @@ def test_retired_symlink_is_skipped(tmp_path):
     assert "bin/release" not in sync._find_retired_files(str(tmp_path))
 
 
-def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
+def test_compute_mirror_planned_dest_never_retired(tmp_path, monkeypatch):
     """A dest this sync still distributes is LIVE — if a future kind re-ships a
-    retired name, the plan wins and the tombstone is suppressed."""
+    retired name, the plan wins and the removal is suppressed."""
     dest = "bin/check-fmt"
     tmp_release = tmp_path / "tmpbuild"
     (tmp_release / "bin").mkdir(parents=True)
@@ -1131,7 +1155,7 @@ def test_compute_mirror_planned_dest_never_tombstoned(tmp_path, monkeypatch):
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
     assert mp.retired_to_remove == []
 
-    # Absent from the plan, the same file IS tombstoned.
+    # Absent from the plan, the same file IS retired.
     mp = sync.compute_mirror([], str(tmp_path), str(tmp_release), migrate=False)
     assert mp.retired_to_remove == [dest]
 
@@ -1198,40 +1222,13 @@ def test_retired_tables_inventory_locked():
         "app-bin/smoke-hook.sh": 2,
         "scripts/smoke.sh": 3,
     }
-    non_skill = {
-        k: v for k, v in sync.RETIRED_BLOB_FILES.items() if not k.startswith(".claude/skills/")
-    }
-    assert {k: len(v) for k, v in non_skill.items()} == expected_counts
+    assert {k: len(v) for k, v in sync.RETIRED_BLOB_FILES.items()} == expected_counts
 
-    # The de-distributed infra-skill set (WS2/WS7): 17 skills, 49 files,
-    # 69 historical blobs — per-file blob entries under .claude/skills/.
-    skill_files = {
-        k: v for k, v in sync.RETIRED_BLOB_FILES.items() if k.startswith(".claude/skills/")
-    }
-    assert {k.split("/")[2] for k in skill_files} == {
-        "pr-review-respond",
-        "release-issue-relay",
-        "diagnose",
-        "tdd",
-        "review",
-        "triage",
-        "to-issues",
-        "handoff",
-        "qa",
-        "grill-me",
-        "grill-with-docs",
-        "improve-codebase-architecture",
-        "request-refactor-plan",
-        "ubiquitous-language",
-        "zoom-out",
-        "teach",
-        "padz-for-agents",
-    }
-    assert len(skill_files) == 49
-    assert sum(len(v) for v in skill_files.values()) == 69
-    # The STILL-distributed skills must never be tombstoned.
-    live = {"gh-pr-review-loop", *sync.REPLACE_IF_PRESENT_SKILLS}
-    assert not live & {k.split("/")[2] for k in skill_files}
+    # The de-distributed infra-skill set is NOT in this table (#655): a dropped
+    # skill reaches a consumer as an untracked symlink (WS7), which the
+    # broken-symlink sweep removes — the explicit per-file blob entries were
+    # redundant and were deleted. No .claude/skills/ entry survives here.
+    assert not any(k.startswith(".claude/skills/") for k in sync.RETIRED_BLOB_FILES)
 
     for dest, blobs in sync.RETIRED_BLOB_FILES.items():
         assert blobs, dest
@@ -1256,13 +1253,13 @@ def test_retired_catalog_pins_the_live_fleet_misses():
 
 
 def test_retired_orientation_inside_release_dir_is_swept(tmp_path, monkeypatch):
-    """A pre-WS4 seed's tracked .release/ORIENTATION.md is tombstoned: the
+    """A pre-WS4 seed's tracked .release/ORIENTATION.md is retired: the
     dotted-dir dest resolves and lands in retired_to_remove so the managed
     commit pathspec records the deletion explicitly."""
     rel = tmp_path / ".release"
     rel.mkdir()
     orientation = rel / "ORIENTATION.md"
-    orientation.write_text("# Orientation\n\nstale doctrine\n")
+    orientation.write_text("# Orientation\n\nstale rule\n")
     monkeypatch.setitem(
         sync.RETIRED_BLOB_FILES,
         ".release/ORIENTATION.md",

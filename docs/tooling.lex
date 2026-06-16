@@ -48,7 +48,7 @@ release-core, the gate, distribution, and workflows
         - `release-core detect-kind` — report this repo's release Kind.
         - `release-core cut` — cut a release for this repo.
         - `release-core audit` / `status` — release posture / the
-          pilot-running done-check.
+          conformance done-check.
         - `release-core issue file <component> "<symptom>"` — escalate infra
           friction upstream to `arthur-debert/release`.
         - `release-core pr …` — the PR-loop helpers ([#3]).
@@ -216,7 +216,7 @@ release-core, the gate, distribution, and workflows
     `release-core init` is the one builder (the standalone `release-sync`
     verb and the `release-drift-check` subsystem were retired in WS4, #521 —
     with the tree ephemeral there is nothing to fall out of sync). The engine
-    lives in `release_core/sync.py` (`build_plan` / `materialize` /
+    lives in `release_core/sync.py` (`install_plan` / `install_tree` /
     `compute_mirror`);
     init is its only driver. Read this before adding anything consumers should
     receive.

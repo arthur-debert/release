@@ -3,7 +3,7 @@
 ``release-core how-to`` is the single entry point a fresh agent (or human) runs
 to learn how to lint / test / build / release / run *in this specific repo*,
 plus the draft-first dev cycle. It is the ONE source of that guidance:
-the consumer CLAUDE.md is a small managed block (~7 lines) pointing here, so there
+the consumer CLAUDE.md is a small header block (~7 lines) pointing here, so there
 is no synced ORIENTATION.md or per-Kind doc to fall out of sync (release#501 —
 discovery is the CLI, not docs).
 
@@ -187,7 +187,7 @@ _GATE_BLURB = (
 
 
 def _ci_jobs_section() -> list[str]:
-    """Consumer-authored CI jobs vs the ephemeral managed tree (release#581).
+    """Consumer-authored CI jobs vs the ephemeral managed files (release#581).
 
     Kind-agnostic, so it renders on both the repo path and the abstract path —
     the trap is the same everywhere: managed paths do not exist on a fresh CI
@@ -196,16 +196,16 @@ def _ci_jobs_section() -> list[str]:
     lines.append("Writing your own CI job that uses a managed tool?")
     lines.append(
         "  Managed paths (bin/check*, lib/release_core/, .release/**) are "
-        "EPHEMERAL — recomposed by `release-core init`, untracked, so they DO "
+        "EPHEMERAL — rewritten by `release-core init`, untracked, so they DO "
         "NOT exist on a fresh CI checkout. Any job step that invokes one must "
-        "build the managed tree first:"
+        "install the `.release/` temp dir first:"
     )
     lines.append("    - uses: arthur-debert/release/.github/actions/arm-gate@v3")
     lines.append("      with:")
-    lines.append("        toolset: 'false'   # build-only (skips the lint toolset)")
+    lines.append("        toolset: 'false'   # install-only (skips the lint toolset)")
     lines.append(
         "  Drop the `toolset` input (default 'true') when the job also runs the "
-        "gate. Never hand-copy the build recipe — invoke the composite."
+        "gate. Never hand-copy the install recipe — invoke the composite."
     )
     return lines
 

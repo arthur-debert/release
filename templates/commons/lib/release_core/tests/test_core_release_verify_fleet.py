@@ -84,7 +84,7 @@ class _Driver:
             return _cp(self.sync_rc.get(cwd, 0), stdout="sync-out\n", stderr="sync-err\n")
         if cmd[: len(rvf._SELF_CLI) + 1] == [*rvf._SELF_CLI, "gate"]:
             # WS3 (release#524): the gate runs via `release-core gate` (it points
-            # lefthook at the materialized .release/lefthook.yml), not a bare
+            # lefthook at the installed .release/lefthook.yml), not a bare
             # `lefthook run` against a now-absent root config.
             cwd = kw.get("cwd")
             return _cp(

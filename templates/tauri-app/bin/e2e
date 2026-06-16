@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical tauri-app e2e runner. Same script local + CI.
+# The tauri-app e2e runner. Same script local + CI.
 #
 # Delegates to the consumer's `npm run test:e2e` (or pnpm/yarn
 # equivalent). The consumer's package.json owns what e2e means —

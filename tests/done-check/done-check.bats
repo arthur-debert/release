@@ -87,17 +87,17 @@ STUB
   [ "$status" -eq 64 ]
 }
 
-# --- happy path (canonical rust-cli, all green) -----------------------
+# --- happy path (rust-cli, all green) -----------------------
 
-@test "pilot-running: canonical rust-cli sweeps green, exit 0" {
+@test "conformant: rust-cli sweeps green, exit 0" {
   printf 'jobs:\n  release:\n    uses: arthur-debert/release/.github/workflows/rust-cli.yml@v1\n' \
     > "$WORK/release_yml"
   _install_gh_stub
   run "$BIN/release-core" status --repo o/r
   [ "$status" -eq 0 ]
   [[ "$output" == *"Stack: rust-cli"* ]]
-  [[ "$output" == *"pilot-running"* ]]
-  [[ "$output" == *"→ o/r/rust-cli : pilot-running"* ]]
+  [[ "$output" == *"conformant"* ]]
+  [[ "$output" == *"→ o/r/rust-cli : conformant"* ]]
 }
 
 @test "--json emits a parseable object with verbs[]" {
@@ -110,7 +110,7 @@ STUB
   line="$(printf '%s\n' "$output" | tail -1)"
   [ "$(echo "$line" | jq -r '.repo')" = "o/r" ]
   [ "$(echo "$line" | jq -r '.stack')" = "rust-cli" ]
-  [ "$(echo "$line" | jq -r '.state')" = "pilot-running" ]
+  [ "$(echo "$line" | jq -r '.state')" = "conformant" ]
   [ "$(echo "$line" | jq -r '.verbs[0].verb')" = "check" ]
 }
 

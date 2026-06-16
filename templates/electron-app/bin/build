@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical electron-app build entry point. Same script local + CI.
+# The electron-app build entry point. Same script local + CI.
 #
 # Delegates to the consumer's `npm run build` script (or pnpm/yarn
 # equivalent), preserving whatever build chain the consumer has wired
@@ -32,7 +32,7 @@ set -euo pipefail
 
 # Resolve package manager from the lockfile. Check CWD first
 # (monorepo with subdir-local lockfile), fall back to repo root.
-# Lockfile IS the canonical signal; consumers commit exactly one.
+# Lockfile IS the signal; consumers commit exactly one.
 detect_pm() {
     local root
     root="$(git rev-parse --show-toplevel 2>/dev/null || echo ".")"

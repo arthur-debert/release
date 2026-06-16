@@ -15,7 +15,7 @@ name: GH action release
 #    Consumers pin `uses: <repo>@v1`; advancing `v1` to point at the
 #    latest non-breaking tag is how fixes propagate to all callers.
 #    This workflow handles that advance for non-prerelease releases.
-# 3. arthur-debert/release is itself a canonical consumer. (We can't
+# 3. arthur-debert/release is itself a consumer. (We can't
 #    use `@v1` to cut `@v1` — chicken/egg; first tag cut manually.
 #    Subsequent tags can call this workflow once it ships.)
 #
@@ -98,7 +98,7 @@ jobs:
       # via the consumer's synced pull-model bootstrap. The bin/semver /
       # bin/changelog shims were retired (release#476); the prepare job now
       # uses the pip-installed console-scripts. --no-init: we only need the
-      # package + its scripts here, not a config re-materialization. --major v2
+      # package + its scripts here, not a `.release/` re-install. --major v2
       # is the v3-safety pin (this workflow ships in the v2 line).
       - name: Set up Python for release_core console-scripts
         uses: actions/setup-python@v6
@@ -113,18 +113,18 @@ jobs:
         # $GITHUB_PATH) persists that dir for later steps. CI just invokes it —
         # same script, same behavior as a local session; the only CI-specific
         # setup is the Python above. --major v2 pins the v3-safety line; --no-init
-        # because the release run needs the scripts, not a tree materialize.
+        # because the release run needs the scripts, not a `.release/` install.
         run: bash bin/install-release-core --major v2 --no-init
 
-      - name: Materialize the managed .release/ tree
-        # The bot gate below runs the managed gate from .release/ — which is
-        # gitignored + ephemeral (WS4) and so absent on a fresh CI checkout.
-        # Materialize it with the release-core installed ABOVE (pinned to the
-        # v2 line): `init` composes from the wheel's OFFLINE bundle, no extra
-        # install. Deliberately NOT arm-gate's materialize input — that path
-        # re-runs install-release-core at its default `releases/latest`, which
-        # would override the v2 pin (and pull a v3 wheel into this v2 workflow
-        # once v3 exists). --no-commit: CI never auto-commits the managed tree.
+      - name: Install the .release/ temp dir
+        # The bot gate below runs the gate from .release/ — which is gitignored
+        # + ephemeral (WS4) and so absent on a fresh CI checkout. Install it
+        # with the release-core installed ABOVE (pinned to the v2 line): `init`
+        # writes from the wheel's OFFLINE bundle, no extra install. Deliberately
+        # NOT arm-gate's install input — that path re-runs install-release-core
+        # at its default `releases/latest`, which would override the v2 pin (and
+        # pull a v3 wheel into this v2 workflow once v3 exists). --no-commit: CI
+        # never auto-commits the managed paths.
         #
         # Skipped when a root lefthook.yml exists: then the gate definition is
         # LOCAL (release's own repo — hand-authored root gate, no detectable
@@ -139,16 +139,18 @@ jobs:
         run: |
           # Same root-config trio run-precommit-gate.sh detects.
           if [ -f lefthook.yml ] || [ -f .lefthook.yml ] || [ -f lefthook.yaml ]; then
-            echo "Root lefthook config present — gate definition is local; skipping .release/ materialize."
+            echo "Root lefthook config present — gate definition is local; skipping .release/ install."
           else
             release-core init --no-commit
           fi
       - name: Arm the gate toolset
         # ONE definition of CI gate-arming (pinned toolset), same as
-        # rust-cli.yml — but provision-only (materialize: 'false'; see the
-        # step above for why). Without an armed+materialized gate this
-        # workflow's bot gate had NOTHING to run on a post-WS3 consumer (no
-        # root lefthook.yml) and silently skipped (release#531 F1).
+        # rust-cli.yml — but provision-only (the install opt-out; see the step
+        # above for why). The input key is `materialize` here because this calls
+        # the still-pinned arm-gate@v2 — it becomes `install_tree` when this ref
+        # bumps to @v3. Without an armed+installed gate this workflow's bot gate
+        # had NOTHING to run on a post-WS3 consumer (no root lefthook.yml) and
+        # silently skipped (release#531 F1).
         uses: arthur-debert/release/.github/actions/arm-gate@v2
         with:
           materialize: 'false'
@@ -274,7 +276,7 @@ jobs:
             # + tag current HEAD.
             # Pre-commit gate — hold the bot commit to the consumer's own
             # gate, through the binary (release#531 F1). arm-gate above
-            # materialized .release/ + provisioned the pinned toolset;
+            # installed .release/ + provisioned the pinned toolset;
             # `release-core gate --hook` points lefthook at
             # .release/lefthook.yml (falling back to discovery for a
             # pre-migration root config). Replaces the drifted inline copy
@@ -373,7 +375,7 @@ jobs:
 
       # release_core wheel publish (pip-bootstrap transport, ADR-0003).
       # Only this repo (arthur-debert/release, the gh-action stack's own
-      # canonical consumer) ships the release_core package; the step is
+      # consumer) ships the release_core package; the step is
       # guarded so any other gh-action consumer without the package is a
       # clean no-op. When the package IS present the build/upload is a HARD
       # gate — a failed build or upload fails the release (set -euo pipefail,

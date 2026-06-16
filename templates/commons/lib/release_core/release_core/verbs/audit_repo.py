@@ -33,7 +33,7 @@ Checks performed:
 Conformance checks (WARN-only — don't fail; surface adoption gaps):
   9. scripts_inventory  — what's left in scripts/ beyond the shared
                            setup-dev-env.sh + project extras
- 10. workflows_canonical — count of workflows that are NOT thin callers of
+ 10. workflows_thin_callers — count of workflows that are NOT thin callers of
                            arthur-debert/release/* (legacy / bespoke surface)
 
 Shell→Python migration: the base64/jq/grep
@@ -61,7 +61,7 @@ _ECOSYSTEM_RE = re.compile(r"^[ \t]*-[ \t]*package-ecosystem:[ \t]*(.+?)[ \t]*$"
 _GOMOD_DEP_RE = re.compile(r"^\s*(?:require\s+)?github\.com/arthur-debert/", re.MULTILINE)
 _GOMOD_MODULE_RE = re.compile(r"^\s*module\s+")
 # A thin caller of a release/ reusable workflow.
-_CANONICAL_USE_RE = re.compile(r"uses:.*arthur-debert/release/\.github/workflows/")
+_THIN_CALLER_USE_RE = re.compile(r"uses:.*arthur-debert/release/\.github/workflows/")
 # git insteadOf + RELEASE_TOKEN, the private-module auth signal.
 _INSTEADOF_RE = re.compile(r"insteadOf.*github\.com")
 
@@ -393,34 +393,36 @@ def _check_scripts_inventory(repo: str, results: list) -> None:
         _record(results, "WARN", "scripts_inventory", f"non-standard: {','.join(extras)}")
 
 
-def _check_workflows_canonical(repo: str, results: list) -> None:
+def _check_workflows_thin_callers(repo: str, results: list) -> None:
     listing = _file_names(repo, ".github/workflows")
     if not listing:
-        _record(results, "SKIP", "workflows_canonical", "no .github/workflows/ on default branch")
+        _record(
+            results, "SKIP", "workflows_thin_callers", "no .github/workflows/ on default branch"
+        )
         return
-    canonical = 0
+    thin_callers = 0
     bespoke: list[str] = []
     total = 0
     for f in listing:
         total += 1
         body = _file_content(repo, f".github/workflows/{f}") or ""
-        if _CANONICAL_USE_RE.search(body):
-            canonical += 1
+        if _THIN_CALLER_USE_RE.search(body):
+            thin_callers += 1
         else:
             bespoke.append(f)
     if not bespoke:
         _record(
             results,
             "PASS",
-            "workflows_canonical",
+            "workflows_thin_callers",
             f"all {total} workflows are thin callers of release/",
         )
     else:
         _record(
             results,
             "WARN",
-            "workflows_canonical",
-            f"{canonical}/{total} thin callers; bespoke: {', '.join(bespoke)}",
+            "workflows_thin_callers",
+            f"{thin_callers}/{total} thin callers; bespoke: {', '.join(bespoke)}",
         )
 
 
@@ -434,7 +436,7 @@ _CHECKS = (
     _check_ci_main_green,
     _check_private_mod_auth,
     _check_scripts_inventory,
-    _check_workflows_canonical,
+    _check_workflows_thin_callers,
 )
 
 

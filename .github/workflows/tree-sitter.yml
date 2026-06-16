@@ -8,7 +8,7 @@ name: tree-sitter release
 # What this stack ships
 # ---------------------
 # - A `tree-sitter.tar.gz` artifact attached to the GH release,
-#   containing the canonical bundle layout downstream consumers
+#   containing the standard bundle layout downstream consumers
 #   (editors, syntax-highlighter libraries) extract from:
 #     <name>.wasm
 #     grammar.js
@@ -37,7 +37,7 @@ name: tree-sitter release
 #   Lives separately in cascade-handler.yml (Wave 1.3). Consumers
 #   that need cascade fan-out chain their thin caller's `release`
 #   job with a follow-up notify step (see lex-fmt/tree-sitter-lex
-#   release.yml for the canonical pattern).
+#   release.yml for the reference pattern).
 #
 # Convention hooks
 # ----------------
@@ -218,7 +218,7 @@ jobs:
           echo "parser-name=${parser}" >> "${GITHUB_OUTPUT}"
 
   # -------------------------------------------------------------------
-  # 2. Build the canonical tree-sitter bundle: regen parser, run
+  # 2. Build the standard tree-sitter bundle: regen parser, run
   #    corpus tests, build WASM, assemble dist/, tar it up.
   # -------------------------------------------------------------------
   build:

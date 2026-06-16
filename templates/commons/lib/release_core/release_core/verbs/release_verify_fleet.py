@@ -310,11 +310,11 @@ def _detect_kind(abspath: str) -> str:
 
 
 def _run_sync(abspath: str, ref_sha: str, release_home: str) -> bool:
-    """Build the consumer clone's managed tree, env-pinned to the candidate
-    SHA. Runs ``release-core init --no-commit`` (the standalone ``release-sync``
-    verb was retired in WS4, release#521); init's full build honors the same
-    RELEASE_HOME/RELEASE_REF pinning. --no-commit: the verify sweep only lints the
-    composed tree, it never mutates the clone's git state.
+    """Install the managed files into the consumer clone, env-pinned to the
+    candidate SHA. Runs ``release-core init --no-commit`` (the standalone
+    ``release-sync`` verb was retired in WS4, release#521); init's full install
+    honors the same RELEASE_HOME/RELEASE_REF pinning. --no-commit: the verify
+    sweep only lints the installed files, it never mutates the clone's git state.
 
     Combined stdout+stderr is written to <abspath>/.verify-sync.log. Returns True
     on a zero exit."""
@@ -333,7 +333,7 @@ def _run_gate(abspath: str) -> tuple[bool, str]:
 
     Invokes ``release-core gate`` (NOT a bare ``lefthook run``): since WS3
     (release#524) the consumer no longer tracks a root lefthook.yml for lefthook
-    to discover — the gate definition lives in the just-built
+    to discover — the gate definition lives in the just-installed
     ``.release/lefthook.yml``, and ``release-core gate`` is what points lefthook at
     it (LEFTHOOK_CONFIG) the same way the local hook + CI do. Spawned via
     ``_SELF_CLI`` (this interpreter, ``-m release_core``), never a PATH lookup

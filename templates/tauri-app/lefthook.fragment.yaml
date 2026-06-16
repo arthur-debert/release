@@ -7,7 +7,7 @@
 #
 # rust-quality assumes Cargo.toml at the repo ROOT and globs `**/*.rs`
 # at the root. In a Tauri app the Cargo workspace lives in `src-tauri/`
-# (canonical Tauri layout) — the consumer's repo root is the frontend.
+# (the standard Tauri layout) — the consumer's repo root is the frontend.
 # Running `cargo fmt` from root would error ("could not find Cargo.toml
 # in /path/or any parent dir").
 #

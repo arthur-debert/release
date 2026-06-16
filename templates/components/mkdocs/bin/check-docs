@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Canonical mkdocs build check. Synced from arthur-debert/release@<ref>
+# The mkdocs build check. Synced from arthur-debert/release@<ref>
 # (templates/components/mkdocs/). Do not edit by hand.
 #
 # Runs `mkdocs build --strict` so broken refs / missing nav entries /
 # plugin errors fail loudly. Pure local convenience — CI runs the same
-# command via the canonical mkdocs.yml reusable workflow.
+# command via the shared mkdocs.yml reusable workflow.
 #
 # Auto-discovers config:
 #   1. ./mkdocs.yml          (most consumers — dodot, standout)

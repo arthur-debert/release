@@ -13,7 +13,7 @@ description: |
                   .lefthook.yml / lefthook.yaml)
     2. husky  (.husky/pre-commit)
     3. release-core managed-gate fallback — when no root gate config
-       is present but release-core is on PATH, materialize the managed
+       is present but release-core is on PATH, install the managed
        gate from the wheel bundle and run it through the binary
        (`release-core gate --hook`). This is the post-WS3 path where
        the gate config lives only in the ephemeral .release/.

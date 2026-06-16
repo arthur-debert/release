@@ -21,7 +21,7 @@ Two artifacts fix that:
 2. **The assumption lint** (:func:`lint_repo`) — scans this repo's CI surfaces
    (reusable workflows, composite actions, shipped workflow copies under
    ``templates/``) for any JOB whose steps reference a managed path (from the
-   manifest's managed-path patterns) without a PRIOR build step in the
+   manifest's managed-path patterns) without a PRIOR install step in the
    same job (the ``arm-gate`` composite or an explicit ``release-core init``).
    This is the sweep that would have caught #579 the day WS7 merged.
 
@@ -56,7 +56,7 @@ BASELINE_RELPATH = "docs/references/consumer-contract-lint-baseline.yaml"
 CONTRACT_SCHEMA = 1
 
 # The managed-path PREFIXES: a CI job referencing any path under these must
-# build the managed tree first (arm-gate / release-core init) — post
+# install the `.release/` temp dir first (arm-gate / release-core init) — post
 # WS4/WS7 none of them exist in a fresh checkout. `bin/check` is deliberately a
 # prefix (covers bin/check, bin/check-e2e, bin/check-gate, …, the #579 family);
 # exact mirror dests (e.g. `.editorconfig`) come from the manifest's
@@ -106,9 +106,9 @@ def _capability_names(repo_root: str) -> list[str]:
 
 
 def _all_consumer_dests(repo_root: str) -> set[str]:
-    """The UNION of every dest the sync engine can build into a consumer,
+    """The UNION of every dest the sync engine can install into a consumer,
     across all Kinds and all Components — each subtree walked exactly as
-    ``build_plan`` walks it (same Source abstraction, same skip predicate,
+    ``install_plan`` walks it (same Source abstraction, same skip predicate,
     same prefix-strip), plus every distributed-skill dest (both catalogs:
     PUSH_ALL_SKILLS unconditionally and REPLACE_IF_PRESENT_SKILLS, which are
     part of the contract surface even though they sync conditionally)."""
@@ -160,7 +160,7 @@ def build_manifest(repo_root: str) -> dict:
         "gitignored": [".release/"],
         "untracked_mirrors": mirrors,
         "gate_internal": sorted(sync.GATE_INTERNAL_FILES),
-        "tombstones": {
+        "retired_files": {
             "blob": sorted(sync.RETIRED_BLOB_FILES),
             "fingerprint": sorted(sync.RETIRED_FINGERPRINT_FILES),
         },
@@ -182,7 +182,7 @@ _HEADER = """\
 #   release-core admin contract dump
 #
 # A PR that changes the contract (sync.py classification, templates/ dests,
-# tombstones) MUST regenerate this file in the same PR — the root lefthook.yml
+# retired_files) MUST regenerate this file in the same PR — the root lefthook.yml
 # `consumer-contract-check` gate entry fails when the file is out of sync.
 #
 # This manifest is PRESCRIPTIVE, not descriptive (#583 owner constraint): it
@@ -199,9 +199,9 @@ _HEADER = """\
 #   untracked_mirrors     — symlink dests recomposed every init, excluded via
 #                           .git/info/exclude, NEVER tracked (WS7).
 #   gate_internal         — live only inside .release/ (WS3).
-#   tombstones            — retired dests init removes (provenance-gated, WS6).
+#   retired_files         — retired dests init removes (provenance-gated, WS6).
 #   managed_path_prefixes — path prefixes whose presence in a CI job means the
-#                           job MUST build first (arm-gate /
+#                           job MUST install `.release/` first (arm-gate /
 #                           release-core init); the assumption lint
 #                           (bin-internal/lint-consumer-contract.sh) enforces
 #                           this over every workflow + composite action.
@@ -256,7 +256,7 @@ def manifest_text(repo_root: str) -> str:
 
 @dataclass(frozen=True)
 class Violation:
-    """One job step that references a managed path with no prior build step."""
+    """One job step that references a managed path with no prior install step."""
 
     file: str  # repo-relative path of the workflow / action file
     job: str  # job id ("(composite)" for a composite action's steps)
@@ -318,25 +318,30 @@ def _strip_shell_comments(text: str) -> str:
     return "\n".join(kept)
 
 
-def _step_is_materialize(step: dict) -> bool:
-    """A step that composes the managed tree: the arm-gate composite (its
-    materialize step runs `release-core init`; matched local-path and @ref
-    forms both) or an explicit `release-core init` run line. Exactly these two
-    — the standard recipe is DEMANDED, not one option among many (#583 owner
+def _step_installs_tree(step: dict) -> bool:
+    """A step that installs the `.release/` temp dir: the arm-gate composite (its
+    install step runs `release-core init`; matched local-path and @ref forms
+    both) or an explicit `release-core init` run line. Exactly these two — the
+    standard recipe is DEMANDED, not one option among many (#583 owner
     constraint: escape hatches shrink, not grow).
 
-    arm-gate called with `materialize: 'false'` (release's own ci.yml — the one
-    repo with real root configs) does NOT compose the tree, so it earns no
-    credit; `toolset: 'false'` (#581, the build-only building block)
-    still builds the tree and does."""
+    arm-gate called with the install opt-out (release's own ci.yml — the one
+    repo with real root configs) does NOT write `.release/`, so it earns no
+    credit; `toolset: 'false'` (#581, the install-only building block) still
+    writes `.release/` and does. The opt-out input is named `install_tree`
+    on arm-gate@v3 and `materialize` on the still-pinned @v2 — accept either."""
     uses = step.get("uses")
     if isinstance(uses, str) and uses.split("@", 1)[0].endswith("/arm-gate"):
         with_block = step.get("with")
         # str().lower() catches both the GH-conventional quoted 'false' and a
-        # bare YAML `false` (parsed as a bool).
-        return not (
-            isinstance(with_block, dict) and str(with_block.get("materialize")).lower() == "false"
-        )
+        # bare YAML `false` (parsed as a bool). Either input key opts out.
+        if isinstance(with_block, dict):
+            opt_out = (
+                str(with_block.get("install_tree")).lower() == "false"
+                or str(with_block.get("materialize")).lower() == "false"
+            )
+            return not opt_out
+        return True
     run = step.get("run")
     return isinstance(run, str) and "release-core init" in _strip_shell_comments(run)
 
@@ -381,22 +386,22 @@ def _step_checkout_path(step: dict) -> str | None:
 
 def _lint_steps(relpath: str, job_id: str, steps: list, regex: re.Pattern[str]) -> list[Violation]:
     """One job's steps, in order: a managed-path reference is a violation
-    unless a PRIOR step in the SAME job either built the managed tree
+    unless a PRIOR step in the SAME job either installed the `.release/` temp dir
     (arm-gate / release-core init) or checked content out INTO that path."""
     out: list[Violation] = []
-    materialized = False
+    tree_installed = False
     provided: list[str] = []
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
-        if _step_is_materialize(step):
-            materialized = True
+        if _step_installs_tree(step):
+            tree_installed = True
             continue
         checkout_path = _step_checkout_path(step)
         if checkout_path is not None:
             provided.append(checkout_path)
             continue
-        if materialized:
+        if tree_installed:
             continue
         ref = _first_unprovided_ref(step, regex, provided)
         if ref is not None:
@@ -481,7 +486,7 @@ def lint_workflow_dir(repo_root: str, patterns: list[str]) -> list[Violation]:
     """The CONSUMER-side sweep (#581): scan only ``.github/workflows/**`` of a
     consumer repo for jobs that reference a managed ephemeral path (``patterns``
     — the init-resolved mirror dests + the managed prefixes) without a prior
-    build step. Same scanner as :func:`lint_repo` (one scanner, two file
+    install step. Same scanner as :func:`lint_repo` (one scanner, two file
     enumerations); ``release-core init`` runs this at seed/session time as the
     tripwire warning for consumer-authored jobs (the supage#163 class).
 

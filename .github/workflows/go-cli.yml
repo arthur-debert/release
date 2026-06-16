@@ -40,7 +40,7 @@ on:
         default: ''
 
       darwin-archs:
-        description: 'Comma-separated macOS archs (arm64 only by canonical; intel-mac dropped). Set "" to skip macOS.'
+        description: 'Comma-separated macOS archs (arm64 only by default; intel-mac dropped). Set "" to skip macOS.'
         type: string
         required: false
         default: 'arm64'
@@ -70,7 +70,7 @@ on:
         default: 'arthur-debert/homebrew-tools'
 
       brew-desc:
-        description: 'Formula `desc` line (single line, ≤79 chars, no trailing period). Required when brew: true — Go has no canonical metadata file to derive this from.'
+        description: 'Formula `desc` line (single line, ≤79 chars, no trailing period). Required when brew: true — Go has no standard metadata file to derive this from.'
         type: string
         required: false
         default: ''
@@ -436,7 +436,7 @@ jobs:
           done
           rm -f "$KEY"
 
-      - name: Package binaries (canonical subdir layout)
+      - name: Package binaries (standard subdir layout)
         shell: bash
         env:
           BIN_NAME: ${{ inputs.bin-name }}
@@ -535,7 +535,7 @@ jobs:
             exit 0
           fi
           if [ -z "$BREW_DESC" ] || [ -z "$BREW_LICENSE" ]; then
-            echo "::error::brew: true requires brew-desc and brew-license inputs (Go has no canonical metadata file to derive them from)."
+            echo "::error::brew: true requires brew-desc and brew-license inputs (Go has no standard metadata file to derive them from)."
             exit 1
           fi
           echo "skip=false" >> "$GITHUB_OUTPUT"

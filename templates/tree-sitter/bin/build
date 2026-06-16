@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Canonical tree-sitter build entry point. Same script local + CI.
+# The tree-sitter build entry point. Same script local + CI.
 #
 # Builds the WASM artifact via `npx tree-sitter build --wasm`. Produces
 # `tree-sitter-<name>.wasm` in the repo root. The release-time
 # tree-sitter.yml@v1 workflow runs the same command then assembles the
-# canonical bundle (extension.toml + wasm + queries + src) into a
+# build bundle (extension.toml + wasm + queries + src) into a
 # tarball.
 #
 # Usage:

@@ -1,0 +1,1 @@
+- Remove release-sync/jargon legacy: delete redundant retired-skill list, rename compose-engine + contract identifiers off canonical/materialize/tombstone/pilot-running, migrate CLAUDE.md marker to release-core
