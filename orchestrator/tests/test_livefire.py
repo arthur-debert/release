@@ -115,7 +115,12 @@ def test_parse_feedback_tolerates_embedded_code_fence():
     # feedback; the indented ``` swept into the captured block and broke the
     # YAML loader ("found character '`'"). parse_feedback must strip bare fences
     # and salvage the report rather than fail the whole run.
-    t = "```yaml\nrepo: r\nverdict: clean\ndetail:\n  ```\n  snippet\n  ```\nextra: true\n```"
+    # Cover both a bare ``` and an info-string fence with non-word chars
+    # (```shell-session) — the latter must also be stripped.
+    t = (
+        "```yaml\nrepo: r\nverdict: clean\ndetail:\n"
+        "  ```shell-session\n  $ boom\n  ```\nextra: true\n```"
+    )
     fb = livefire.parse_feedback(t)
     assert fb["repo"] == "r"
     assert fb["verdict"] == "clean"

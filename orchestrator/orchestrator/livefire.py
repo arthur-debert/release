@@ -42,9 +42,12 @@ PROMPT_DOC_REL = "docs/dev/live-fire-prompt.md"
 # 3-backtick ```yaml schema example survives verbatim. Extract between them.
 _PROMPT_FENCE_RE = re.compile(r"^````text$", re.MULTILINE)
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
-# A line that is ONLY a code fence (optional indent/whitespace) — never valid
-# YAML, so safe to strip when an agent embeds one inside its feedback block.
-_BARE_FENCE_RE = re.compile(r"^\s*```\w*\s*$")
+# A line that is ONLY a code fence — ``` with an optional info string of any
+# shape (`shell-session`, `c++`, `objective-c`, …), so we match anything after
+# the backticks except a further backtick. A line starting with ``` is never
+# valid YAML, so this only ever fires (and only on the salvage retry, after the
+# raw block already failed to parse) on genuinely-stray fences.
+_BARE_FENCE_RE = re.compile(r"^\s*```[^`]*$")
 # A strict verification-tag shape — vX.Y.Z-release-rc (optional .N) — so a
 # transcript-sourced tag can't trigger a destructive delete unless it is exactly
 # a reserved verification tag (release#663).
