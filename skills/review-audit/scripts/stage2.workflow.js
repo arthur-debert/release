@@ -41,6 +41,11 @@ const BATCH =
 let reviewed = cfg.reviewed
 if (Array.isArray(args) && args.length) reviewed = args
 else if (typeof args === 'string' && args.trim().startsWith('[')) reviewed = JSON.parse(args)
+// LIMITATION (#740): `reviewed` (from cfg.reviewed) is trusted to be an array
+// here — a bare string would pass the `.length` truthiness check below and
+// then `.slice()` char-by-char into nonsense batches. Validating it's an
+// array of integers (fail fast otherwise) is part of the stage2 input-
+// hardening tracked in #740.
 if (!reviewed || !reviewed.length) {
   const slimDir = `${DIR}/slim`
   if (!fs.existsSync(slimDir)) {
@@ -55,6 +60,12 @@ if (!reviewed || !reviewed.length) {
     .filter(({ p }) => (JSON.parse(fs.readFileSync(p, 'utf8')).reviewers || []).length)
     .map(({ n }) => n)
     .sort((a, b) => a - b)
+  // LIMITATION (#740): a slim file's reviewers[] may name a bot that isn't in
+  // the configured REVIEWERS enum (e.g. one added via the extract --config
+  // overlay). That bot's findings then hit a confusing schema-enum rejection
+  // deep in the judge instead of failing fast here. Cross-checking the slim
+  // reviewers[] against REVIEWERS up front is part of the stage2 input-
+  // hardening tracked in #740.
 }
 
 const batches = []

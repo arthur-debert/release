@@ -46,18 +46,6 @@ def main():
         except Exception:
             pass
 
-    # Pick the reviewer (default: most multi-round PRs) and derive its PR list.
-    multi = collections.Counter()
-    for p in slim_dir.glob("pr-*.json"):
-        slim = json.loads(p.read_text())
-        rounds = collections.Counter(
-            t["reviewer"] for t in slim.get("threads", []) if (t.get("round") or 1) >= 2)
-        for rv in rounds:
-            multi[rv] += 1
-    reviewer = a.reviewer or (multi.most_common(1)[0][0] if multi else None)
-    if not reviewer:
-        print("no reviewer has round>=2 threads — nothing to classify")
-        return
     def eff_round(t):
         """Highest round in which this reviewer commented on the thread.
 
@@ -70,6 +58,23 @@ def main():
         rounds = [r for r in (t.get("bot_followup_rounds") or []) if r]
         rounds.append(t.get("round") or 1)
         return max(rounds)
+
+    # Pick the reviewer (default: most multi-round PRs) and derive its PR list.
+    # Use eff_round() here too — the same round>=2 notion the rest of the
+    # script uses — so a reviewer whose only round>=2 activity is follow-ups on
+    # round-1 threads is counted, and the auto-pick can't disagree with the
+    # body (which would pick the wrong default reviewer, or none).
+    multi = collections.Counter()
+    for p in slim_dir.glob("pr-*.json"):
+        slim = json.loads(p.read_text())
+        rounds = collections.Counter(
+            t["reviewer"] for t in slim.get("threads", []) if eff_round(t) >= 2)
+        for rv in rounds:
+            multi[rv] += 1
+    reviewer = a.reviewer or (multi.most_common(1)[0][0] if multi else None)
+    if not reviewer:
+        print("no reviewer has round>=2 activity — nothing to classify")
+        return
 
     prs = sorted(
         int(p.stem.split("-")[1]) for p in slim_dir.glob("pr-*.json")
