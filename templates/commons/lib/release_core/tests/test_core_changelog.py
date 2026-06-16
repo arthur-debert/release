@@ -45,10 +45,10 @@ def test_is_valid_semver_matches_semver_tool(v, valid):
 # --- changelog-add ----------------------------------------------------------
 
 
-# add now writes a `### <section>` heading above the bullet by default
-# (release#720). DEFAULT_SECTION is "Changed". Pass --section '' for the old
-# bare-bullet output. The leading heading is what every assertion below expects.
-_SECTION = f"### {changelog.DEFAULT_SECTION}\n\n".encode()
+# add writes a bare `- bullet` by default (the renderer's flat list). A
+# `### <section>` heading is opt-in via --section <name> (release#720). The
+# default carries no heading, so the prefix every assertion below adds is empty.
+_SECTION = f"### {changelog.DEFAULT_SECTION}".encode() if changelog.DEFAULT_SECTION else b""
 
 
 def test_add_inline_args_join_with_space(repo):
@@ -64,13 +64,12 @@ def test_add_numeric_slug_prefixed(repo):
     assert not (repo / "CHANGELOG" / "unreleased-142.md").exists()
 
 
-def test_add_default_section_heading(repo):
-    # The default fragment carries a keepachangelog-style section heading.
+def test_add_default_is_bare_bullet(repo):
+    # The default fragment is a bare bullet — no section heading — matching the
+    # verbatim renderer's flat list (release#720).
     rc = changelog.add_main(["fix", "Fix the thing (#9)"])
     assert rc == 0
-    assert (
-        repo / "CHANGELOG" / "unreleased-fix.md"
-    ).read_bytes() == b"### Changed\n\n- Fix the thing (#9)\n"
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"- Fix the thing (#9)\n"
 
 
 def test_add_custom_section(repo):
@@ -118,11 +117,11 @@ def test_add_help_after_force(repo, capsys):
     assert "usage:" in capsys.readouterr().out
 
 
-def test_add_stdin_already_bulleted_gets_section(repo, monkeypatch):
+def test_add_stdin_already_bulleted_stays_bare(repo, monkeypatch):
     import io
 
-    # Already-bulleted stdin keeps its bullets (no double-bullet) but still
-    # picks up the default section heading.
+    # Already-bulleted stdin keeps its bullets (no double-bullet) and, by
+    # default, no section heading is added.
     payload = b"- one\n- two\n\n"
     monkeypatch.setattr("sys.stdin", type("S", (), {"buffer": io.BytesIO(payload)})())
     changelog.add_main(["multi"])
@@ -181,14 +180,14 @@ def test_add_collision_fails_without_force(repo, capsys):
     rc = changelog.add_main(["142", "second"])
     assert rc == 1
     assert "already exists" in capsys.readouterr().err
-    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "### Changed\n\n- first\n"
+    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "- first\n"
 
 
 def test_add_force_overwrites(repo):
     changelog.add_main(["142", "first"])
     rc = changelog.add_main(["--force", "142", "second"])
     assert rc == 0
-    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "### Changed\n\n- second\n"
+    assert (repo / "CHANGELOG" / "unreleased-pr-142.md").read_text() == "- second\n"
 
 
 @pytest.mark.parametrize("slug", ["../evil", ".hidden", "a/b"])

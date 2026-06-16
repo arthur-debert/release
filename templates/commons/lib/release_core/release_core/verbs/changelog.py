@@ -103,16 +103,18 @@ ADD_USAGE = (
     "\n"
     "Options:\n"
     "  --force            overwrite an existing fragment\n"
-    "  --section <name>   group heading for the fragment (default: Changed);\n"
-    "                     pass --section '' to omit the heading\n"
+    "  --section <name>   write a `### <name>` group heading above the bullet\n"
+    "                     (keepachangelog-style); default is a bare bullet (no\n"
+    "                     heading), matching the verbatim renderer's flat list\n"
     "  -h, --help         show this help and exit"
 )
 
-# Default group heading written above the bullet so a fragment reads as a
-# keepachangelog-style section (### Changed / Added / Fixed …). The renderer
-# concatenates fragment bytes verbatim, so the heading flows straight into the
-# Unreleased block. Pass `--section ''` to write a bare bullet (old behavior).
-DEFAULT_SECTION = "Changed"
+# A fragment is a bare `- bullet` by default: the renderer concatenates fragment
+# bytes verbatim into a flat list under the version (it does NOT group by
+# section), so a per-fragment `### <section>` heading would scatter stray
+# headings through that list. `--section <name>` is opt-in for repos that
+# genuinely author keepachangelog-style sectioned fragments (release#720).
+DEFAULT_SECTION = ""
 
 _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
