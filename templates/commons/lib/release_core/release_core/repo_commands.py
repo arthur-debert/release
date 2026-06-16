@@ -519,13 +519,16 @@ def preflight(cmd: Cmd, root: str) -> str | None:
         pm = detect_pm(root)
         return f"dependencies not installed — run `{pm} install` first"
     # 2. Build artifact: wasm crates not built (vitest load-failures from
-    #    `wasm/*/pkg/` missing).
-    missing = _wasm_crate_dirs_missing_pkg(root)
-    if missing:
-        return (
-            "wasm packages not built — run the wasm build first "
-            f"(missing pkg/ in: {', '.join(missing)})"
-        )
+    #    `wasm/*/pkg/` missing). Only a node-driven suite imports the built
+    #    `pkg/`, so gate this on the command — a `cargo test`/`cargo build` in a
+    #    repo that merely *has* a `wasm/` dir doesn't depend on its `pkg/`.
+    if _is_node_run(cmd, root):
+        missing = _wasm_crate_dirs_missing_pkg(root)
+        if missing:
+            return (
+                "wasm packages not built — run the wasm build first "
+                f"(missing pkg/ in: {', '.join(missing)})"
+            )
     # 3. Build artifact: tree-sitter parser not generated (`parser.c not found`).
     if _tree_sitter_parser_missing(root):
         return "tree-sitter parser not generated — run `tree-sitter generate` first"

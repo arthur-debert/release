@@ -83,7 +83,7 @@ to do something, that is a finding — note it and use your best guess.
    version `1.4.3-release-rc` — no leading `v`; the cut command rejects a `v`
    prefix and the resulting tag becomes `v1.4.3-release-rc`). Discover the cut
    command. BEFORE you cut, ensure a `CHANGELOG/unreleased-*.md` fragment exists
-   (your coverage PR from step 3 should already carry one; if it doesn't, add a
+   (your coverage PR from step 4 should already carry one; if it doesn't, add a
    throwaway via the repo's changelog command) — the release prepare gate
    REFUSES to cut without a fragment and will fail the run otherwise. Report
    whether it dispatched, whether the pipeline ran prep → build →

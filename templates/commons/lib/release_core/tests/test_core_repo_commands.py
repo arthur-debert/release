@@ -435,6 +435,17 @@ def test_preflight_wasm_built_is_clean(tmp_path):
     assert rc.preflight(_node_cmd("npm"), str(tmp_path)) is None
 
 
+def test_preflight_wasm_unbuilt_ignored_for_non_node_command(tmp_path):
+    # A `cargo test`/`cargo build` doesn't import the wasm `pkg/`, so an unbuilt
+    # wasm crate must NOT block it — the wasm check is gated on a node command.
+    (tmp_path / "node_modules").mkdir()
+    wasm = tmp_path / "wasm" / "phos-viewer-wasm"
+    wasm.mkdir(parents=True)
+    (wasm / "Cargo.toml").write_text("[package]\nname='x'\n")
+    cmd = rc.Cmd(["cargo", "test"], "cargo test", label="rust")
+    assert rc.preflight(cmd, str(tmp_path)) is None
+
+
 def test_preflight_tree_sitter_parser_missing(tmp_path):
     # grammar.js present, no src/parser.c → the `parser.c not found` case
     # (#702). A non-node command still triggers it (e.g. an nvim test runner).
