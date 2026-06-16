@@ -203,6 +203,18 @@ def test_real_root_config_present_true_for_authored_config(tmp_path):
     assert gate._real_root_config_present(str(tmp_path)) is True
 
 
+def test_empty_starter_is_not_real_and_gets_clobbered(tmp_path):
+    # release#737: a `lefthook install` that ran BEFORE `--install-hook` leaves an
+    # empty / all-commented starter lefthook.yml. It is NOT a real config (would
+    # bypass the fail-loud guard) and must be replaced by the stub.
+    _git_init(tmp_path)
+    starter = tmp_path / "lefthook.yml"
+    starter.write_text("# Refer to https://lefthook.dev for documentation\n#\n# pre-commit:\n")
+    assert gate._real_root_config_present(str(tmp_path)) is False
+    gate._install_hook(str(tmp_path))
+    assert gate._STUB_MARKER in starter.read_text()
+
+
 def test_git_exclude_is_idempotent(tmp_path):
     _git_init(tmp_path)
     gate._git_exclude(str(tmp_path), "lefthook.yml")

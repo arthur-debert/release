@@ -328,23 +328,36 @@ def _install_hook(root: str) -> int:
     return 0
 
 
+def _has_active_config_lines(text: str) -> bool:
+    """True iff `text` has any active (non-blank, non-comment) line — i.e. real
+    config content. An empty or entirely-commented file (the starter lefthook.yml
+    a stray `lefthook install` creates) has none."""
+    return any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines())
+
+
 def _real_root_config_present(root: str) -> bool:
     """True iff the repo root has a REAL lefthook config — release-self's
     hand-authored gate or a not-yet-migrated consumer's — as opposed to OUR
-    untracked redirect stub (release#714). A `lefthook.yml` carrying the stub
-    marker is NOT a real config: it declares no hooks and must not satisfy the
-    unbuilt-gate fail-loud guard (release#567) nor be overwritten as if authored."""
+    untracked redirect stub or an empty/all-commented starter (release#714).
+    Neither the stub (marker-identified) NOR an inactive starter is a real config:
+    both declare no active hooks and must not satisfy the unbuilt-gate fail-loud
+    guard (release#567). An inactive starter is additionally clobberable by our
+    stub — release#737 review: a starter that a `lefthook install` created BEFORE
+    `--install-hook` ran would otherwise survive and bypass the guard."""
     for name in _DISCOVERY_NAMES:
         path = os.path.join(root, name)
         if not os.path.isfile(path):
             continue
         try:
             with open(path, encoding="utf-8") as fh:
-                head = fh.read(512)
+                text = fh.read()
         except OSError:
             return True  # unreadable but present — treat as real, don't clobber
-        if _STUB_MARKER not in head:
-            return True
+        if _STUB_MARKER in text[:512]:
+            continue  # our own redirect stub — not a real config
+        if _has_active_config_lines(text):
+            return True  # authored / real config — never clobber
+        # else: empty or all-commented starter — NOT real, clobberable by the stub.
     return False
 
 
@@ -360,12 +373,14 @@ def _write_root_stub(root: str) -> None:
         return
     stub_path = os.path.join(root, "lefthook.yml")
     try:
-        # Refresh only if absent or already our stub — never stomp a file that
-        # appeared without the marker between the check above and here.
+        # We write when the root is absent, already our stub, OR an inactive
+        # starter (no active lines). TOCTOU guard: only bail if a REAL config
+        # (active, non-stub content) appeared between the check above and here.
         if os.path.isfile(stub_path):
             with open(stub_path, encoding="utf-8") as fh:
-                if _STUB_MARKER not in fh.read(512):
-                    return
+                text = fh.read()
+            if _STUB_MARKER not in text[:512] and _has_active_config_lines(text):
+                return
         with open(stub_path, "w", encoding="utf-8") as fh:
             fh.write(_STUB_BODY)
     except OSError as exc:

@@ -7,10 +7,12 @@ on a reviewer's name — it consumes the adapter interface only.
 
 Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
-  Ready    = Reviewed + CI green + a CLEAN merge state. "Mergeable" here means
-             `mergeStateStatus == CLEAN` — the authoritative, merge-obeyed
-             signal — NOT GitHub's async-stale `mergeable` verdict (it reads
-             MERGEABLE optimistically before a recompute lands). Gate order once
+  Ready    = Reviewed + CI green + a merge state of CLEAN, or UNSTABLE while the
+             CI rollup is already green (a transient ready_for_review re-queue
+             lag; release#715). "Mergeable" here keys off `mergeStateStatus` — the
+             authoritative, merge-obeyed signal — NOT GitHub's async-stale
+             `mergeable` verdict (it reads MERGEABLE optimistically before a
+             recompute lands). Gate order once
              Reviewed: a conflict (DIRTY) or a BEHIND base surfaces first (a
              moved base re-stales CI); then failing/pending CI (BLOCKED /
              VALIDATING); then CLEAN -> READY; an UNSTABLE that survives the CI
