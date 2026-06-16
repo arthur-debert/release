@@ -373,7 +373,12 @@ def test_coverage_friendly_fails_when_deps_missing(monkeypatch, capsys, tmp_path
     (tmp_path / "pnpm-lock.yaml").write_text("")  # no node_modules → deps missing
     executed = {"v": False}
     monkeypatch.setattr(tasks, "_repo_root", lambda: str(tmp_path))
-    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    # coverage execs through _coverage_exec (release#694), not _exec — tripwire
+    # the real exec path so a preflight miss would be a loud assert, never a raw
+    # subprocess.
+    monkeypatch.setattr(
+        tasks, "_coverage_exec", lambda cmd, root, *, raw: executed.update(v=True) or 0
+    )
     monkeypatch.setattr(
         tasks.repo_commands,
         "coverage_commands",

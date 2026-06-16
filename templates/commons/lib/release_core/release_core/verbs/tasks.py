@@ -201,8 +201,12 @@ def _coverage_exec(cmd: Cmd, root: str, *, raw: bool) -> int:
 
 
 def _coverage_fanout(cmds: list[Cmd], root: str, *, raw: bool) -> int:
-    """Run each coverage command in order; stop at the first non-zero."""
+    """Run each coverage command in order; stop at the first non-zero. A missing
+    prerequisite (bare checkout) friendly-fails before exec, same as _fanout."""
     for cmd in cmds:
+        rc = _preflight(cmd, root)
+        if rc != 0:
+            return rc
         rc = _coverage_exec(cmd, root, raw=raw)
         if rc != 0:
             return rc
