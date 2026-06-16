@@ -152,7 +152,7 @@ def parse_feedback(transcript: str) -> dict:
         raise LiveFireError(
             "agent emitted no parseable feedback block (no ```yaml block with a "
             "'verdict' key) — it likely finished the work + PR but skipped the "
-            "feedback step even after a prod"
+            "feedback step"
         )
     return fb
 

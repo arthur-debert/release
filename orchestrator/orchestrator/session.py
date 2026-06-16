@@ -64,6 +64,11 @@ async def run_session(
 
     Returns the discovered session_id (if any).
     """
+    if (followup_prompt or needs_followup) and text_sink is None:
+        raise ValueError(
+            "followup_prompt/needs_followup require text_sink (the prod predicate "
+            "reads the accumulated transcript) — pass a text_sink list."
+        )
     _force_blocking_stdio()
     repo_path = str(Path(repo_path).expanduser().resolve())
     resume_id = state.get(repo_path) if resume else None
