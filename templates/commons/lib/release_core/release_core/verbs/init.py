@@ -11,18 +11,17 @@ DISTRIBUTION is pull-only — there is no push mechanism (#476; `orc propagate`
 was removed). The `--push` flag below is unrelated to distribution: it is an
 opt-in plain `git push` of the LOCAL managed auto-commit.
 
-A bare `release-core init` runs the COMPLETE managed-tree build (`build_plan` →
-`build_tree` → `diff_release` → `compute_mirror` → `decide_claude` → apply) sourced
-from the wheel bundle — the whole
-`.release/` build dir + every working-tree mirror (skills, configs,
-per-Kind/Component files, real-file workflow copies, the CLAUDE.md managed
+A bare `release-core init` installs the files from the wheel bundle (`install_plan` →
+`install_tree` → `diff_release` → `compute_mirror` → `decide_claude` → apply):
+the `.release/` temp dir + every working-tree mirror (skills, configs,
+per-Kind/Component files, real-file workflow copies, the CLAUDE.md header
 block) — then AUTO-COMMITS ONLY the managed paths iff they actually changed.
 Byte-identical result → no commit, so churn tracks release cadence, not session
-count. This is what SessionStart runs; it is the managed-tree build sourced from the
-wheel. This is the ONLY mode: the `--config-only` escape hatch (the pre-#476
-config-subset behavior) was REMOVED in release#532 — post-WS3 it built
-root configs whose gate referenced a `.release/` it never created, an
-internally inconsistent path nothing on the fleet used.
+count. This is what SessionStart runs, from the wheel. This is the ONLY mode:
+the `--config-only` escape hatch (the pre-#476 config-subset behavior) was
+REMOVED in release#532 — post-WS3 it wrote root configs whose gate referenced a
+`.release/` it never created, an internally inconsistent path nothing on the
+fleet used.
 
 Flags:
   --dry-run    compute + report the change count, write nothing.
@@ -56,9 +55,9 @@ hatch_build.py) so init is self-contained — no release clone, no network. This
 is the DEFAULT and the only path a pip-installed consumer ever takes.
 
 A `$RELEASE_HOME` git checkout, when explicitly present (release-dev only),
-OVERRIDES the bundle: init then composes from live templates via the full
-build engine (sync.build_plan + sync.build_tree) at $RELEASE_REF, the
-same git-clone contract the build engine uses. In an editable/source checkout the
+OVERRIDES the bundle: init then installs from live templates via
+sync.install_plan + sync.install_tree at $RELEASE_REF, the
+same git-clone contract those steps use. In an editable/source checkout the
 bundle is absent (a gitignored build artifact), so $RELEASE_HOME is required
 there; a fresh wheel install needs neither.
 
@@ -111,14 +110,14 @@ def _read_sync_yaml(repo_root: str) -> str | None:
 
 # ── Full build: the whole managed tree, from the bundle ──────────────────────
 #
-# The full build is the SAME engine pipeline init
-# runs (build_plan + build_tree + diff + compute_mirror + decide_claude + apply),
-# now sourced from the wheel bundle and driven by init: BundleSource by default,
+# It runs the SAME steps init always runs
+# (install_plan + install_tree + diff + compute_mirror + decide_claude + apply),
+# sourced from the wheel bundle: BundleSource by default,
 # or GitSource when a
 # real $RELEASE_HOME clone is present (release-dev override, mirroring how the
-# config path prefers $RELEASE_HOME over the bundle). It builds the full
-# .release/ build dir plus all working-tree mirrors (symlinks, real-file copies,
-# the CLAUDE.md orientation block) — the whole managed tree.
+# config path prefers $RELEASE_HOME over the bundle). It writes the
+# .release/ temp dir plus all working-tree mirrors (symlinks, real-file copies,
+# the CLAUDE.md header block).
 
 
 def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, str, list[str]]:
@@ -253,12 +252,12 @@ def _run_full_sync(
     for the detected Kind.
     """
     source, kind, caps_names = _resolve_full_source(repo_root, repo_name)
-    plan = sync.build_plan(source, kind, caps_names, repo_root=repo_root)
+    plan = sync.install_plan(source, kind, caps_names, repo_root=repo_root)
 
     tmp_release = tempfile.mkdtemp(prefix=".release-build.", dir=repo_root)
     swapped = False
     try:
-        sync.build_tree(source, source.ref_sha, plan, tmp_release)
+        sync.install_tree(source, source.ref_sha, plan, tmp_release)
         file_diff, new_files = sync.diff_release(tmp_release, os.path.join(repo_root, ".release"))
         mirror = sync.compute_mirror(new_files, repo_root, tmp_release, migrate=False)
         claude = sync.decide_claude(repo_root, tmp_release)
@@ -653,7 +652,7 @@ def _main_full(
 ) -> int:
     """The default init path: full managed-tree build + auto-commit-on-change.
 
-    Runs the complete managed-tree build (build_plan + build_tree +
+    Runs the complete managed-tree build (install_plan + install_tree +
     diff_release + compute_mirror + decide_claude + apply), sourced from the wheel
     bundle by default (or a real
     $RELEASE_HOME clone), then — unless --no-commit/--dry-run — stages ONLY the

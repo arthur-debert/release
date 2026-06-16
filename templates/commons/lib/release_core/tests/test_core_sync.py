@@ -336,7 +336,7 @@ def test_subtree_list_order():
     ]
 
 
-def test_build_plan_precedence_last_write_wins(monkeypatch):
+def test_install_plan_precedence_last_write_wins(monkeypatch):
     """A dest present in both commons and the kind subtree resolves to the kind's
     source (kind is later in precedence) but keeps its first-seen order slot."""
     trees = {
@@ -351,7 +351,7 @@ def test_build_plan_precedence_last_write_wins(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_ls_tree", ls_tree)
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
 
-    plan = sync.build_plan(_git_source(), "rust-cli", [])
+    plan = sync.install_plan(_git_source(), "rust-cli", [])
     assert plan.order == ["bin/check"]  # fragment skipped; single dest
     assert plan.source["bin/check"] == "templates/rust-cli/bin/check"  # last wins
     assert plan.mode["bin/check"] == "100755"
@@ -375,13 +375,13 @@ def _skill_tree_ls(skill_files):
     return ls_tree
 
 
-def test_build_plan_distributes_push_all_skills(monkeypatch):
+def test_install_plan_distributes_push_all_skills(monkeypatch):
     """Every PUSH_ALL skill that exists at the ref materializes whole-directory:
     each file under skills/<name>/ → .claude/skills/<name>/<subpath>."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for name in sync.PUSH_ALL_SKILLS:
         dest = f".claude/skills/{name}/SKILL.md"
         assert dest in plan.order
@@ -389,7 +389,7 @@ def test_build_plan_distributes_push_all_skills(monkeypatch):
         assert plan.mode[dest] == "100644"
 
 
-def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
+def test_install_plan_multifile_skill_distributes_all_files(monkeypatch):
     """A multi-file skill (extra .md alongside SKILL.md) reaches the consumer in
     full, not just its SKILL.md. Uses a kept PUSH_ALL skill (gh-pr-review-loop)."""
     multi = "gh-pr-review-loop"
@@ -400,26 +400,26 @@ def test_build_plan_multifile_skill_distributes_all_files(monkeypatch):
     }
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for sub in ("SKILL.md", "mocking.md", "tests.md", "refactoring.md"):
         dest = f".claude/skills/{multi}/{sub}"
         assert dest in plan.order
         assert plan.source[dest] == f"skills/{multi}/{sub}"
 
 
-def test_build_plan_tolerates_missing_skill_dir(monkeypatch):
+def test_install_plan_tolerates_missing_skill_dir(monkeypatch):
     """A PUSH_ALL skill whose dir is absent at the ref is silently skipped."""
     # Only gh-pr-review-loop exists; the rest return "" (missing).
     files = {"gh-pr-review-loop": ["SKILL.md"]}
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     assert ".claude/skills/gh-pr-review-loop/SKILL.md" in plan.order
     # A missing skill contributes nothing.
     assert ".claude/skills/diagnose/SKILL.md" not in plan.order
 
 
-def test_build_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tmp_path):
+def test_install_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tmp_path):
     """REPLACE_IF_PRESENT skills are synced ONLY when the consumer already carries
     .claude/skills/<name>; otherwise they are not added to the plan."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
@@ -431,13 +431,13 @@ def test_build_plan_replace_if_present_only_when_consumer_has_it(monkeypatch, tm
     have = sync.REPLACE_IF_PRESENT_SKILLS[0]
     (tmp_path / ".claude" / "skills" / have).mkdir(parents=True)
 
-    plan = sync.build_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
+    plan = sync.install_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
     assert f".claude/skills/{have}/SKILL.md" in plan.order
     for name in sync.REPLACE_IF_PRESENT_SKILLS[1:]:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
-def test_build_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
+def test_install_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
     """An existing .claude/skills/<name> SYMLINK also counts as present."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
@@ -449,22 +449,22 @@ def test_build_plan_replace_if_present_detects_symlink(monkeypatch, tmp_path):
     skills_dir.mkdir(parents=True)
     os.symlink("/nowhere", str(skills_dir / name))  # dangling symlink still counts
 
-    plan = sync.build_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
+    plan = sync.install_plan(_git_source(), "tree-sitter", [], repo_root=str(tmp_path))
     assert f".claude/skills/{name}/SKILL.md" in plan.order
 
 
-def test_build_plan_replace_if_present_skipped_without_repo_root(monkeypatch):
+def test_install_plan_replace_if_present_skipped_without_repo_root(monkeypatch):
     """No repo_root (clone-less init) ⇒ REPLACE_IF_PRESENT skills are skipped."""
     files = {name: ["SKILL.md"] for name in sync.PUSH_ALL_SKILLS}
     files.update({name: ["SKILL.md"] for name in sync.REPLACE_IF_PRESENT_SKILLS})
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for name in sync.REPLACE_IF_PRESENT_SKILLS:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
-def test_build_plan_never_distributes_release_only_skills(monkeypatch):
+def test_install_plan_never_distributes_release_only_skills(monkeypatch):
     """Release-only skills are never in either catalog ⇒ never planned, even if
     they exist at the ref."""
     release_only = ["release-fleet-ops", "release-fleet-triage", "gh-repo-setup"]
@@ -472,12 +472,12 @@ def test_build_plan_never_distributes_release_only_skills(monkeypatch):
     files.update({name: ["SKILL.md"] for name in release_only})
     monkeypatch.setattr(sync.gh, "git_ls_tree", _skill_tree_ls(files))
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     for name in release_only:
         assert f".claude/skills/{name}/SKILL.md" not in plan.order
 
 
-def test_build_plan_lefthook_fragment_order(monkeypatch):
+def test_install_plan_lefthook_fragment_order(monkeypatch):
     monkeypatch.setattr(sync.gh, "git_ls_tree", lambda *a, **k: "")
     present = {
         "ref:templates/components/_lefthook-base.yaml",
@@ -486,7 +486,7 @@ def test_build_plan_lefthook_fragment_order(monkeypatch):
         "ref:templates/rust-cli/lefthook.fragment.yaml",
     }
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: rp in present)
-    plan = sync.build_plan(_git_source(), "rust-cli", ["cap"])
+    plan = sync.install_plan(_git_source(), "rust-cli", ["cap"])
     assert plan.lefthook_frags == [
         "templates/components/_lefthook-base.yaml",
         "templates/commons/lefthook.fragment.yaml",
@@ -495,7 +495,7 @@ def test_build_plan_lefthook_fragment_order(monkeypatch):
     ]
 
 
-def test_build_plan_skips_skip_sources(monkeypatch):
+def test_install_plan_skips_skip_sources(monkeypatch):
     listing = (
         "100644 blob a\ttemplates/commons/manifest.yaml\n"
         "100644 blob b\ttemplates/commons/lefthook.fragment.yaml\n"
@@ -510,12 +510,12 @@ def test_build_plan_skips_skip_sources(monkeypatch):
         lambda ref, path, *, cwd, **k: listing if path == "templates/commons" else "",
     )
     monkeypatch.setattr(sync.gh, "git_cat_file_exists", lambda rp, *, cwd: False)
-    plan = sync.build_plan(_git_source(), "tree-sitter", [])
+    plan = sync.install_plan(_git_source(), "tree-sitter", [])
     assert plan.order == ["bin/real"]  # bytecode + skip-sources dropped
 
 
-def test_build_tree_writes_managed_gitignore(monkeypatch, tmp_path):
-    """build_tree() always writes a self-ignoring .release/.gitignore (`*`) so the
+def test_install_tree_writes_managed_gitignore(monkeypatch, tmp_path):
+    """install_tree() always writes a self-ignoring .release/.gitignore (`*`) so the
     whole ephemeral build dir is invisible to git — out-of-sync impossible by
     construction (WS4, release#521; supersedes the bytecode-only ignore of #450)."""
     plan = sync.Plan()
@@ -524,7 +524,7 @@ def test_build_tree_writes_managed_gitignore(monkeypatch, tmp_path):
     plan.source = {"bin/real": "templates/commons/bin/real"}
 
     monkeypatch.setattr(sync.gh, "git_show_bytes", lambda spec, *, cwd: b"#!/bin/sh\n")
-    sync.build_tree(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
+    sync.install_tree(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
 
     gi = tmp_path / ".gitignore"
     assert gi.is_file()

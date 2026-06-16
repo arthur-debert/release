@@ -56,7 +56,7 @@ BASELINE_RELPATH = "docs/references/consumer-contract-lint-baseline.yaml"
 CONTRACT_SCHEMA = 1
 
 # The managed-path PREFIXES: a CI job referencing any path under these must
-# build the managed tree first (arm-gate / release-core init) — post
+# install the `.release/` temp dir first (arm-gate / release-core init) — post
 # WS4/WS7 none of them exist in a fresh checkout. `bin/check` is deliberately a
 # prefix (covers bin/check, bin/check-e2e, bin/check-gate, …, the #579 family);
 # exact mirror dests (e.g. `.editorconfig`) come from the manifest's
@@ -108,7 +108,7 @@ def _capability_names(repo_root: str) -> list[str]:
 def _all_consumer_dests(repo_root: str) -> set[str]:
     """The UNION of every dest the sync engine can build into a consumer,
     across all Kinds and all Components — each subtree walked exactly as
-    ``build_plan`` walks it (same Source abstraction, same skip predicate,
+    ``install_plan`` walks it (same Source abstraction, same skip predicate,
     same prefix-strip), plus every distributed-skill dest (both catalogs:
     PUSH_ALL_SKILLS unconditionally and REPLACE_IF_PRESENT_SKILLS, which are
     part of the contract surface even though they sync conditionally)."""
@@ -318,25 +318,30 @@ def _strip_shell_comments(text: str) -> str:
     return "\n".join(kept)
 
 
-def _step_is_materialize(step: dict) -> bool:
-    """A step that composes the managed tree: the arm-gate composite (its
-    materialize step runs `release-core init`; matched local-path and @ref
-    forms both) or an explicit `release-core init` run line. Exactly these two
-    — the standard recipe is DEMANDED, not one option among many (#583 owner
+def _step_installs_tree(step: dict) -> bool:
+    """A step that installs the `.release/` temp dir: the arm-gate composite (its
+    install step runs `release-core init`; matched local-path and @ref forms
+    both) or an explicit `release-core init` run line. Exactly these two — the
+    standard recipe is DEMANDED, not one option among many (#583 owner
     constraint: escape hatches shrink, not grow).
 
-    arm-gate called with `materialize: 'false'` (release's own ci.yml — the one
-    repo with real root configs) does NOT compose the tree, so it earns no
-    credit; `toolset: 'false'` (#581, the build-only building block)
-    still builds the tree and does."""
+    arm-gate called with the install opt-out (release's own ci.yml — the one
+    repo with real root configs) does NOT write `.release/`, so it earns no
+    credit; `toolset: 'false'` (#581, the install-only building block) still
+    writes `.release/` and does. The opt-out input is named `install-tree`
+    on arm-gate@v3 and `materialize` on the still-pinned @v2 — accept either."""
     uses = step.get("uses")
     if isinstance(uses, str) and uses.split("@", 1)[0].endswith("/arm-gate"):
         with_block = step.get("with")
         # str().lower() catches both the GH-conventional quoted 'false' and a
-        # bare YAML `false` (parsed as a bool).
-        return not (
-            isinstance(with_block, dict) and str(with_block.get("materialize")).lower() == "false"
-        )
+        # bare YAML `false` (parsed as a bool). Either input key opts out.
+        if isinstance(with_block, dict):
+            opt_out = (
+                str(with_block.get("install-tree")).lower() == "false"
+                or str(with_block.get("materialize")).lower() == "false"
+            )
+            return not opt_out
+        return True
     run = step.get("run")
     return isinstance(run, str) and "release-core init" in _strip_shell_comments(run)
 
@@ -381,22 +386,22 @@ def _step_checkout_path(step: dict) -> str | None:
 
 def _lint_steps(relpath: str, job_id: str, steps: list, regex: re.Pattern[str]) -> list[Violation]:
     """One job's steps, in order: a managed-path reference is a violation
-    unless a PRIOR step in the SAME job either built the managed tree
+    unless a PRIOR step in the SAME job either installed the `.release/` temp dir
     (arm-gate / release-core init) or checked content out INTO that path."""
     out: list[Violation] = []
-    materialized = False
+    tree_installed = False
     provided: list[str] = []
     for i, step in enumerate(steps):
         if not isinstance(step, dict):
             continue
-        if _step_is_materialize(step):
-            materialized = True
+        if _step_installs_tree(step):
+            tree_installed = True
             continue
         checkout_path = _step_checkout_path(step)
         if checkout_path is not None:
             provided.append(checkout_path)
             continue
-        if materialized:
+        if tree_installed:
             continue
         ref = _first_unprovided_ref(step, regex, provided)
         if ref is not None:

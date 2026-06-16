@@ -566,8 +566,8 @@ def _build_via_bundle(tmp_path, src_root, kind):
     out = tmp_path / "out-bundle"
     out.mkdir()
     source = sync.BundleSource(str(src_root), ref_sha="release-core test")
-    plan = sync.build_plan(source, kind, [])
-    sync.build_tree(source, source.ref_sha, plan, str(out))
+    plan = sync.install_plan(source, kind, [])
+    sync.install_tree(source, source.ref_sha, plan, str(out))
     return out
 
 
@@ -575,8 +575,8 @@ def _build_via_git(tmp_path, clone, kind):
     out = tmp_path / "out-git"
     out.mkdir()
     source = sync.GitSource(str(clone), "HEAD", "abc123sha")
-    plan = sync.build_plan(source, kind, [])
-    sync.build_tree(source, source.ref_sha, plan, str(out))
+    plan = sync.install_plan(source, kind, [])
+    sync.install_tree(source, source.ref_sha, plan, str(out))
     return out
 
 

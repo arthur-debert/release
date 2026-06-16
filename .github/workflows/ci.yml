@@ -44,13 +44,13 @@ jobs:
         # replaces the #417/#419 inline blocks fleet-wide. Local path ref since
         # this is release's own repo. (release#416)
         #
-        # materialize:false — release is the SOURCE repo: it has real root configs
-        # (a real lefthook.yml), no detectable Kind, and never composes a
-        # `.release/` tree, so the WS4 materialize step (release#521) would fail
+        # install-tree:false — release is the SOURCE repo: it has real root configs
+        # (a real lefthook.yml), no detectable Kind, and never writes a
+        # `.release/` temp dir, so the WS4 install step (release#521) would fail
         # kind detection here. Consumers use the default (true). See arm-gate.
         uses: ./.github/actions/arm-gate
         with:
-          materialize: 'false'
+          install-tree: 'false'
       - name: Run the gate (lefthook run pre-commit --all-files)
         run: lefthook run pre-commit --all-files
 

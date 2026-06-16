@@ -1,11 +1,11 @@
-"""sync — the managed-tree compose engine (build-dir + symlinks, ADR-0001).
+"""sync — installs the `.release/` temp dir (its files + the symlink mirrors, ADR-0001).
 
-Ref selection, Kind+Component resolution, the build-into-a-fresh-.release/
-plan, lefthook fragment composition, release-internal classification,
-symlink-target computation, the diff against an existing .release/,
-broken-symlink detection, and the CLAUDE.md orientation block. ``verbs/init.py``
-drives this engine (build_plan → build_tree → diff → compute_mirror →
-decide_claude → _apply_mirror); init is its only driver (the standalone
+Ref selection, Kind+Component resolution, the plan for a fresh `.release/`,
+lefthook fragment composition, release-internal classification,
+symlink-target computation, the diff against an existing `.release/`,
+broken-symlink detection, and the CLAUDE.md header block. ``verbs/init.py``
+calls these steps (install_plan → install_tree → diff → compute_mirror →
+decide_claude → _apply_mirror); init is the only caller (the standalone
 wrapper verb was retired in WS4, release#521).
 
 All git access goes through gh.py (the chokepoint). Filesystem reads/writes use
@@ -58,7 +58,7 @@ class Source:
     "from-source <shortsha>" for a --from-source install. Only the bundle path
     carries it (the wheel is what the stamp describes); GitSource composes from
     a live clone whose ref_sha already says exactly where the content came from.
-    When set, build_tree() writes it into .release-sync-source alongside the
+    When set, install_tree() writes it into .release-sync-source alongside the
     ref_sha line, and init labels the managed auto-commit with it.
     """
 
@@ -492,7 +492,7 @@ def validate_capabilities(source: Source, capabilities: list[str]) -> None:
     templates/components/<c>/ tree in the source.
 
     A cheap existence probe (source.exists on the tree path) — NOT a recursive
-    list_tree that build_plan immediately re-walks. A git tree is never empty,
+    list_tree that install_plan immediately re-walks. A git tree is never empty,
     and the bundle never stages an empty dir, so existence == the original
     'non-empty tree' contract."""
     for c in capabilities:
@@ -530,7 +530,7 @@ def subtree_list(kind: str, capabilities: list[str]) -> list[str]:
     return subtrees
 
 
-def build_plan(
+def install_plan(
     source: Source,
     kind: str,
     capabilities: list[str],
@@ -633,7 +633,7 @@ def link_target(dest: str) -> str:
 # ── Build the new tree into a tempdir ─────────────────────────────────────────
 
 
-def build_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
+def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
     """Write the new .release/ tree into a tempdir: write each
     planned blob (preserving the 100755/100644 mode), the composed lefthook.yml,
     and the provenance marker into ``tmp_release``."""
