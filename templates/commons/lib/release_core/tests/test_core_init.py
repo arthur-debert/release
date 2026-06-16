@@ -567,7 +567,7 @@ def _materialize_via_bundle(tmp_path, src_root, kind):
     out.mkdir()
     source = sync.BundleSource(str(src_root), ref_sha="release-core test")
     plan = sync.build_plan(source, kind, [])
-    sync.materialize(source, source.ref_sha, plan, str(out))
+    sync.build_tree(source, source.ref_sha, plan, str(out))
     return out
 
 
@@ -576,7 +576,7 @@ def _materialize_via_git(tmp_path, clone, kind):
     out.mkdir()
     source = sync.GitSource(str(clone), "HEAD", "abc123sha")
     plan = sync.build_plan(source, kind, [])
-    sync.materialize(source, source.ref_sha, plan, str(out))
+    sync.build_tree(source, source.ref_sha, plan, str(out))
     return out
 
 

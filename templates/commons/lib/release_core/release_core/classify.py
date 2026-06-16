@@ -52,7 +52,8 @@ INFRA_MARKERS = (
 )
 PROJECT_MARKERS = (
     "bin/check",
-    "canonical checks",
+    "project checks",
+    "canonical checks",  # legacy step name (pre-#655) — still seen in in-flight runs
     "e2e",
     "bats",
     "cargo",

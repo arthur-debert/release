@@ -633,8 +633,8 @@ def link_target(dest: str) -> str:
 # ── Materialize the new tree into a tempdir ───────────────────────────────────
 
 
-def materialize(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
-    """Mirror `--- Build the new .release/ tree in a tempdir ---`: write each
+def build_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> None:
+    """Write the new .release/ tree into a tempdir: write each
     planned blob (preserving the 100755/100644 mode), the composed lefthook.yml,
     and the provenance marker into ``tmp_release``."""
     for dest in plan.order:

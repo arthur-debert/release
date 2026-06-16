@@ -154,8 +154,8 @@ def test_audit_all_green(monkeypatch):
     assert rows["ci_main_green"][0] == "PASS"
     assert rows["private_mod_auth"][0] == "SKIP"  # no go.mod
     assert rows["scripts_inventory"][0] == "PASS"
-    # ci.yml uses rust-ci reusable → workflows_canonical PASS
-    assert rows["workflows_canonical"][0] == "PASS"
+    # ci.yml uses rust-ci reusable → workflows_thin_callers PASS
+    assert rows["workflows_thin_callers"][0] == "PASS"
 
 
 def test_dep_security_404_is_fail(monkeypatch):
@@ -240,8 +240,8 @@ def test_workflows_bespoke_warns(monkeypatch):
         "jobs:\n  x:\n    runs-on: ubuntu\n"
     )
     rows = _rows(monkeypatch, routes)
-    assert rows["workflows_canonical"][0] == "WARN"
-    assert "bespoke.yml" in rows["workflows_canonical"][1]
+    assert rows["workflows_thin_callers"][0] == "WARN"
+    assert "bespoke.yml" in rows["workflows_thin_callers"][1]
 
 
 # --------------------------------------------------------------------------

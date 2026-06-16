@@ -514,9 +514,9 @@ def test_build_plan_skips_skip_sources(monkeypatch):
     assert plan.order == ["bin/real"]  # bytecode + skip-sources dropped
 
 
-def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
-    """materialize() always writes a self-ignoring .release/.gitignore (`*`) so the
-    whole ephemeral build dir is invisible to git — drift impossible by
+def test_build_tree_writes_managed_gitignore(monkeypatch, tmp_path):
+    """build_tree() always writes a self-ignoring .release/.gitignore (`*`) so the
+    whole ephemeral build dir is invisible to git — out-of-sync impossible by
     construction (WS4, release#521; supersedes the bytecode-only ignore of #450)."""
     plan = sync.Plan()
     plan.order = ["bin/real"]
@@ -524,7 +524,7 @@ def test_materialize_writes_managed_gitignore(monkeypatch, tmp_path):
     plan.source = {"bin/real": "templates/commons/bin/real"}
 
     monkeypatch.setattr(sync.gh, "git_show_bytes", lambda spec, *, cwd: b"#!/bin/sh\n")
-    sync.materialize(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
+    sync.build_tree(_git_source(ref_sha="deadbeef" * 5), "deadbeef" * 5, plan, str(tmp_path))
 
     gi = tmp_path / ".gitignore"
     assert gi.is_file()

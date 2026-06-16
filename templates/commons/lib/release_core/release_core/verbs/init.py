@@ -258,7 +258,7 @@ def _run_full_sync(
     tmp_release = tempfile.mkdtemp(prefix=".release-build.", dir=repo_root)
     swapped = False
     try:
-        sync.materialize(source, source.ref_sha, plan, tmp_release)
+        sync.build_tree(source, source.ref_sha, plan, tmp_release)
         file_diff, new_files = sync.diff_release(tmp_release, os.path.join(repo_root, ".release"))
         mirror = sync.compute_mirror(new_files, repo_root, tmp_release, migrate=False)
         claude = sync.decide_claude(repo_root, tmp_release)

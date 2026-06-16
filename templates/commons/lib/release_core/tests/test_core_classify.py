@@ -51,9 +51,16 @@ def test_infra_step_names_classify_infra(step_name):
 def test_project_step_with_armed_tree_is_project():
     steps = [
         _step("Arm the gate toolset", "success"),
+        _step("Run project checks (bin/check)", "failure"),
+    ]
+    assert classify.classify_failure("Run project checks (bin/check)", steps) == "PROJECT"
+    # The pre-#655 step name ("canonical checks") is still recognized for
+    # in-flight runs cut before release shipped the rename.
+    legacy = [
+        _step("Arm the gate toolset", "success"),
         _step("Run canonical checks (bin/check)", "failure"),
     ]
-    assert classify.classify_failure("Run canonical checks (bin/check)", steps) == "PROJECT"
+    assert classify.classify_failure("Run canonical checks (bin/check)", legacy) == "PROJECT"
 
 
 def test_project_step_without_materialize_is_infra():

@@ -85,7 +85,7 @@ FORBIDDEN_NOTARIZATION_SECRETS = ("ASC_API_KEY_BASE64", "ASC_API_KEY_ID", "ASC_A
 # dir). A `.canary-secrets` marker naming anything else is a setup error.
 SIGNING_SECRETS = ("APPLE_CERTIFICATE_P12_BASE64", "APPLE_CERTIFICATE_PASSWORD")
 
-SEED_COMMIT_SUBJECT = "canary: canonical seed"
+SEED_COMMIT_SUBJECT = "canary: seed"
 
 
 def _usage_block() -> str:

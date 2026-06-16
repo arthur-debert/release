@@ -241,7 +241,7 @@ jobs:
         # lint/format toolset the hardened gate needs.
         uses: arthur-debert/release/.github/actions/arm-gate@v2
 
-      - name: Run canonical checks (bin/check)
+      - name: Run project checks (bin/check)
         run: bin/check
 
       - name: Build release binary
