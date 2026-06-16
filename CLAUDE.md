@@ -55,7 +55,7 @@ silently dropping managed `bin/` tools).
   <owner/name> --watch` — empty commit to its main + classified verdict, never
   `gh run rerun`; #595). That's it — consumers
   self-update at SessionStart: `install-release-core` pulls the wheel and a bare
-  `release-core init` (the DEFAULT full build) re-installs the managed
+  `release-core init` (the DEFAULT full install) reinstalls the managed
   files from the wheel bundle and auto-commits any change. There is **no push
   mechanism** — the wheel is the carrier; pull does the rest. A consumer still on
   a pre-pull seed migrates by running the (fixed) resolver once in that repo and

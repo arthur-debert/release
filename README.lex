@@ -75,7 +75,7 @@ For domain vocabulary see CONTEXT.md. For project status and roadmap see the roa
 
     4.1. Files In Repo
 
-        All release-managed files live in a temp directory (.release/), installed by release-core from the versioned binary. Consumer locations (bin/check, lefthook.yml, CLAUDE.md, etc.) are symlinks pointing into .release/, which keeps ownership of managed files clear. .release/ is committed today, but the direction (ADR-0004 / ADR-0005) is to gitignore it and regenerate it each session from the binary — invoke, don't discover.
+        All release-managed files live in a temp directory (.release/), installed by release-core from the versioned binary. Consumer locations (bin/check, lefthook.yml, CLAUDE.md, etc.) are symlinks pointing into .release/, which keeps ownership of managed files clear. .release/ is gitignored and regenerated each session from the binary (ADR-0004 / ADR-0005) — invoke, don't discover.
 
         4.1.1. Executables:
             bin/: symlinks to release-supplied tools for tasks like check, build, release. Never repo or app-specific.

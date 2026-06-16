@@ -72,7 +72,7 @@ followed by `release-core init`.**
   > auto-committing managed changes — "release-sync sourced from the wheel". The
   > config-subset behavior described here became the `--config-only` escape
   > hatch — then was REMOVED outright in #532 (post-WS3 it wrote root configs
-  > whose gate referenced a `.release/` it never created; the full build is
+  > whose gate referenced a `.release/` it never created; the full install is
   > the only mode). So the wheel pull now carries the full tree, retiring
   > `orc propagate` in steady state (see "What this changes" → propagate bullet
   > below, now realized).

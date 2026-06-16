@@ -134,9 +134,11 @@ The Agent Harness
         skills; general dev-cycle skills are the agent's own (global) skills,
         not release's to push.
 
-        The distributed skill is still written (never hand-copied) as a symlink
-        into the `.release/` temp dir — and since WS7 that mirror is EPHEMERAL
-        (untracked, listed in `.git/info/exclude`, reinstalled by every init), so
+        The distributed skill's real file is written (never hand-copied) into
+        the `.release/` temp dir, and the consumer-discovery path
+        (`.claude/skills/...`) is a symlink into it — and since WS7 that symlink
+        mirror is EPHEMERAL (untracked, in `.git/info/exclude`, reinstalled by
+        every init), so
         a consumer's copy cannot fall out of sync with release's official blob
         and leaves no tracked footprint.
 
