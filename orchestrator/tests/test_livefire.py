@@ -127,6 +127,35 @@ def test_parse_feedback_tolerates_embedded_code_fence():
     assert fb["extra"] is True
 
 
+@requires_yaml
+def test_parse_feedback_skips_incidental_block_without_verdict():
+    # #683: a yaml block the agent READ from a file (no `verdict`) must be
+    # skipped; the report is the block WITH a verdict — even when an incidental
+    # block comes AFTER it in the transcript.
+    t = (
+        "```yaml\nrepo: r\nverdict: clean\n```\n\n"
+        "then the agent quoted a config:\n\n"
+        "```yaml\nname: some-config\nvalue: 7\n```"
+    )
+    assert livefire.parse_feedback(t)["verdict"] == "clean"
+
+
+@requires_yaml
+def test_parse_feedback_raises_when_only_incidental_blocks():
+    # The exact #683 failure: agent skipped the feedback step; only a managed
+    # file's yaml block is present (no `verdict`). Must raise clearly.
+    t = "```yaml\nname: x\nnote: read from a doc\n```"
+    with pytest.raises(livefire.LiveFireError, match="verdict"):
+        livefire.parse_feedback(t)
+
+
+@requires_yaml
+def test_has_feedback_predicate():
+    assert livefire.has_feedback("```yaml\nverdict: clean\n```") is True
+    assert livefire.has_feedback("```yaml\nname: x\n```") is False
+    assert livefire.has_feedback("no fenced blocks here") is False
+
+
 # ── findings_to_issues ────────────────────────────────────────────────────
 
 

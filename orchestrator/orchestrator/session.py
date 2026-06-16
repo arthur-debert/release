@@ -8,6 +8,7 @@ the `--verbose` flag dumps raw messages to stderr so we can iterate.
 import contextlib
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
@@ -38,6 +39,8 @@ async def run_session(
     permission_mode: str = "acceptEdits",
     persist_session: bool = True,
     text_sink: list[str] | None = None,
+    followup_prompt: str | None = None,
+    needs_followup: Callable[[str], bool] | None = None,
 ) -> str | None:
     """Send `prompt` to a session pinned at `repo_path`.
 
@@ -90,25 +93,41 @@ async def run_session(
     discovered_session_id: str | None = None
 
     async with ClaudeSDKClient(options=opts) as client:
+
+        async def _drain() -> None:
+            nonlocal discovered_session_id
+            async for msg in client.receive_response():
+                if verbose:
+                    print(f"[msg] {type(msg).__name__}: {msg!r}", file=sys.stderr)
+                sid = getattr(msg, "session_id", None)
+                if sid:
+                    discovered_session_id = sid
+                content = getattr(msg, "content", None)
+                if content:
+                    for block in content:
+                        text = getattr(block, "text", None)
+                        if text:
+                            print(text, end="", flush=True)
+                            if text_sink is not None:
+                                text_sink.append(text)
+            print()  # final newline after streamed content
+
         await client.query(prompt)
-        async for msg in client.receive_response():
-            if verbose:
-                print(f"[msg] {type(msg).__name__}: {msg!r}", file=sys.stderr)
+        await _drain()
 
-            sid = getattr(msg, "session_id", None)
-            if sid:
-                discovered_session_id = sid
-
-            content = getattr(msg, "content", None)
-            if content:
-                for block in content:
-                    text = getattr(block, "text", None)
-                    if text:
-                        print(text, end="", flush=True)
-                        if text_sink is not None:
-                            text_sink.append(text)
-
-        print()  # final newline after streamed content
+        # Prod ONCE for a required deliverable the agent skipped. After a long
+        # task an agent often stops without its final structured output (e.g.
+        # livefire's feedback block); a single same-session nudge recovers it
+        # without re-running the whole task (release#683).
+        if (
+            followup_prompt
+            and needs_followup
+            and text_sink is not None
+            and needs_followup("".join(text_sink))
+        ):
+            print("[orc] required output missing — prodding once", file=sys.stderr)
+            await client.query(followup_prompt)
+            await _drain()
 
     if discovered_session_id and persist_session:
         state.set_(repo_path, discovered_session_id)

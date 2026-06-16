@@ -101,32 +101,60 @@ def _strip_bare_fences(block: str) -> str:
     return "\n".join(ln for ln in block.splitlines() if not _BARE_FENCE_RE.match(ln))
 
 
-def parse_feedback(transcript: str) -> dict:
-    """Extract + parse the agent's ```yaml feedback block from the transcript.
+# The follow-up prod when the agent finishes the task but skips the feedback
+# block (release#683 — agents stop after the PR/rc on a long run). Sent ONCE in
+# the same session by run_session via needs_followup=has_feedback-is-False.
+FOLLOWUP_FEEDBACK_PROMPT = (
+    "You have not emitted the required feedback block. Output ONLY the single "
+    "fenced ```yaml feedback block now (repo / verdict / pr / rc / findings, as "
+    "specified) — nothing before or after it."
+)
 
-    The prompt instructs the agent to END with the feedback block, so the LAST
-    well-formed yaml block is the report. Tries blocks last-first, and tolerates
-    an agent that embedded a stray ``` fence inside its block (by retrying with
-    bare-fence lines stripped). Raises rather than returning a partial — no
-    parseable report is a failed run.
+
+def _first_feedback(transcript: str) -> dict | None:
+    """The agent's feedback mapping, or None if absent.
+
+    Scans yaml blocks LAST-first (the report ends the response) and accepts only
+    a mapping that carries a ``verdict`` key — the one mandatory field — so an
+    INCIDENTAL yaml block (one the agent read from a managed file like
+    dev-cycle.lex / a skill, which every consumer carries) is skipped rather
+    than mis-parsed as the report (release#683). Tolerates a stray embedded ```
+    fence by retrying with bare-fence lines stripped.
     """
     import yaml  # lazy — keep module import SDK/dep-free for the light CI job
 
-    blocks = _YAML_BLOCK_RE.findall(transcript)
-    if not blocks:
-        raise LiveFireError("agent produced no ```yaml feedback block")
-    last_error: str | None = None
-    for raw in reversed(blocks):
+    for raw in reversed(_YAML_BLOCK_RE.findall(transcript)):
         for candidate in (raw, _strip_bare_fences(raw)):
             try:
                 data = yaml.safe_load(candidate)
-            except yaml.YAMLError as e:
-                last_error = str(e)
+            except yaml.YAMLError:
                 continue
-            if isinstance(data, dict):
+            if isinstance(data, dict) and "verdict" in data:
                 return data
-            last_error = "block did not parse to a mapping"
-    raise LiveFireError(f"no ```yaml feedback block parsed to a mapping: {last_error}")
+    return None
+
+
+def has_feedback(transcript: str) -> bool:
+    """True once the transcript carries the agent's feedback block — the
+    predicate run_session uses to decide whether to prod for it (#683)."""
+    return _first_feedback(transcript) is not None
+
+
+def parse_feedback(transcript: str) -> dict:
+    """The agent's ```yaml feedback mapping (a block with a ``verdict`` key).
+
+    Raises rather than returning a partial — no feedback block is a failed run,
+    and the message names the actual cause (the agent skipped the step) instead
+    of a confusing YAML error on some unrelated block.
+    """
+    fb = _first_feedback(transcript)
+    if fb is None:
+        raise LiveFireError(
+            "agent emitted no parseable feedback block (no ```yaml block with a "
+            "'verdict' key) — it likely finished the work + PR but skipped the "
+            "feedback step even after a prod"
+        )
+    return fb
 
 
 _SYMPTOM_MAX = 200
@@ -323,6 +351,8 @@ async def livefire_one(
             persist_session=False,
             verbose=verbose,
             text_sink=sink,
+            followup_prompt=FOLLOWUP_FEEDBACK_PROMPT,
+            needs_followup=lambda t: not has_feedback(t),
         )
         transcript = "".join(sink)
         feedback = parse_feedback(transcript)
