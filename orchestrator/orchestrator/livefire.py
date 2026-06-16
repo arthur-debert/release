@@ -102,8 +102,10 @@ def _strip_bare_fences(block: str) -> str:
 
 
 # The follow-up prod when the agent finishes the task but skips the feedback
-# block (release#683 — agents stop after the PR/rc on a long run). Sent ONCE in
-# the same session by run_session via needs_followup=has_feedback-is-False.
+# block (release#683 — agents stop after the PR/rc on a long run). livefire_one
+# passes this as run_session's `followup_prompt` with
+# `needs_followup=lambda t: not has_feedback(t)`, so it's sent ONCE in the same
+# session when the transcript still lacks a feedback block.
 FOLLOWUP_FEEDBACK_PROMPT = (
     "You have not emitted the required feedback block. Output ONLY the single "
     "fenced ```yaml feedback block now (repo / verdict / pr / rc / findings, as "
