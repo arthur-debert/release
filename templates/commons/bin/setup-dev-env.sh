@@ -9,11 +9,11 @@
 # fetch, extra rustup targets, etc.) put them in app-bin/post-setup-hook.sh
 # — this script calls that hook at the end if it exists.
 #
-# Pre-commit hook wiring runs in BOTH local and cloud sessions (a fresh
-# clone has no `.git/hooks/pre-commit` wired regardless of where the dev
-# is). Everything else below the cloud-only gate is cloud-only —
-# submodules, project dep caches, NSS cert imports etc. are already in
-# place on a dev's local machine.
+# Pre-commit hook wiring AND git-submodule init run in BOTH local and cloud
+# sessions (a fresh clone has neither a wired `.git/hooks/pre-commit` nor
+# initialised submodules, regardless of where the dev is). Everything else
+# below the cloud-only gate is cloud-only — project dep caches, NSS cert
+# imports etc. are already in place on a dev's local machine.
 #
 # Detects stack by filesystem signals — handles rust, node, ruby, python,
 # and consumers with no project deps (just lefthook / hand-rolled hook
@@ -27,6 +27,29 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "${REPO_ROOT}"
+
+# --- 0.0. Git submodule content (BOTH local and cloud) ------------------
+# Runs in BOTH contexts, ABOVE the cloud-only gate, because a FRESH clone
+# has uninitialised submodules regardless of where it lands — the live-fire
+# round clones consumers fresh, and lex-fmt/lex carries a `comms/` submodule
+# (per .gitmodules) whose content the gate + tests need. The old §1
+# submodule step ran cloud-only on the (wrong) assumption that a local dev
+# always already has submodules in place; a fresh checkout doesn't, so the
+# gate/tests failed on missing submodule content (release#706, #728).
+#
+# Placed FIRST so submodule file content exists for everything downstream:
+# the §0.1 init/gate wiring, the gate itself, and the §2 dep installs / tests.
+# Guarded on .gitmodules so it's a no-op (the block is skipped entirely) when
+# the repo has no submodules. No-op-cheap when already in sync.
+#
+# Best-effort: a network hiccup fetching submodule content must NOT abort the
+# whole bootstrap (matches the script's continue-on-transient-errors stance) —
+# warn loudly so a genuinely-missing submodule surfaces rather than silently
+# failing a later gate/test step.
+if [ -f .gitmodules ]; then
+  git submodule update --init --recursive --quiet \
+    || echo "warning: git submodule update --init failed — submodule content may be missing (gate/tests that need it will fail)" >&2
+fi
 
 # --- 0. Arm the gate: ensure the lefthook toolset is installed ----------
 # THE gate (lefthook.yml) is HARD — a missing tool FAILS the commit, it does
@@ -279,12 +302,11 @@ fi
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
 
 # --- 1. Universal git hygiene --------------------------------------------
-# Cloud clones are shallow; restore submodule content and release tags.
-# Submodule update is a no-op when in sync; tag fetch is one round-trip.
+# Cloud clones are shallow; restore release tags. Tag fetch is one
+# round-trip. (Submodule content is restored in §0.0 above, which runs in
+# BOTH local and cloud — a fresh checkout has uninitialised submodules in
+# either context, so it can't be cloud-only.)
 
-if [ -f .gitmodules ]; then
-  git submodule update --init --recursive --quiet || true
-fi
 git fetch --tags --quiet origin || true
 
 # --- 2. Project dep cache ------------------------------------------------
