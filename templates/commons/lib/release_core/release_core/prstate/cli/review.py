@@ -13,6 +13,7 @@ Commands (each is a `main(argv) -> int`, wrapped into the click tree by
             no-op backends say so and skip verification.
   cancel  — withdraw pending review request(s).
   show    — read-only: print posted review(s) + ALL review threads.
+  reply   — post a threaded reply to a review comment (rationale / push-back).
 
 Waiting is NOT here: the engine-owned `pr wait` (release#503, `cli/wait.py`)
 replaced the per-reviewer `review wait` — the state engine knows what is
@@ -87,6 +88,31 @@ Usage:
 {_USAGE_COMMON}
 Exit codes:
   0   request(s) withdrawn (or no-op for no-mechanism reviewers)
+  1   gh failure
+  64  bad usage
+"""
+
+USAGE_REPLY = """\
+release-core pr review reply — post a threaded reply to a review comment.
+
+Usage:
+  release-core pr review reply <comment-id> <body> [--pr <pr-number>]
+
+The push-back path: when you DISAGREE with a review comment (or want to
+explain a fix), reply with rationale on the thread rather than silently
+resolving it. <comment-id> is the numeric REST comment id printed by
+`release-core pr review show` (the same handle `pr resolve-thread` takes);
+<body> is the reply text. After replying, resolve the thread with
+`release-core pr resolve-thread <pr> <comment-id>`.
+
+With no --pr, resolves the PR for the current branch.
+
+Options:
+  --pr <pr-number>  the PR to reply on (default: current branch's PR)
+  -h --help         show this help
+
+Exit codes:
+  0   reply posted
   1   gh failure
   64  bad usage
 """
@@ -291,6 +317,70 @@ def _act(
     except ghapi.GhError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    return 0
+
+
+# --- reply --------------------------------------------------------------------
+
+
+def reply_main(argv: list[str]) -> int:
+    """Post a threaded reply to a review comment (the rationale / push-back path)."""
+    comment_arg: str | None = None
+    body: str | None = None
+    pr_arg: str | None = None
+    it = iter(argv)
+    for arg in it:
+        if arg in ("-h", "--help"):
+            print(USAGE_REPLY)
+            return 0
+        if arg == "--pr":
+            pr_arg = next(it, None)
+            if pr_arg is None:
+                print("error: --pr needs a number", file=sys.stderr)
+                return 64
+        elif arg.startswith("--pr="):
+            pr_arg = arg.split("=", 1)[1]
+        elif arg.startswith("-") and arg != "-":
+            print(f"error: unknown option {arg}", file=sys.stderr)
+            return 64
+        elif comment_arg is None:
+            comment_arg = arg
+        elif body is None:
+            body = arg
+        else:
+            print(
+                f"error: too many arguments ({arg!r}) — usage is "
+                "`reply <comment-id> <body> [--pr <pr-number>]`",
+                file=sys.stderr,
+            )
+            return 64
+    if comment_arg is None or body is None:
+        print("error: reply needs a <comment-id> and a <body>", file=sys.stderr)
+        return 64
+    if not comment_arg.isdigit():
+        print(
+            f"error: comment id must be numeric (got: {comment_arg}) — use the "
+            "numeric comment-id from `pr review show`",
+            file=sys.stderr,
+        )
+        return 64
+    if pr_arg is not None and not pr_arg.isdigit():
+        print(f"error: PR number must be numeric (got: {pr_arg})", file=sys.stderr)
+        return 64
+    try:
+        pr = _resolve_pr(int(pr_arg) if pr_arg is not None else None)
+    except ghapi.GhError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if pr is None:
+        print("error: could not resolve a PR for the current branch", file=sys.stderr)
+        return 1
+    try:
+        ghapi.pr_review_reply(pr, int(comment_arg), body)
+    except ghapi.GhError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"replied to comment {comment_arg} on #{pr}")
     return 0
 
 

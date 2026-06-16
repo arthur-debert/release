@@ -118,6 +118,24 @@ def pr_ready(pr: int, *, undo: bool = False) -> None:
     _gh(args)
 
 
+def pr_review_reply(pr: int, comment_id: int, body: str) -> None:
+    """Post a threaded reply to an existing PR review comment.
+
+    Wraps ``POST /repos/{owner}/{name}/pulls/{pr}/comments/{comment_id}/replies``
+    — the dedicated reply endpoint that threads the new comment under the
+    target rather than starting a fresh top-level review comment. ``comment_id``
+    is the numeric REST id (the same handle ``pr resolve-thread`` takes); ``body``
+    is the reply text. This is the push-back path: reply with rationale, then
+    resolve the thread.
+    """
+    owner, name = repo_slug()
+    rest(
+        f"repos/{owner}/{name}/pulls/{pr}/comments/{comment_id}/replies",
+        method="POST",
+        fields={"body": body},
+    )
+
+
 def repo_slug() -> tuple[str, str]:
     """Return (owner, name) for the current repo."""
     data = json.loads(_gh(["repo", "view", "--json", "owner,name"]))
