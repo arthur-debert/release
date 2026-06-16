@@ -176,7 +176,10 @@ def evaluate(
 
     # 2. Required reviews in; any open thread (from any reviewer) must be addressed
     #    — UNLESS a circuit breaker says the loop is diverging: then STOP, don't
-    #    open another cycle. A converged PR (no open threads) is never stopped.
+    #    open another cycle. A converged PR (no open threads) is normally handed
+    #    off — except when the cycle-cap fired: it is then BLOCKED and routed to
+    #    `release-core pr ready --ack-cycle-cap` (the converged-but-capped branch
+    #    below), not flipped silently.
     if open_threads:
         if breaker_stops:
             status.state = TaskState.BLOCKED

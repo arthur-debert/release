@@ -113,7 +113,7 @@ def divergent_cycle_count(cycles: list[Cycle]) -> int:
     Conservative by construction: it can only ever return <= len(cycles), so it
     never makes the cap fire EARLIER than the raw round count would have.
     """
-    seen: set[str] = set()
+    seen: set[tuple[str, int]] = set()  # (path, line) finding locations
     count = 0
     for cycle in cycles:
         new_locations = set(cycle.comment_keys) - seen
@@ -145,7 +145,7 @@ def evaluate_breakers(
         return BreakerVerdict(
             True,
             "cycle-cap",
-            f"{divergent} divergent review cycles exceeds the cap of {CYCLE_CAP}",
+            f"{divergent} divergent review cycles (of {n} total) exceeds the cap of {CYCLE_CAP}",
             n,
         )
 
