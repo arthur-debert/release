@@ -62,13 +62,19 @@ pre-commit:
       run: npx --no-install eslint --no-warn-ignored --max-warnings 0 -- {staged_files}
       priority: 2
     prettier:
-      # Auto-fix + re-stage. Prettier's whole value is mechanical
-      # formatting; failing the commit for fixable whitespace is
-      # friction with no payoff. `stage_fixed: true` writes the
-      # fixes back to the working tree AND re-stages them in the
-      # same hook run, so the commit goes through with the
-      # formatted content. If prettier can't fix something (rare),
-      # it'll exit non-zero and the commit fails as before.
+      # Check-only (`--check`), NOT `--write`. The bare agent-facing
+      # `release-core gate` runs lefthook with `--all-files`, which expands
+      # `{staged_files}` to the ENTIRE tree — so a `--write` here reformats
+      # every managed `.md`/config in the repo, not just what the commit
+      # touched. That silently pulled three untouched managed docs
+      # (CLAUDE.md, docs/dev/epic-registry.md, docs/specs/shadow-nodes.md)
+      # into the diff on a phos-editor/app gate run (release#713). A gate
+      # check must never modify a file it was only asked to inspect. With
+      # `--check` prettier exits non-zero on an unformatted file (the gate
+      # still fails, actionably) but writes nothing — the author runs
+      # `prettier --write` (or `bin/check-fmt`) deliberately. This also
+      # matches release's own root `lefthook.yml` prettier, which is
+      # likewise `--check`.
       #
       # Symlink filter: prettier 3.x explicitly refuses symlinks
       # passed as explicit paths ("Explicitly specified pattern X
@@ -76,7 +82,7 @@ pre-commit:
       # model (ADR-0001), most managed files are symlinks pointing
       # into .release/, so we strip them before invoking prettier.
       # The real files (under .release/) are in the same staged
-      # set when changed, and still get formatted.
+      # set when changed, and still get checked.
       glob:
         - "*.{js,jsx,ts,tsx,vue,svelte,json,html,css,scss,md,yml,yaml}"
       #
@@ -95,8 +101,7 @@ pre-commit:
         [ -f .gitignore ] && ig="$ig --ignore-path .gitignore";
         [ -f .prettierignore ] && ig="$ig --ignore-path .prettierignore";
         [ -f .release/.prettierignore ] && ig="$ig --ignore-path .release/.prettierignore";
-        npx --no-install prettier --write $ig -- "$@";
-      stage_fixed: true
+        npx --no-install prettier --check $ig -- "$@";
       priority: 2
     typecheck:
       # tsc operates on the project as a whole — no per-file invocation.
