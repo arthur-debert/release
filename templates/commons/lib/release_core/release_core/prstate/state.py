@@ -7,15 +7,19 @@ on a reviewer's name — it consumes the adapter interface only.
 
 Two definitions anchor it:
   Reviewed = every required reviewer done + every thread resolved.
-  Ready    = Reviewed + CI green + a CLEAN merge state. "Mergeable" here means
-             `mergeStateStatus == CLEAN` — the authoritative, merge-obeyed
-             signal — NOT GitHub's async-stale `mergeable` verdict (it reads
-             MERGEABLE optimistically before a recompute lands). Gate order once
+  Ready    = Reviewed + CI green + a merge state of CLEAN, or UNSTABLE while the
+             CI rollup is already green (a transient ready_for_review re-queue
+             lag; release#715). "Mergeable" here keys off `mergeStateStatus` — the
+             authoritative, merge-obeyed signal — NOT GitHub's async-stale
+             `mergeable` verdict (it reads MERGEABLE optimistically before a
+             recompute lands). Gate order once
              Reviewed: a conflict (DIRTY) or a BEHIND base surfaces first (a
              moved base re-stales CI); then failing/pending CI (BLOCKED /
-             VALIDATING); then CLEAN -> READY; an uncomputed (UNKNOWN) merge
-             state re-polls; any remaining computed non-CLEAN state
-             (BLOCKED/UNSTABLE/HAS_HOOKS) is BLOCKED (release#675).
+             VALIDATING); then CLEAN -> READY; an UNSTABLE that survives the CI
+             gates is a transient ready_for_review re-queue lag (the rollup is
+             green) and also goes READY (release#715); an uncomputed (UNKNOWN)
+             merge state re-polls; any remaining computed non-CLEAN state
+             (BLOCKED/HAS_HOOKS) is BLOCKED (release#675).
 
 Best-effort reviewers (Gemini) never gate: an absent or in-progress best-effort
 reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*
@@ -188,7 +192,10 @@ def evaluate(
     # real reason the PR is not merge-ready and must NOT hand off:
     #   DIRTY    → conflict          BEHIND → base moved, head out of date
     #   BLOCKED  → branch protection / a required status not satisfied
-    #   UNSTABLE → a (non-required) check is failing/pending
+    #   UNSTABLE → a (non-required) check is failing/pending — EXCEPT when the
+    #              rollup is already green (the FAILING/PENDING gates passed): then
+    #              UNSTABLE is a transient ready_for_review re-queue lag and goes
+    #              READY, deferring to the authoritative rollup (release#715).
     # An UNKNOWN / null merge state means GitHub is still computing — re-poll
     # (that loop is `release-core pr wait`'s job: gather()+evaluate() until a
     # terminal state), never flip on it. We do NOT special-case approval-pending
@@ -231,6 +238,38 @@ def evaluate(
         status.next_action = "reviews done; CI check(s) running — wait for checks"
         return status
 
+    # UNSTABLE is GitHub's "a non-required check is failing/pending" state — but
+    # the engine ALREADY inspects every check via the rollup (the FAILING/PENDING
+    # gates above). A surviving UNSTABLE with an EXPLICITLY GREEN rollup is a
+    # transient lag, not a real block: GitHub re-runs a SKIPPED/NEUTRAL check on
+    # the `ready_for_review` event (e.g. phos's `e2e-gpu`, conclusion=skipped),
+    # flipping mergeStateStatus to UNSTABLE for a beat while the rollup still reads
+    # green — the false-alarm #715 hit right after `pr ready`. The authoritative
+    # rollup wins: defer to it. We require GREEN, not merely "not failing/pending":
+    # ChecksState.NONE (an empty/absent rollup) is NOT evidence the checks passed,
+    # so an UNSTABLE-with-no-rollup falls through to BLOCKED rather than a blind
+    # hand-off (#737 review). We also do NOT relax BLOCKED/HAS_HOOKS: those can
+    # reflect a required status the rollup never lists (e.g. a missing required
+    # check), so the rollup cannot disprove them — only UNSTABLE, whose whole
+    # meaning IS the per-check state an explicitly-green rollup already covers.
+    if ctx.merge_state == "UNSTABLE" and checks == ChecksState.GREEN:
+        status.state = TaskState.READY
+        if ctx.is_draft:
+            status.next_action = (
+                "reviewed + threads resolved + CI green; merge state UNSTABLE only "
+                "from a non-required check re-running on ready_for_review (the rollup "
+                "is green) — run `release-core pr ready` to flip draft->ready and page "
+                "the human"
+            )
+        else:
+            status.next_action = (
+                "reviewed + threads resolved + CI green; merge state UNSTABLE only "
+                "from a non-required check re-running on ready_for_review (the rollup "
+                "is green), already ready-for-review — done; await the human's verify "
+                "+ merge"
+            )
+        return status
+
     # CLEAN is the ONLY merge-ready state — mergeable, current, all contexts
     # green. This is the single hand-off point.
     if ctx.merge_state == "CLEAN":
@@ -253,10 +292,10 @@ def evaluate(
         status.next_action = "reviews done; mergeability not yet determined — re-check shortly"
         return status
 
-    # Computed, but a non-CLEAN merge state (BLOCKED / UNSTABLE / HAS_HOOKS):
-    # GitHub is blocking the merge for a real reason — a status check or
-    # branch-protection rule (UNSTABLE = a non-required check failing/pending).
-    # Surface it; don't flip.
+    # Computed, but a non-CLEAN merge state (BLOCKED / HAS_HOOKS — UNSTABLE was
+    # handled above): GitHub is blocking the merge for a real reason — a status
+    # check or branch-protection rule the rollup can't disprove (e.g. a missing
+    # required check). Surface it; don't flip.
     status.state = TaskState.BLOCKED
     status.next_action = (
         f"merge blocked by GitHub (mergeStateStatus={ctx.merge_state}) — a status "

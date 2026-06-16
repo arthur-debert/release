@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 
 from release_core.verbs import gate
 
@@ -146,3 +147,113 @@ def test_verdict_is_standalone_when_output_lacks_trailing_newline(tmp_path, caps
     lines = capsys.readouterr().out.splitlines()
     assert lines[-1] == "GATE: OK (1 check)"
     assert lines[-2] == "no trailing newline here"
+
+
+# --- root lefthook stub: defend the gate model against `lefthook install` ----
+# (release#714). A stock npm/pnpm `prepare: lefthook install` step otherwise
+# creates an empty starter lefthook.yml at the root and can re-open the
+# release#567 ungated-commit boot hole. `--install-hook` writes a hook-less,
+# git-excluded redirect stub so `lefthook install` finds a config (no starter)
+# and leaves our binary-driven hook untouched.
+
+
+def _git_init(tmp_path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+
+
+def test_install_hook_writes_the_root_stub_in_a_ws3_consumer(tmp_path):
+    _git_init(tmp_path)
+    rc = gate._install_hook(str(tmp_path))
+    assert rc == 0
+    stub = tmp_path / "lefthook.yml"
+    assert stub.is_file()
+    assert gate._STUB_MARKER in stub.read_text()
+    # The stub declares NO hooks (no top-level `<hook>:` key) — so `lefthook
+    # install` won't sync/clobber the binary-driven pre-commit hook.
+    active = [line for line in stub.read_text().splitlines() if line and not line.startswith("#")]
+    assert active == ["colors: false"]
+
+
+def test_install_hook_git_excludes_the_stub(tmp_path):
+    _git_init(tmp_path)
+    gate._install_hook(str(tmp_path))
+    exclude = (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
+    assert "lefthook.yml" in [line.strip() for line in exclude]
+
+
+def test_install_hook_does_not_clobber_a_real_root_gate(tmp_path):
+    # release-self / not-yet-migrated repo: a hand-authored root lefthook.yml must
+    # never be overwritten by the stub.
+    _git_init(tmp_path)
+    real = tmp_path / "lefthook.yml"
+    real.write_text("pre-commit:\n  commands:\n    ruff:\n      run: ruff check .\n")
+    gate._install_hook(str(tmp_path))
+    assert real.read_text().startswith("pre-commit:")
+    assert gate._STUB_MARKER not in real.read_text()
+
+
+def test_real_root_config_present_ignores_the_stub(tmp_path):
+    # The stub is NOT a real config — it declares no hooks.
+    (tmp_path / "lefthook.yml").write_text(gate._STUB_BODY)
+    assert gate._real_root_config_present(str(tmp_path)) is False
+
+
+def test_real_root_config_present_true_for_authored_config(tmp_path):
+    (tmp_path / "lefthook.yml").write_text("pre-commit:\n  commands: {}\n")
+    assert gate._real_root_config_present(str(tmp_path)) is True
+
+
+def test_write_root_stub_survives_missing_git(tmp_path, monkeypatch):
+    # #737 review: _git_exclude's `git rev-parse` must not crash --install-hook
+    # when git isn't on PATH — best-effort means the stub still gets written.
+    def _no_git(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(gate.subprocess, "run", _no_git)
+    gate._write_root_stub(str(tmp_path))  # must not raise
+    assert gate._STUB_MARKER in (tmp_path / "lefthook.yml").read_text()
+
+
+def test_empty_starter_is_not_real_and_gets_clobbered(tmp_path):
+    # release#737: a `lefthook install` that ran BEFORE `--install-hook` leaves an
+    # empty / all-commented starter lefthook.yml. It is NOT a real config (would
+    # bypass the fail-loud guard) and must be replaced by the stub.
+    _git_init(tmp_path)
+    starter = tmp_path / "lefthook.yml"
+    starter.write_text("# Refer to https://lefthook.dev for documentation\n#\n# pre-commit:\n")
+    assert gate._real_root_config_present(str(tmp_path)) is False
+    gate._install_hook(str(tmp_path))
+    assert gate._STUB_MARKER in starter.read_text()
+
+
+def test_git_exclude_is_idempotent(tmp_path):
+    _git_init(tmp_path)
+    gate._git_exclude(str(tmp_path), "lefthook.yml")
+    gate._git_exclude(str(tmp_path), "lefthook.yml")
+    lines = [
+        line.strip() for line in (tmp_path / ".git" / "info" / "exclude").read_text().splitlines()
+    ]
+    assert lines.count("lefthook.yml") == 1
+
+
+def test_unbuilt_gate_fails_loud_even_with_the_stub_present(tmp_path, capsys, monkeypatch):
+    # The boot hole (release#567) must stay closed: with NO .release/lefthook.yml
+    # and only our hook-less stub at the root, the gate must FAIL LOUD, not
+    # discover the stub and warn-and-pass an ungated commit (release#714).
+    _git_init(tmp_path)
+    (tmp_path / "lefthook.yml").write_text(gate._STUB_BODY)
+    monkeypatch.chdir(tmp_path)
+    # A lefthook on PATH so resolution gets past the "no runner" branch; the
+    # config guard must fire before it's ever invoked. A pure /bin/sh fake (no
+    # interpreter dependency) so it resolves even when we prepend our bindir.
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake = bindir / "lefthook"
+    fake.write_text("#!/bin/sh\necho 'lefthook version 0.0.0'\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ.get('PATH', '')}")
+    monkeypatch.setenv("LEFTHOOK_VERSION", "0.0.0")
+    rc = gate.main([])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "GATE: FAILED (gate config not built)" in out
