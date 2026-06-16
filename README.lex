@@ -90,9 +90,9 @@ For domain vocabulary see CONTEXT.md. For project status and roadmap see the roa
 
         The shared workflows handle provisioning, secrets, and output formatting, but delegate core logic to the tool library, else a parallel implementation would drift.
 
-    4.3. release-sync
+    4.3. Installing the managed files
 
-        release-sync installs the resolved set of files (from the consumer's Kind and Capabilities) into the .release/ temp directory. It rebuilds from scratch every time: no state tracking, no incremental diffs. Symlinks at expected locations point into .release/; when a file is removed from templates, its symlink breaks and cleanup removes it.
+        release-core init installs the resolved set of files (from the consumer's Kind and Capabilities) into the .release/ temp directory. It rebuilds from scratch every time: no state tracking, no incremental diffs. Symlinks at expected locations point into .release/; when a file is removed from templates, its symlink breaks and cleanup removes it. (The standalone release-sync verb this section once described was retired in WS4 — init is the only installer.)
 
         Consumers can override default Capabilities via a .release-sync.yaml at their repo root. A branch dial allows testing release changes before merging to main.
 
