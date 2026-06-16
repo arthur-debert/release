@@ -5,12 +5,29 @@ names, message types, attribute names) gets discovered on first run;
 the `--verbose` flag dumps raw messages to stderr so we can iterate.
 """
 
+import contextlib
+import os
 import sys
 from pathlib import Path
 
 from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
 from . import state
+
+
+def _force_blocking_stdio() -> None:
+    """Force stdout/stderr to BLOCKING mode before the SDK stream loop.
+
+    Under a piped or backgrounded parent (CI, `orc livefire --all`, any captured
+    subprocess) these fds can be non-blocking — and a heavy `--verbose` /
+    streamed-text write then raises ``BlockingIOError: [Errno 35]`` (EAGAIN) and
+    aborts an otherwise-successful run (caught live-firing rustloc, release#663).
+    Blocking mode makes the write WAIT for the reader to drain instead of failing.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        # not a real fd (captured StringIO, closed stream, …) → nothing to set
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            os.set_blocking(stream.fileno(), True)
 
 
 async def run_session(
@@ -44,6 +61,7 @@ async def run_session(
 
     Returns the discovered session_id (if any).
     """
+    _force_blocking_stdio()
     repo_path = str(Path(repo_path).expanduser().resolve())
     resume_id = state.get(repo_path) if resume else None
 

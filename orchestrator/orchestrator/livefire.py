@@ -42,6 +42,12 @@ PROMPT_DOC_REL = "docs/dev/live-fire-prompt.md"
 # 3-backtick ```yaml schema example survives verbatim. Extract between them.
 _PROMPT_FENCE_RE = re.compile(r"^````text$", re.MULTILINE)
 _YAML_BLOCK_RE = re.compile(r"```ya?ml\s*\n(.*?)\n```", re.DOTALL)
+# A line that is ONLY a code fence — ``` with an optional info string of any
+# shape (`shell-session`, `c++`, `objective-c`, …), so we match anything after
+# the backticks except a further backtick. A line starting with ``` is never
+# valid YAML, so this only ever fires (and only on the salvage retry, after the
+# raw block already failed to parse) on genuinely-stray fences.
+_BARE_FENCE_RE = re.compile(r"^\s*```[^`]*$")
 # A strict verification-tag shape — vX.Y.Z-release-rc (optional .N) — so a
 # transcript-sourced tag can't trigger a destructive delete unless it is exactly
 # a reserved verification tag (release#663).
@@ -83,25 +89,44 @@ def load_prompt(doc_path: str | Path | None = None) -> str:
     return body
 
 
-def parse_feedback(transcript: str) -> dict:
-    """Extract + parse the LAST ```yaml block from the agent transcript.
+def _strip_bare_fences(block: str) -> str:
+    """Drop lines that are a bare ``` fence (optional surrounding whitespace).
 
-    The prompt instructs the agent to END with the feedback block, so the last
-    yaml fence is the report (earlier ones may be incidental). Raises rather
-    than returning a partial — a missing/unparseable report is a failed run.
+    Agents routinely embed a code fence inside a feedback value (a snippet of
+    the error they saw); an indented/mid-block ``` is then swept into the
+    captured block by the non-greedy regex and makes the YAML loader choke on a
+    stray backtick. A bare ``` line is never meaningful YAML, so dropping it
+    salvages the common case without altering real content (caught live-firing
+    rustloc — the agent fenced an example in its report)."""
+    return "\n".join(ln for ln in block.splitlines() if not _BARE_FENCE_RE.match(ln))
+
+
+def parse_feedback(transcript: str) -> dict:
+    """Extract + parse the agent's ```yaml feedback block from the transcript.
+
+    The prompt instructs the agent to END with the feedback block, so the LAST
+    well-formed yaml block is the report. Tries blocks last-first, and tolerates
+    an agent that embedded a stray ``` fence inside its block (by retrying with
+    bare-fence lines stripped). Raises rather than returning a partial — no
+    parseable report is a failed run.
     """
     import yaml  # lazy — keep module import SDK/dep-free for the light CI job
 
     blocks = _YAML_BLOCK_RE.findall(transcript)
     if not blocks:
         raise LiveFireError("agent produced no ```yaml feedback block")
-    try:
-        data = yaml.safe_load(blocks[-1])
-    except yaml.YAMLError as e:
-        raise LiveFireError(f"feedback block is not valid YAML: {e}") from e
-    if not isinstance(data, dict):
-        raise LiveFireError("feedback block did not parse to a mapping")
-    return data
+    last_error: str | None = None
+    for raw in reversed(blocks):
+        for candidate in (raw, _strip_bare_fences(raw)):
+            try:
+                data = yaml.safe_load(candidate)
+            except yaml.YAMLError as e:
+                last_error = str(e)
+                continue
+            if isinstance(data, dict):
+                return data
+            last_error = "block did not parse to a mapping"
+    raise LiveFireError(f"no ```yaml feedback block parsed to a mapping: {last_error}")
 
 
 _SYMPTOM_MAX = 200

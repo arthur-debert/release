@@ -385,8 +385,11 @@ def main(argv: list[str] | None = None) -> int:
     p_livefire.add_argument(
         "--dry-run",
         action="store_true",
-        help="skip the side-effecting inbox filing + rc teardown (the agent run "
-        "still happens — that IS the verification)",
+        help="skip ONLY the inbox filing + rc teardown. NOT side-effect-free: the "
+        "agent still runs, pushes the coverage PR, and cuts the rc — so dry-run "
+        "can LEAVE a dangling -release-rc. To test the tool cleanly, prefer a "
+        "single consumer with --yes (full run incl. teardown). All runs need "
+        "`env -u ANTHROPIC_API_KEY` (subscription auth).",
     )
     p_livefire.add_argument(
         "--keep-clone",
