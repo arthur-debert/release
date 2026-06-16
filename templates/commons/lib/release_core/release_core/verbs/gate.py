@@ -54,6 +54,20 @@ discover. ``--hook`` runs lefthook over the STAGED set (not ``--all-files``), so
 agent-facing ``release-core gate`` keeps ``--all-files`` (no false green on an
 unstaged edit).
 
+``--install-hook`` ALSO writes an untracked, hook-less root ``lefthook.yml`` stub
+(git-excluded; release#714) in a WS3 consumer (one with no real root config). A
+stock npm/pnpm ``prepare: lefthook install`` step otherwise runs ``lefthook
+install`` with no config present, and lefthook then CREATES an empty starter
+``lefthook.yml`` at the root — an all-commented file that would silently
+warn-and-pass an ungated commit if the gate ever discovered it (re-opening the
+release#567 boot hole) and a tracked-able root config the WS3 model forbids. The
+stub pre-empts that: ``lefthook install`` finds it (no starter created) and, since
+it declares no hooks, leaves our binary-driven pre-commit hook untouched. The gate
+verb always prefers ``.release/lefthook.yml`` over it, and the unbuilt-gate
+fail-loud guard ignores it (a stub is not a real config), so it acts only as the
+install-time redirect it is. release-self / not-yet-migrated repos keep their
+hand-authored root gate and never get a stub.
+
 Every gate run prints a single final line — ``GATE: OK (N checks)`` or
 ``GATE: FAILED (name, ...)`` — derived from lefthook's exit code (release#628).
 It survives a ``release-core gate | tail`` view, where the pipe would otherwise
@@ -114,6 +128,39 @@ _HOOK_BODY = """\
 # lefthook.yml for a stock git hook to discover — release-core gate points lefthook
 # at .release/lefthook.yml itself.
 exec release-core gate --hook "$@"
+"""
+
+# The marker line every release-written root lefthook stub carries. It identifies
+# the file as OUR untracked redirect (not a real gate config) so the unbuilt-gate
+# fail-loud guard (release#567) ignores it — see _real_root_config_present.
+_STUB_MARKER = "# release-managed lefthook stub"
+
+# An untracked root lefthook stub (release#714). WS3 removed the TRACKED root
+# lefthook.yml, but a stock npm/pnpm `prepare: lefthook install` step still runs
+# `lefthook install`, and with NO config present lefthook CREATES an empty starter
+# `lefthook.yml` at the repo root (empirically confirmed on 2.1.9: "Config not
+# found, creating..."). That stray starter (a) is a tracked-able root config the
+# WS3 model forbids, and (b) is entirely commented out, so if the gate ever fell
+# back to it (when .release/ isn't built yet) lefthook would warn-and-pass an
+# UNGATED commit — exactly the boot hole release#567 closed.
+#
+# This stub pre-empts that: present, `lefthook install` finds a config and does
+# NOT create a starter. It declares NO hooks, so `lefthook install`'s hook sync is
+# a no-op and never clobbers our binary-driven .git/hooks/pre-commit (a stub WITH
+# a pre-commit key would make lefthook install its OWN dispatcher hook, bypassing
+# `release-core gate`'s pinned-runner + fail-loud resolution — confirmed; so the
+# stub stays hook-less). It is git-excluded (never tracked), and the gate verb
+# always prefers .release/lefthook.yml over it, so it only ever acts as the
+# install-time redirect it is.
+_STUB_BODY = f"""\
+{_STUB_MARKER} — do not edit, do not commit (regenerate: release-core gate --install-hook).
+# WS3 (release#524): the real gate lives in the ephemeral .release/lefthook.yml;
+# `release-core gate` points lefthook there explicitly. This hook-less stub exists
+# ONLY so a stray `lefthook install` (e.g. an npm `prepare` script) finds a config
+# and does not create an empty starter lefthook.yml that would silently ungate
+# commits (release#714). It declares no hooks, so it never shadows the
+# binary-driven pre-commit hook.
+colors: false
 """
 
 
@@ -277,7 +324,81 @@ def _install_hook(root: str) -> int:
     mode = os.stat(hook_path).st_mode
     os.chmod(hook_path, mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
     print(f"release-core gate: installed pre-commit hook → {hook_path}")
+    _write_root_stub(root)
     return 0
+
+
+def _real_root_config_present(root: str) -> bool:
+    """True iff the repo root has a REAL lefthook config — release-self's
+    hand-authored gate or a not-yet-migrated consumer's — as opposed to OUR
+    untracked redirect stub (release#714). A `lefthook.yml` carrying the stub
+    marker is NOT a real config: it declares no hooks and must not satisfy the
+    unbuilt-gate fail-loud guard (release#567) nor be overwritten as if authored."""
+    for name in _DISCOVERY_NAMES:
+        path = os.path.join(root, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as fh:
+                head = fh.read(512)
+        except OSError:
+            return True  # unreadable but present — treat as real, don't clobber
+        if _STUB_MARKER not in head:
+            return True
+    return False
+
+
+def _write_root_stub(root: str) -> None:
+    """Write the untracked root lefthook redirect stub + git-exclude it (release#714).
+
+    Only in a WS3 consumer (no REAL root config): release-self and not-yet-migrated
+    consumers keep a hand-authored root gate, which we must never overwrite. The
+    stub stops a stray `lefthook install` (npm/pnpm `prepare`) from creating an
+    empty starter lefthook.yml that would silently ungate commits. Best-effort: a
+    failure here never fails the hook install (the hook itself is the gate)."""
+    if _real_root_config_present(root):
+        return
+    stub_path = os.path.join(root, "lefthook.yml")
+    try:
+        # Refresh only if absent or already our stub — never stomp a file that
+        # appeared without the marker between the check above and here.
+        if os.path.isfile(stub_path):
+            with open(stub_path, encoding="utf-8") as fh:
+                if _STUB_MARKER not in fh.read(512):
+                    return
+        with open(stub_path, "w", encoding="utf-8") as fh:
+            fh.write(_STUB_BODY)
+    except OSError as exc:
+        print(f"warning: could not write the root lefthook stub: {exc}", file=sys.stderr)
+        return
+    _git_exclude(root, "lefthook.yml")
+
+
+def _git_exclude(root: str, pattern: str) -> None:
+    """Add `pattern` to .git/info/exclude (untrack without a tracked .gitignore),
+    matching the WS7 mirror-exclusion model. Idempotent; best-effort."""
+    exclude = subprocess.run(
+        ["git", "rev-parse", "--git-path", "info/exclude"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+    ).stdout.strip()
+    if not exclude:
+        return
+    exclude = os.path.join(root, exclude) if not os.path.isabs(exclude) else exclude
+    try:
+        existing = ""
+        if os.path.isfile(exclude):
+            with open(exclude, encoding="utf-8") as fh:
+                existing = fh.read()
+        if any(line.strip() == pattern for line in existing.splitlines()):
+            return
+        os.makedirs(os.path.dirname(exclude), exist_ok=True)
+        sep = "" if existing == "" or existing.endswith("\n") else "\n"
+        with open(exclude, "a", encoding="utf-8") as fh:
+            fh.write(f"{sep}{pattern}\n")
+    except OSError:
+        return  # best-effort: the stub still works untracked, just not git-excluded
 
 
 # lefthook's NO_COLOR summary block is one line per check: "<glyph> <name> (<time>)".
@@ -464,7 +585,11 @@ def main(argv: list[str]) -> int:
         env["LEFTHOOK_CONFIG"] = explicit_cfg
     elif os.path.isfile(managed_cfg):
         env["LEFTHOOK_CONFIG"] = managed_cfg
-    elif not any(os.path.isfile(os.path.join(root, name)) for name in _DISCOVERY_NAMES):
+    elif not _real_root_config_present(root):
+        # No .release/lefthook.yml AND no REAL root config. Our untracked redirect
+        # stub (release#714) does NOT count — it declares no hooks, so discovering
+        # it would warn-and-pass an ungated commit, exactly the boot hole this
+        # guard closes (release#567). Fail loud regardless of the stub's presence.
         print(
             "error: the gate config is not built — .release/lefthook.yml is "
             "missing and the repo root has no lefthook config. Run `release-core "

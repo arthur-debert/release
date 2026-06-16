@@ -63,8 +63,11 @@ def test_evaluate_states(context, fixture, expected):
         # Computed but non-CLEAN: GitHub is blocking the merge (branch protection
         # / required status) — BLOCKED, not a handoff point.
         ("MERGEABLE", "BLOCKED", TaskState.BLOCKED),
-        # Mergeable verdict but an unstable (failing/pending) context — not ready.
-        ("MERGEABLE", "UNSTABLE", TaskState.BLOCKED),
+        # UNSTABLE with an already-green rollup is a transient ready_for_review
+        # re-queue lag (a SKIPPED/NEUTRAL check re-runs) — defer to the rollup and
+        # reach READY, not a false-alarm BLOCKED (release#715). The fixture's
+        # rollup is green, so this isolates the merge-state branch.
+        ("MERGEABLE", "UNSTABLE", TaskState.READY),
         # DIRTY wins even if `mergeable` lags at the optimistic value.
         ("UNKNOWN", "DIRTY", TaskState.BLOCKED),
         # CLEAN is authoritative even if `mergeable` still lags at UNKNOWN.
@@ -116,15 +119,93 @@ def test_behind_base_takes_precedence_over_pending_ci(context):
     assert "behind" in status.next_action
 
 
-def test_non_clean_block_message_is_generic_not_required(context):
-    # UNSTABLE = a NON-required check; the message must not assert "required".
+def test_non_clean_block_message_names_the_merge_state(context):
+    # A genuine computed non-CLEAN merge state the rollup can't disprove (BLOCKED:
+    # e.g. a missing required status) stays BLOCKED and names mergeStateStatus in
+    # the next action. (UNSTABLE is handled separately — see the #715 tests.)
+    import dataclasses
+
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="BLOCKED")
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "BLOCKED" in status.next_action
+
+
+# --- UNSTABLE = transient ready_for_review re-queue lag (release#715) --------
+# GitHub re-runs a SKIPPED/NEUTRAL check on the `ready_for_review` event (phos's
+# `e2e-gpu`, conclusion=skipped), flipping mergeStateStatus to UNSTABLE for a beat
+# while the statusCheckRollup still reads green — a false-alarm BLOCKED right after
+# `pr ready`. The engine already inspects every check via the rollup, so when the
+# rollup is green it defers to it and reaches READY.
+
+
+def test_unstable_with_green_rollup_is_ready(context):
+    # The exact #715 scenario: green rollup (a SKIPPED e2e-gpu among them) but
+    # mergeStateStatus lags at UNSTABLE — defer to the rollup → READY.
+    import dataclasses
+
+    rollup = [
+        {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {
+            "name": "e2e-gpu",
+            "__typename": "CheckRun",
+            "status": "COMPLETED",
+            "conclusion": "SKIPPED",
+        },
+    ]
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE", checks=rollup)
+    status = evaluate(ctx)
+    assert status.state is TaskState.READY
+    assert "release-core pr ready" in status.next_action  # draft fixture → flip
+    assert "UNSTABLE" in status.next_action  # explains why it's not a flat CLEAN
+
+
+def test_unstable_with_a_genuinely_failing_check_is_still_blocked(context):
+    # UNSTABLE must NOT mask a real failure: a FAILING rollup is caught by the CI
+    # gate BEFORE the merge-state branch, so it stays BLOCKED with the CI message.
+    import dataclasses
+
+    rollup = [
+        {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {
+            "name": "e2e-gpu",
+            "__typename": "CheckRun",
+            "status": "COMPLETED",
+            "conclusion": "FAILURE",
+        },
+    ]
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE", checks=rollup)
+    status = evaluate(ctx)
+    assert status.state is TaskState.BLOCKED
+    assert "failing" in status.next_action
+
+
+def test_unstable_with_a_re_running_check_is_validating(context):
+    # The check is genuinely mid-re-run (IN_PROGRESS) → the rollup is PENDING, so
+    # the CI gate reports VALIDATING (wait for checks), never a flip. Only an
+    # already-green rollup reaches READY.
+    import dataclasses
+
+    rollup = [
+        {"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "e2e-gpu", "__typename": "CheckRun", "status": "IN_PROGRESS", "conclusion": None},
+    ]
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE", checks=rollup)
+    status = evaluate(ctx)
+    assert status.state is TaskState.VALIDATING
+
+
+def test_unstable_non_draft_says_done_not_flip(context):
+    # Post-flip (already ready-for-review) UNSTABLE-with-green-rollup must say
+    # done/await merge, never re-prescribe the flip the agent already made.
     import dataclasses
 
     ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE")
+    ctx.is_draft = False
     status = evaluate(ctx)
-    assert status.state is TaskState.BLOCKED
-    assert "UNSTABLE" in status.next_action
-    assert "required" not in status.next_action
+    assert status.state is TaskState.READY
+    assert "release-core pr ready" not in status.next_action
+    assert "done" in status.next_action and "merge" in status.next_action
 
 
 def test_best_effort_gemini_does_not_gate_ready(context):

@@ -1,0 +1,1 @@
+- gate: --install-hook writes an untracked root lefthook.yml stub so a stray 'lefthook install' (npm prepare) can't create an empty starter config that silently ungates commits (#714)
