@@ -48,7 +48,7 @@ release-core, the gate, distribution, and workflows
         - `release-core detect-kind` — report this repo's release Kind.
         - `release-core cut` — cut a release for this repo.
         - `release-core audit` / `status` — release posture / the
-          pilot-running done-check.
+          conformance done-check.
         - `release-core issue file <component> "<symptom>"` — escalate infra
           friction upstream to `arthur-debert/release`.
         - `release-core pr …` — the PR-loop helpers ([#3]).
