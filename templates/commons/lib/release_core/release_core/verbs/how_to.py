@@ -121,6 +121,29 @@ _GENERIC_HINT = {
 }
 
 
+# What CI actually does at a cut, per Kind — the release "half" the workflow runs
+# (release#704). The generic `prepare → build → (sign/notarize) → publish` is wrong
+# for the interpreted / no-artifact Kinds: an nvim plugin or a tree-sitter grammar
+# has nothing to compile or codesign, so its pipeline is just `prepare → release`
+# (bump version + roll CHANGELOG, then tag + GitHub Release). Keep this honest so
+# an agent isn't told to expect a build/sign stage that never runs for its Kind.
+_PIPELINE_PREPARE_ONLY = (
+    "prepare → release (bump + CHANGELOG, then tag + GitHub Release; "
+    "no build/sign — interpreted)"
+)
+_PIPELINE_FULL = "prepare → build → (sign/notarize where applicable) → publish"
+_KIND_PIPELINE: dict[str, str] = {
+    "nvim-plugin": _PIPELINE_PREPARE_ONLY,
+    "tree-sitter": _PIPELINE_PREPARE_ONLY,
+    "docs-site": _PIPELINE_PREPARE_ONLY,
+}
+
+
+def _pipeline_for(kind: str) -> str:
+    """The CI release pipeline description for `kind` (Kind-aware — release#704)."""
+    return _KIND_PIPELINE.get(kind, _PIPELINE_FULL)
+
+
 def _resolved(cmds: list[Cmd]) -> str:
     """Join a fan-out's resolved commands for display, or a not-wired note."""
     if not cmds:
@@ -128,7 +151,7 @@ def _resolved(cmds: list[Cmd]) -> str:
     return "; ".join(c.display for c in cmds)
 
 
-def _verbs_section_repo(root: str) -> list[str]:
+def _verbs_section_repo(root: str, kind: str) -> list[str]:
     """The verbs section for the CURRENT repo — uniform verbs annotated with the
     repo's REAL resolved commands (read from its manifests)."""
     rc = repo_commands.resolve(root)
@@ -148,8 +171,9 @@ def _verbs_section_repo(root: str) -> list[str]:
     lines.append(f"  build               : release-core build       → {build}")
     lines.append(
         "  release             : release-core cut <major|minor|patch>"
-        "   (CI builds/signs/publishes — never release locally)"
+        "   (runs in CI — never release locally)"
     )
+    lines.append(f"      CI pipeline: {_pipeline_for(kind)}")
     run = rc.run.display if rc.run else "(no run command detected)"
     lines.append(f"  run                 : release-core run         → {run}")
     if rc.docs:
@@ -177,8 +201,9 @@ def _verbs_section_kind(kind: str) -> list[str]:
     lines.append(f"  build               : release-core build       → {hint['build']}")
     lines.append(
         "  release             : release-core cut <major|minor|patch>"
-        "   (CI builds/signs/publishes — never release locally)"
+        "   (runs in CI — never release locally)"
     )
+    lines.append(f"      CI pipeline: {_pipeline_for(kind)}")
     lines.append(f"  run                 : release-core run         → {hint['run']}")
     return lines
 
@@ -343,7 +368,7 @@ def _render_repo(root: str, kind: str) -> str:
         "yours. Confirm the Kind anytime with `release-core detect-kind`."
     )
     lines.append("")
-    lines.extend(_verbs_section_repo(root))
+    lines.extend(_verbs_section_repo(root, kind))
     lines.append("")
     lines.extend(_ci_jobs_section())
     lines.append("")

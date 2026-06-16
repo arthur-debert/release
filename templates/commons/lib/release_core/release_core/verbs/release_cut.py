@@ -22,7 +22,9 @@ release can still draw from the same unreleased entries.
 
 Verification cut (`-release-rc` reserved suffix, #663): the live-fire
 verification harness cuts `X.Y.Z-release-rc` to exercise the whole
-release half (prep → build → sign/notarize → publish → cascade)
+release half (prep → build → sign/notarize → publish → cascade — the
+build/sign/publish stages are Kind-dependent; an interpreted Kind such
+as nvim-plugin / tree-sitter is just prepare → release)
 WITHOUT leaving a trace. It behaves like any pre-release EXCEPT the
 prepare step pushes the tag ONLY — the version-bump commit is NOT
 pushed to the branch, so the consumer's version line / main history
