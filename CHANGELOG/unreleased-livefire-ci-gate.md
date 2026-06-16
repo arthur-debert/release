@@ -1,5 +1,3 @@
-### Fixed
-
 - The `rust-ci.yml` e2e job and the `bats-e2e.yml` reusable workflow now install the bats helper libs (bats-support/assert/detik/file) to a runner-writable `${{ github.workspace }}/.bats/` dir instead of the action's `/usr/lib/bats-*` default; the old path was written as root on a cache miss but restored as the non-root runner on a cache hit, failing with "Permission denied" on alternating runs and blocking the v3.1.2 canary (#690)
 - The npm-quality prettier pre-commit check is now `--check` (was `--write` + `stage_fixed`); under the bare `release-core gate`'s `--all-files` run, `--write` reformatted untouched managed docs across the whole tree and pulled them into the diff. The check still fails non-zero on an unformatted file but no longer silently rewrites files it was only asked to inspect (#713)
 - A failing cargo-fmt pre-commit check (rust-quality, zed-extension, tauri-app) now prints a concise summary — the files needing formatting plus `run \`cargo fmt\` to fix` — instead of dumping rustfmt's long colorized unified diff; the check stays check-only (no silent auto-apply) and still exits non-zero (#691)

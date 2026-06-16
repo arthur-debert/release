@@ -1,5 +1,3 @@
-### Changed
-
 - `release-core how-to` now warns up front (dev-cycle step 1) to branch off `origin/<default-branch>` BEFORE committing, with the reason spelled out: the SessionStart `release-core init` can auto-commit a managed sync onto the local default branch, and branching/committing off that tip drags the auto-commit into the PR diff as an `alien commit` (#685)
 - `release-core how-to` describes the CI release pipeline Kind-aware: interpreted Kinds (nvim-plugin, tree-sitter, docs-site) render `prepare → release` (no build/sign), the rest render the full `prepare → build → (sign/notarize) → publish`; the `release-cut --help` `-release-rc` note is annotated the same way (#704)
 - `release-core how-to` orientation now flags the managed per-Kind entry point (`bin/check*`, `lib/release_core/`) as EPHEMERAL — installed by `release-core init` and listed in `.git/info/exclude` — so seeing `bin/check` untracked in `git status` is expected, not a problem to fix (#697)
