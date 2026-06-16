@@ -103,7 +103,7 @@ def test_how_to_dev_cycle_branches_from_origin_not_local_main():
     # `origin/main` that misleads repos whose default branch differs.
     assert "origin/main" not in body
     assert "NOT the local default branch" in body
-    assert "auto-committed a managed sync" in body
+    assert "AUTO-COMMIT a managed sync" in body
 
 
 def test_how_to_documents_the_install_only_ci_pattern(tmp_path):
