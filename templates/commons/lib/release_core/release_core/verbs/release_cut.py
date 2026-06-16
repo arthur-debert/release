@@ -107,6 +107,18 @@ Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
 pre-release suffix is stripped before bumping; to step from
 1.0.0-rc.1 to 1.0.0, type the version literally).
 
+Pre-releases: pass a semver pre-release suffix (e.g. 1.8.0-rc.1) to
+cut an RC/beta — CI marks the GitHub Release "pre-release" and skips
+rolling `## [Unreleased]` so later RCs can still draw from it.
+
+Reserved `-release-rc` suffix (live-fire verification, #663):
+`X.Y.Z-release-rc` is a throwaway verification cut. It behaves like
+any pre-release EXCEPT the prepare step pushes the TAG ONLY — the
+version-bump commit is NOT pushed to the branch, so the consumer's
+version line / main history stay clean. The live-fire harness deletes
+the tag + GitHub Release on teardown. Do not use it for a real RC
+(use `-rc.N` / `-beta.N` for those).
+
 The current version is read from the version source for the
 Consumer's Kind (Cargo.toml, package.json, extension.toml, or the
 latest git tag for Kinds without a manifest — including repos with

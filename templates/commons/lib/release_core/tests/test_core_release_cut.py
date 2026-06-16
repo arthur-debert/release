@@ -188,6 +188,14 @@ def test_bad_version_exits_2(gh_dispatch, capsys):
     assert "version must be" in capsys.readouterr().err
 
 
+def test_help_surfaces_release_rc_reservation(capsys):
+    """#693: `cut --help` documents the reserved `-release-rc` suffix, not just
+    the version grammar + pre-release stripping."""
+    rc = release_cut.main(["--help"])
+    assert rc == 0
+    assert "-release-rc" in capsys.readouterr().err
+
+
 def test_no_args_exits_2(capsys):
     rc = release_cut.main([])
     assert rc == 2
