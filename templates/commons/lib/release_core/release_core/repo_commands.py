@@ -483,12 +483,15 @@ def docs_commands(root: str) -> DocsCommands | None:
 # must not pretend to be the consumer's CI).
 
 
-def _is_node_run(cmd: Cmd, root: str) -> bool:  # noqa: ARG001 (root kept for a uniform predicate signature)
+def _is_node_run(cmd: Cmd, root: str) -> bool:  # noqa: ARG001
     """True iff this command runs through the node package manager — its head is
     one of ``npm``/``pnpm``/``yarn`` (covering both ``<pm> run …`` and direct
     invocations like ``pnpm tauri build``) or ``npx``. Any of these needs
     ``node_modules`` installed. (The detected pm is always one of these names, so
-    a per-call ``detect_pm`` probe would be redundant — release#735 review.)"""
+    a per-call ``detect_pm`` probe would be redundant — release#735 review.)
+
+    ``root`` is unused (kept for a uniform predicate signature across preflight
+    helpers); hence the ``ARG001`` waiver above."""
     return bool(cmd.argv) and cmd.argv[0] in ("npm", "pnpm", "yarn", "npx")
 
 
