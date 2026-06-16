@@ -60,6 +60,21 @@ silently dropping managed `bin/` tools).
   mechanism** — the wheel is the carrier; pull does the rest. A consumer still on
   a pre-pull seed migrates by running the (fixed) resolver once in that repo and
   opening the resulting managed-sync PR — a one-time seed, not a fleet push.
+  - **Steady state vs. the interim — `orc livefire`:** once release stabilizes
+    (changes are minor string/skill/config tweaks), the pull model makes
+    **adoption free** — every consumer absorbs the new version at its next
+    SessionStart, no fan-out. UNTIL then, the interim fan-out + VERIFICATION tool
+    is **`orc livefire`** (built/shipped epic #663): per consumer it clones fresh
+    → boots (= the convergence: pulls the `@v3` wheel + init) → a subordinate
+    bypassPermissions agent runs the one standard prompt
+    (`docs/dev/live-fire-prompt.md`), pushes a REAL coverage PR + cuts a throwaway
+    `-release-rc` → harvests feedback to the #348 inbox → tears down the rc.
+    `orc livefire --all` fans out in parallel; run via `env -u ANTHROPIC_API_KEY`
+    (subscription auth). It VERIFIES + de-risks a new version across the fleet
+    ("fan out the pull, confirm CI + release still work"); PERSISTING convergence
+    to a consumer's main is still merge / `poke` / organic pull. `--dry-run` is
+    NOT side-effect-free (the agent still pushes the PR + cuts the rc; dry-run
+    only skips the inbox filing + rc teardown).
 - **The load-bearing gotcha:** mechanical fleet tools (`release-core admin repos
   verify`) run in clones *without* the consumer's toolchain (no `npm install` /
   `cargo`), so they cannot run the consumer gate faithfully — a

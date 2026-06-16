@@ -109,6 +109,19 @@ def test_parse_feedback_raises_on_non_mapping():
         livefire.parse_feedback("```yaml\n- just\n- a\n- list\n```")
 
 
+@requires_yaml
+def test_parse_feedback_tolerates_embedded_code_fence():
+    # The live rustloc failure: the agent fenced an example snippet inside its
+    # feedback; the indented ``` swept into the captured block and broke the
+    # YAML loader ("found character '`'"). parse_feedback must strip bare fences
+    # and salvage the report rather than fail the whole run.
+    t = "```yaml\nrepo: r\nverdict: clean\ndetail:\n  ```\n  snippet\n  ```\nextra: true\n```"
+    fb = livefire.parse_feedback(t)
+    assert fb["repo"] == "r"
+    assert fb["verdict"] == "clean"
+    assert fb["extra"] is True
+
+
 # ── findings_to_issues ────────────────────────────────────────────────────
 
 
