@@ -34,14 +34,22 @@ pre-commit:
       # deliberately. Exit stays non-zero on a fmt nit, consistent with the
       # check-only cargo-clippy step below.
       run: >-
-        out="$(cargo fmt --all -- --check -l 2>/dev/null)";
+        errf="$(mktemp)";
+        out="$(cargo fmt --all -- --check -l 2>"$errf")";
         rc=$?;
         if [ "$rc" -ne 0 ]; then
-          n="$(printf '%s\n' "$out" | grep -c .)";
-          echo "cargo-fmt: ${n} file(s) need formatting — run \`cargo fmt\` to fix:" >&2;
-          printf '%s\n' "$out" | sed 's/^/  /' >&2;
+          if [ -n "$out" ]; then
+            n="$(printf '%s\n' "$out" | grep -c .)";
+            echo "cargo-fmt: ${n} file(s) need formatting — run \`cargo fmt\` to fix:" >&2;
+            printf '%s\n' "$out" | sed 's/^/  /' >&2;
+          else
+            echo "cargo-fmt: failed (not a formatting diff) — rustfmt/toolchain error:" >&2;
+            cat "$errf" >&2;
+          fi;
+          rm -f "$errf";
           exit "$rc";
-        fi
+        fi;
+        rm -f "$errf"
       priority: 2
     cargo-clippy:
       # Match any Rust source OR Cargo manifest OR Cargo.lock. Dependency
