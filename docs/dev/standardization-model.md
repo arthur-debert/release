@@ -263,8 +263,8 @@ Distilled from the 17-repo audit (full detail + per-repo scorecard:
    comms migrated its docs off Jekyll onto the shared `mkdocs.yml` workflow
    (comms now pins `@v3`) and onboarded to the fleet (comms#75); lex's orphan
    `pages.yml` was deleted.
-   `lex.ing` is now published solely by comms via mkdocs + mkdocs-lex, so no
-   Jekyll Kind is needed.)
+   `lex.ing` is now published solely by comms via mkdocs + `mkdocs-lex-plugin`,
+   so no Jekyll Kind is needed.)
 
 **Pure deletes (zero upstream work):** dead-orphan brew-render pairs (5 repos),
 `rust-setup/action.yml` (2), vscode's husky gate, `bin/check-fmt`/`check-lint`
