@@ -77,10 +77,10 @@ to do something, that is a finding — note it and use your best guess.
    (drive it to the point a human would merge: reviews addressed, CI green,
    mergeable). Do not merge it yourself; stop at ready. Bound the review wait:
    if the loop is still waiting on reviews/CI after a couple of rounds, do NOT
-   keep blocking on it — step 4 does not depend on the PR reaching ready (the
+   keep blocking on it — step 5 does not depend on the PR reaching ready (the
    cut is off the branch, not the merge). Record the slow/unbounded review-wait
-   as a finding and MOVE ON to step 4 so the release half still gets exercised
-   and the rc is cut. Reaching step 4 is the priority; a perfectly-green PR is
+   as a finding and MOVE ON to step 5 so the release half still gets exercised
+   and the rc is cut. Reaching step 5 is the priority; a perfectly-green PR is
    not (#722).
 
 5. RELEASE HALF. Cut a throwaway verification release to exercise the release
