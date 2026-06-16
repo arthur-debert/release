@@ -27,6 +27,37 @@ required reviewer's outage holds the PR at `REVIEWS_PENDING` until it recovers �
 accepted, not a bug. The engine names the outstanding reviewer in the next
 action, so a single-reviewer stall is visible, not silent.
 
+## Reading the per-reviewer line in `pr status`
+
+`release-core pr status` prints a per-reviewer breakdown as
+`name=lifecycle` pairs (two-space separated), e.g.
+`copilot=requested  gemini=in_progress`. This is informational detail
+*under* the single lifecycle state — you still act on the one next action,
+not on a raw reviewer field. The names are the registered adapters and the
+lifecycles are the adapter states; both are a fixed, enumerable set, so an
+unfamiliar pair is not a new concept to learn:
+
+- **Reviewer names** (the adapter registry — `prstate/reviewers.py`):
+  - `copilot` — requestable; the default required reviewer.
+  - `coderabbit` — requestable; the phos-org pilot (opt-in via
+    `required_reviewers:`).
+  - `gemini` — auto-triggering, best-effort; *not* requestable, so never a
+    required gate. It appears in the line whenever it has acted, but a
+    timed-out Gemini is treated as skipped rather than blocking Ready.
+- **Lifecycle states** (`ReviewLifecycle`):
+  - `not_requested` — no review and no pending request on the current head.
+  - `requested` — a review request is attached; the reviewer hasn't acted yet.
+  - `in_progress` — the reviewer is actively looking (e.g. Gemini's "eyes"
+    reaction); not yet done.
+  - `done_clean` — finished and left **no** comment threads.
+  - `done_comments` — finished and left comment threads (triage them).
+
+A push stales a head-strict reviewer (Copilot, CodeRabbit) back toward
+`not_requested`/`requested`, so re-request after every push (Gemini is
+any-head and won't re-review). The done-signal for the round is still
+**zero unresolved threads**, engine-computed — never a manual read of these
+pairs.
+
 ## The loop
 
 ```text
