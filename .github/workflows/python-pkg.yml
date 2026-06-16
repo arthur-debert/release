@@ -327,20 +327,26 @@ jobs:
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          prerelease_flag=""
+          # Re-assert prerelease on BOTH paths. gh defaults a created release to
+          # isPrerelease=false, and `gh release edit` leaves prerelease UNCHANGED
+          # unless --prerelease is passed — so on the resume/exists path the
+          # status would otherwise stay false even for a `-rc`/`-release-rc`
+          # version (release#726). Pass the explicit boolean form so the release
+          # always matches the version's SemVer pre-release suffix, idempotently.
+          prerelease_bool=false
           if [ "${PRERELEASE}" = "true" ]; then
-            prerelease_flag="--prerelease"
+            prerelease_bool=true
           fi
           # Attach sdist + wheels as release assets so GH-release-
           # only consumers (e.g. air-gapped installs) can fetch them
           # without going through PyPI.
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "Release ${TAG} exists — updating notes and re-uploading assets."
-            gh release edit "${TAG}" --notes-file release-notes.md
+            gh release edit "${TAG}" --notes-file release-notes.md --prerelease="${prerelease_bool}"
             gh release upload "${TAG}" dist/* --clobber
           else
             gh release create "${TAG}" \
-              ${prerelease_flag} \
+              --prerelease="${prerelease_bool}" \
               --title "${TAG}" \
               --notes-file release-notes.md \
               dist/*

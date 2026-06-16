@@ -1,0 +1,1 @@
+- python-pkg (+ all hand-rolled GH-release steps) now re-assert --prerelease on the release-edit/resume path, so a -release-rc / pre-release-suffixed cut is created with isPrerelease=true even when the release already exists (#726)
