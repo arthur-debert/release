@@ -127,6 +127,13 @@ jobs:
   # -------------------------------------------------------------------
   create-release:
     needs: [prepare, publish-crates]
+    # publish-crates is skipped for a `-release-rc` verification cut (no external
+    # publish), so guard with always() + accept a skipped publish — otherwise a
+    # skipped need would cascade-skip the GH release we DO want on a verify cut.
+    if: |
+      always()
+      && needs.prepare.result == 'success'
+      && (needs.publish-crates.result == 'success' || needs.publish-crates.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
