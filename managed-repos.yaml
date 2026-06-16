@@ -1,4 +1,4 @@
-# Canonical list of repos this release/ portfolio manages.
+# The single source-of-truth list of repos this release/ portfolio manages.
 # Source of truth for audit-portfolio, managed-repos, release-verify-fleet,
 # and any future per-fleet tooling. README.md's "Managed repos" table is
 # the human-readable mirror.

@@ -3,9 +3,9 @@
 `docs/references/consumer-contract.yaml` states what a consumer tree looks
 like: the tracked real files (the bootstrap quartet + `.github/workflows/*`
 managed copies), the untracked ephemeral mirror dests (WS7), the gitignored
-`.release/` build dir (WS4), the gate-internal set (WS3), the retired-file sets
+`.release/` temp dir (WS4), the gate-internal set (WS3), the retired-file sets
 (WS6), and the managed-path patterns a CI job may only reference after
-building the managed tree.
+installing the managed files.
 
 ## Generated, never hand-maintained
 
@@ -39,7 +39,7 @@ It scans every CI surface — `.github/workflows/*.yml`,
 manifest's `managed_path_prefixes` plus every `untracked_mirrors` dest)
 without a prior step in the same job that provides it:
 
-- a build step that sets up the managed tree — the `arm-gate` composite or an
+- a setup step that installs the managed files — the `arm-gate` composite or an
   explicit `release-core init` run line (exactly these two: the standard recipe
   is demanded, not one option among many); or
 - an `actions/checkout` step whose `with.path` checks content out INTO the
@@ -95,9 +95,9 @@ Scope and non-scope, deliberately:
 - It does **not** exempt the workflow from the **assumption lint**
   (`release-core admin contract lint`): an `# UNMANAGED` workflow that
   references a managed ephemeral path (`.release/`, `bin/check`,
-  `lib/release_core/`, an untracked mirror) still must build the managed tree
-  first. Being domain-bespoke does not license assuming the old managed-tree
-  shape.
+  `lib/release_core/`, an untracked mirror) still must install the managed files
+  first. Being domain-bespoke does not license assuming the old managed-file
+  layout.
 - There is currently **no automated fat-workflow / bypass linter** in this
   repo — the release#569/#630 "litmus sweep" was a one-time manual fleet
   analysis, not a gate. So this marker is, today, a **documented convention**

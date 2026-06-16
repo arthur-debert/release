@@ -312,7 +312,7 @@ STUB
 
 # --------------------------------------------------------------------------
 # provenance stamp (#580): the resolved release tag lands in the venv so
-# `release-core init` can label the managed-sync commit with the REAL release
+# `release-core init` can label the managed-files commit with the REAL release
 # line (the wheel's package version is a static 0.0.1).
 # --------------------------------------------------------------------------
 
@@ -409,10 +409,10 @@ STUB
 # folded-in init: install-release-core runs `release-core init` by default
 # --------------------------------------------------------------------------
 
-@test "init: runs a bare release-core init (full materialize) by default after install" {
+@test "init: runs a bare release-core init (full install) by default after install" {
   run "$BIN"
   [ "$status" -eq 0 ]
-  # #476 cutover: a bare `init` IS the full managed-tree materialize + auto-commit
+  # #476 cutover: a bare `init` IS the full managed-file install + auto-commit
   # on change. The resolver passes NO flags; auto-commit is the default. init is
   # invoked from the tool venv's own bin.
   [ "$(cat "$INIT_LOG")" = "release-core init" ]

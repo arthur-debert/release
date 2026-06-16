@@ -74,7 +74,7 @@ removed after. It never merges.
 The probe verb spins a fresh subordinate agent in `<repo-path>` and
 sends it an eval prompt. The agent reports back what it sees, runs
 the lint/test commands you ask it to, and gives a verdict. This is how
-release/ changes get from "implemented" to "pilot-running": a fresh
+release/ changes get from "implemented" to "conformant": a fresh
 agent's empirical experience IS the test.
 
 **Important:** probe uses `bypassPermissions`. Run it only against a
@@ -94,11 +94,11 @@ exactly as a real session would, and then **boot-asserts** that the
 managed sync actually applied:
 
 - `.release/.release-sync-source` exists and names a source sha/ref
-  (assert a — init composed the managed tree);
+  (assert a — init installed the managed files into `.release/`);
 - the clone's git `info/exclude` carries the WS7 managed-mirrors block
   sentinel (assert b — init rewrote the mirrors exclude block).
 
-The asserts check **materialized state, never commits** — an
+The asserts check **installed state, never commits** — an
 already-converged clone commits nothing, and that is success. A boot
 report (provenance ref, `release-core --version`, whether this boot
 created a sync commit) is printed to stderr before the session starts.
@@ -155,7 +155,7 @@ sections, ending with a verdict like:
 
 The probe found a real bug on its first run against the Component
 model: `templates/rust/.github/pull_request_template.md` (shipped by
-release/) violates the canonical markdownlint config (MD041) — then
+release/) violates the shared markdownlint config (MD041) — then
 shipped by the `shell-quality` Component, now part of `templates/commons/`.
 That's the value loop in one example — static review missed it; the
 fresh agent's `lefthook run` surfaced it.

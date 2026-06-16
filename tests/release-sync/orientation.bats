@@ -3,12 +3,12 @@
 load helper
 
 # ---------------------------------------------------------------------
-# Consumer CLAUDE.md orientation STUB (release#348 → WS2 release#523)
+# Consumer CLAUDE.md header STUB (release#348 → WS2 release#523)
 #
 # `release-core init` injects a marker-delimited managed block at the TOP of the
 # consumer's CLAUDE.md. WS2 made the block a tiny STUB pointing at the binary
 # (`release-core how-to` is the single source of orientation) — it no longer
-# imports @.release/ORIENTATION.md, and ORIENTATION.md is no longer composed. The
+# imports @.release/ORIENTATION.md, and ORIENTATION.md is no longer installed. The
 # block owns ONLY itself; the consumer's own content lives below it, untouched.
 # ---------------------------------------------------------------------
 
@@ -67,9 +67,9 @@ END_MARK='<!-- END release-managed orientation -->'
   [ "$(grep -cF "$BEGIN_MARK" CLAUDE.md)" -eq 1 ]
 }
 
-@test "the gh-release-issue synced shim is retired — not materialized (#476)" {
+@test "the gh-release-issue synced retired file is gone — not installed (#476)" {
   # The escalation tool reaches a consumer's PATH via the pip console-script
-  # (install-release-core at SessionStart), NOT a synced bin/ shim.
+  # (install-release-core at SessionStart), NOT a synced bin/ file.
   release_sync >/dev/null
   [ ! -e bin/gh-release-issue ]
   [ ! -e .release/bin/gh-release-issue ]

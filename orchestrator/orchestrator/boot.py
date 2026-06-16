@@ -12,7 +12,7 @@ boot-ASSERTS that the managed sync actually applied, and returns a
 :class:`BootReport` recording what was booted. Deterministic and fail-loud —
 any boot failure invalidates the probe by design.
 
-The asserts check MATERIALIZED STATE, never commits: an already-converged
+The asserts check INSTALLED STATE, never commits: an already-converged
 clone legitimately commits nothing, so "no sync commit appeared" is not a
 failure (the commit subject is recorded informationally only).
 
@@ -27,9 +27,9 @@ from pathlib import Path
 
 BOOT_SCRIPT = "bin/setup-dev-env.sh"
 
-# Provenance marker written by `release-core init` into the composed .release/
-# tree (ADR-0002; see release_core/sync.py SOURCE_MARKER). Last non-comment
-# line is the source sha/ref the managed tree was composed from.
+# Provenance marker written by `release-core init` into the `.release/` temp dir
+# (ADR-0002; see release_core/sync.py SOURCE_MARKER). Last non-comment
+# line is the source sha/ref the managed files were installed from.
 SOURCE_MARKER = ".release/.release-sync-source"
 
 # The WS7 managed-mirrors block sentinel that init rewrites into the clone's
@@ -109,7 +109,7 @@ def _parse_source_ref(repo: Path) -> str:
     if not marker.is_file():
         raise BootError(
             f"boot-assert (a) failed: {SOURCE_MARKER} missing after boot — "
-            "release-core init did not compose the managed tree."
+            "release-core init did not install the `.release/` temp dir."
         )
     lines = [
         ln.strip()
@@ -167,7 +167,7 @@ def boot_clone(repo_path: str) -> BootReport:
     head_before = _git(repo, "rev-parse", "HEAD")
     _run_boot_script(repo)
 
-    # Boot-asserts: materialized state only — never commits (a converged
+    # Boot-asserts: installed state only — never commits (a converged
     # clone commits nothing, and that is success).
     source_ref = _parse_source_ref(repo)
     _assert_exclude_sentinel(repo)

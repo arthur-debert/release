@@ -29,8 +29,8 @@ consumer-side fix was wasted motion.
 
 1. **Reproduce once, in one throwaway clone.** Not an agent per repo. The fleet
    is already cloned by `release-core admin repos verify` under
-   `/tmp/release-fleet-verify-$USER/`. Reset one to clean `main`, compose the
-   managed tree from your candidate ref (`release-core init --no-commit` with
+   `/tmp/release-fleet-verify-$USER/`. Reset one to clean `main`, install the
+   managed files from your candidate ref (`release-core init --no-commit` with
    `RELEASE_HOME`/`RELEASE_REF` — the retired `release-sync` verb is gone), run
    the gate. One repo tells you what 15 would.
 2. **Consult the oracle — is it upstream?** Two cheap, deterministic signals:
@@ -88,7 +88,7 @@ If `lefthook dump` shows a command that is not the synced one, a local override
 is shadowing it. The fix is to delete the obsolete `lefthook-local.yml` (it
 exists only because the gate used to be brittle), not to re-patch upstream.
 
-## The tools (compose these, don't reinvent)
+## The tools (use these, don't reinvent)
 
 - `release-core admin repos verify --ref <ref>` — hermetic pre-flight: clones the
   fleet, syncs each from `<ref>`, runs the gate. Use it BEFORE
@@ -98,8 +98,8 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   clones (missing-deps artifacts, not regressions — classify by failing step;
   #594 tracks making verify classify these itself).
 - `release-core admin canary run --ref main` — the deep pre-ship round: a
-  synthetic consumer lives its full life (boot from source, build the
-  managed tree, gate, e2e, a real prerelease cut) against the candidate sha and a
+  synthetic consumer lives its full life (boot from source, install the
+  managed files, gate, e2e, a real prerelease cut) against the candidate sha and a
   `canary/<family>` commit status lands on `release@<sha>`. NOT optional
   before a cut: `release-core cut` refuses unless every registered family's
   status is green on the exact main HEAD it dispatches (release#606, no skip
@@ -108,7 +108,7 @@ exists only because the gate used to be brittle), not to re-patch upstream.
   the target repo on a fresh branch, run the resolver once — `bash
   bin/install-release-core` (use release's own `bin/install-release-core` if the
   consumer's is pre-fix and can't self-bootstrap). It pulls the latest wheel and
-  a bare `init` fully builds + auto-commits the managed tree. Then push and
+  a bare `init` fully installs + auto-commits the managed files. Then push and
   open the managed-sync PR; its CI is the gate. One repo at a time; after the
   first seed the consumer self-updates natively. No fleet-wide push.
   (Release-dev note: if `RELEASE_HOME` is set in *your* env, prefix the run with

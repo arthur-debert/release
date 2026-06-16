@@ -64,7 +64,7 @@ consumer).
 ## `release-core admin repos verify`
 
 The pre-flight lint sweep — the realization of "checkout all repos,
-build their managed tree (`release-core init`), try to commit," using real consumer files instead of
+run `release-core init` to install managed files, try to commit," using real consumer files instead of
 synthetic fixtures (this is why per-Kind fixtures, release#298, were closed
 won't-do).
 
@@ -149,7 +149,7 @@ tree-build/provision, boot, init) vs **PROJECT** = consumer-side
 
 Where `repos verify` is the fast, fleet-wide *gate* sweep, the canary round
 is the slow, deep *workflow* test (release#587, epic #583): it makes a real
-synthetic consumer live its full life — boot from source, build the managed tree,
+synthetic consumer live its full life — boot from source, install managed files,
 `bin/check`, e2e/bats, and a genuine prerelease cut — against an
 **unreleased** candidate ref, before `release-core cut` moves the fleet.
 Different instruments; run both before cutting (the canary half is
@@ -278,7 +278,7 @@ hand-rolled-bypass finding. phos-app's `e2e-gpu.yml` already self-declares it.
 
 The marker is ONLY the bypass signal — it does NOT suppress the assumption
 lint (`release-core admin contract lint`): an `# UNMANAGED` workflow that
-references a managed ephemeral path still must build the managed tree
+references a managed ephemeral path still must install the managed files
 first. There is currently no automated fat-workflow linter in this repo (the
 release#569/#630 litmus sweep was a one-time manual analysis), so this is a
 documented convention any sweep must honor; see

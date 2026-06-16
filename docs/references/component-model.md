@@ -92,7 +92,7 @@ capabilities:
 The override is the full set (not additive). If `.release-sync.yaml` is
 absent, the Kind manifest is authoritative. If present, it wins.
 
-Declaring a Component that doesn't exist is a fatal compose error
+Declaring a Component that doesn't exist is a fatal install error
 (`release-core init` exits non-zero).
 
 ## What `release-core init` composes
@@ -134,7 +134,7 @@ The generated file carries a header marker:
 # templates/components/<cap>/lefthook.fragment.yaml.
 ```
 
-Since WS3 (#524) the composed `lefthook.yml` and most lint/format tool configs
+Since WS3 (#524) the generated `lefthook.yml` and most lint/format tool configs
 (`.markdownlint.json`, `.markdownlintignore`, `.yamllint`, `.prettierignore`) are
 **release-internal**: they live only in `.release/` and are NOT mirrored to the
 consumer root. The gate runs through the binary (`release-core gate` points
@@ -147,15 +147,15 @@ config explicitly — `markdownlint --config/--ignore-path`, `yamllint -c`,
 fleet, so `check-shell` passes `--rcfile=.release/.shellcheckrc` explicitly —
 the upward-walk root dotfile is gone.
 
-## How sync builds the managed tree (no state file)
+## How init installs managed files (no state file)
 
-Sync is **stateless**. It does not track a per-consumer manifest of what
-was synced before. Instead it rebuilds the whole managed tree from scratch
+Init is **stateless**. It does not track a per-consumer manifest of what
+was installed before. Instead it reinstalls the whole managed file set from scratch
 on every run (ADR-0001):
 
 1. Remove `.release/` entirely.
 2. Rebuild `.release/` from the current templates (commons + declared
-   Components + Kind) — a self-contained build directory of real file
+   Components + Kind) — a self-contained temp dir of real file
    content.
 3. Create working-tree symlinks (`bin/check`, `.editorconfig`,
    `.claude/skills/*`, …) pointing into `.release/`. (`lefthook.yml` + the gate
@@ -184,7 +184,7 @@ session, so it can't fall out of sync); it remains purely informational.
 There is no state file.
 
 Mechanism reference:
-[ADR-0001](../adr/0001-release-sync-build-dir-with-symlinks.md) (build dir +
+[ADR-0001](../adr/0001-release-sync-build-dir-with-symlinks.md) (temp dir +
 symlinks), [ADR-0002](../adr/0002-provenance-marker.md) (provenance marker),
 and the distribution section of `docs/tooling.lex`.
 

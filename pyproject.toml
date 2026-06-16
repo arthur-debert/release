@@ -1,7 +1,7 @@
 # Virtual workspace root for release/'s Python code.
 #
 # Two members:
-#   - templates/commons/lib/release_core : the canonical pip-distributed core +
+#   - templates/commons/lib/release_core : the pip-distributed core +
 #                      CLI. Carries the folded PR state engine (release_core.
 #                      prstate; release#459) — stdlib-only, runs in CI and Cloud.
 #   - orchestrator   : local-only harness. May use the Claude Agent SDK
@@ -12,7 +12,7 @@
 [tool.uv.workspace]
 # release_core lives under templates/commons/ because it's a release-managed file
 # set distributed to consumers — but, unlike the rest, it ships by pip wheel (not
-# by sync): it is the single canonical copy and the one channel for the Python
+# by sync): it is the single authoritative copy and the one channel for the Python
 # core, including the gh-task-status console script.
 members = [
   "templates/commons/lib/release_core",

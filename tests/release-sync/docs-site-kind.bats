@@ -4,7 +4,7 @@
 # docs-site Kind (mkdocs) — release#353 §A (onboarding lex-fmt/comms)
 #
 # A pure-content/docs repo (an mkdocs site) has no compiled-artifact
-# signal, so detect-kind used to fail and the compose engine aborted with
+# signal, so detect-kind used to fail and the install engine aborted with
 # "could not detect kind". The docs-site Kind recognises a root
 # mkdocs.yml and ships a manifest-less Kind tree (bin/check). The repo
 # opts into the mkdocs Capability via .release-sync.yaml.
@@ -18,7 +18,7 @@ source "$BATS_TEST_DIRNAME/../../templates/components/bats/lib/bats-harness.bash
 BIN="$BATS_TEST_DIRNAME/../../bin"
 RELEASE_HOME_ABS="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 
-# Compose the managed tree via the current entry point (`release-core init`); the
+# Install the managed files via the current entry point (`release-core init`); the
 # standalone `release-sync` verb was retired in WS4 (release#521). --no-commit:
 # the suite asserts filesystem state, never git history. (This suite builds its
 # own docs-site fixture and does NOT load the shared helper, so it defines this.)
@@ -31,7 +31,7 @@ setup() {
   cd "$HARNESS_WORKSPACE"
   git init -q
   # docs-site fixture: a root mkdocs.yml is the Kind signal. Declare the
-  # mkdocs Capability so check-docs is materialized too.
+  # mkdocs Capability so check-docs is installed too.
   touch mkdocs.yml
   printf 'capabilities:\n  - mkdocs\n' > .release-sync.yaml
   export PATH="$BIN:$PATH"
@@ -63,7 +63,7 @@ teardown() {
   run release_sync
   [ "$status" -eq 0 ]
   [[ "$output" != *"could not detect kind"* ]]
-  # The docs-site Kind tree materialized (manifest-less Kind detected from mkdocs.yml).
+  # The docs-site Kind tree installed (manifest-less Kind detected from mkdocs.yml).
   [ -f .release/bin/check ]
 }
 
@@ -81,7 +81,7 @@ teardown() {
   [ -L bin/check-docs ]
 }
 
-@test "the commons gate + orientation stub land on a docs-site repo" {
+@test "the commons gate + header stub land on a docs-site repo" {
   release_sync >/dev/null
   [ -f .release/lefthook.yml ]
   [ -f CLAUDE.md ]

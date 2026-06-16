@@ -2,11 +2,11 @@
 
 # release#531 F1 — the bot gate must not silently skip on a post-WS3 managed
 # consumer. Post-WS3 the gate config lives only in the ephemeral .release/
-# (no root lefthook.yml); post-WS4 nothing materializes .release/ outside
+# (no root lefthook.yml); post-WS4 nothing installs .release/ outside
 # rust-cli's arm-gate. run-precommit-gate.sh's detection chain then found no
 # config and skipped — a hollow green on every non-rust bot commit. The fix:
-# when release-core is on PATH (every release flow installs it), MATERIALIZE
-# the managed tree (release-core init --no-commit) and run the real gate
+# when release-core is on PATH (every release flow installs it), install
+# the managed files (release-core init --no-commit) and run the real gate
 # through the binary (release-core gate --hook). These tests drive the script
 # against a logging release-core stub — offline, no real wheel.
 
@@ -31,7 +31,7 @@ setup() {
   export CALLS="$PWD/calls.log"
   : > "$CALLS"
   # A logging release-core stub: records argv; `init` fabricates the managed
-  # config exactly like the real materialize would.
+  # config exactly like the real install would.
   cat > "$STUB/release-core" <<'STUB'
 #!/usr/bin/env bash
 printf 'release-core %s\n' "$*" >> "$CALLS"
@@ -49,7 +49,7 @@ _stage_a_file() {
   git add bumped.txt
 }
 
-@test "managed consumer, no root config: materializes then gates through the binary" {
+@test "managed consumer, no root config: installs the managed files then gates through the binary" {
   _stage_a_file
   PATH="$STUB:$PATH" run bash "$GATE"
   [ "$status" -eq 0 ]
@@ -58,10 +58,10 @@ _stage_a_file() {
 }
 
 @test "managed consumer, .release/lefthook.yml already present: the #530 LEFTHOOK_CONFIG path wins (no re-init)" {
-  # When arm-gate (or a prior step) already materialized .release/, the script
+  # When arm-gate (or a prior step) already installed .release/, the script
   # keeps its existing behavior: export LEFTHOOK_CONFIG and run lefthook
   # directly (the rust path, #530). The new release-core branch exists for the
-  # previously-hollow case (nothing materialized) only.
+  # previously-hollow case (nothing installed) only.
   mkdir -p .release && : > .release/lefthook.yml
   cat > "$STUB/lefthook" <<'STUB'
 #!/usr/bin/env bash
@@ -98,7 +98,7 @@ STUB
   grep -q 'lefthook run pre-commit --file bumped.txt \[cfg=caller.yml\]' "$CALLS"
 }
 
-@test "a whitespace-only LEFTHOOK_CONFIG counts as unset (falls back to the managed copy)" {
+@test "a whitespace-only LEFTHOOK_CONFIG counts as unset (falls back to the managed .release/ copy)" {
   # #569 B4: don't let a blank LEFTHOOK_CONFIG send lefthook down default discovery.
   mkdir -p .release && : > .release/lefthook.yml
   cat > "$STUB/lefthook" <<'STUB'

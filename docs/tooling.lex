@@ -1,7 +1,7 @@
 release-core, the gate, distribution, and workflows
 
     The machinery layer of `release/`: one CLI an agent drives, one quality
-    gate it runs, one sync engine that builds managed files into a
+    gate it runs, one installer that writes managed files into a
     consumer, and one set of reusable GitHub Actions workflows. This document
     is the single home for all four — it absorbs the former `tooling`,
     `distribution`, `workflows`, and the mechanism half of `injected-files`,
@@ -35,8 +35,8 @@ release-core, the gate, distribution, and workflows
           build / release / run + the draft-first dev cycle). The single source
           of procedural truth — see `harness.lex` and `dev-cycle.lex`.
         - `release-core gate` — run the quality gate (see [#2]).
-        - `release-core init` — build the managed tree from the wheel
-          bundle: the gitignored, ephemeral `.release/` build dir plus the
+        - `release-core init` — install managed files from the wheel
+          bundle: the gitignored, ephemeral `.release/` temp dir plus the
           working-tree mirrors ([#5]). What SessionStart runs; the only mode
           (the `--config-only` escape hatch was removed in #532). Auto-commits
           a managed change when one exists — consumers self-update by pull,
@@ -92,7 +92,7 @@ release-core, the gate, distribution, and workflows
     pre-commit --all-files`, so green here == green in CI, with no false-green
     on unstaged files. It points lefthook at `.release/lefthook.yml` via
     `LEFTHOOK_CONFIG` — there is no tracked root gate config in a consumer
-    (WS3, #524); the gate definition lives only in the ephemeral build dir.
+    (WS3, #524); the gate definition lives only in the ephemeral temp dir.
 
     It is a HARD gate: a missing tool exits non-zero (a setup failure, never a
     skip), and `--no-verify` is never an acceptable workaround — CI re-runs the
@@ -103,7 +103,7 @@ release-core, the gate, distribution, and workflows
     separate required check, so run the repo's `test` verb yourself before
     pushing.
 
-    The gate is ONE definition (`lefthook.yml`, composed from fragments —
+    The gate is ONE definition (`lefthook.yml`, assembled from fragments —
     [#5.2]) run everywhere: session start arms it, local commits run it, CI runs
     the same `lefthook run pre-commit --all-files`. To add or change a check,
     edit a fragment — never hand-copy a check into a CI job. See the "ONE gate,
@@ -180,7 +180,7 @@ release-core, the gate, distribution, and workflows
     - It then runs a bare `release-core init` in the repo (best-effort).
 
     So a consumer gets a NEW `release_core` automatically on its next session
-    start (or next CI run) — there is nothing to commit to update the engine.
+    start (or next CI run) — there is nothing to commit to update the tool.
     The pull model keeps consumers on the always-stable tip without per-repo
     bump PRs.
 
@@ -197,8 +197,8 @@ release-core, the gate, distribution, and workflows
     - Optionally `.release-sync.yaml` — the one per-repo knob (component
       override).
 
-    Everything else is EPHEMERAL, recomposed by every `init`: the `.release/`
-    build dir is gitignored (WS4, #521), and the working-tree mirrors (the
+    Everything else is EPHEMERAL, reinstalled by every `init`: the `.release/`
+    temp dir is gitignored (WS4, #521), and the working-tree mirrors (the
     `bin/` task symlinks, `.editorconfig`, the distributed skill) are
     untracked, listed in a managed `.git/info/exclude` block (WS7, #528).
     Nothing can fall out of sync by construction — there is nothing tracked to
@@ -211,12 +211,12 @@ release-core, the gate, distribution, and workflows
     commit. `--no-commit` skips it (CI); `--push` additionally fast-forwards
     on a clean default branch.
 
-5. Distribution — the compose engine (init → ephemeral tree + mirrors)
+5. Distribution — the installer (init → ephemeral temp dir + mirrors)
 
-    `release-core init` is the one builder (the standalone `release-sync`
+    `release-core init` is the one installer (the standalone `release-sync`
     verb and the `release-drift-check` subsystem were retired in WS4, #521 —
-    with the tree ephemeral there is nothing to fall out of sync). The engine
-    lives in `release_core/sync.py` (`install_plan` / `install_tree` /
+    with the temp dir ephemeral there is nothing to fall out of sync). The
+    installer lives in `release_core/sync.py` (`install_plan` / `install_tree` /
     `compute_mirror`);
     init is its only driver. Read this before adding anything consumers should
     receive.
@@ -225,7 +225,7 @@ release-core, the gate, distribution, and workflows
     as possible, and nothing mixed-ownership. The wheel carries it; files
     appear at session start and never enter git.
 
-    5.1. What init composes
+    5.1. What init installs
 
         Three template subtrees, low to high precedence (last write wins):
 
@@ -237,7 +237,7 @@ release-core, the gate, distribution, and workflows
 
         A file's destination is its source path minus the subtree prefix:
         `templates/commons/bin/check-shell` → `.release/bin/check-shell`.
-        `lefthook.yml` is the one composed file — deep-merged from each
+        `lefthook.yml` is the one merged file — deep-merged from each
         subtree's `lefthook.fragment.yaml` in precedence order; to change a
         check, edit a fragment, never a consumer's gate. Skills ride the same
         mechanism, whole-directory (catalogs in `harness.lex`).
@@ -247,11 +247,11 @@ release-core, the gate, distribution, and workflows
 
     5.2. Where things land
 
-        Four placement classes, decided by the engine:
+        Four placement classes, decided by the installer:
 
-        Ephemeral build dir (`.release/`):
-            The whole composed tree, gitignored via a self-ignoring
-            `.release/.gitignore`, recomposed every init. The gate config
+        Ephemeral temp dir (`.release/`):
+            The whole installed tree, gitignored via a self-ignoring
+            `.release/.gitignore`, reinstalled every init. The gate config
             (`lefthook.yml` + lint/format configs) lives ONLY here; tools get
             it via explicit `--config`/`--rcfile`/`-c` paths (WS3, #524).
 
@@ -268,16 +268,16 @@ release-core, the gate, distribution, and workflows
             (WS5, #526 — must exist on a fresh clone, before any init ran).
             Copies carry a managed-marker header so stale ones are swept.
 
-        The CLAUDE.md stub:
+        The CLAUDE.md header block:
             A marker-delimited block injected at the top of the consumer's
             CLAUDE.md, pointing at `release-core how-to` (`harness.lex` §2).
 
-    5.3. Cleanup is part of the compose
+    5.3. Cleanup is part of the install
 
         Every init also removes what no longer belongs:
 
         - Broken/de-mirrored symlinks: any `.release/`-pointing symlink whose
-          dest this compose does not mirror is swept (and its emptied skill
+          dest this install does not mirror is swept (and its emptied skill
           dir pruned).
         - Stale managed copies: marker-carrying workflow files absent from the
           plan.
@@ -436,7 +436,7 @@ release-core, the gate, distribution, and workflows
     (fast-forward the floating major). Run `release-core admin repos verify`
     (hermetic pre-flight) before advancing. Consumers self-update at their next
     SessionStart — `install-release-core` pulls the wheel and a bare
-    `release-core init` rebuilds the whole managed tree — so there is NO
+    `release-core init` reinstalls the managed files — so there is NO
     push step. (Seeding a pre-pull consumer is a one-time `bash
     bin/install-release-core` run in that repo, then open the resulting
     managed-sync PR — one repo at a time.) For the full principle and the
@@ -449,7 +449,7 @@ release-core, the gate, distribution, and workflows
 
     Done:
         - Vocabulary + sync redesign: settled on Kind, Component, and Consumer
-          (Stack and client were the older names); the build-dir + symlinks
+          (Stack and client were the older names); the temp dir + symlinks
           architecture (ADR-0001/0002) that makes removals and renames
           detectable instead of lingering.
         - Reliable dev cycle (epic #332): the reviewer-agnostic `gh-task-status`
@@ -461,13 +461,13 @@ release-core, the gate, distribution, and workflows
 
     Done (continued):
         - Self-improving feedback loop (epic #348, closed): consumer
-          orientation via the CLAUDE.md stub + `how-to`; the escalation
+          orientation via the CLAUDE.md header block + `how-to`; the escalation
           contract (`release-core issue file`) and the maintainer inbox
           (`admin inbox` / `notify-source`).
         - Minimal footprint (epic #501, ADR-0005, closed 2026-06): the wheel
           is the sole carrier. `.release/` ephemeral (WS4), bootstrap quartet
           as real files (WS5), retired-file cleanup (WS6), ephemeral
-          mirrors + the machinery keep/fold/drop (WS7,
+          mirrors + the keep/fold/drop decision list (WS7,
           `docs/references/self-improving-machinery.md`). The old sync and
           out-of-sync-check subsystem is gone; a consumer tracks only the
           irreducible set.

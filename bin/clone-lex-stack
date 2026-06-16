@@ -54,7 +54,7 @@
 
 set -euo pipefail
 
-# --- Canonical repo list (single source of truth) --------------------
+# --- The repo list (single source of truth) --------------------
 # When a new sibling repo joins the lex-fmt stack, add it here and
 # re-publish via env-setup. Q6 of the multi-repo bootstrap plan covers
 # why this is hardcoded for v1 rather than dynamic.

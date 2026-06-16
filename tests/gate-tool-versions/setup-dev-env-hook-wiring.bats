@@ -3,13 +3,13 @@
 #
 # The first-commit-of-session boot hole: `.release/` is ephemeral (gitignored,
 # WS4), so every session starts without the gate config until `release-core
-# init` composes it. The fix under test:
+# init` installs it. The fix under test:
 #   * the pull-model boot (§0.1, install-release-core → init) runs BEFORE the
 #     hook wiring (§0.2), so the very first session of a fresh clone wires a
-#     hook that has a materialized gate to run;
+#     hook that has an installed gate config to run;
 #   * a consumer (no root lefthook.yml) gets the binary hook wired EVEN when
 #     init failed and `.release/lefthook.yml` is absent — its commits then hit
-#     `release-core gate --hook`'s fail-loud unmaterialized-config error
+#     `release-core gate --hook`'s fail-loud missing-config error
 #     instead of running with no hook at all;
 #   * release-self / not-yet-migrated repos (root lefthook.yml, no managed
 #     config) keep the stock `lefthook install` wiring.
@@ -71,7 +71,7 @@ EOF
   chmod +x "$STUB/lefthook"
 
   # install-release-core: logs the boot, and (when MATERIALIZE=1) simulates
-  # init composing the ephemeral gate config.
+  # init installing the ephemeral gate config.
   cat > "$STUB/install-release-core" <<'EOF'
 #!/bin/sh
 echo "install-release-core" >> "$ORDER_LOG"
@@ -112,7 +112,7 @@ _run_setup() {
   MATERIALIZE=1
   _run_setup
   [ "$status" -eq 0 ]
-  # Order: the boot (which materializes .release/) precedes the hook install —
+  # Order: the boot (which installs .release/) precedes the hook install —
   # the release#567 first-session fix.
   grep -n "install-release-core" "$ORDER_LOG"
   grep -n "release-core gate --install-hook" "$ORDER_LOG"
@@ -128,7 +128,7 @@ _run_setup() {
 @test "consumer with a FAILED init (no .release/lefthook.yml) still gets the binary hook" {
   # No root lefthook.yml + no managed config: the consumer shape with init not
   # (yet) run. The hook must be wired anyway so commits hit the gate's
-  # fail-loud unmaterialized-config error — never run hookless/ungated.
+  # fail-loud missing-config error — never run hookless/ungated.
   MATERIALIZE=0
   _run_setup
   [ "$status" -eq 0 ]

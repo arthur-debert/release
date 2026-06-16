@@ -160,7 +160,7 @@ pre-commit:
     consumer-contract-lint:
       # The assumption lint (#584): every CI surface (.github/workflows,
       # .github/actions, templates/ workflow copies) — any JOB referencing a
-      # managed path (per the manifest) without a prior materialize step in the
+      # managed path (per the manifest) without a prior install step in the
       # same job (arm-gate / release-core init) fails. The mechanical "who still
       # assumes the old shape" sweep that would have caught release#579.
       # The shrink-only baseline was drained to zero and its file deleted

@@ -98,7 +98,7 @@ unset GH_TOKEN
 # `exit 0` in it terminate the harness. The downside is that exports
 # from the child (e.g. `export DISPLAY=:99` for the Xvfb wrapper) die
 # with the child. We mitigate the DISPLAY case below by reading what
-# the script may have written to ~/.bashrc — the canonical Xvfb extras
+# the script may have written to ~/.bashrc — the shared Xvfb extras
 # also persist DISPLAY there for interactive shells, so picking it up
 # here keeps lefthook + tests aligned with real cloud usage. Other
 # script-level exports (PATH additions, language-specific vars) won't
