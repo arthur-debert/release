@@ -164,6 +164,12 @@ def metrics_row(slim):
         return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
     created, ready, merged = (iso(slim["created_at"]), iso(slim["ready_at"]),
                               iso(slim["merged_at"]))
+    # LIMITATION (#740): first-feedback timing keys off the first TOP-LEVEL
+    # review only. A bot that leaves only inline threads or issue-level
+    # comments (no submitted review) has first_review=None, so its
+    # first_review_wait_min / commits_after_first_review undercount. Folding
+    # earliest-inline/issue-comment timing into the "first feedback" clock is
+    # the issue-comment-only-reviewers enhancement tracked in #740.
     first_review = iso(slim["reviews"][0]["submitted_at"]) if slim["reviews"] else None
     clock = ready or created
     per_reviewer = {}

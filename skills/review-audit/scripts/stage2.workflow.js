@@ -76,6 +76,12 @@ the comment is about, comments[] = the conversation, plus signals you MUST use:
 CodeRabbit puts most signal in review BODIES (reviews[].body) and self-marks
 "Addressed in <sha>" — treat that as actioned=changed. Copilot puts findings both
 in review bodies and inline threads. Gemini is mostly inline.`
+// LIMITATION (#740): the FIELD_GUIDE above describes reviews[] and threads[]
+// but NOT issue_comments[] (which the slim files do carry — extract.py's
+// slim_issue). A reviewer whose feedback lands only as issue-level comments
+// is therefore invisible to the judge. Teaching the guide + rubric to read
+// issue_comments[] is part of the issue-comment-only-reviewers enhancement
+// tracked in #740.
 
 const RUBRIC = `
 For EVERY substantive bot comment (inline thread OR a distinct point in a review body)

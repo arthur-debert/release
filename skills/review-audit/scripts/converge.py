@@ -21,6 +21,7 @@ import collections
 import json
 import statistics as st
 import subprocess
+import sys
 
 from audit_config import resolve_dir, resolve_repo
 
@@ -82,7 +83,15 @@ def main():
         o = subprocess.run(
             ["gh", "api", f"/repos/{owner}/{repo}/commits/{sha}",
              "--jq", "[.files[].filename]"], capture_output=True, text=True)
-        f = json.loads(o.stdout) if o.returncode == 0 and o.stdout.strip() else []
+        # Fail LOUD: a swallowed gh failure (auth/rate-limit/network) would
+        # return [] and silently misclassify every round>=2 thread on this
+        # commit as a re-scan, skewing the convergence stats with no warning.
+        if o.returncode != 0:
+            err = (o.stderr or "").strip()[:300] or "no output"
+            sys.exit(f"review-audit: `gh api commits/{sha}` failed ({err}). "
+                     "Fix auth/budget (`gh auth status`) and re-run; "
+                     "convergence stats need the per-commit file lists.")
+        f = json.loads(o.stdout) if o.stdout.strip() else []
         cache[sha] = f
         return f
 
