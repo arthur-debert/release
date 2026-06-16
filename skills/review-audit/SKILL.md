@@ -68,8 +68,8 @@ repo's checkout (auto-detected). Pick an output dir once and pass the same
 ### Mechanical tier (cheap default)
 
 ```sh
-cd scripts
-DIR=../analysis/reviews            # or any path; reused below
+cd skills/review-audit/scripts    # scripts live here, relative to the repo root
+DIR=analysis/reviews              # or any abs path; reused below
 
 python3 extract.py  --repo OWNER/NAME --dir "$DIR"   # 1: pull + denoise (slow, resumable)
 python3 enrich.py   --repo OWNER/NAME --dir "$DIR"   # 2: resolution flags

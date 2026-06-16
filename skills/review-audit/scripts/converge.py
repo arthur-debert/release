@@ -57,11 +57,24 @@ def main():
     if not reviewer:
         print("no reviewer has round>=2 threads — nothing to classify")
         return
+    def eff_round(t):
+        """Highest round in which this reviewer commented on the thread.
+
+        A thread's `round` is the round its ROOT was opened in; the same bot
+        may follow up in later rounds (`bot_followup_rounds`). The reviewer's
+        round>=2 ACTIVITY on a thread is captured by the max of the two — a
+        thread opened in round 1 that the bot revisits in round 2 IS a
+        round>=2 event, which `round` alone misses.
+        """
+        rounds = [r for r in (t.get("bot_followup_rounds") or []) if r]
+        rounds.append(t.get("round") or 1)
+        return max(rounds)
+
     prs = sorted(
         int(p.stem.split("-")[1]) for p in slim_dir.glob("pr-*.json")
-        if any(t["reviewer"] == reviewer and (t.get("round") or 1) >= 2
+        if any(t["reviewer"] == reviewer and eff_round(t) >= 2
                for t in json.loads(p.read_text()).get("threads", [])))
-    print(f"reviewer={reviewer}: {len(prs)} PRs with round>=2 threads\n")
+    print(f"reviewer={reviewer}: {len(prs)} PRs with round>=2 activity\n")
 
     def files_for(sha):
         if sha in cache:
@@ -102,32 +115,40 @@ def main():
         for t in slim["threads"]:
             if t["reviewer"] != reviewer:
                 continue
-            r = t.get("round") or 1
+            r = eff_round(t)          # the reviewer's latest activity round
             if r < 2:
                 continue
-            followup = 1 in (t.get("bot_followup_rounds") or []) \
-                or t.get("n_replies", 0) > 0
-            if r - 1 < len(rev_reviews):
-                prev_t = rev_reviews[r - 2] if r - 2 >= 0 else ""
-                this_t = rev_reviews[r - 1]
-            else:
-                prev_t, this_t = rev_reviews[-2], rev_reviews[-1]
-            changed = set()
-            for sha, date in commits:
-                if prev_t < date <= this_t:
-                    changed |= set(files_for(sha))
-            on_changed = t.get("path") in changed
-            changed_any = set()
-            for sha, date in commits:
-                if date > rev_reviews[0]:
-                    changed_any |= set(files_for(sha))
-            touched_since_r1 = t.get("path") in changed_any
+            opened = t.get("round") or 1
             fnd = vfind(n, t.get("path"))
             val = fnd["value"] if fnd else None
-            cls = ("followup" if followup else
-                   "on_changed" if on_changed else
-                   "on_touched_file" if touched_since_r1 else
-                   "on_preexisting")
+            # A thread OPENED in an earlier round that this reviewer revisits
+            # in round r>=2 is a follow-up on its own earlier thread — it is
+            # reacting to the author's response, hence CONVERGING by construction.
+            if opened < r:
+                cls = "followup"
+            else:
+                # Brand-new thread opened at round r>=2: classify by whether
+                # the file it targets was changed in the push that triggered
+                # this round (vs. a re-scan of code unchanged since round 1).
+                if r - 1 < len(rev_reviews):
+                    prev_t = rev_reviews[r - 2] if r - 2 >= 0 else ""
+                    this_t = rev_reviews[r - 1]
+                else:
+                    prev_t, this_t = rev_reviews[-2], rev_reviews[-1]
+                changed = set()
+                for sha, date in commits:
+                    if prev_t < date <= this_t:
+                        changed |= set(files_for(sha))
+                changed_any = set()
+                for sha, date in commits:
+                    if date > rev_reviews[0]:
+                        changed_any |= set(files_for(sha))
+                if t.get("path") in changed:
+                    cls = "on_changed"
+                elif t.get("path") in changed_any:
+                    cls = "on_touched_file"
+                else:
+                    cls = "on_preexisting"
             buckets[cls] += 1
             rows.append((n, r, cls, t.get("path"), t.get("resolved"), val,
                          (fnd.get("gist", "") if fnd else "")))

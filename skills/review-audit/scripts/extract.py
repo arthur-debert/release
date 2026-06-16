@@ -19,17 +19,14 @@ import sys
 import time
 from datetime import datetime
 
-from audit_config import (clean, gh, load_overlay, resolve_dir, resolve_repo,
-                          role)
+from audit_config import (clean, gh, load_overlay, rate_resource, resolve_dir,
+                          resolve_repo, role)
 
 SLEEP = 0.25
 
 
 def rate_remaining():
-    import subprocess
-    r = json.loads(subprocess.run(
-        ["gh", "api", "rate_limit"], capture_output=True, text=True).stdout)
-    return r["resources"]["core"]["remaining"], r["resources"]["core"]["reset"]
+    return rate_resource("core")
 
 
 def fetch_pr(owner, repo, n):

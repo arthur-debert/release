@@ -38,7 +38,8 @@ def pctile(xs, q):
     xs = sorted(x for x in xs if x is not None)
     if not xs:
         return None
-    return round(xs[min(len(xs) - 1, int(q * len(xs)))], 1)
+    # inclusive rank: q=0 -> first, q=1 -> last; p90 of 10 items is index 8.
+    return round(xs[int(q * (len(xs) - 1))], 1)
 
 
 def main():

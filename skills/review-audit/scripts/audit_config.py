@@ -153,3 +153,20 @@ def gh(path, paginate=False):
             i = j
         return merged
     return json.loads(txt)
+
+
+def rate_resource(resource):
+    """(remaining, reset) for a rate_limit resource ('core' / 'graphql').
+
+    Surfaces gh failures (missing/auth/network) with an actionable message
+    instead of crashing on a JSON decode of empty/error stdout.
+    """
+    out = subprocess.run(["gh", "api", "rate_limit"],
+                         capture_output=True, text=True)
+    if out.returncode != 0 or not out.stdout.strip():
+        err = (out.stderr or "").strip()[:300] or "no output"
+        sys.exit(f"review-audit: `gh api rate_limit` failed ({err}). "
+                 "Check `gh auth status` and network connectivity.")
+    r = json.loads(out.stdout)
+    res = r["resources"][resource]
+    return res["remaining"], res["reset"]

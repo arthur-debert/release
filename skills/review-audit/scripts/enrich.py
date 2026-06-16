@@ -13,7 +13,7 @@ import json
 import subprocess
 import time
 
-from audit_config import resolve_dir, resolve_repo
+from audit_config import rate_resource, resolve_dir, resolve_repo
 
 Q_TMPL = """query($n:Int!){repository(owner:"%s",name:"%s"){pullRequest(number:$n){
  reviewThreads(first:100){nodes{isResolved isOutdated resolvedBy{login}
@@ -42,10 +42,7 @@ def gql(query, n):
 
 
 def gql_remaining():
-    r = json.loads(subprocess.run(["gh", "api", "rate_limit"],
-                                  capture_output=True, text=True).stdout)
-    return (r["resources"]["graphql"]["remaining"],
-            r["resources"]["graphql"]["reset"])
+    return rate_resource("graphql")
 
 
 def wait_for_budget(minimum=200):

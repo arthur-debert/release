@@ -16,6 +16,8 @@
 // dir/slim/*.json for files whose `reviewers` array is non-empty — so it
 // adapts to any repo instead of carrying a hardcoded fallback.
 
+import fs from 'node:fs'
+
 export const meta = {
   name: 'review-audit-judging',
   description: 'Per-PR LLM judgment of bot-review value, criticality & convergence',
