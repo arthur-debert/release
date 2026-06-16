@@ -35,7 +35,7 @@ pre-commit:
       # auto-apply (gate must never silently rewrite files, cf. #713).
       run: >-
         cd src-tauri;
-        errf="$(mktemp)";
+        errf="$(mktemp "${TMPDIR:-/tmp}/cargo-fmt.XXXXXX")";
         out="$(cargo fmt --all -- --check -l 2>"$errf")";
         rc=$?;
         if [ "$rc" -ne 0 ]; then

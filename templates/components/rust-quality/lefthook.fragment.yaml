@@ -34,7 +34,7 @@ pre-commit:
       # deliberately. Exit stays non-zero on a fmt nit, consistent with the
       # check-only cargo-clippy step below.
       run: >-
-        errf="$(mktemp)";
+        errf="$(mktemp "${TMPDIR:-/tmp}/cargo-fmt.XXXXXX")";
         out="$(cargo fmt --all -- --check -l 2>"$errf")";
         rc=$?;
         if [ "$rc" -ne 0 ]; then
