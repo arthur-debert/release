@@ -203,6 +203,17 @@ def test_real_root_config_present_true_for_authored_config(tmp_path):
     assert gate._real_root_config_present(str(tmp_path)) is True
 
 
+def test_write_root_stub_survives_missing_git(tmp_path, monkeypatch):
+    # #737 review: _git_exclude's `git rev-parse` must not crash --install-hook
+    # when git isn't on PATH — best-effort means the stub still gets written.
+    def _no_git(*a, **k):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(gate.subprocess, "run", _no_git)
+    gate._write_root_stub(str(tmp_path))  # must not raise
+    assert gate._STUB_MARKER in (tmp_path / "lefthook.yml").read_text()
+
+
 def test_empty_starter_is_not_real_and_gets_clobbered(tmp_path):
     # release#737: a `lefthook install` that ran BEFORE `--install-hook` leaves an
     # empty / all-commented starter lefthook.yml. It is NOT a real config (would

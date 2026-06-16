@@ -391,13 +391,18 @@ def _write_root_stub(root: str) -> None:
 
 def _git_exclude(root: str, pattern: str) -> None:
     """Add `pattern` to .git/info/exclude (untrack without a tracked .gitignore),
-    matching the WS7 mirror-exclusion model. Idempotent; best-effort."""
-    exclude = subprocess.run(
-        ["git", "rev-parse", "--git-path", "info/exclude"],
-        capture_output=True,
-        text=True,
-        cwd=root,
-    ).stdout.strip()
+    matching the WS7 mirror-exclusion model. Idempotent; best-effort — a missing
+    `git` (FileNotFoundError) or any git error must never crash `--install-hook`
+    (#737 review)."""
+    try:
+        exclude = subprocess.run(
+            ["git", "rev-parse", "--git-path", "info/exclude"],
+            capture_output=True,
+            text=True,
+            cwd=root,
+        ).stdout.strip()
+    except OSError:
+        return  # git not on PATH — the stub still works untracked
     if not exclude:
         return
     exclude = os.path.join(root, exclude) if not os.path.isabs(exclude) else exclude

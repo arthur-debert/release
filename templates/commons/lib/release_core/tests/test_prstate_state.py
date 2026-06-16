@@ -180,6 +180,17 @@ def test_unstable_with_a_genuinely_failing_check_is_still_blocked(context):
     assert "failing" in status.next_action
 
 
+def test_unstable_with_no_rollup_is_not_promoted(context):
+    # #737 review: an empty/absent rollup (ChecksState.NONE) is NOT evidence the
+    # checks passed, so an UNSTABLE-with-no-rollup must NOT be blindly promoted to
+    # READY — only an EXPLICITLY GREEN rollup tolerates UNSTABLE.
+    import dataclasses
+
+    ctx = dataclasses.replace(context("ready_checks_green"), merge_state="UNSTABLE", checks=[])
+    status = evaluate(ctx)
+    assert status.state is not TaskState.READY
+
+
 def test_unstable_with_a_re_running_check_is_validating(context):
     # The check is genuinely mid-re-run (IN_PROGRESS) → the rollup is PENDING, so
     # the CI gate reports VALIDATING (wait for checks), never a flip. Only an

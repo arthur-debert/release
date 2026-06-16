@@ -240,17 +240,19 @@ def evaluate(
 
     # UNSTABLE is GitHub's "a non-required check is failing/pending" state — but
     # the engine ALREADY inspects every check via the rollup (the FAILING/PENDING
-    # gates above), and reaching here means that rollup is clean (GREEN/NONE) and
-    # the base is current. So a surviving UNSTABLE is a transient lag, not a real
-    # block: GitHub re-runs a SKIPPED/NEUTRAL check on the `ready_for_review`
-    # event (e.g. phos's `e2e-gpu`, conclusion=skipped), flipping mergeStateStatus
-    # to UNSTABLE for a beat while the rollup still reads green — the false-alarm
-    # #715 hit right after `pr ready`. The authoritative rollup wins: defer to it,
-    # i.e. fall through to the CLEAN hand-off. We do NOT relax BLOCKED/HAS_HOOKS:
-    # those can reflect a required status the rollup never lists (e.g. a missing
-    # required check), so the rollup cannot disprove them — only UNSTABLE, whose
-    # whole meaning IS the per-check state the rollup already covers.
-    if ctx.merge_state == "UNSTABLE":
+    # gates above). A surviving UNSTABLE with an EXPLICITLY GREEN rollup is a
+    # transient lag, not a real block: GitHub re-runs a SKIPPED/NEUTRAL check on
+    # the `ready_for_review` event (e.g. phos's `e2e-gpu`, conclusion=skipped),
+    # flipping mergeStateStatus to UNSTABLE for a beat while the rollup still reads
+    # green — the false-alarm #715 hit right after `pr ready`. The authoritative
+    # rollup wins: defer to it. We require GREEN, not merely "not failing/pending":
+    # ChecksState.NONE (an empty/absent rollup) is NOT evidence the checks passed,
+    # so an UNSTABLE-with-no-rollup falls through to BLOCKED rather than a blind
+    # hand-off (#737 review). We also do NOT relax BLOCKED/HAS_HOOKS: those can
+    # reflect a required status the rollup never lists (e.g. a missing required
+    # check), so the rollup cannot disprove them — only UNSTABLE, whose whole
+    # meaning IS the per-check state an explicitly-green rollup already covers.
+    if ctx.merge_state == "UNSTABLE" and checks == ChecksState.GREEN:
         status.state = TaskState.READY
         if ctx.is_draft:
             status.next_action = (
