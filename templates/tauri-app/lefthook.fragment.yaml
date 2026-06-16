@@ -29,7 +29,20 @@ pre-commit:
         - "src-tauri/*.rs"
         - "src-tauri/rustfmt.toml"
         - "src-tauri/**/rustfmt.toml"
-      run: cd src-tauri && cargo fmt --all -- --check
+      # Summarize the failure (file list + remedy) rather than dumping
+      # rustfmt's colorized unified diff — `-l` lists the files needing
+      # formatting; see rust-quality for the rationale (release#691). No
+      # auto-apply (gate must never silently rewrite files, cf. #713).
+      run: >-
+        cd src-tauri;
+        out="$(cargo fmt --all -- --check -l 2>/dev/null)";
+        rc=$?;
+        if [ "$rc" -ne 0 ]; then
+          n="$(printf '%s\n' "$out" | grep -c .)";
+          echo "tauri-cargo-fmt: ${n} file(s) need formatting — run \`cargo fmt\` (in src-tauri/) to fix:" >&2;
+          printf '%s\n' "$out" | sed 's/^/  /' >&2;
+          exit "$rc";
+        fi
       priority: 2
     tauri-cargo-clippy:
       # Match any Rust source OR Cargo manifest OR Cargo.lock under
