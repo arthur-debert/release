@@ -64,7 +64,12 @@ async def run_session(
 
     Returns the discovered session_id (if any).
     """
-    if (followup_prompt or needs_followup) and text_sink is None:
+    if bool(followup_prompt) != bool(needs_followup):
+        raise ValueError(
+            "pass BOTH followup_prompt and needs_followup, or neither — one "
+            "without the other silently disables the prod."
+        )
+    if followup_prompt and text_sink is None:
         raise ValueError(
             "followup_prompt/needs_followup require text_sink (the prod predicate "
             "reads the accumulated transcript) — pass a text_sink list."

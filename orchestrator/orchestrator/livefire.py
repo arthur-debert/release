@@ -150,9 +150,9 @@ def parse_feedback(transcript: str) -> dict:
     fb = _first_feedback(transcript)
     if fb is None:
         raise LiveFireError(
-            "agent emitted no parseable feedback block (no ```yaml block with a "
-            "'verdict' key) — it likely finished the work + PR but skipped the "
-            "feedback step"
+            "no ```yaml block parsed to a mapping with a 'verdict' key (missing, "
+            "malformed YAML, or non-mapping) — the agent likely finished the work "
+            "+ PR but skipped or botched the feedback step"
         )
     return fb
 
