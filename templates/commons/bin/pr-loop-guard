@@ -139,12 +139,13 @@ def main():
     # fold left: each relative target resolves against the previous resolved
     # dir (`cd a && cd b` really lands in cwd/a/b), while an absolute or ~
     # target resets the accumulator (release#632).
-    candidate_cwds = [cwd]
-    acc = cwd
+    candidate_cwds = [os.path.normpath(cwd)]
+    acc = candidate_cwds[0]
     for tgt in cd_targets(command):
         expanded = os.path.expanduser(tgt)
         if not os.path.isabs(expanded):
             expanded = os.path.join(acc, expanded)
+        expanded = os.path.normpath(expanded)
         candidate_cwds.append(expanded)
         acc = expanded
 
