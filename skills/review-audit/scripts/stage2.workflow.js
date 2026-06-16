@@ -190,4 +190,6 @@ all ${b.length} PRs (numbers ${b.join(', ')}), matching the schema exactly.`
 
 const flat = results.filter(Boolean).flatMap((r) => r.verdicts || [])
 log(`collected ${flat.length} PR verdicts`)
-return flat
+// Match the declared contract (SCHEMA + the per-agent prompt both say
+// {verdicts: [...]}), not a bare array, so downstream consumers can rely on it.
+return { verdicts: flat }
