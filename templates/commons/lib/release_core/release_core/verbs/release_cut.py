@@ -470,6 +470,27 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     if res.stderr:
         sys.stderr.write(res.stderr)
     if res.returncode != 0:
+        # `gh workflow run` dispatches via workflow_dispatch; GitHub returns
+        # HTTP 422 "Workflow does not have 'workflow_dispatch' trigger" when
+        # the target release.yml lacks that trigger. Name the remediation —
+        # the raw gh error doesn't say what to add.
+        if "workflow_dispatch" in (res.stderr or ""):
+            print(
+                "\nrelease-core cut: .github/workflows/release.yml is not "
+                "dispatchable.\n"
+                "  Its `on:` block needs a `workflow_dispatch:` trigger so "
+                "`cut` can launch it:\n"
+                "\n"
+                "    on:\n"
+                "      workflow_dispatch:\n"
+                "        inputs:\n"
+                "          version:\n"
+                "            required: true\n"
+                "\n"
+                "  Add it to the consumer's release.yml, commit, then re-run "
+                "the cut.",
+                file=sys.stderr,
+            )
         return res.returncode
 
     print(
