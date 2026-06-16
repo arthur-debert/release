@@ -131,19 +131,84 @@ def test_all(argv: list[str]) -> int:
 # --- coverage --------------------------------------------------------------
 
 
+# How many trailing lines of a coverage tool's output to surface as "the
+# summary" in the default concise view. The per-module/per-file table that
+# cargo-llvm-cov, `go tool cover -func`, and vitest/jest coverage reporters all
+# print lands at the very END of the stream, so a tail captures it Kind-
+# agnostically (release#694 — the user's summary was buried under a ~30KB build
+# log). Generous enough to hold a real module table; `--verbose` shows it all.
+_COVERAGE_SUMMARY_LINES = 40
+
+
+def _coverage_exec(cmd: Cmd, root: str, *, raw: bool) -> int:
+    """Run one coverage command. ``raw`` streams the full output live (the old
+    behavior). Otherwise capture the combined stream and, on success, print only
+    the trailing summary table; on FAILURE print the whole captured stream so the
+    error is diagnosable (release#694)."""
+    cwd = root if cmd.cwd is None else os.path.join(root, cmd.cwd)
+    argv = _resolve_argv(cmd, root)
+    label = f"[{cmd.label}] " if cmd.label else ""
+    print(f"→ {label}{cmd.display}", flush=True)
+    if raw:
+        return subprocess.run(argv, cwd=cwd).returncode
+    proc = subprocess.run(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    output = proc.stdout or ""
+    if proc.returncode != 0:
+        # Failure: the user needs the full context to diagnose — print it all.
+        sys.stdout.write(output)
+        if output and not output.endswith("\n"):
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+        return proc.returncode
+    lines = output.splitlines()
+    if len(lines) > _COVERAGE_SUMMARY_LINES:
+        omitted = len(lines) - _COVERAGE_SUMMARY_LINES
+        print(
+            f"  … {omitted} lines of build/test output hidden "
+            "(re-run with --verbose for the full stream) …"
+        )
+        lines = lines[-_COVERAGE_SUMMARY_LINES:]
+    for line in lines:
+        print(line)
+    sys.stdout.flush()
+    return 0
+
+
+def _coverage_fanout(cmds: list[Cmd], root: str, *, raw: bool) -> int:
+    """Run each coverage command in order; stop at the first non-zero."""
+    for cmd in cmds:
+        rc = _coverage_exec(cmd, root, raw=raw)
+        if rc != 0:
+            return rc
+    return 0
+
+
 def coverage(argv: list[str]) -> int:
     """Run every component's coverage tool and end on its per-module summary
     (release#568). UNLIKE the test verbs this never skips-with-notice: coverage
     was explicitly asked for, so a Kind with no coverage toolchain is a loud
     error, and a missing tool (cargo-llvm-cov) hard-errors with the install
-    command — never a silent skip (the hard-gate philosophy)."""
+    command — never a silent skip (the hard-gate philosophy).
+
+    By default the verbose build/test stream is suppressed and only the trailing
+    per-module summary table is shown (release#694); ``--verbose``/``--raw``
+    restores the full live stream."""
     if _is_help(argv):
         print(
             "release-core coverage — run THIS repo's coverage (kind-aware: "
             "test runner --coverage / cargo llvm-cov / go tool cover) and "
-            "print the per-module summary"
+            "print the per-module summary.\n"
+            "  --verbose, --raw   stream the full build/test output (default: "
+            "show only the summary table)"
         )
         return 0
+    raw = bool(argv) and argv[0] in ("--verbose", "--raw")
     root = _repo_root()
     cmds = repo_commands.coverage_commands(root)
     if not cmds:
@@ -182,7 +247,7 @@ def coverage(argv: list[str]) -> int:
                 file=sys.stderr,
             )
             return 1
-    return _fanout(cmds, root)
+    return _coverage_fanout(cmds, root, raw=raw)
 
 
 # --- build / run (single app-root command) --------------------------------
