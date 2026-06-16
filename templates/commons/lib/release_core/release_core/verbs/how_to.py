@@ -364,8 +364,13 @@ def _render_repo(root: str, kind: str) -> str:
     lines.append("")
     lines.append(
         "Infrastructure (quality gate, build, release, PR flow) is managed by "
-        "release-core. Don't hand-edit managed files (.release/**); app code is "
-        "yours. Confirm the Kind anytime with `release-core detect-kind`."
+        "release-core. Don't hand-edit managed files (.release/**, bin/check*, "
+        "lib/release_core/); app code is yours. These managed mirrors are "
+        "EPHEMERAL — installed (not committed) by `release-core init` at session "
+        "start and listed in .git/info/exclude, so the per-Kind entry point "
+        "(e.g. `bin/check`) showing as untracked in `git status` is expected, "
+        "not a problem to fix. Confirm the Kind anytime with "
+        "`release-core detect-kind`."
     )
     lines.append("")
     lines.extend(_verbs_section_repo(root, kind))
@@ -385,8 +390,13 @@ def _render(kind: str) -> str:
     lines.append("")
     lines.append(
         "Infrastructure (quality gate, build, release, PR flow) is managed by "
-        "release-core. Don't hand-edit managed files (.release/**); app code is "
-        "yours. Confirm the Kind anytime with `release-core detect-kind`."
+        "release-core. Don't hand-edit managed files (.release/**, bin/check*, "
+        "lib/release_core/); app code is yours. These managed mirrors are "
+        "EPHEMERAL — installed (not committed) by `release-core init` at session "
+        "start and listed in .git/info/exclude, so the per-Kind entry point "
+        "(e.g. `bin/check`) showing as untracked in `git status` is expected, "
+        "not a problem to fix. Confirm the Kind anytime with "
+        "`release-core detect-kind`."
     )
     lines.append("")
     lines.extend(_verbs_section_kind(kind))
