@@ -4,14 +4,14 @@ name: Electron CI
 #
 # Sibling to `rust-ci.yml` / `go-ci.yml`: collapses each consumer's
 # hand-rolled "setup-node + npm ci + (build shared) + typecheck + lint
-# + test" sequence down to a thin caller. The canonical umbrella is
+# + test" sequence down to a thin caller. The shared umbrella is
 # `bin/check` — shipped by the electron-app Stack template + the
-# npm-quality Component, both synced via release-sync.
+# npm-quality Component.
 #
 # Design choices worth knowing:
 #
-#  * **`bin/check` is the canonical call.** Consumers that have adopted
-#    the take-iii Component model already ship `bin/check`. Same
+#  * **`bin/check` is the standard call.** Consumers that have adopted
+#    the Component model already ship `bin/check`. Same
 #    fix-once-propagate guarantee as the rust fleet.
 #
 #  * **E2E job — opt-in.** Pass `e2e: true` to add a separate `e2e`
@@ -119,8 +119,8 @@ on:
 
           When `false` (default), no e2e job exists. Consumers can
           still keep a bespoke e2e job in their caller, but the
-          managed-portfolio standard is to use this input so the
-          gate is consistent across the fleet.
+          standard across the fleet is to use this input so the
+          gate is consistent.
         type: boolean
         required: false
         default: false
@@ -187,7 +187,7 @@ jobs:
       - name: Detect package manager
         # Auto-detect from lockfile presence: pnpm-lock.yaml → pnpm,
         # yarn.lock → yarn, default → npm. Avoids requiring a consumer
-        # input; the lockfile IS the canonical signal of which manager
+        # input; the lockfile IS the definitive signal of which manager
         # is in use, and every consumer commits exactly one.
         id: pm
         shell: bash

@@ -8,7 +8,7 @@ name: Zed extension release
 # What this stack ships
 # ---------------------
 # A `<extension-name>-<version>.tar.gz` artifact attached to the GH
-# release, containing the canonical bundle layout:
+# release, containing the standard bundle layout:
 #
 #     extension.toml          (Zed manifest — version source of truth)
 #     extension.wasm          (compiled wasm32-wasip2, renamed from
@@ -153,7 +153,7 @@ jobs:
 
       # Resume-case guard: if prepare-release resumed from a pre-existing
       # tag (didn't make a new commit), the extension.toml at that tag's
-      # SHA may have been written by an older canonical without the
+      # SHA may have been written by an older version of the step without the
       # staging fix above and could be stale. Validate the tag's
       # extension.toml carries the requested version; fail fast otherwise
       # — a silent shipped-with-wrong-version is worse than a re-dispatch
@@ -212,7 +212,7 @@ jobs:
           echo "Resolved: extension-name=${ext_name}, cargo-wasm-name=${wasm_name}"
 
   # -------------------------------------------------------------------
-  # 2. Build the wasm + assemble + tar the canonical bundle.
+  # 2. Build the wasm + assemble + tar the standard bundle.
   # -------------------------------------------------------------------
   build:
     needs: prepare

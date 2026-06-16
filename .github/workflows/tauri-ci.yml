@@ -5,13 +5,12 @@ name: Tauri CI
 # Sibling to `rust-ci.yml` / `electron-ci.yml`: collapses each
 # consumer's hand-rolled "setup-node + setup-rust + npm ci + cargo
 # fmt/clippy/test + frontend lint/typecheck/test" sequence down to a
-# thin caller. The canonical umbrella is `bin/check` — shipped by the
-# tauri-app Stack template + the npm-quality Component, both synced
-# via release-sync.
+# thin caller. The standard umbrella is `bin/check` — shipped by the
+# tauri-app Stack template + the npm-quality Component.
 #
 # Design choices worth knowing:
 #
-#  * **`bin/check` is the canonical call.** It runs BOTH halves of a
+#  * **`bin/check` is the standard call.** It runs BOTH halves of a
 #    Tauri repo: frontend (prettier + eslint + typecheck + unit
 #    tests) and rust (cargo fmt --check + cargo clippy + cargo
 #    test, scoped to src-tauri/). Same fix-once-propagate guarantee
@@ -225,7 +224,7 @@ jobs:
       - name: Detect package manager
         # Auto-detect from lockfile presence: pnpm-lock.yaml → pnpm,
         # yarn.lock → yarn, default → npm. Avoids requiring a consumer
-        # input; the lockfile IS the canonical signal of which manager
+        # input; the lockfile IS the authoritative signal of which manager
         # is in use, and every consumer commits exactly one.
         id: pm
         shell: bash
@@ -308,7 +307,7 @@ jobs:
           workspaces: src-tauri
 
       - name: Install cargo-nextest
-        # Canonical test runner used by bin/check-tests when nextest
+        # Standard test runner used by bin/check-tests when nextest
         # is present. Matches rust-ci.yml.
         uses: taiki-e/install-action@v2
         with:

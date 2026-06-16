@@ -1,7 +1,7 @@
 # `fetch-artifact` composite action
 
 Install a pinned cross-repo artifact from a GH release. Reads the
-canonical `artifacts.json` schema (see
+standard `artifacts.json` schema (see
 [`docs/artifacts-schema.md`](../../../docs/artifacts-schema.md)) and
 delegates to the same [`bin/fetch-artifact`](../../../bin/fetch-artifact)
 CLI used locally by `scripts/setup-dev-env.sh` — CI and local paths

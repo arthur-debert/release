@@ -5,7 +5,7 @@ name: pip-bootstrap smoke
 # release's own repo, no consumer:
 #
 #   build wheel -> pip install into a fresh venv -> console-scripts on PATH ->
-#   `release-core init` (the full materialize + auto-commit — the ONLY mode
+#   `release-core init` (the full install + auto-commit — the ONLY mode
 #   since release#532 removed --config-only) in a throwaway fixture repo ->
 #   re-run is idempotent. Covered on BOTH source paths: offline from the wheel
 #   bundle (the consumer default) and the $RELEASE_HOME override (release-dev).
@@ -29,12 +29,12 @@ jobs:
     env:
       PKG_DIR: templates/commons/lib/release_core
     steps:
-      - name: Checkout (full clone — the OVERRIDE path composes from this checkout)
+      - name: Checkout (full clone — the OVERRIDE path installs from this checkout)
         uses: actions/checkout@v6
         with:
-          # The default `release-core init` path needs NO checkout (it composes
+          # The default `release-core init` path needs NO checkout (it installs
           # from the wheel-bundled templates). But the OVERRIDE-path step below
-          # ($RELEASE_HOME=this checkout) drives the release-sync engine, which
+          # ($RELEASE_HOME=this checkout) drives the init engine, which
           # reads git objects (git ls-tree / cat-file / show) at $RELEASE_REF —
           # so it needs real history, not a shallow clone.
           fetch-depth: 0
@@ -82,7 +82,7 @@ jobs:
 
       - name: Assert the wheel BUNDLES the config templates (self-contained)
         # The self-contained wheel ships the config templates under
-        # release_core/_bundled_templates/ so `release-core init` composes the
+        # release_core/_bundled_templates/ so `release-core init` installs the
         # gate offline (no release clone). Prove the build hook (hatch_build.py)
         # actually staged them INTO the wheel — without this, init silently falls
         # back to the $RELEASE_HOME path and the "self-contained" claim is a lie.
@@ -117,9 +117,9 @@ jobs:
           require "go-cli/manifest.yaml"
 
       - name: Assert the wheel BUNDLES the FULL tree + the distributed skills (#476)
-        # Part 1 of #476: the wheel must carry the WHOLE managed tree (not just
+        # Part 1 of #476: the wheel must carry the WHOLE managed files (not just
         # the config subset) plus the distributed skill catalog, so a later
-        # `init` can do a full OFFLINE materialize. These assertions are positive
+        # `init` can do a full OFFLINE install. These assertions are positive
         # (full-tree content present) AND negative (release-only skills + the
         # self-referential package subtree are NOT shipped — recursion/bloat
         # guard). Inspect via zipfile so we read the wheel exactly as installed.
@@ -247,7 +247,7 @@ jobs:
 
       - name: release-core init OFFLINE (DEFAULT full) — self-sync the whole tree
         # The #476 cutover contract: a BARE `release-core init` (what SessionStart
-        # runs) materializes the WHOLE managed tree from the wheel bundle and
+        # runs) installs the WHOLE managed files from the wheel bundle and
         # auto-commits managed changes — NO release clone, NO network. This is the
         # pull-model self-sync that retires propagate in steady state.
         run: |
@@ -263,9 +263,9 @@ jobs:
           git -C "$full" commit -qm 'fixture: go-cli marker'
           cd "$full"
           release-core init
-          # The FULL managed tree must be materialized on disk: the .release/ build
+          # The FULL managed files must be installed on disk: the .release/ temp
           # dir, working-tree symlink mirrors, and the CLAUDE.md stub block.
-          test -d .release || { echo "ERROR: no .release/ build dir materialized" >&2; exit 1; }
+          test -d .release || { echo "ERROR: no .release/ temp dir written" >&2; exit 1; }
           # WS2 (#523): the CLAUDE.md block is a stub pointing at `release-core
           # how-to` — no synced ORIENTATION.md anymore.
           grep -qF 'release-core how-to' CLAUDE.md \
@@ -273,13 +273,13 @@ jobs:
           if [ -e .release/ORIENTATION.md ]; then
             echo "ERROR: .release/ORIENTATION.md should be retired (WS2)" >&2; exit 1
           fi
-          # WS4 (#521): the ephemeral .release/ build dir is gitignored + never
+          # WS4 (#521): the ephemeral .release/ temp dir is gitignored + never
           # committed — the self-ignoring .release/.gitignore (`*`) keeps it out.
           if git ls-files --error-unmatch .release >/dev/null 2>&1; then
             echo "ERROR: .release/ is git-tracked — it must be ephemeral (gitignored)" >&2
             git ls-files .release >&2; exit 1
           fi
-          # WS7 (#528): the symlink mirrors are EPHEMERAL — materialized on disk
+          # WS7 (#528): the symlink mirrors are EPHEMERAL — written on disk
           # but NEVER tracked (listed in .git/info/exclude). The tracked surface
           # is the irreducible set only: zero tracked symlinks, mirrors live on
           # disk, exclude block present, status clean.
@@ -288,7 +288,7 @@ jobs:
             echo "ERROR: $n_links tracked symlink(s) — mirrors must be ephemeral (WS7)" >&2
             git ls-files -s | awk '$1 == "120000" {print $4}' >&2; exit 1
           }
-          test -L .editorconfig || { echo "ERROR: .editorconfig mirror not materialized" >&2; exit 1; }
+          test -L .editorconfig || { echo "ERROR: .editorconfig mirror not written" >&2; exit 1; }
           grep -q "release-core managed mirrors" "$(git rev-parse --git-path info/exclude)" \
             || { echo "ERROR: no managed mirror block in .git/info/exclude" >&2; exit 1; }
           [ -z "$(git status --porcelain)" ] \
@@ -307,7 +307,7 @@ jobs:
             git status --porcelain >&2
             exit 1
           fi
-          echo "ok: default full init materialized + auto-committed the whole tree"
+          echo "ok: default full init installed + auto-committed the whole tree"
           # Idempotent: a second bare run is a clean no-op (no new commit).
           head1="$(git rev-parse HEAD)"
           release-core init
@@ -325,7 +325,7 @@ jobs:
           # WS5 (release#526) — the fresh-clone boot proof: a NEW clone of the
           # consumer must be able to START the SessionStart chain before any
           # .release/ exists. The bootstrap quartet are tracked REAL files
-          # (never symlinks into the ephemeral build dir), executable, and the
+          # (never symlinks into the ephemeral temp dir), executable, and the
           # hooks config is readable JSON.
           fresh="${RUNNER_TEMP}/fixture-fresh-clone"
           rm -rf "$fresh"
@@ -346,12 +346,12 @@ jobs:
             || { echo "ERROR: .claude/settings.json is not readable JSON" >&2; exit 1; }
           echo "ok: fresh clone carries a self-starting bootstrap (WS5)"
 
-      - name: release-core init OVERRIDE — $RELEASE_HOME composes from live templates
+      - name: release-core init OVERRIDE — $RELEASE_HOME installs from live templates
         # release-dev's path: an explicit $RELEASE_HOME git clone OVERRIDES the
-        # bundle, composing from LIVE templates via the full release-sync engine.
-        # Exercised through the full materialize — the ONLY init mode since
+        # bundle, installing from LIVE templates via the full release-sync engine.
+        # Exercised through the full install — the ONLY init mode since
         # release#532 removed the --config-only escape hatch. $RELEASE_REF pins
-        # composition to the exact PR commit, so it does not depend on any
+        # the install to the exact PR commit, so it does not depend on any
         # remote branch existing.
         env:
           RELEASE_HOME: ${{ github.workspace }}
@@ -360,17 +360,17 @@ jobs:
           set -euo pipefail
           cd "${FIXTURE}"
           release-core init
-          # The full tree materialized: .release/ build dir + working-tree
+          # The full managed files installed: .release/ temp dir + working-tree
           # mirrors + the CLAUDE.md stub; .release/ stays untracked (WS4).
-          test -d .release || { echo "ERROR: no .release/ build dir materialized" >&2; exit 1; }
+          test -d .release || { echo "ERROR: no .release/ temp dir written" >&2; exit 1; }
           grep -qF 'release-core how-to' CLAUDE.md \
             || { echo "ERROR: CLAUDE.md stub block not injected" >&2; exit 1; }
           if git ls-files --error-unmatch .release >/dev/null 2>&1; then
             echo "ERROR: .release/ is git-tracked — it must be ephemeral" >&2; exit 1
           fi
           # PROVE the override path was taken: the git engine stamps the resolved
-          # SHA into the managed commit subject ("sync managed tree from <sha>"),
-          # whereas the bundle path stamps "release-core <version>".
+          # SHA into the managed commit subject ("sync managed tree from <sha>");
+          # the bundle path stamps "release-core <version>" instead.
           subject="$(git log -1 --pretty=format:%s)"
           case "$subject" in
             "chore(release): sync managed tree from release-core"*)

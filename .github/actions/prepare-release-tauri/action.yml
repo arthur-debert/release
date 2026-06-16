@@ -19,7 +19,7 @@ inputs:
     required: false
     default: '.'
   prep-script:
-    description: 'Optional consumer prep-script path, run before the canonical bump.'
+    description: 'Optional consumer prep-script path, run before the standard bump.'
     required: false
     default: ''
   gh-token:

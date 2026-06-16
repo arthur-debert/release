@@ -5,7 +5,7 @@ name: Go CI
 # Closes part of #107 (CI workflow reusability gap). Where
 # `go-cli.yml` covers the release path, this workflow covers every
 # push / pull_request: install Go, optionally install golangci-lint,
-# run the canonical `bin/check` umbrella.
+# run the shared `bin/check` umbrella.
 #
 # What's distinct
 # ---------------
@@ -58,9 +58,9 @@ on:
         default: ''
       check-command:
         description: |
-          The canonical umbrella check entry point. Defaults to
-          `bin/check`; override for consumers still mid-take-iii
-          migration (e.g. `scripts/test-all`).
+          The umbrella check entry point. Defaults to
+          `bin/check`; override for consumers still mid-migration
+          (e.g. `scripts/test-all`).
         type: string
         required: false
         default: 'bin/check'

@@ -1,9 +1,8 @@
 name: CI
 
-# Self-host of gh-action-ci.yml@v1. This repo IS the canonical
-# arthur-debert/release, so calling its own CI canonical from itself
-# is the dogfood loop: a regression in gh-action-ci.yml's actionlint
-# step fails its own PR.
+# Self-host of gh-action-ci.yml@v1. This repo IS arthur-debert/release,
+# so calling its own CI from itself is the dogfood loop: a regression in
+# gh-action-ci.yml's actionlint step fails its own PR.
 
 on:
   push:

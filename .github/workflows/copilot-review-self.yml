@@ -1,9 +1,9 @@
 name: Copilot Review (self)
 
 # Self-applying caller for this repo's own PRs. Closes #15
-# (dogfood the canonical PR loop on release itself).
+# (dogfood the standard PR loop on release itself).
 #
-# Trigger policy (also the canonical policy in
+# Trigger policy (also the standard policy in
 # templates/rust/.github/workflows/copilot-review.yml, kept in lockstep):
 #   - `on: pull_request: types: [opened]` — fires once at PR creation,
 #     regardless of draft state. Drafts get Copilot too.

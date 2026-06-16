@@ -165,7 +165,7 @@ runs:
           # Pre-commit gate — hold the bot commit to the consumer's own gate.
           # ONE definition, INVOKED — bin-internal/run-precommit-gate.sh (it collects
           # the staged set, detects the gate, prefers the managed .release/ config,
-          # MATERIALIZES it via release-core when absent (release#531 F1), and
+          # INSTALLS it via release-core when absent (release#531 F1), and
           # re-stages auto-fixes). The previous inlined copy of that script had
           # drifted: it missed the WS3 LEFTHOOK_CONFIG routing, so on a post-WS3
           # consumer (no root lefthook.yml) it silently SKIPPED the gate.

@@ -30,7 +30,7 @@ on:
         default: ''
 
       darwin-archs:
-        description: 'Comma-separated macOS archs (arm64 only by canonical; intel-mac dropped). Set "" to skip macOS.'
+        description: 'Comma-separated macOS archs (arm64 only by default; intel-mac dropped). Set "" to skip macOS.'
         type: string
         required: false
         default: 'arm64'
@@ -437,7 +437,7 @@ jobs:
           done
           rm -f "$KEY"
 
-      - name: Package binaries (canonical subdir layout)
+      - name: Package binaries (standard subdir layout)
         shell: bash
         env:
           BIN_NAME: ${{ inputs.bin-name }}
@@ -600,7 +600,7 @@ jobs:
           echo "homepage=$HOMEPAGE" >> "$GITHUB_OUTPUT"
 
           # URLs and SHAs for every tarball matching <bin>-<target>.<ext>.
-          # Brew template only uses the canonical 4 (mac arm64 + linux gnu),
+          # Brew template only uses the standard 4 (mac arm64 + linux gnu),
           # but we emit all present for forward compatibility.
           URL_BASE="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/${BIN_NAME}"
           urls='{}'

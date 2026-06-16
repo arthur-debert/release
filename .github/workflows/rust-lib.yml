@@ -114,7 +114,7 @@ jobs:
 
   # -------------------------------------------------------------------
   # 3. Create the GitHub release. Library releases don't carry binary
-  #    artifacts (the canonical distribution channel is crates.io), but
+  #    artifacts (the primary distribution channel is crates.io), but
   #    we still create a GH release so:
   #    - Users see the changelog on github.com/<repo>/releases.
   #    - The release becomes a stable anchor downstream consumers can

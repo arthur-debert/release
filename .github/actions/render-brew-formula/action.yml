@@ -1,5 +1,5 @@
 name: 'Render Homebrew formula'
-description: 'Render the canonical brew formula template against per-target URLs/SHAs and project metadata'
+description: 'Render the shared brew formula template against per-target URLs/SHAs and project metadata'
 
 inputs:
   bin-name:
@@ -27,7 +27,7 @@ inputs:
     description: 'Where to write the rendered .rb file'
     required: true
   template-path:
-    description: 'Path to .rb.tmpl; defaults to canonical template (subdir tarball layout, mac arm64 + linux x86_64/arm64)'
+    description: 'Path to .rb.tmpl; defaults to the shared template (subdir tarball layout, mac arm64 + linux x86_64/arm64)'
     required: false
     default: ''
   private-repo:

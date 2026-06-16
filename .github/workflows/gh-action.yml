@@ -15,7 +15,7 @@ name: GH action release
 #    Consumers pin `uses: <repo>@v1`; advancing `v1` to point at the
 #    latest non-breaking tag is how fixes propagate to all callers.
 #    This workflow handles that advance for non-prerelease releases.
-# 3. arthur-debert/release is itself a canonical consumer. (We can't
+# 3. arthur-debert/release is itself a consumer. (We can't
 #    use `@v1` to cut `@v1` — chicken/egg; first tag cut manually.
 #    Subsequent tags can call this workflow once it ships.)
 #
@@ -98,7 +98,7 @@ jobs:
       # via the consumer's synced pull-model bootstrap. The bin/semver /
       # bin/changelog shims were retired (release#476); the prepare job now
       # uses the pip-installed console-scripts. --no-init: we only need the
-      # package + its scripts here, not a config re-materialization. --major v2
+      # package + its scripts here, not a `.release/` re-install. --major v2
       # is the v3-safety pin (this workflow ships in the v2 line).
       - name: Set up Python for release_core console-scripts
         uses: actions/setup-python@v6
@@ -375,7 +375,7 @@ jobs:
 
       # release_core wheel publish (pip-bootstrap transport, ADR-0003).
       # Only this repo (arthur-debert/release, the gh-action stack's own
-      # canonical consumer) ships the release_core package; the step is
+      # consumer) ships the release_core package; the step is
       # guarded so any other gh-action consumer without the package is a
       # clean no-op. When the package IS present the build/upload is a HARD
       # gate — a failed build or upload fails the release (set -euo pipefail,

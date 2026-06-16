@@ -4,15 +4,15 @@ name: Rust CI
 #
 # Closes the "CI workflow reusability gap" called out in README.md.
 # Where `rust-cli.yml` covers the release path, this workflow covers
-# every push / pull_request: run the canonical `bin/check` umbrella,
+# every push / pull_request: run the shared `bin/check` umbrella,
 # optionally build a release binary, optionally run bats e2e against
 # that binary.
 #
 # Design choices worth knowing:
 #
-#  * **`bin/check` is the canonical call.** Consumers that have adopted
-#    the take-iii Component model already ship `bin/check` (synced by
-#    release-sync from the rust-quality Capability + the commons lint gate).
+#  * **`bin/check` is the standard call.** Consumers that have adopted
+#    the Component model already ship `bin/check` (installed from the
+#    rust-quality Capability + the commons lint gate).
 #    Fix-once-propagate works because the script lives in the consumer
 #    tree and is the same shape across the fleet.
 #
@@ -87,7 +87,7 @@ on:
       bats:
         description: |
           Opt into a second `e2e` job that installs bats-core and calls
-          the consumer's `bin/check-e2e` (canonical bats runner from the
+          the consumer's `bin/check-e2e` (shared bats runner from the
           `bats` Component). When true, the e2e job runs after `check`.
         type: boolean
         required: false
@@ -216,7 +216,7 @@ jobs:
           targets: ${{ inputs.extra-targets }}
 
       - name: Install cargo-nextest
-        # Canonical test runner used by bin/check-tests across the fleet.
+        # Standard test runner used by bin/check-tests across the fleet.
         uses: taiki-e/install-action@v2
         with:
           tool: nextest
@@ -272,7 +272,7 @@ jobs:
           # FULL checkout, not sparse: post-WS4/WS7 (release#521/#528)
           # `.release/` is gitignored and `bin/check-e2e` / `lib/` are
           # untracked ephemeral mirrors, so a sparse checkout of those
-          # paths yields nothing — the managed tree must be MATERIALIZED
+          # paths yields nothing — the managed paths must be installed
           # (arm-gate below), and `release-core init` needs the full repo
           # to detect the Kind. (The binary still comes in via
           # download-artifact, not from source.)
@@ -289,10 +289,10 @@ jobs:
         with:
           python-version: '3.13'
       - name: Arm the gate toolset
-        # Same ONE composite the `check` job uses — its materialize step
-        # installs the pinned release_core wheel and composes `.release/`
-        # + the bin/lib mirrors, so `bin/check-e2e` exists on this fresh
-        # runner (it is an untracked mirror post-WS7, never in the
+        # Same ONE composite the `check` job uses — its install step
+        # installs the pinned release_core wheel and writes the `.release/`
+        # temp dir + the bin/lib mirrors, so `bin/check-e2e` exists on this
+        # fresh runner (it is an untracked mirror post-WS7, never in the
         # checkout itself).
         uses: arthur-debert/release/.github/actions/arm-gate@v2
 
@@ -303,7 +303,7 @@ jobs:
           name: ${{ inputs.binary-name }}-linux
 
       - name: Install bats-core
-        # Canonical install via the bats-core marketplace action — same
+        # Standard install via the bats-core marketplace action — same
         # one used by bats-e2e.yml. Matches the `bats` Component docs.
         uses: bats-core/bats-action@4.0.0
 

@@ -5,7 +5,7 @@ name: Neovim Plugin CI
 # Closes part of #107. Where `nvim-plugin.yml` covers the release path
 # (tag + GH release), this workflow covers every push / pull_request:
 # install Neovim, optionally install bats / luacheck / stylua, run the
-# canonical `bin/check` umbrella (or the consumer's existing
+# standard `bin/check` umbrella (or the consumer's existing
 # scripts/test-all).
 #
 # What's distinct
@@ -15,7 +15,7 @@ name: Neovim Plugin CI
 #   busted/vusted instead).
 # - Consumer-specific deps (downloading lexd-lsp / tree-sitter grammar
 #   tarballs in lex-fmt/nvim's case) stay in the consumer's pre-check
-#   hook — not in the canonical.
+#   hook — not in the shared workflow.
 #
 # Caller shape (paste-ready):
 #
@@ -56,8 +56,8 @@ on:
         default: ''
       check-command:
         description: |
-          The canonical umbrella check entry point. Defaults to
-          `bin/check`; override for consumers still mid-take-iii
+          The standard umbrella check entry point. Defaults to
+          `bin/check`; override for consumers still mid-migration
           (e.g. `scripts/test-all`).
         type: string
         required: false
@@ -109,11 +109,11 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.13'
-      - name: Arm the gate toolset (materialize bin/check + lint toolset)
+      - name: Arm the gate toolset (install bin/check + lint toolset)
         # Same gap as tree-sitter-ci: the umbrella check (default `bin/check`)
-        # ran without materializing it, so a consumer lacking a committed
-        # bin/check would fail `No such file` (exit 127). arm-gate materializes
-        # the managed tree (incl. bin/check) + installs the gate toolset,
+        # ran without installing it first, so a consumer lacking a committed
+        # bin/check would fail `No such file` (exit 127). arm-gate installs
+        # bin/check and the gate toolset into the `.release/` temp dir,
         # matching rust-ci.yml et al.
         uses: arthur-debert/release/.github/actions/arm-gate@v2
 

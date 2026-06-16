@@ -2,7 +2,7 @@ name: Tauri Native E2E (reusable)
 
 # Reusable workflow: run a Tauri app's NATIVE E2E suite — the real WebKitGTK
 # webview driven over WebDriver (tauri-driver + WebKitWebDriver, under xvfb +
-# dbus) — inside the canonical pinned tauri-driver Docker image. This is the
+# dbus) — inside the shared pinned tauri-driver Docker image. This is the
 # managed home for the native lane (release#445): the consumer's thin caller
 # owns the triggers (PR + nightly cron + workflow_dispatch) and passes its config
 # via `with:`; ALL the suite logic stays in the consumer's `runner-script`, which

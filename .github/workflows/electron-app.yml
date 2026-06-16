@@ -117,7 +117,7 @@ permissions:
 # modification on the .app would invalidate that signature. Instead, use
 # electron-builder's own `afterPack` lifecycle hook (a JS function
 # declared in package.json `build.afterPack`), which runs BETWEEN pack
-# and sign. That's the canonical entry point for re-signing nested
+# and sign. That's the standard entry point for re-signing nested
 # bundles. (Notarization runs AFTER the build but only modifies the
 # .dmg by appending a stapled ticket — that's fine and doesn't
 # invalidate the signature on the .app inside.)
@@ -197,7 +197,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
       - name: Detect package manager
-        # Lockfile IS the canonical signal; consumers commit exactly
+        # Lockfile IS the definitive signal; consumers commit exactly
         # one of pnpm-lock.yaml / yarn.lock / package-lock.json.
         # Same pattern as electron-ci.yml + tauri-ci.yml.
         id: pm
@@ -324,7 +324,7 @@ jobs:
       - name: Provision fetch-deps on PATH
         # The consumer's build script calls `fetch-deps` by name, but it
         # isn't on PATH in CI (it lives in arthur-debert/release/bin).
-        # Fetch the canonical copy from release@main and prepend it to
+        # Fetch the real-file copy from release@main and prepend it to
         # PATH. (main, not a pinned ref: matches consumers' existing
         # bootstrap, and the CI `guards` job keeps main's bin/fetch-deps a
         # real file so this raw fetch returns the script, not a symlink
@@ -359,7 +359,7 @@ jobs:
           # handle notarization in dedicated submit/poll/staple steps
           # below for queue visibility.
           args=(--mac "--${ARCH}" --publish never -c.mac.notarize=false)
-          # Direct `<pm> run build`. (The old "prefer canonical bin/build"
+          # Direct `<pm> run build`. (The old "prefer bin/build"
           # branch was dead code post-WS7: bin/build is an untracked
           # ephemeral mirror, absent on a plain checkout, so the guard
           # always took this fallback — release#588.)
@@ -472,7 +472,7 @@ jobs:
       # NOTE: the packaged-binary smoke step (app-bin/smoke-hook.sh) was
       # removed as dead code: post-WS7 the hook is an untracked ephemeral
       # mirror, absent on a plain checkout, so its existence guard never
-      # fired (release#588). Restoring packaged smoke testing (materialize
+      # fired (release#588). Restoring packaged smoke testing (install `.release/`
       # first) vs retiring the hook templates is tracked in release#590.
 
       # Upload runs `if: always() && !cancelled()` so a notarization
@@ -540,7 +540,7 @@ jobs:
 
       - name: Provision fetch-deps on PATH
         # See build-mac for rationale. fetch-deps isn't on PATH in CI;
-        # fetch the canonical real-file copy at this workflow's commit.
+        # fetch the real-file copy at this workflow's commit.
         shell: bash
         run: |
           dir="$RUNNER_TEMP/release-bin"
@@ -557,7 +557,7 @@ jobs:
         run: |
           ${{ steps.pm.outputs.pm }} run build --linux --${{ matrix.arch }} --publish never
 
-      # AppImage is the canonical linux artifact for electron-app and
+      # AppImage is the standard linux artifact for electron-app and
       # required for the release to be useful; .deb is optional (only
       # produced if the consumer's electron-builder config has the
       # `deb` target enabled). Split into two uploads so a missing

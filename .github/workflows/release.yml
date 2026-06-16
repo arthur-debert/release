@@ -2,7 +2,7 @@ name: Release
 
 # Thin caller of this repo's own gh-action.yml@v2.
 #
-# Yes, this repo cuts ITS OWN release tags via the canonical
+# Yes, this repo cuts ITS OWN release tags via the shared
 # gh-action.yml stack workflow, dogfooding the SAME floating major
 # (`@v2`) the fleet pins — not a stale older line. Chicken-and-egg
 # note: the first tag that included gh-action.yml had to be cut
@@ -18,7 +18,7 @@ name: Release
 # - publish the `release_core` wheel as a release asset (pip-bootstrap
 #   transport, ADR-0003)
 # - advance the floating-major branch (derived from the released
-#   version, e.g. v2) → new tag (the canonical distribution mechanism)
+#   version, e.g. v2) → new tag (the standard distribution mechanism)
 #
 # Manual fall-back: if this workflow ever can't run (org outage,
 # permissions change), the entire flow is still doable by hand:

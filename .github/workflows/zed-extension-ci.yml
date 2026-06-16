@@ -3,10 +3,10 @@ name: Zed Extension CI
 # Reusable PR-time check workflow for zed-extension consumers.
 #
 # Closes part of #107. Where `zed-extension.yml` covers the release
-# path (wasm build + canonical bundle tarball + GH release), this
+# path (wasm build + standard bundle tarball + GH release), this
 # workflow covers every push / pull_request: install Rust with the
 # wasm32-wasip2 target, optionally install Node + bats, run the
-# canonical `bin/check` umbrella (or scripts/test-all fallback).
+# shared `bin/check` umbrella (or scripts/test-all fallback).
 #
 # What's distinct
 # ---------------
@@ -90,9 +90,9 @@ on:
         default: ''
       check-command:
         description: |
-          The canonical umbrella check entry point. Defaults to
+          The standard umbrella check entry point. Defaults to
           `bin/check`; override (e.g. `scripts/test-all`) for
-          consumers still mid-take-iii.
+          consumers still mid-migration.
         type: string
         required: false
         default: 'bin/check'
