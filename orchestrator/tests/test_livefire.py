@@ -368,6 +368,17 @@ def test_extract_rc_tag_none_when_absent():
     assert livefire.extract_rc_tag("no rc was cut; blocked at step 3") is None
 
 
+def test_extract_rc_tag_rejects_embedded_token():
+    # A longer token must NOT yield a truncated teardown target (boundary guard).
+    assert livefire.extract_rc_tag("artifact v1.2.3-release-rcXYZ in the log") is None
+    assert livefire.extract_rc_tag("prefixed xv1.2.3-release-rc thing") is None
+
+
+def test_extract_rc_tag_allows_trailing_punctuation():
+    # A tag at the end of a sentence (trailing period) is still a valid mention.
+    assert livefire.extract_rc_tag("cut v1.4.3-release-rc.") == "v1.4.3-release-rc"
+
+
 @requires_yaml
 def test_feedback_or_fallback_returns_real_feedback():
     fb = livefire.feedback_or_fallback(_TRANSCRIPT, rc_tag="v1.4.3-release-rc")

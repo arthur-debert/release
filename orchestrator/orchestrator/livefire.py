@@ -51,7 +51,12 @@ _BARE_FENCE_RE = re.compile(r"^\s*```[^`]*$")
 # A strict verification-tag shape — vX.Y.Z-release-rc (optional .N) — so a
 # transcript-sourced tag can't trigger a destructive delete unless it is exactly
 # a reserved verification tag (release#663).
-_VERIFY_TAG_RE = re.compile(r"v\d+\.\d+\.\d+-release-rc(\.\d+)?")
+# Boundary-guarded so an embedded token (e.g. `v1.2.3-release-rcXYZ`) can't
+# yield a truncated `v1.2.3-release-rc` teardown target: the leading lookbehind
+# requires a token start (not mid-word / mid-tag), and the trailing lookahead
+# rejects a following word-char or `-` while still allowing sentence
+# punctuation (a real `.N` is consumed by the optional group first).
+_VERIFY_TAG_RE = re.compile(r"(?<![\w.-])v\d+\.\d+\.\d+-release-rc(\.\d+)?(?![\w-])")
 
 
 class LiveFireError(RuntimeError):
