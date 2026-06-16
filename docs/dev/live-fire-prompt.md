@@ -51,37 +51,53 @@ Do NOT ask me how to do things. Discover them from what the repo ships:
 CLAUDE.md / AGENTS.md stub, and the available skills. If you cannot discover how
 to do something, that is a finding — note it and use your best guess.
 
-1. COVERAGE. Determine how this repo measures test coverage and run it. Find one
+1. PROVISION. This is a fresh clone — install dependencies and run any required
+   project build BEFORE you measure coverage or run tests, so coverage measures
+   a BUILT tree, not a bare checkout. Discover the package manager from the
+   lockfile and install (`pnpm install` / `npm install` / `yarn install` /
+   `cargo fetch`, as applicable); then run whatever pre-test build the repo
+   needs — e.g. a wasm build (`wasm-pack` / a `build:wasm` script) when there is
+   a `wasm/` tree, or `tree-sitter generate` when there is a `grammar.js`.
+   Running `release-core coverage` / `test-unit` on a bare tree friendly-fails
+   with a remediation line (deps not installed / wasm not built / parser not
+   generated) — that line tells you exactly what to provision. Report any
+   provisioning step you had to discover that the tooling didn't point you at.
+
+2. COVERAGE. Determine how this repo measures test coverage and run it. Find one
    module that is both important (load-bearing, widely used) and poorly tested.
    Improve its tests — and the code if a test surfaces a real bug. Keep the
    change focused and genuinely mergeable.
 
-2. COMMIT. Stage and commit your work. The pre-commit quality gate must run.
+3. COMMIT. Stage and commit your work. The pre-commit quality gate must run.
    Report whether it ran, what it checked, and whether its output was useful
    (did a failure tell you how to fix it?). Add a changelog fragment if the repo
    requires one — discover how.
 
-3. PR. Open a pull request. Discover and follow this repo's PR review loop
+4. PR. Open a pull request. Discover and follow this repo's PR review loop
    (drive it to the point a human would merge: reviews addressed, CI green,
    mergeable). Do not merge it yourself; stop at ready. Bound the review wait:
    if the loop is still waiting on reviews/CI after a couple of rounds, do NOT
-   keep blocking on it — step 4 does not depend on the PR reaching ready (the
+   keep blocking on it — step 5 does not depend on the PR reaching ready (the
    cut is off the branch, not the merge). Record the slow/unbounded review-wait
-   as a finding and MOVE ON to step 4 so the release half still gets exercised
-   and the rc is cut. Reaching step 4 is the priority; a perfectly-green PR is
+   as a finding and MOVE ON to step 5 so the release half still gets exercised
+   and the rc is cut. Reaching step 5 is the priority; a perfectly-green PR is
    not (#722).
 
-4. RELEASE HALF. Cut a throwaway verification release to exercise the release
+5. RELEASE HALF. Cut a throwaway verification release to exercise the release
    pipeline without polluting the version line: use the reserved pre-release
    suffix `-release-rc` (e.g. if the current version is 1.4.2, cut the bare
    version `1.4.3-release-rc` — no leading `v`; the cut command rejects a `v`
    prefix and the resulting tag becomes `v1.4.3-release-rc`). Discover the cut
-   command. Report whether it dispatched,
-   whether the pipeline ran prep → build → (sign/notarize) → publish, and
-   whether it left the branch / version line clean. Do NOT clean up the rc
-   tag/release yourself — the harness does teardown.
+   command. BEFORE you cut, ensure a `CHANGELOG/unreleased-*.md` fragment exists
+   (your coverage PR from step 4 should already carry one; if it doesn't, add a
+   throwaway via the repo's changelog command) — the release prepare gate
+   REFUSES to cut without a fragment and will fail the run otherwise. Report
+   whether it dispatched, whether the pipeline ran prep → build →
+   (sign/notarize) → publish, and whether it left the branch / version line
+   clean. Do NOT clean up the rc tag/release yourself — the harness does
+   teardown.
 
-5. FEEDBACK. End your response with the structured feedback block specified
+6. FEEDBACK. End your response with the structured feedback block specified
    below — nothing after it. For each step, report how you discovered how to do
    it, what tripped you, and anything missing, inaccurate, or requiring a
    workaround. Be specific (name the command, file, or doc). "It worked, no
@@ -95,7 +111,7 @@ verdict: <clean|minor-friction|blocked>
 pr: <url, or "none — blocked at step N">
 rc: <vX.Y.Z-release-rc tag cut, or "none — blocked at step N">
 findings:
-  - step: <coverage|commit|pr|release|discovery>
+  - step: <provision|coverage|commit|pr|release|discovery>
     component: <release surface, e.g. how-to|gate|changelog|pr-loop|cut|docs|skills>
     severity: <blocker|friction|papercut|ok>
     what: <what happened, specifically>
@@ -109,6 +125,15 @@ After harvesting feedback, the rollout runner deletes the `-release-rc` tag and
 its GitHub pre-release on each consumer (the prepare step never advanced the
 branch, so nothing else needs reverting). The coverage PR is left for the human
 to merge — that is the "value left behind".
+
+> Rc-run optics (release#705): a `-release-rc` cut dispatches the consumer's own
+> `release.yml`, so it shows up in `gh run list` looking identical to a real
+> release run — easy to confuse with a genuine cut that happens to be in flight.
+> The fix belongs in the consumer's workflow, not the harness: give the
+> `release.yml` job a distinguishing `run-name:` that surfaces the
+> `-release-rc` suffix (e.g. `run-name: release ${{ inputs.version }}`), so a
+> verification cut reads as one at a glance. Not done here to keep this a
+> prompt-only change.
 
 ## Routing feedback (release#348)
 

@@ -41,6 +41,7 @@ def test_test_unit_fans_out_and_propagates_failure(monkeypatch):
         return 0 if cmd.label == "node" else 2  # rust fails
 
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "_preflight", lambda cmd, root: 0)  # clean tree
     monkeypatch.setattr(tasks, "_exec", _fake_exec)
     monkeypatch.setattr(
         tasks.repo_commands,
@@ -146,6 +147,7 @@ def test_coverage_fans_out_and_propagates_failure(monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
+    monkeypatch.setattr(tasks, "_preflight", lambda cmd, root: 0)  # clean tree
 
     def _fake_exec(cmd, root, *, raw):
         calls.append(cmd.argv)
@@ -294,6 +296,7 @@ def test_build_forwards_args_npm_needs_dashdash(monkeypatch):
     captured = {}
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks.repo_commands, "detect_pm", lambda r: "npm")
+    monkeypatch.setattr(tasks, "_preflight", lambda cmd, root: 0)  # clean tree
     monkeypatch.setattr(
         tasks.repo_commands,
         "build_command",
@@ -337,6 +340,88 @@ def test_cargo_test_stays_plain_without_nextest(monkeypatch):
     monkeypatch.setattr(tasks, "which", lambda name: None)
     cmd = Cmd(["cargo", "test", "--all-features"], "cargo test", label="rust")
     assert tasks._resolve_argv(cmd, "/repo") == ["cargo", "test", "--all-features"]
+
+
+# --- preflight: friendly-fail on a bare checkout (#710/#718/#711/#702) ----
+
+
+# These exercise the REAL preflight against a real tmp tree (never a fake
+# "/repo" + a stubbed preflight): the verb must friendly-fail BEFORE exec, so a
+# real `_exec` would `chdir` into the tree — `_exec` is monkeypatched only as a
+# tripwire asserting it is never reached.
+
+
+def test_test_unit_friendly_fails_when_deps_missing(monkeypatch, capsys, tmp_path):
+    # A node command on a bare clone (no node_modules) must NOT exec into a raw
+    # `vitest: command not found` — it prints the install hint and exits 1.
+    (tmp_path / "pnpm-lock.yaml").write_text("")  # no node_modules → deps missing
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "unit_commands",
+        lambda r: [Cmd(["pnpm", "run", "test:unit"], "pnpm run test:unit", label="node")],
+    )
+    assert tasks.test_unit([]) == 1
+    assert not executed["v"]  # never exec'd the failing command
+    err = capsys.readouterr().err
+    assert "dependencies not installed" in err and "pnpm install" in err
+
+
+def test_coverage_friendly_fails_when_deps_missing(monkeypatch, capsys, tmp_path):
+    (tmp_path / "pnpm-lock.yaml").write_text("")  # no node_modules → deps missing
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: str(tmp_path))
+    # coverage execs through _coverage_exec (release#694), not _exec — tripwire
+    # the real exec path so a preflight miss would be a loud assert, never a raw
+    # subprocess.
+    monkeypatch.setattr(
+        tasks, "_coverage_exec", lambda cmd, root, *, raw: executed.update(v=True) or 0
+    )
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "coverage_commands",
+        lambda r: [Cmd(["pnpm", "run", "test:unit", "--coverage"], "pnpm …", label="node")],
+    )
+    assert tasks.coverage([]) == 1
+    assert not executed["v"]
+    assert "dependencies not installed" in capsys.readouterr().err
+
+
+def test_test_unit_runs_when_preflight_clean(monkeypatch, tmp_path):
+    # A ready tree (deps installed) execs normally.
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    (tmp_path / "node_modules").mkdir()
+    monkeypatch.setattr(tasks, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "unit_commands",
+        lambda r: [Cmd(["pnpm", "run", "test:unit"], "pnpm run test:unit", label="node")],
+    )
+    assert tasks.test_unit([]) == 0
+
+
+def test_build_friendly_fails_when_artifact_missing(monkeypatch, capsys, tmp_path):
+    # deps present (node_modules) so we get past the deps check; a node build in
+    # a repo with an unbuilt wasm crate friendly-fails on the missing pkg/.
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    (tmp_path / "node_modules").mkdir()
+    crate = tmp_path / "wasm" / "phos-viewer-wasm"
+    crate.mkdir(parents=True)
+    (crate / "Cargo.toml").write_text("[package]\nname='x'\n")
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: str(tmp_path))
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "build_command",
+        lambda r: Cmd(["pnpm", "run", "build"], "pnpm run build", label="node"),
+    )
+    assert tasks.build([]) == 1
+    assert not executed["v"]
+    assert "wasm packages not built" in capsys.readouterr().err
 
 
 def test_help(capsys):

@@ -69,9 +69,29 @@ def _exec(cmd: Cmd, root: str) -> int:
     return subprocess.run(argv, cwd=cwd).returncode
 
 
+def _preflight(cmd: Cmd, root: str) -> int:
+    """Friendly-fail BEFORE exec when ``cmd``'s prerequisites are missing on a
+    bare checkout (deps not installed / wasm not built / tree-sitter parser not
+    generated). Prints ONE actionable remediation line and returns exit 1 (the
+    cargo-llvm-cov install-hint UX); returns 0 when the tree is ready to run.
+
+    Detection + message only — never auto-installs or auto-builds; pretending to
+    be the consumer's CI is the load-bearing gotcha this guard avoids."""
+    msg = repo_commands.preflight(cmd, root)
+    if msg is None:
+        return 0
+    label = f"[{cmd.label}] " if cmd.label else ""
+    print(f"release-core: {label}{msg}", file=sys.stderr)
+    return 1
+
+
 def _fanout(cmds: list[Cmd], root: str) -> int:
-    """Run each command in order; stop at the first non-zero and propagate it."""
+    """Run each command in order; stop at the first non-zero and propagate it.
+    A missing prerequisite (bare checkout) friendly-fails before exec."""
     for cmd in cmds:
+        rc = _preflight(cmd, root)
+        if rc != 0:
+            return rc
         rc = _exec(cmd, root)
         if rc != 0:
             return rc
@@ -181,8 +201,12 @@ def _coverage_exec(cmd: Cmd, root: str, *, raw: bool) -> int:
 
 
 def _coverage_fanout(cmds: list[Cmd], root: str, *, raw: bool) -> int:
-    """Run each coverage command in order; stop at the first non-zero."""
+    """Run each coverage command in order; stop at the first non-zero. A missing
+    prerequisite (bare checkout) friendly-fails before exec, same as _fanout."""
     for cmd in cmds:
+        rc = _preflight(cmd, root)
+        if rc != 0:
+            return rc
         rc = _coverage_exec(cmd, root, raw=raw)
         if rc != 0:
             return rc
@@ -298,6 +322,9 @@ def build(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    rc = _preflight(cmd, root)
+    if rc != 0:
+        return rc
     return _exec(_with_args(cmd, argv, root), root)
 
 
@@ -315,4 +342,7 @@ def run(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    rc = _preflight(cmd, root)
+    if rc != 0:
+        return rc
     return _exec(_with_args(cmd, argv, root), root)

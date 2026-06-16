@@ -1,0 +1,1 @@
+- Friendly-fail runnable verbs on a bare checkout (deps/wasm/tree-sitter not provisioned) + live-fire prompt provisioning + changelog-before-cut steps
