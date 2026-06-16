@@ -374,3 +374,91 @@ def test_resolve_empty_repo(tmp_path):
     got = rc.resolve(str(tmp_path))
     assert got.unit == [] and got.e2e == [] and got.build is None and got.run is None
     assert got.coverage == [] and got.docs is None and got.deps is None
+
+
+# --- preflight: friendly-fail on a bare checkout --------------------------
+#
+# On a fresh clone the detected command is right but its prerequisites are
+# absent. preflight() detects that from the filesystem and returns ONE
+# remediation line (deps / wasm / tree-sitter) — never runs anything.
+
+
+def _node_cmd(pm: str = "pnpm") -> rc.Cmd:
+    return rc.Cmd([pm, "run", "test:unit"], f"{pm} run test:unit", label="node")
+
+
+def test_preflight_clean_when_node_modules_present(tmp_path):
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    (tmp_path / "node_modules").mkdir()
+    assert rc.preflight(_node_cmd(), str(tmp_path)) is None
+
+
+def test_preflight_deps_missing_names_the_pm(tmp_path):
+    # pnpm lockfile, no node_modules → the vitest/svelte-check "command not
+    # found" case (#710, #718). Message names the right package manager.
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    msg = rc.preflight(_node_cmd("pnpm"), str(tmp_path))
+    assert msg is not None and "dependencies not installed" in msg
+    assert "pnpm install" in msg
+
+
+def test_preflight_deps_missing_npm_default(tmp_path):
+    # No lockfile → npm; npx command also counts as needing node_modules.
+    msg = rc.preflight(rc.Cmd(["npx", "tsc"], "npx tsc", label="node"), str(tmp_path))
+    assert msg is not None and "npm install" in msg
+
+
+def test_preflight_non_node_command_ignores_node_modules(tmp_path):
+    # A cargo/go command never needs node_modules — no deps message.
+    cmd = rc.Cmd(["cargo", "test"], "cargo test", label="rust")
+    assert rc.preflight(cmd, str(tmp_path)) is None
+
+
+def test_preflight_wasm_not_built(tmp_path):
+    # deps present so we get past the deps check; a wasm crate without pkg/ →
+    # the vitest module-load-failure case (#711).
+    (tmp_path / "node_modules").mkdir()
+    wasm = tmp_path / "wasm" / "phos-viewer-wasm"
+    wasm.mkdir(parents=True)
+    (wasm / "Cargo.toml").write_text("[package]\nname='x'\n")
+    msg = rc.preflight(_node_cmd("npm"), str(tmp_path))
+    assert msg is not None and "wasm packages not built" in msg
+    assert "wasm/phos-viewer-wasm" in msg
+
+
+def test_preflight_wasm_built_is_clean(tmp_path):
+    (tmp_path / "node_modules").mkdir()
+    wasm = tmp_path / "wasm" / "phos-viewer-wasm"
+    wasm.mkdir(parents=True)
+    (wasm / "Cargo.toml").write_text("[package]\nname='x'\n")
+    (wasm / "pkg").mkdir()
+    assert rc.preflight(_node_cmd("npm"), str(tmp_path)) is None
+
+
+def test_preflight_tree_sitter_parser_missing(tmp_path):
+    # grammar.js present, no src/parser.c → the `parser.c not found` case
+    # (#702). A non-node command still triggers it (e.g. an nvim test runner).
+    (tmp_path / "grammar.js").write_text("module.exports = grammar({});")
+    cmd = rc.Cmd(["app-bin/test-all"], "app-bin/test-all", label="nvim")
+    msg = rc.preflight(cmd, str(tmp_path))
+    assert msg is not None and "tree-sitter parser not generated" in msg
+    assert "tree-sitter generate" in msg
+
+
+def test_preflight_tree_sitter_generated_is_clean(tmp_path):
+    (tmp_path / "grammar.js").write_text("module.exports = grammar({});")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "parser.c").write_text("/* generated */")
+    cmd = rc.Cmd(["app-bin/test-all"], "app-bin/test-all", label="nvim")
+    assert rc.preflight(cmd, str(tmp_path)) is None
+
+
+def test_preflight_deps_shadow_artifact_checks(tmp_path):
+    # When BOTH deps are missing AND wasm is unbuilt, deps wins (it is the
+    # precondition for the build) — one actionable line, not a pile.
+    (tmp_path / "pnpm-lock.yaml").write_text("")
+    wasm = tmp_path / "wasm" / "phos-viewer-wasm"
+    wasm.mkdir(parents=True)
+    (wasm / "Cargo.toml").write_text("[package]\nname='x'\n")
+    msg = rc.preflight(_node_cmd("pnpm"), str(tmp_path))
+    assert msg is not None and "dependencies not installed" in msg

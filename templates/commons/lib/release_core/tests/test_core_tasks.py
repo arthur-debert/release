@@ -41,6 +41,7 @@ def test_test_unit_fans_out_and_propagates_failure(monkeypatch):
         return 0 if cmd.label == "node" else 2  # rust fails
 
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
     monkeypatch.setattr(tasks, "_exec", _fake_exec)
     monkeypatch.setattr(
         tasks.repo_commands,
@@ -134,6 +135,7 @@ def test_coverage_fans_out_and_propagates_failure(monkeypatch):
     calls: list[list[str]] = []
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
+    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
 
     def _fake_exec(cmd, root):
         calls.append(cmd.argv)
@@ -212,6 +214,7 @@ def test_build_forwards_args_npm_needs_dashdash(monkeypatch):
     captured = {}
     monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
     monkeypatch.setattr(tasks.repo_commands, "detect_pm", lambda r: "npm")
+    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
     monkeypatch.setattr(
         tasks.repo_commands,
         "build_command",
@@ -255,6 +258,83 @@ def test_cargo_test_stays_plain_without_nextest(monkeypatch):
     monkeypatch.setattr(tasks, "which", lambda name: None)
     cmd = Cmd(["cargo", "test", "--all-features"], "cargo test", label="rust")
     assert tasks._resolve_argv(cmd, "/repo") == ["cargo", "test", "--all-features"]
+
+
+# --- preflight: friendly-fail on a bare checkout (#710/#718/#711/#702) ----
+
+
+def test_test_unit_friendly_fails_when_deps_missing(monkeypatch, capsys):
+    # A node command on a bare clone (no node_modules) must NOT exec into a raw
+    # `vitest: command not found` — it prints the install hint and exits 1.
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "unit_commands",
+        lambda r: [Cmd(["pnpm", "run", "test:unit"], "pnpm run test:unit", label="node")],
+    )
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "preflight",
+        lambda cmd, root: "dependencies not installed — run `pnpm install` first",
+    )
+    assert tasks.test_unit([]) == 1
+    assert not executed["v"]  # never exec'd the failing command
+    err = capsys.readouterr().err
+    assert "dependencies not installed" in err and "pnpm install" in err
+
+
+def test_coverage_friendly_fails_when_deps_missing(monkeypatch, capsys):
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "which", lambda name: "/usr/bin/cargo-llvm-cov")
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "coverage_commands",
+        lambda r: [Cmd(["pnpm", "run", "test:unit", "--coverage"], "pnpm …", label="node")],
+    )
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "preflight",
+        lambda cmd, root: "dependencies not installed — run `pnpm install` first",
+    )
+    assert tasks.coverage([]) == 1
+    assert not executed["v"]
+    assert "dependencies not installed" in capsys.readouterr().err
+
+
+def test_test_unit_runs_when_preflight_clean(monkeypatch):
+    # A ready tree (preflight None) execs normally.
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks.repo_commands, "preflight", lambda cmd, root: None)
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "unit_commands",
+        lambda r: [Cmd(["pnpm", "run", "test:unit"], "pnpm run test:unit", label="node")],
+    )
+    assert tasks.test_unit([]) == 0
+
+
+def test_build_friendly_fails_when_artifact_missing(monkeypatch, capsys):
+    executed = {"v": False}
+    monkeypatch.setattr(tasks, "_repo_root", lambda: "/repo")
+    monkeypatch.setattr(tasks, "_exec", lambda cmd, root: executed.update(v=True) or 0)
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "build_command",
+        lambda r: Cmd(["pnpm", "run", "build"], "pnpm run build", label="node"),
+    )
+    monkeypatch.setattr(
+        tasks.repo_commands,
+        "preflight",
+        lambda cmd, root: "wasm packages not built — run the wasm build first",
+    )
+    assert tasks.build([]) == 1
+    assert not executed["v"]
+    assert "wasm packages not built" in capsys.readouterr().err
 
 
 def test_help(capsys):

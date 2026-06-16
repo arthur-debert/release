@@ -452,6 +452,86 @@ def docs_commands(root: str) -> DocsCommands | None:
     )
 
 
+# --- preflight: friendly-fail a runnable verb on a bare checkout ----------
+#
+# On a FRESH clone (no `pnpm install`, no wasm build, no `tree-sitter generate`)
+# the detected command is correct but its PREREQUISITES are absent, so exec'ing
+# it produces a raw, undiscoverable error: `vitest: command not found` (deps),
+# a vitest module-load failure (`wasm/…/pkg/` missing), or `parser.c not found`
+# (grammar not generated). These are not the consumer's gate failing — they are
+# "you ran the suite on a bare tree". Detect each from the filesystem (never run
+# anything) and return ONE actionable remediation line so the verb can fail
+# FRIENDLY with a clean exit, mirroring the `cargo-llvm-cov is not installed`
+# install-hint UX in tasks.coverage. Detection + message only — we never
+# auto-install deps or auto-build (the "load-bearing gotcha": a mechanical tool
+# must not pretend to be the consumer's CI).
+
+
+def _is_node_run(cmd: Cmd, root: str) -> bool:
+    """True iff this command drives a node script through the package manager
+    (``<pm> run …``) or ``npx`` — i.e. it needs ``node_modules`` installed."""
+    if not cmd.argv:
+        return False
+    head = cmd.argv[0]
+    return head == detect_pm(root) or head in ("npm", "pnpm", "yarn", "npx")
+
+
+def _wasm_crate_dirs_missing_pkg(root: str) -> list[str]:
+    """Rust→wasm crate dirs under ``wasm/`` (a ``Cargo.toml`` present) whose
+    built ``pkg/`` output is absent — the wasm-pack build hasn't run. Empty when
+    there is no ``wasm/`` tree or every crate is already built."""
+    wasm_root = os.path.join(root, "wasm")
+    if not os.path.isdir(wasm_root):
+        return []
+    missing: list[str] = []
+    try:
+        names = sorted(os.listdir(wasm_root))
+    except OSError:
+        return []
+    for name in names:
+        crate = os.path.join(wasm_root, name)
+        if not os.path.isdir(crate) or not os.path.isfile(os.path.join(crate, "Cargo.toml")):
+            continue
+        if not os.path.isdir(os.path.join(crate, "pkg")):
+            missing.append(os.path.join("wasm", name))
+    return missing
+
+
+def _tree_sitter_parser_missing(root: str) -> bool:
+    """True iff this is a tree-sitter grammar (``grammar.js`` at the root) whose
+    generated ``src/parser.c`` is absent — ``tree-sitter generate`` hasn't run."""
+    return os.path.isfile(os.path.join(root, "grammar.js")) and not os.path.isfile(
+        os.path.join(root, "src", "parser.c")
+    )
+
+
+def preflight(cmd: Cmd, root: str) -> str | None:
+    """The single remediation line for a missing prerequisite of ``cmd`` on a
+    bare checkout, or ``None`` when the tree is ready to run.
+
+    Order is most-actionable-first: an uninstalled toolchain (deps) shadows the
+    build-artifact checks, because installing deps is the precondition for the
+    build anyway. The build-artifact checks (wasm / tree-sitter) are
+    message-only: they point at the build, they never run it."""
+    # 1. Toolchain: a node command with no node_modules → the inner tool
+    #    (vitest / svelte-check / …) resolves to "command not found".
+    if _is_node_run(cmd, root) and not os.path.isdir(os.path.join(root, "node_modules")):
+        pm = detect_pm(root)
+        return f"dependencies not installed — run `{pm} install` first"
+    # 2. Build artifact: wasm crates not built (vitest load-failures from
+    #    `wasm/*/pkg/` missing).
+    missing = _wasm_crate_dirs_missing_pkg(root)
+    if missing:
+        return (
+            "wasm packages not built — run the wasm build first "
+            f"(missing pkg/ in: {', '.join(missing)})"
+        )
+    # 3. Build artifact: tree-sitter parser not generated (`parser.c not found`).
+    if _tree_sitter_parser_missing(root):
+        return "tree-sitter parser not generated — run `tree-sitter generate` first"
+    return None
+
+
 @dataclass
 class RepoCommands:
     """Everything the verbs + how-to need for one repo, resolved once."""
