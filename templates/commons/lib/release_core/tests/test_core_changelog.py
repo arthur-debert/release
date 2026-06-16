@@ -47,8 +47,10 @@ def test_is_valid_semver_matches_semver_tool(v, valid):
 
 # add writes a bare `- bullet` by default (the renderer's flat list). A
 # `### <section>` heading is opt-in via --section <name> (release#720). The
-# default carries no heading, so the prefix every assertion below adds is empty.
-_SECTION = f"### {changelog.DEFAULT_SECTION}".encode() if changelog.DEFAULT_SECTION else b""
+# default carries no heading, so this prefix is empty — but mirror
+# `_with_section`'s exact bytes (heading + blank line) so the assertions stay
+# correct if DEFAULT_SECTION ever becomes non-empty (release#732 review).
+_SECTION = changelog._with_section(b"", changelog.DEFAULT_SECTION)
 
 
 def test_add_inline_args_join_with_space(repo):
