@@ -103,6 +103,14 @@ _KIND_HINT: dict[str, dict[str, str]] = {
         "build": "(none — interpreted)",
         "run": "(open Neovim with the plugin on the runtimepath)",
     },
+    "tree-sitter": {
+        "test": "tree-sitter test",
+        # The tree-sitter CLI has no coverage flag (`tree-sitter test
+        # --coverage` errors) — release#696.
+        "coverage": "(no coverage tool for this Kind)",
+        "build": "tree-sitter generate",
+        "run": "tree-sitter parse <file>",
+    },
 }
 
 _GENERIC_HINT = {
