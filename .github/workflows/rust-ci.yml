@@ -210,7 +210,7 @@ jobs:
           submodules: ${{ inputs.submodules }}
 
       - name: Setup Rust (toolchain + cache)
-        uses: arthur-debert/release/.github/actions/setup-rust@v2
+        uses: arthur-debert/release/.github/actions/setup-rust@v3
         with:
           components: clippy, rustfmt
           targets: ${{ inputs.extra-targets }}
@@ -239,7 +239,7 @@ jobs:
         # block #417/#419 had to copy into every reusable workflow (release#416).
         # Node + Python are set up by the steps above; the composite installs the
         # lint/format toolset the hardened gate needs.
-        uses: arthur-debert/release/.github/actions/arm-gate@v2
+        uses: arthur-debert/release/.github/actions/arm-gate@v3
 
       - name: Run project checks (bin/check)
         run: bin/check
@@ -294,7 +294,7 @@ jobs:
         # temp dir + the bin/lib mirrors, so `bin/check-e2e` exists on this
         # fresh runner (it is an untracked mirror post-WS7, never in the
         # checkout itself).
-        uses: arthur-debert/release/.github/actions/arm-gate@v2
+        uses: arthur-debert/release/.github/actions/arm-gate@v3
 
       - name: Download binary
         if: inputs.binary-name != ''
@@ -399,7 +399,7 @@ jobs:
         # Shared setup-rust composite installs the wasm32 target +
         # Swatinem/rust-cache (caching mandatory per CLAUDE.md). clippy
         # component for the lint below.
-        uses: arthur-debert/release/.github/actions/setup-rust@v2
+        uses: arthur-debert/release/.github/actions/setup-rust@v3
         with:
           components: clippy
           targets: wasm32-unknown-unknown
@@ -436,7 +436,7 @@ jobs:
           submodules: ${{ inputs.submodules }}
 
       - name: Setup Rust (wasm32 toolchain + cache)
-        uses: arthur-debert/release/.github/actions/setup-rust@v2
+        uses: arthur-debert/release/.github/actions/setup-rust@v3
         with:
           targets: wasm32-unknown-unknown
 

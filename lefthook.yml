@@ -86,6 +86,30 @@ pre-commit:
         # silently disables integration entirely.
         SHELLCHECK_OPTS='-S warning' actionlint -color
 
+    workflow-action-major:
+      # The reusable workflows must reference release's OWN composite actions at
+      # the floating major (@v3), never a frozen older major. A `rust-cli.yml@v3`
+      # whose internal `uses:` still says `prepare-release@v2` silently runs stale
+      # v2 action code for every consumer "on v3" — exactly the drift that shipped
+      # the -release-rc main-pollution + crates.io publish incident (the @v2 pins
+      # were never advanced at the v3.0.0 cut). Bump this literal at the next major.
+      glob:
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+        - ".github/actions/*/action.yml"
+      run: |
+        fail=0
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          bad=$(grep -noE 'arthur-debert/release/\.github/actions/[a-z0-9-]+@v[0-9][0-9.]*' "$f" | grep -vE '@v3$') || true
+          if [ -n "$bad" ]; then
+            echo "ERROR: $f pins an internal release action off the floating major (@v3):" >&2
+            echo "$bad" >&2
+            fail=1
+          fi
+        done
+        exit $fail
+
     ruff:
       # Lint + format-check the Python workspace (release_core + orchestrator)
       # PLUS the extensionless Python shims under bin/ and templates/commons/bin/

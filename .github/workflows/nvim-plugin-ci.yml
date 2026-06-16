@@ -115,7 +115,7 @@ jobs:
         # bin/check would fail `No such file` (exit 127). arm-gate installs
         # bin/check and the gate toolset into the `.release/` temp dir,
         # matching rust-ci.yml et al.
-        uses: arthur-debert/release/.github/actions/arm-gate@v2
+        uses: arthur-debert/release/.github/actions/arm-gate@v3
 
       - name: Run umbrella check
         shell: bash

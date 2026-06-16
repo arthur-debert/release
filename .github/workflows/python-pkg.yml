@@ -133,7 +133,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-python@v2
+      - uses: arthur-debert/release/.github/actions/prepare-release-python@v3
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -213,7 +213,9 @@ jobs:
   # -------------------------------------------------------------------
   publish-pypi:
     needs: [prepare, build]
-    if: inputs.publish-pypi
+    # A `-release-rc` cut is a throwaway live-fire verification (release#663):
+    # build + tag + GH release, but NEVER publish to PyPI.
+    if: inputs.publish-pypi && !contains(needs.prepare.outputs.version, '-release-rc')
     runs-on: ubuntu-latest
     steps:
       - name: Install uv
@@ -256,7 +258,9 @@ jobs:
   # -------------------------------------------------------------------
   publish-testpypi:
     needs: [prepare, build]
-    if: inputs.publish-testpypi
+    # A `-release-rc` cut is a throwaway live-fire verification (release#663):
+    # build + tag + GH release, but NEVER publish to TestPyPI.
+    if: inputs.publish-testpypi && !contains(needs.prepare.outputs.version, '-release-rc')
     runs-on: ubuntu-latest
     steps:
       - name: Install uv
