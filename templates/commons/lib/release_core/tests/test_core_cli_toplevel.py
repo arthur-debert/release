@@ -124,7 +124,7 @@ def test_changelog_help_lists_subcommands(capsys):
 
 
 def test_sync_group_is_gone(capsys):
-    """WS4 (release#521) retired the ``sync`` group with the drift/sync subsystem;
+    """WS4 (release#521) retired the ``sync`` group with the sync subsystem;
     consumers self-sync via ``release-core init``. The group must not resolve."""
     rc = cli_entry.main(["sync", "--help"])
     assert rc != 0

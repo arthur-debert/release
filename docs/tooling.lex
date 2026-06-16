@@ -216,7 +216,7 @@ release-core, the gate, distribution, and workflows
     `release-core init` is the one builder (the standalone `release-sync`
     verb and the `release-drift-check` subsystem were retired in WS4, #521 —
     with the tree ephemeral there is nothing to fall out of sync). The engine
-    lives in `release_core/sync.py` (`build_plan` / `materialize` /
+    lives in `release_core/sync.py` (`build_plan` / `build_tree` /
     `compute_mirror`);
     init is its only driver. Read this before adding anything consumers should
     receive.

@@ -758,9 +758,9 @@ def test_compute_mirror_symlinked_skill_root_is_removed_first(tmp_path):
     assert dest not in mp.migrated
 
 
-def test_compute_mirror_real_copy_queued_when_dest_absent_or_drifted(tmp_path):
+def test_compute_mirror_real_copy_queued_when_dest_absent_or_out_of_sync(tmp_path):
     """A managed real-file copy (.github/workflows/*.yml) is queued when the dest
-    is missing or its bytes drift from what _apply would write."""
+    is missing or its bytes differ from what _apply would write."""
     dest = ".github/workflows/copilot-review.yml"
     tmp_release = tmp_path / "tmpbuild"
     (tmp_release / ".github" / "workflows").mkdir(parents=True)
@@ -770,7 +770,7 @@ def test_compute_mirror_real_copy_queued_when_dest_absent_or_drifted(tmp_path):
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
     assert dest in mp.copies_to_write
 
-    # drifted dest (hand-edited) → still queued (drift repaired)
+    # out-of-sync dest (hand-edited) → still queued (repaired)
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / dest).write_text("hand-edited junk\n")
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)

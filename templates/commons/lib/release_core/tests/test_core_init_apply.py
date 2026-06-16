@@ -22,7 +22,7 @@ from release_core.verbs import init
 
 def test_apply_claude_write_is_0o644_not_0o600(tmp_path, monkeypatch):
     # tempfile.mkstemp creates the temp at 0o600; the apply phase must chmod to
-    # 0o644 before os.replace so the materialized CLAUDE.md is world-readable.
+    # 0o644 before os.replace so the built CLAUDE.md is world-readable.
     monkeypatch.chdir(tmp_path)
     claude = sync.ClaudeDecision(action="create", desired="# hello\n")
     init._apply_mirror(sync.MirrorPlan(), claude)

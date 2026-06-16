@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # fetch-artifact — install a pinned cross-repo artifact from a GH release.
 #
-# Reads artifacts.json (canonical schema; see docs/artifacts-schema.md)
+# Reads artifacts.json (the schema; see docs/artifacts-schema.md)
 # and downloads the named artifact at the pinned version.
 #
 # Usage:
@@ -73,7 +73,7 @@ def warn(msg: str) -> None:
 USAGE = """\
 fetch-artifact — install a pinned cross-repo artifact from a GH release.
 
-Reads artifacts.json (canonical schema; see docs/artifacts-schema.md)
+Reads artifacts.json (the schema; see docs/artifacts-schema.md)
 and downloads the named artifact at the pinned version.
 
 Usage:

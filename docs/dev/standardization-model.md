@@ -229,7 +229,7 @@ Implemented across every prepare path — the `prepare-release*` composites
 (coverage task + release-rc). A consumer check = firing it at a consumer; a
 fleet rollout check = firing it at N consumers **in parallel**. One prompt →
 broad authentic verification + a feedback harvest, repo-independent. The
-canonical prompt + its structured-feedback schema lives in
+shared prompt + its structured-feedback schema lives in
 [`live-fire-prompt.md`](live-fire-prompt.md).
 
 This sits alongside the synthetic canary (deterministic mechanics gate before a

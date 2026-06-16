@@ -6,7 +6,7 @@ Two layers:
     determinism, the committed manifest's freshness, and that the lint passes
     CLEAN on today's tree (the shrink-only baseline was drained to zero and
     its file deleted in #588).
-  - SYNTHETIC tests in tmp repos — drift detection, the #579-shape violation
+  - SYNTHETIC tests in tmp repos — out-of-sync detection, the #579-shape violation
     (managed-path reference, no materialize), step ordering, the composite
     pseudo-job, the checkout-provider rule, the path boundary, and the
     baseline ratchet (grandfather + stale-entry failure).
@@ -80,7 +80,7 @@ def test_committed_manifest_is_current():
     contract regenerates docs/references/consumer-contract.yaml in the SAME PR."""
     committed = Path(REPO_ROOT, contract.MANIFEST_RELPATH).read_text(encoding="utf-8")
     assert committed == contract.manifest_text(REPO_ROOT), (
-        "consumer-contract.yaml drifted — run: release-core admin contract dump"
+        "consumer-contract.yaml out of sync — run: release-core admin contract dump"
     )
 
 
@@ -118,7 +118,7 @@ def test_rust_ci_e2e_job_is_clean_post_579():
     assert contract.lint_file(REPO_ROOT, ".github/workflows/rust-ci.yml", regex) == []
 
 
-# ── Synthetic: dump / check drift ─────────────────────────────────────────────
+# ── Synthetic: dump / check out-of-sync ───────────────────────────────────────
 
 
 @pytest.fixture
@@ -144,13 +144,13 @@ def test_dump_then_check_roundtrip(synthetic_repo, capsys):
     assert "is current" in out
 
 
-def test_check_detects_drift_with_diff_and_advice(synthetic_repo, capsys):
+def test_check_detects_out_of_sync_with_diff_and_advice(synthetic_repo, capsys):
     assert contract_verb.main(["dump", "--root", synthetic_repo]) == 0
     manifest = Path(synthetic_repo, contract.MANIFEST_RELPATH)
-    manifest.write_text(manifest.read_text().replace("bin/check-gate", "bin/zzz-drifted"))
+    manifest.write_text(manifest.read_text().replace("bin/check-gate", "bin/zzz-stale"))
     assert contract_verb.main(["check", "--root", synthetic_repo]) == 1
     err = capsys.readouterr().err
-    assert "bin/zzz-drifted" in err  # the diff names the drift
+    assert "bin/zzz-stale" in err  # the diff names the out-of-sync entry
     assert "release-core admin contract dump" in err  # and the fix
 
 
