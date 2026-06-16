@@ -257,7 +257,7 @@ def test_help_documents_the_ack_flag(capsys):
 
 
 def test_unknown_flag_still_rejected_alongside_ack(capsys):
-    assert ready.main(["--bogus"]) == 64
+    assert ready.main(["--ack-cycle-cap", "--bogus"]) == 64
     assert "unknown option" in capsys.readouterr().err
 
 
