@@ -175,6 +175,37 @@ re-woken** — it burns its run and never sees the result. Monitor is a
 main-loop primitive; inside this loop you wait by blocking on
 `release-core pr wait` in the current turn.
 
+### `pr wait` is a long blocking call — keep it foreground
+
+`release-core pr wait` legitimately runs **4–6 minutes** while reviewers and
+CI work (that is the whole point — it blocks in-turn until there's something
+to do). The Claude Code harness has a short default Bash timeout and will
+**push a command that exceeds it into the background**, printing a
+`Command running in background` line. That makes a correctly-foreground
+`pr wait` *look* backgrounded — directly contradicting the "block in-turn"
+rule above. This is a harness timeout artifact, not a `pr wait` bug
+(release#692, #721, #730).
+
+Avoid it by giving the Bash call an explicit long `timeout` so the harness
+keeps it in the foreground for the whole wait:
+
+```sh
+# invoke pr wait with an explicit long Bash timeout (e.g. 900000 ms = 15 min)
+release-core pr wait [<pr>]
+```
+
+When you call this tool, set the Bash `timeout` parameter to comfortably
+exceed `pr wait`'s own `--timeout` (default a few minutes; bump both for a
+slow reviewer). Then:
+
+- A long run and even a `Command running in background` notice are
+  **expected** — do not interpret them as "the wait detached, move on."
+  Let the call finish and read its exit code (0 = act on the next state;
+  2 = `pr wait` timed out, just re-run it).
+- If it *does* slip to the background anyway, do **not** abandon the turn or
+  spawn a Monitor — re-invoke `release-core pr wait` in the foreground with a
+  larger Bash `timeout` and block on it to completion.
+
 ## Requesting reviews
 
 ```sh
