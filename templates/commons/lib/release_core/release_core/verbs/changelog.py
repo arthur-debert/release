@@ -125,10 +125,26 @@ def add_main(argv: list[str]) -> int:
 
     # Intercept help before any validation so `add --help` / `add -h` (and
     # `add --force --help`) print usage instead of failing slug validation on
-    # the literal "--help" token (release#686 — recurred fleet-wide).
-    if any(a in ("-h", "--help") for a in args):
-        print(ADD_USAGE)
-        return 0
+    # the literal "--help" token (release#686 — recurred fleet-wide). Scoped to
+    # the LEADING option region — before the positional <slug> and before a bare
+    # `--` terminator — so a literal `--help` can still be passed in the body
+    # (release#732 review). `--section <value>` skips its value, which is never
+    # a help trigger.
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("-h", "--help"):
+            print(ADD_USAGE)
+            return 0
+        if a == "--":
+            break
+        if a == "--section":
+            i += 2
+            continue
+        if a == "--force" or a.startswith("--section="):
+            i += 1
+            continue
+        break  # reached the positional <slug>; stop scanning for help
 
     root = _resolve_changelog_root()
     if not root:

@@ -117,6 +117,25 @@ def test_add_help_after_force(repo, capsys):
     assert "usage:" in capsys.readouterr().out
 
 
+def test_add_help_in_body_is_not_a_help_trigger(repo):
+    # Past the positional <slug>, a literal `--help` is body text, not help
+    # (release#732 review): help is only recognized in the leading-option region.
+    rc = changelog.add_main(["fix", "document the", "--help", "flag"])
+    assert rc == 0
+    assert (
+        repo / "CHANGELOG" / "unreleased-fix.md"
+    ).read_bytes() == b"- document the --help flag\n"
+
+
+def test_add_help_after_terminator_is_body(repo):
+    # A bare `--` terminates option scanning, so help is no longer recognized:
+    # `--help` past the terminator is the slug/body, never a help trigger.
+    rc = changelog.add_main(["--", "fix", "--help"])
+    assert rc == 0
+    # `--help` became the body (already `-`-led, so no extra bullet), not help.
+    assert (repo / "CHANGELOG" / "unreleased-fix.md").read_bytes() == b"--help\n"
+
+
 def test_add_stdin_already_bulleted_stays_bare(repo, monkeypatch):
     import io
 
