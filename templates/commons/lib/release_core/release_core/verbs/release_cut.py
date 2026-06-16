@@ -22,7 +22,9 @@ release can still draw from the same unreleased entries.
 
 Verification cut (`-release-rc` reserved suffix, #663): the live-fire
 verification harness cuts `X.Y.Z-release-rc` to exercise the whole
-release half (prep → build → sign/notarize → publish → cascade)
+release half (prep → build → sign/notarize → publish → cascade — the
+build/sign/publish stages are Kind-dependent; an interpreted Kind such
+as nvim-plugin / tree-sitter is just prepare → release)
 WITHOUT leaving a trace. It behaves like any pre-release EXCEPT the
 prepare step pushes the tag ONLY — the version-bump commit is NOT
 pushed to the branch, so the consumer's version line / main history
@@ -104,6 +106,18 @@ usage: release-core cut <major|minor|patch|X.Y.Z[-PRERELEASE]>
 Bump shortcuts operate on the current MAJOR.MINOR.PATCH (any
 pre-release suffix is stripped before bumping; to step from
 1.0.0-rc.1 to 1.0.0, type the version literally).
+
+Pre-releases: pass a semver pre-release suffix (e.g. 1.8.0-rc.1) to
+cut an RC/beta — CI marks the GitHub Release "pre-release" and skips
+rolling `## [Unreleased]` so later RCs can still draw from it.
+
+Reserved `-release-rc` suffix (live-fire verification, #663):
+`X.Y.Z-release-rc` is a throwaway verification cut. It behaves like
+any pre-release EXCEPT the prepare step pushes the TAG ONLY — the
+version-bump commit is NOT pushed to the branch, so the consumer's
+version line / main history stay clean. The live-fire harness deletes
+the tag + GitHub Release on teardown. Do not use it for a real RC
+(use `-rc.N` / `-beta.N` for those).
 
 The current version is read from the version source for the
 Consumer's Kind (Cargo.toml, package.json, extension.toml, or the
@@ -456,6 +470,27 @@ def main(argv: list[str]) -> int:  # noqa: C901 — flat dispatch mirrors the ba
     if res.stderr:
         sys.stderr.write(res.stderr)
     if res.returncode != 0:
+        # `gh workflow run` dispatches via workflow_dispatch; GitHub returns
+        # HTTP 422 "Workflow does not have 'workflow_dispatch' trigger" when
+        # the target release.yml lacks that trigger. Name the remediation —
+        # the raw gh error doesn't say what to add.
+        if "workflow_dispatch" in (res.stderr or ""):
+            print(
+                "\nrelease-core cut: .github/workflows/release.yml is not "
+                "dispatchable.\n"
+                "  Its `on:` block needs a `workflow_dispatch:` trigger so "
+                "`cut` can launch it:\n"
+                "\n"
+                "    on:\n"
+                "      workflow_dispatch:\n"
+                "        inputs:\n"
+                "          version:\n"
+                "            required: true\n"
+                "\n"
+                "  Add it to the consumer's release.yml, commit, then re-run "
+                "the cut.",
+                file=sys.stderr,
+            )
         return res.returncode
 
     print(

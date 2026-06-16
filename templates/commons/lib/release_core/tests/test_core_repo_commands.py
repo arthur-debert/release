@@ -361,6 +361,25 @@ def test_coverage_empty_when_no_coverage_capable_component(tmp_path):
     assert rc.coverage_commands(str(tmp_path)) == []
 
 
+def test_coverage_tree_sitter_test_gets_no_coverage_flag(tmp_path):
+    # release#696: a tree-sitter grammar's `test` script is `tree-sitter test`,
+    # which has NO --coverage flag (errors `unexpected argument '--coverage'`).
+    # The resolver must NOT synthesize one — the grammar falls through to the
+    # empty (no-coverage) result, consistent with nvim-plugin.
+    (tmp_path / "grammar.js").write_text("module.exports = grammar({});\n")
+    _pkg(tmp_path, {"test": "tree-sitter test", "build": "tree-sitter generate"})
+    assert rc.coverage_commands(str(tmp_path)) == []
+
+
+def test_coverage_tree_sitter_honors_dedicated_coverage_script(tmp_path):
+    # If a grammar repo ever wires a REAL coverage script, honor it — the guard
+    # only suppresses the synthesized `tree-sitter test --coverage`.
+    (tmp_path / "grammar.js").write_text("module.exports = grammar({});\n")
+    _pkg(tmp_path, {"test": "tree-sitter test", "coverage": "vitest run --coverage"}, pm="pnpm")
+    cov = rc.coverage_commands(str(tmp_path))
+    assert [c.argv for c in cov] == [["pnpm", "run", "coverage"]]
+
+
 # --- robustness: garbled / missing manifest never crashes -----------------
 
 

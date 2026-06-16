@@ -100,6 +100,10 @@ def test_flip_warns_that_checks_rerun_on_the_ready_event(engine, flips, capsys):
     assert "re-runs checks" in out
     assert "VALIDATING" in out
     assert "release-core pr wait" in out
+    # #703: the VALIDATING note must read as expected/benign, not an error or a
+    # mandatory extra round — frame it as normal and "no further action needed".
+    assert "normal and expected" in out
+    assert "No further action is needed" in out
 
 
 def test_already_ready_pr_is_idempotent_success(engine, flips, capsys):

@@ -27,6 +27,37 @@ required reviewer's outage holds the PR at `REVIEWS_PENDING` until it recovers �
 accepted, not a bug. The engine names the outstanding reviewer in the next
 action, so a single-reviewer stall is visible, not silent.
 
+## Reading the per-reviewer line in `pr status`
+
+`release-core pr status` prints a per-reviewer breakdown as
+`name=lifecycle` pairs (two-space separated), e.g.
+`copilot=requested  gemini=in_progress`. This is informational detail
+*under* the single lifecycle state — you still act on the one next action,
+not on a raw reviewer field. The names are the registered adapters and the
+lifecycles are the adapter states; both are a fixed, enumerable set, so an
+unfamiliar pair is not a new concept to learn:
+
+- **Reviewer names** (the adapter registry — `prstate/reviewers.py`):
+  - `copilot` — requestable; the default required reviewer.
+  - `coderabbit` — requestable; the phos-org pilot (opt-in via
+    `required_reviewers:`).
+  - `gemini` — auto-triggering, best-effort; *not* requestable, so never a
+    required gate. It appears in the line whenever it has acted, but a
+    timed-out Gemini is treated as skipped rather than blocking Ready.
+- **Lifecycle states** (`ReviewLifecycle`):
+  - `not_requested` — no review and no pending request on the current head.
+  - `requested` — a review request is attached; the reviewer hasn't acted yet.
+  - `in_progress` — the reviewer is actively looking (e.g. Gemini's "eyes"
+    reaction); not yet done.
+  - `done_clean` — finished and left **no** comment threads.
+  - `done_comments` — finished and left comment threads (triage them).
+
+A push stales a head-strict reviewer (Copilot, CodeRabbit) back toward
+`not_requested`/`requested`, so re-request after every push (Gemini is
+any-head and won't re-review). The done-signal for the round is still
+**zero unresolved threads**, engine-computed — never a manual read of these
+pairs.
+
 ## The loop
 
 ```text
@@ -143,6 +174,37 @@ yields its turn to "wait in the background" **terminates and is never
 re-woken** — it burns its run and never sees the result. Monitor is a
 main-loop primitive; inside this loop you wait by blocking on
 `release-core pr wait` in the current turn.
+
+### `pr wait` is a long blocking call — keep it foreground
+
+`release-core pr wait` legitimately runs **4–6 minutes** while reviewers and
+CI work (that is the whole point — it blocks in-turn until there's something
+to do). The Claude Code harness has a short default Bash timeout and will
+**push a command that exceeds it into the background**, printing a
+`Command running in background` line. That makes a correctly-foreground
+`pr wait` *look* backgrounded — directly contradicting the "block in-turn"
+rule above. This is a harness timeout artifact, not a `pr wait` bug
+(release#692, #721, #730).
+
+Avoid it by giving the Bash call an explicit long `timeout` so the harness
+keeps it in the foreground for the whole wait:
+
+```sh
+# invoke pr wait with an explicit long Bash timeout (e.g. 900000 ms = 15 min)
+release-core pr wait [<pr>]
+```
+
+When you call this tool, set the Bash `timeout` parameter to comfortably
+exceed `pr wait`'s own `--timeout` (default a few minutes; bump both for a
+slow reviewer). Then:
+
+- A long run and even a `Command running in background` notice are
+  **expected** — do not interpret them as "the wait detached, move on."
+  Let the call finish and read its exit code (0 = act on the next state;
+  2 = `pr wait` timed out, just re-run it).
+- If it *does* slip to the background anyway, do **not** abandon the turn or
+  spawn a Monitor — re-invoke `release-core pr wait` in the foreground with a
+  larger Bash `timeout` and block on it to completion.
 
 ## Requesting reviews
 

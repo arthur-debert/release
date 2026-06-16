@@ -182,10 +182,48 @@ def test_literal_version_dispatches(gh_dispatch, capsys):
     assert ["gh", "workflow", "run", "release.yml", "-f", "version=1.2.3"] in gh_dispatch
 
 
+def test_workflow_dispatch_422_names_remediation(monkeypatch, tmp_path, capsys):
+    """#725: a consumer release.yml without a workflow_dispatch trigger makes
+    `gh workflow run` fail with HTTP 422. cut forwards gh's error AND names the
+    fix (add an `on: workflow_dispatch:` trigger)."""
+    (tmp_path / ".github" / "workflows").mkdir(parents=True)
+    (tmp_path / ".github" / "workflows" / "release.yml").write_text("name: release\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MANAGED_REPOS_MANIFEST", raising=False)
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+
+    def fake_run(cmd, **kw):
+        if cmd[:2] == ["gh", "workflow"]:
+            return _completed(
+                cmd,
+                returncode=1,
+                stderr="HTTP 422: Workflow does not have 'workflow_dispatch' trigger",
+            )
+        return _completed(cmd, returncode=0, stdout="")
+
+    monkeypatch.setattr(proc, "out", lambda cmd, **kw: str(tmp_path))
+    monkeypatch.setattr(proc, "run", fake_run)
+    monkeypatch.setattr(release_cut.shutil, "which", lambda _name: "/usr/bin/gh")
+
+    rc = release_cut.main(["1.2.3"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "workflow_dispatch:" in err
+    assert "not dispatchable" in err
+
+
 def test_bad_version_exits_2(gh_dispatch, capsys):
     rc = release_cut.main(["not-a-version"])
     assert rc == 2
     assert "version must be" in capsys.readouterr().err
+
+
+def test_help_surfaces_release_rc_reservation(capsys):
+    """#693: `cut --help` documents the reserved `-release-rc` suffix, not just
+    the version grammar + pre-release stripping."""
+    rc = release_cut.main(["--help"])
+    assert rc == 0
+    assert "-release-rc" in capsys.readouterr().err
 
 
 def test_no_args_exits_2(capsys):

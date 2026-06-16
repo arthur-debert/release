@@ -103,6 +103,14 @@ _KIND_HINT: dict[str, dict[str, str]] = {
         "build": "(none — interpreted)",
         "run": "(open Neovim with the plugin on the runtimepath)",
     },
+    "tree-sitter": {
+        "test": "tree-sitter test",
+        # The tree-sitter CLI has no coverage flag (`tree-sitter test
+        # --coverage` errors) — release#696.
+        "coverage": "(no coverage tool for this Kind)",
+        "build": "tree-sitter generate",
+        "run": "tree-sitter parse <file>",
+    },
 }
 
 _GENERIC_HINT = {
@@ -113,6 +121,28 @@ _GENERIC_HINT = {
 }
 
 
+# What CI actually does at a cut, per Kind — the release "half" the workflow runs
+# (release#704). The generic `prepare → build → (sign/notarize) → publish` is wrong
+# for the interpreted / no-artifact Kinds: an nvim plugin or a tree-sitter grammar
+# has nothing to compile or codesign, so its pipeline is just `prepare → release`
+# (bump version + roll CHANGELOG, then tag + GitHub Release). Keep this honest so
+# an agent isn't told to expect a build/sign stage that never runs for its Kind.
+_PIPELINE_PREPARE_ONLY = (
+    "prepare → release (bump + CHANGELOG, then tag + GitHub Release; no build/sign — interpreted)"
+)
+_PIPELINE_FULL = "prepare → build → (sign/notarize where applicable) → publish"
+_KIND_PIPELINE: dict[str, str] = {
+    "nvim-plugin": _PIPELINE_PREPARE_ONLY,
+    "tree-sitter": _PIPELINE_PREPARE_ONLY,
+    "docs-site": _PIPELINE_PREPARE_ONLY,
+}
+
+
+def _pipeline_for(kind: str) -> str:
+    """The CI release pipeline description for `kind` (Kind-aware — release#704)."""
+    return _KIND_PIPELINE.get(kind, _PIPELINE_FULL)
+
+
 def _resolved(cmds: list[Cmd]) -> str:
     """Join a fan-out's resolved commands for display, or a not-wired note."""
     if not cmds:
@@ -120,7 +150,7 @@ def _resolved(cmds: list[Cmd]) -> str:
     return "; ".join(c.display for c in cmds)
 
 
-def _verbs_section_repo(root: str) -> list[str]:
+def _verbs_section_repo(root: str, kind: str) -> list[str]:
     """The verbs section for the CURRENT repo — uniform verbs annotated with the
     repo's REAL resolved commands (read from its manifests)."""
     rc = repo_commands.resolve(root)
@@ -140,12 +170,14 @@ def _verbs_section_repo(root: str) -> list[str]:
     lines.append(f"  build               : release-core build       → {build}")
     lines.append(
         "  release             : release-core cut <major|minor|patch>"
-        "   (CI builds/signs/publishes — never release locally)"
+        "   (runs in CI — never release locally)"
     )
+    lines.append(f"      CI pipeline: {_pipeline_for(kind)}")
     run = rc.run.display if rc.run else "(no run command detected)"
     lines.append(f"  run                 : release-core run         → {run}")
     if rc.docs:
         lines.append(f"  docs (mkdocs)       : {rc.docs.build.display}")
+    lines.append(_FRESH_CHECKOUT_NOTE)
     return lines
 
 
@@ -169,10 +201,32 @@ def _verbs_section_kind(kind: str) -> list[str]:
     lines.append(f"  build               : release-core build       → {hint['build']}")
     lines.append(
         "  release             : release-core cut <major|minor|patch>"
-        "   (CI builds/signs/publishes — never release locally)"
+        "   (runs in CI — never release locally)"
     )
+    lines.append(f"      CI pipeline: {_pipeline_for(kind)}")
     lines.append(f"  run                 : release-core run         → {hint['run']}")
+    lines.append(_FRESH_CHECKOUT_NOTE)
     return lines
+
+
+# Fresh-checkout prerequisite note (release#728). A bare `release-core
+# coverage`/`test-*` on a freshly-cloned consumer fails with errors that look
+# like a tooling bug but are really "deps not installed yet" — e.g. lex-fmt/vscode
+# hit `Cannot find module out/test/unit/index.js` because neither `npm install`
+# nor `git submodule update --init` had run. SessionStart (`setup-dev-env.sh`)
+# does both for you; the note is for the manual / fresh-clone case where it
+# hasn't. Kind-agnostic (npm/pnpm/cargo/bundle — whatever the repo's `deps`
+# resolves to) and accurate (the bootstrap normally handles it).
+_FRESH_CHECKOUT_NOTE = (
+    "  NOTE (fresh checkout): coverage/test need the repo's deps INSTALLED and "
+    "any git submodules INITIALISED first — without them you'll see errors that "
+    "look like a tooling bug but are just missing content (e.g. a `Cannot find "
+    "module …` from an un-built test dir). SessionStart (`setup-dev-env.sh`) "
+    "does both automatically; if you cloned and are running by hand, first run "
+    "the `deps` command above (npm/pnpm/cargo/bundle per this repo) and "
+    "`git submodule update --init --recursive` (only if the repo has a "
+    ".gitmodules)."
+)
 
 
 _GATE_BLURB = (
@@ -214,11 +268,15 @@ def _dev_cycle_section() -> list[str]:
     lines: list[str] = []
     lines.append("The dev cycle (the ONE flow — draft-first)")
     lines.append(
-        "  1. Branch off origin/<default-branch> (`git fetch origin && "
-        "git switch -c <branch> origin/<default-branch>`), NOT the local "
-        "default branch: the SessionStart boot may have auto-committed a "
-        "managed sync there, and branching from it carries that alien "
-        "commit into your PR diff."
+        "  1. Branch off origin/<default-branch> BEFORE you commit anything "
+        "(`git fetch origin && git switch -c <branch> origin/<default-branch>`), "
+        "NOT the local default branch. WHY (don't skip this): the SessionStart "
+        "boot runs `release-core init`, which can AUTO-COMMIT a managed sync "
+        "onto your local default branch. Branch (or commit) off that local tip "
+        "and the auto-commit rides along as an `alien commit` in your PR diff — "
+        "noise the reviewer flags and you can't easily drop. Always re-base your "
+        "branch point on the FETCHED origin tip so the PR diff is only your "
+        "change."
     )
     lines.append("  2. Make the change.")
     lines.append(
@@ -327,11 +385,16 @@ def _render_repo(root: str, kind: str) -> str:
     lines.append("")
     lines.append(
         "Infrastructure (quality gate, build, release, PR flow) is managed by "
-        "release-core. Don't hand-edit managed files (.release/**); app code is "
-        "yours. Confirm the Kind anytime with `release-core detect-kind`."
+        "release-core. Don't hand-edit managed files (.release/**, bin/check*, "
+        "lib/release_core/); app code is yours. These managed mirrors are "
+        "EPHEMERAL — installed (not committed) by `release-core init` at session "
+        "start and listed in .git/info/exclude, so the per-Kind entry point "
+        "(e.g. `bin/check`) showing as untracked in `git status` is expected, "
+        "not a problem to fix. Confirm the Kind anytime with "
+        "`release-core detect-kind`."
     )
     lines.append("")
-    lines.extend(_verbs_section_repo(root))
+    lines.extend(_verbs_section_repo(root, kind))
     lines.append("")
     lines.extend(_ci_jobs_section())
     lines.append("")
@@ -348,8 +411,13 @@ def _render(kind: str) -> str:
     lines.append("")
     lines.append(
         "Infrastructure (quality gate, build, release, PR flow) is managed by "
-        "release-core. Don't hand-edit managed files (.release/**); app code is "
-        "yours. Confirm the Kind anytime with `release-core detect-kind`."
+        "release-core. Don't hand-edit managed files (.release/**, bin/check*, "
+        "lib/release_core/); app code is yours. These managed mirrors are "
+        "EPHEMERAL — installed (not committed) by `release-core init` at session "
+        "start and listed in .git/info/exclude, so the per-Kind entry point "
+        "(e.g. `bin/check`) showing as untracked in `git status` is expected, "
+        "not a problem to fix. Confirm the Kind anytime with "
+        "`release-core detect-kind`."
     )
     lines.append("")
     lines.extend(_verbs_section_kind(kind))

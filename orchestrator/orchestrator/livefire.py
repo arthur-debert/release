@@ -51,7 +51,12 @@ _BARE_FENCE_RE = re.compile(r"^\s*```[^`]*$")
 # A strict verification-tag shape — vX.Y.Z-release-rc (optional .N) — so a
 # transcript-sourced tag can't trigger a destructive delete unless it is exactly
 # a reserved verification tag (release#663).
-_VERIFY_TAG_RE = re.compile(r"v\d+\.\d+\.\d+-release-rc(\.\d+)?")
+# Boundary-guarded so an embedded token (e.g. `v1.2.3-release-rcXYZ`) can't
+# yield a truncated `v1.2.3-release-rc` teardown target: the leading lookbehind
+# requires a token start (not mid-word / mid-tag), and the trailing lookahead
+# rejects a following word-char or `-` while still allowing sentence
+# punctuation (a real `.N` is consumed by the optional group first).
+_VERIFY_TAG_RE = re.compile(r"(?<![\w.-])v\d+\.\d+\.\d+-release-rc(\.\d+)?(?![\w-])")
 
 
 class LiveFireError(RuntimeError):
@@ -142,6 +147,36 @@ def has_feedback(transcript: str) -> bool:
     return _first_feedback(transcript) is not None
 
 
+def extract_rc_tag(transcript: str) -> str | None:
+    """The throwaway ``vX.Y.Z-release-rc`` tag the agent cut, scanned out of the
+    transcript INDEPENDENTLY of feedback parsing (release#709).
+
+    Teardown of the rc tag must NOT be coupled to a successful feedback/verdict
+    parse: when the subordinate session ends before emitting the feedback block
+    (subscription throttle / turn-budget truncation), the rc may still have been
+    cut earlier in the transcript, and leaving it dangling forces a manual
+    ``gh release delete``. So this scans the WHOLE transcript for the strict
+    verification-tag shape rather than reading ``feedback['rc']``.
+
+    Returns the LAST such tag (the agent cuts the rc late, in step 4 / the
+    feedback block — the last occurrence is the one it actually cut, not an
+    earlier mention of the convention), or None if no verification tag appears.
+    The strict :data:`_VERIFY_TAG_RE` shape means a stray mention of the literal
+    word "release-rc" can't yield a destructive delete target.
+    """
+    matches = _VERIFY_TAG_RE.findall(transcript)
+    if not matches:
+        return None
+    # findall with a capturing group returns the GROUP, not the whole match; use
+    # finditer to recover the full matched tag, iterating forward and keeping the
+    # last match (finditer yields matches in source order, so the final one is
+    # the last occurrence in the transcript).
+    last = None
+    for m in _VERIFY_TAG_RE.finditer(transcript):
+        last = m.group(0)
+    return last
+
+
 def parse_feedback(transcript: str) -> dict:
     """The agent's ```yaml feedback mapping (a block with a ``verdict`` key).
 
@@ -157,6 +192,42 @@ def parse_feedback(transcript: str) -> dict:
             "+ PR but skipped or botched the feedback step"
         )
     return fb
+
+
+def feedback_or_fallback(transcript: str, *, rc_tag: str | None) -> dict:
+    """The agent's parsed feedback, or — when the feedback/verdict block is
+    missing — a structured FALLBACK mapping so the friction isn't silently lost
+    (release#709).
+
+    When the subordinate session ends before emitting the feedback block, the
+    old behavior raised and lost the run entirely. Instead, synthesize a minimal
+    feedback mapping carrying one ``feedback-skipped`` finding (with whatever rc
+    tag was independently captured) so the run is still RECORDED in the #348
+    inbox rather than a hard error. Teardown is handled separately off
+    ``rc_tag`` — this only governs the harvest half.
+    """
+    fb = _first_feedback(transcript)
+    if fb is not None:
+        return fb
+    return {
+        "verdict": "feedback-skipped",
+        "rc": rc_tag,
+        "findings": [
+            {
+                "step": "feedback",
+                "component": "livefire",
+                "severity": "friction",
+                "what": (
+                    "subordinate agent ended before emitting the feedback/verdict "
+                    "block (likely turn-budget / throttle truncation); findings lost"
+                ),
+                "expected": (
+                    "the session should reach step 5 and emit the ```yaml feedback "
+                    "block; re-harvest or re-run to recover this consumer's findings"
+                ),
+            }
+        ],
+    }
 
 
 _SYMPTOM_MAX = 200
@@ -271,11 +342,16 @@ def teardown_rc(consumer: str, rc_tag: str | None, *, dry_run: bool = False) -> 
 
 
 def _file_then_teardown(
-    feedback: dict, *, consumer: str, dry_run: bool
+    feedback: dict, *, consumer: str, rc_tag: str | None, dry_run: bool
 ) -> tuple[list[str], str | None]:
     """File findings, then ALWAYS attempt rc teardown. Teardown must run even
     when filing fails — otherwise a filing error (e.g. auth) would strand the
     throwaway ``-release-rc`` on the consumer.
+
+    ``rc_tag`` is the tag captured INDEPENDENTLY of feedback parsing
+    (:func:`extract_rc_tag`), NOT ``feedback['rc']`` — so teardown targets the
+    rc the agent actually cut even when the feedback block was malformed or
+    never emitted (release#709).
 
     Implemented as ``try/finally`` so that: a filing error propagates with its
     ORIGINAL traceback (no catch-and-re-raise); teardown still runs in the
@@ -283,7 +359,6 @@ def _file_then_teardown(
     ``finally`` supersedes the filing one — the stray release is the more urgent
     problem. Returns ``(filed, torn_down)`` on success.
     """
-    rc_tag = feedback.get("rc")
     rc = rc_tag if isinstance(rc_tag, str) else None
     filed: list[str] = []
     torn_down: str | None = None
@@ -357,16 +432,25 @@ async def livefire_one(
             needs_followup=lambda t: not has_feedback(t),
         )
         transcript = "".join(sink)
-        feedback = parse_feedback(transcript)
+        # Capture the rc tag straight from the transcript FIRST, decoupled from
+        # feedback parsing — teardown must run off this even if the feedback
+        # block is missing (release#709), so a throttle-truncated session can't
+        # strand a dangling -release-rc on the consumer.
+        rc_tag = extract_rc_tag(transcript)
+        # Degrade a missing/malformed feedback block to a structured fallback
+        # finding (so the friction is still recorded) rather than a hard error.
+        feedback = feedback_or_fallback(transcript, rc_tag=rc_tag)
 
-        filed, torn_down = _file_then_teardown(feedback, consumer=consumer, dry_run=dry_run)
+        filed, torn_down = _file_then_teardown(
+            feedback, consumer=consumer, rc_tag=rc_tag, dry_run=dry_run
+        )
 
         retained = keep_clone or not owns_parent
         return {
             "consumer": consumer,
             "verdict": feedback.get("verdict"),
             "pr": feedback.get("pr"),
-            "rc": feedback.get("rc"),
+            "rc": rc_tag,
             "findings_filed": filed,
             "rc_torn_down": torn_down,
             # Only report a path that still exists; the default deletes the clone.

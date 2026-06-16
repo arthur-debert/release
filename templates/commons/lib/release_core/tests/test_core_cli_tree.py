@@ -39,7 +39,7 @@ def test_pr_group_is_fully_wired():
     assert set(grp.commands) >= {"review", "wait", "resolve-thread", "status", "ready"}
     review = grp.commands["review"]
     assert isinstance(review, click.Group)
-    assert set(review.commands) == {"request", "cancel", "show"}
+    assert set(review.commands) == {"request", "cancel", "show", "reply"}
 
 
 def test_pr_copilot_group_is_gone():

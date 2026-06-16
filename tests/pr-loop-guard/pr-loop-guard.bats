@@ -83,6 +83,30 @@ PY
     [ ! -e "$NGD/pr-loop-armed" ]
 }
 
+@test "cd a && cd .. normalizes back to the parent's sentinel (#674)" {
+    # #674: the accumulator must normpath, so `cd a && cd ..` folds back to the
+    # original cwd ($REPO) rather than leaving a distinct cwd/a/.. string that
+    # the dedup set treats as a separate (un-matched) candidate.
+    mkdir -p "$REPO/a"
+    touch "$GD/pr-loop-armed"
+    guard "cd a && cd .. && gh pr create --fill" "$REPO"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$GD/pr-loop-armed" ]
+}
+
+@test "deny reason prints normalized (no a/..) sentinel paths (#674)" {
+    # #674: with no sentinel armed the guard denies; the listed touch paths must
+    # be normpath'd, so `cd a && cd ..` shows .../.git/pr-loop-armed, never
+    # .../a/../.git/pr-loop-armed.
+    mkdir -p "$REPO/a"
+    guard "cd a && cd .. && gh pr create --fill" "$REPO"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+    [[ "$output" != *'/a/..'* ]]
+    [[ "$output" == *"$GD/pr-loop-armed"* ]]
+}
+
 @test "an absolute cd target resets the fold-left accumulator" {
     # After `cd /abs`, a following relative cd resolves against /abs, and the
     # earlier accumulated path is irrelevant.

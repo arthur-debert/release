@@ -65,6 +65,13 @@ review.add_command(
         short_help="Print posted review(s) + all review threads. Read-only.",
     )
 )
+review.add_command(
+    wrap_verb(
+        review_cli.reply_main,
+        name="reply",
+        short_help="Reply to a review comment with rationale (the push-back path).",
+    )
+)
 
 
 @click.group(

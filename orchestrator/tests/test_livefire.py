@@ -286,10 +286,30 @@ def test_file_then_teardown_happy_path(monkeypatch):
         livefire, "teardown_rc", lambda *a, **k: calls.append("teardown") or "v1.2.3-release-rc"
     )
     filed, torn = livefire._file_then_teardown(
-        {"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False
+        {}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False
     )
     assert filed == ["s"] and torn == "v1.2.3-release-rc"
     assert calls == ["file", "teardown"]
+
+
+def test_file_then_teardown_uses_passed_rc_not_feedback(monkeypatch):
+    # The rc teardown target is the independently-captured rc_tag, NOT
+    # feedback['rc'] (release#709) — pass them differently and assert teardown
+    # gets the captured tag.
+    seen = {}
+    monkeypatch.setattr(livefire, "file_findings", lambda *a, **k: ["s"])
+    monkeypatch.setattr(
+        livefire,
+        "teardown_rc",
+        lambda consumer, rc, **k: seen.update(rc=rc) or rc,
+    )
+    livefire._file_then_teardown(
+        {"rc": "v9.9.9-release-rc"},  # stale/feedback value — must be ignored
+        consumer="o/n",
+        rc_tag="v1.2.3-release-rc",  # the real captured tag
+        dry_run=False,
+    )
+    assert seen["rc"] == "v1.2.3-release-rc"
 
 
 def test_file_then_teardown_tears_down_even_when_filing_fails(monkeypatch):
@@ -304,7 +324,7 @@ def test_file_then_teardown_tears_down_even_when_filing_fails(monkeypatch):
     # teardown is attempted despite the filing failure, then the filing error
     # re-raises so the run still fails loudly.
     with pytest.raises(livefire.LiveFireError, match="file failed"):
-        livefire._file_then_teardown({"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False)
+        livefire._file_then_teardown({}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False)
     assert calls == ["file", "teardown"]
 
 
@@ -324,8 +344,81 @@ def test_file_then_teardown_both_fail_teardown_wins(monkeypatch):
     # both fail → teardown was still attempted, and its error supersedes the
     # filing error (a stray -release-rc is the more urgent problem).
     with pytest.raises(livefire.LiveFireError, match="teardown failed"):
-        livefire._file_then_teardown({"rc": "v1.2.3-release-rc"}, consumer="o/n", dry_run=False)
+        livefire._file_then_teardown({}, consumer="o/n", rc_tag="v1.2.3-release-rc", dry_run=False)
     assert calls == ["file", "teardown"]
+
+
+# ── extract_rc_tag / feedback_or_fallback (release#709 decoupling) ──────────
+
+
+def test_extract_rc_tag_finds_tag_in_prose():
+    # The agent mentions cutting the rc in prose, no yaml block at all.
+    t = "I ran release-core cut and it produced the tag v1.4.3-release-rc on origin."
+    assert livefire.extract_rc_tag(t) == "v1.4.3-release-rc"
+
+
+def test_extract_rc_tag_returns_last_when_multiple():
+    # Step 4 names the convention (v1.4.3-release-rc) then the agent cuts the
+    # real one (v2.0.1-release-rc.2 later) — the LAST is the one actually cut.
+    t = "convention: v1.4.3-release-rc ... then I cut v2.0.1-release-rc.2"
+    assert livefire.extract_rc_tag(t) == "v2.0.1-release-rc.2"
+
+
+def test_extract_rc_tag_none_when_absent():
+    assert livefire.extract_rc_tag("no rc was cut; blocked at step 3") is None
+
+
+def test_extract_rc_tag_rejects_embedded_token():
+    # A longer token must NOT yield a truncated teardown target (boundary guard).
+    assert livefire.extract_rc_tag("artifact v1.2.3-release-rcXYZ in the log") is None
+    assert livefire.extract_rc_tag("prefixed xv1.2.3-release-rc thing") is None
+
+
+def test_extract_rc_tag_allows_trailing_punctuation():
+    # A tag at the end of a sentence (trailing period) is still a valid mention.
+    assert livefire.extract_rc_tag("cut v1.4.3-release-rc.") == "v1.4.3-release-rc"
+
+
+@requires_yaml
+def test_feedback_or_fallback_returns_real_feedback():
+    fb = livefire.feedback_or_fallback(_TRANSCRIPT, rc_tag="v1.4.3-release-rc")
+    assert fb["verdict"] == "minor-friction"
+    assert fb["repo"] == "arthur-debert/padz"
+
+
+def test_feedback_or_fallback_synthesizes_when_block_missing():
+    # The #709 case: session ended before the feedback block. Degrade to a
+    # structured fallback finding rather than a hard error, carrying the rc tag.
+    fb = livefire.feedback_or_fallback(
+        "I opened the PR and cut the rc but my turn ended.", rc_tag="v1.4.3-release-rc"
+    )
+    assert fb["verdict"] == "feedback-skipped"
+    assert fb["rc"] == "v1.4.3-release-rc"
+    assert len(fb["findings"]) == 1
+    assert fb["findings"][0]["severity"] != "ok"
+    # the fallback finding maps to a fileable spec (not silently dropped)
+    specs = livefire.findings_to_issues(fb, consumer="o/n")
+    assert len(specs) == 1
+
+
+def test_fallback_teardown_runs_when_feedback_missing(monkeypatch):
+    # End-to-end of the #709 decoupling at the helper level: feedback block is
+    # absent, but the rc tag is captured from the transcript and teardown STILL
+    # runs off it. Simulate the livefire_one wiring without the SDK.
+    transcript = "Opened PR #9 and cut v1.2.3-release-rc, then the turn ended."
+    rc_tag = livefire.extract_rc_tag(transcript)
+    feedback = livefire.feedback_or_fallback(transcript, rc_tag=rc_tag)
+
+    calls = []
+    monkeypatch.setattr(livefire, "file_findings", lambda *a, **k: calls.append("file") or ["s"])
+    monkeypatch.setattr(
+        livefire, "teardown_rc", lambda consumer, rc, **k: calls.append(("teardown", rc)) or rc
+    )
+    filed, torn = livefire._file_then_teardown(
+        feedback, consumer="o/n", rc_tag=rc_tag, dry_run=False
+    )
+    assert torn == "v1.2.3-release-rc"
+    assert ("teardown", "v1.2.3-release-rc") in calls
 
 
 # ── rollout: registered_consumers / summarize_rollout / livefire_many ──────
