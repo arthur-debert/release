@@ -98,12 +98,12 @@ def test_semver_help_passthrough(capsys):
 
 def test_changelog_add_dispatches_to_add_main(capsys):
     # `changelog add --help` forwards `--help` verbatim to changelog.add_main,
-    # which has no help flag and treats it as a (bad) slug — its slug error
-    # naming `--help` proves the passthrough reached the verb, not click.
+    # whose own help intercept prints the add-specific usage on stdout and exits
+    # 0 (release#686) — proving the passthrough reached the verb, not click.
     rc = cli_entry.main(["changelog", "add", "--help"])
-    err = capsys.readouterr().err
-    assert rc == 2
-    assert "slug" in err and "--help" in err
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "usage: changelog-add" in out
 
 
 def test_changelog_bare_runs_orchestrator(capsys):

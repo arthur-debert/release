@@ -101,6 +101,22 @@ def test_add_stdin_leading_blank_lines_bullets_first_content(repo, monkeypatch):
     assert (repo / "CHANGELOG" / "unreleased-blanks.md").read_bytes() == b"\n\n- text body\n"
 
 
+def test_add_help_prints_usage(repo, capsys):
+    # --help / -h must print usage and exit 0, never validate as a slug (#686).
+    for flag in ("--help", "-h"):
+        rc = changelog.add_main([flag])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "usage:" in out
+        assert "slug must match" not in out
+
+
+def test_add_help_after_force(repo, capsys):
+    rc = changelog.add_main(["--force", "--help"])
+    assert rc == 0
+    assert "usage:" in capsys.readouterr().out
+
+
 def test_ensure_bullet_unit():
     assert changelog._ensure_bullet(b"text\n") == b"- text\n"
     assert changelog._ensure_bullet(b"- text\n") == b"- text\n"  # already bulleted

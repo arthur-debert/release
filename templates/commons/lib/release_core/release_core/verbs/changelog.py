@@ -103,6 +103,15 @@ _SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 def add_main(argv: list[str]) -> int:
     """changelog-add [--force] <slug> [body...]"""
+    args = list(argv)
+
+    # Intercept help before any validation so `add --help` / `add -h` (and
+    # `add --force --help`) print usage instead of failing slug validation on
+    # the literal "--help" token (release#686 — recurred fleet-wide).
+    if any(a in ("-h", "--help") for a in args):
+        print(ADD_USAGE)
+        return 0
+
     root = _resolve_changelog_root()
     if not root:
         print(
@@ -112,7 +121,6 @@ def add_main(argv: list[str]) -> int:
         return 1
     os.chdir(root)
 
-    args = list(argv)
     force = False
     if args and args[0] == "--force":
         force = True
