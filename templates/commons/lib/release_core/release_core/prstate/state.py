@@ -106,6 +106,7 @@ def evaluate(
     registry: list[ReviewerAdapter] | None = None,
     diff_sizer: DiffSizer | None = None,
     required: list[ReviewerAdapter] | None = None,
+    ack_cycle_cap: bool = False,
 ) -> TaskStatus:
     """Compute the PR's lifecycle state from a snapshot.
 
@@ -122,6 +123,16 @@ def evaluate(
     convenience for REPL/ad-hoc callers ONLY — it resolves the config-default
     set (`reviewers.required_reviewers()`, which reads `.release-sync.yaml`),
     the one impurity, which is why the CLI never relies on it.
+
+    `ack_cycle_cap` is the human's explicit acknowledgement of the cycle-cap
+    breaker (release#738): when True, a fired cycle-cap is suppressed so an
+    OTHERWISE-ready PR (0 open threads + CI green + a CLEAN merge, or a transient
+    UNSTABLE while the rollup is green) flips to READY.
+    It suppresses ONLY the cycle-cap — every other breaker and every other
+    readiness gate (merge-state / CI / open threads) still applies, so the ack
+    can never flip a PR that isn't genuinely converged. `release-core pr ready
+    --ack-cycle-cap` is its only caller; `pr status` never sets it (it reports
+    the cap, and routes to this command).
     """
     registry = registry if registry is not None else REGISTRY
     required = required if required is not None else required_reviewers()
@@ -135,6 +146,12 @@ def evaluate(
     # Breakers count cycles against the SAME required set the engine gates on —
     # passed through so an override repo's breaker math matches its reviewers.
     breaker = evaluate_breakers(ctx, diff_sizer, required=required)
+    # The cycle-cap is the one breaker the human can explicitly acknowledge to
+    # land an otherwise-converged PR (release#738): `--ack-cycle-cap` suppresses
+    # its STOP so the engine falls through to the normal readiness gates. Every
+    # OTHER breaker (and every readiness gate) is untouched by the ack.
+    cap_acked = ack_cycle_cap and breaker.breaker == "cycle-cap"
+    breaker_stops = breaker.stop and not cap_acked
 
     status = TaskStatus(
         state=TaskState.REVIEWS_PENDING,  # provisional; set below
@@ -159,11 +176,19 @@ def evaluate(
 
     # 2. Required reviews in; any open thread (from any reviewer) must be addressed
     #    — UNLESS a circuit breaker says the loop is diverging: then STOP, don't
-    #    open another cycle. A converged PR (no open threads) is never stopped.
+    #    open another cycle. A converged PR (no open threads) is normally handed
+    #    off — except when the cycle-cap fired: it is then BLOCKED and routed to
+    #    `release-core pr ready --ack-cycle-cap` (the converged-but-capped branch
+    #    below), not flipped silently.
     if open_threads:
-        if breaker.stop:
+        if breaker_stops:
             status.state = TaskState.BLOCKED
             status.breaker = breaker.breaker
+            # With open threads the PR is NOT otherwise ready, so even a fired
+            # cycle-cap has no software path forward yet (acking it can't flip a
+            # PR with unresolved threads). Keep the STOP-and-surface advice; the
+            # `--ack-cycle-cap` route is offered only once the PR is converged
+            # (handled in the readiness section below).
             status.next_action = (
                 f"STOP — circuit breaker '{breaker.breaker}' fired: {breaker.reason}. "
                 "Do not iterate; surface to the human."
@@ -237,6 +262,39 @@ def evaluate(
         status.state = TaskState.VALIDATING
         status.next_action = "reviews done; CI check(s) running — wait for checks"
         return status
+
+    # The PR is now otherwise-converged: required reviews in, 0 open threads, no
+    # conflict, not behind, CI not failing/pending. The ONLY states left lead to
+    # READY (UNSTABLE-green / CLEAN). If the cycle-cap fired here, the loop ran
+    # too many divergent rounds even though it landed — but it IS genuinely
+    # ready, so this is no longer a dead-end "surface to the human": hand the
+    # human the one-command software path, `release-core pr ready
+    # --ack-cycle-cap`, which re-evaluates with the cap acked and flips only if
+    # every OTHER readiness gate still passes (release#738). The ack itself
+    # (cap_acked) suppresses this branch so the flip proceeds to READY below.
+    if (
+        breaker_stops
+        and breaker.breaker == "cycle-cap"
+        and ctx.merge_state
+        in (
+            "UNSTABLE",
+            "CLEAN",
+        )
+    ):
+        is_ready_merge = ctx.merge_state == "CLEAN" or (
+            ctx.merge_state == "UNSTABLE" and checks == ChecksState.GREEN
+        )
+        if is_ready_merge:
+            status.state = TaskState.BLOCKED
+            status.breaker = breaker.breaker
+            status.next_action = (
+                f"converged but cycle-capped: {breaker.reason} — the PR is otherwise "
+                "ready (reviews in, 0 open threads, CI green, merge state CLEAN — or "
+                "a transient UNSTABLE while the rollup is green). "
+                "Flip it with `release-core pr ready --ack-cycle-cap` (it re-checks "
+                "every other readiness gate); do NOT open another review round."
+            )
+            return status
 
     # UNSTABLE is GitHub's "a non-required check is failing/pending" state — but
     # the engine ALREADY inspects every check via the rollup (the FAILING/PENDING

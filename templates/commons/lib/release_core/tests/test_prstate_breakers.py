@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from itertools import count
 
-from release_core.prstate.breakers import build_cycles, evaluate_breakers
+from release_core.prstate.breakers import (
+    build_cycles,
+    divergent_cycle_count,
+    evaluate_breakers,
+)
 from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
 from release_core.prstate.reviewers import by_name
 from release_core.prstate.state import TaskState, evaluate
@@ -89,8 +93,12 @@ def test_build_cycles_findings_come_from_threads_even_when_resolved():
 
 
 def test_cycle_cap_fires_on_fourth():
+    # Four DIVERGENT cycles — each round introduces a NEW finding location, so
+    # the divergence counter advances every round and the cap (3) trips on the
+    # fourth (release#738: the cap fires on divergent rounds, not raw count).
     reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    v = evaluate_breakers(ctx(reviews))
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
+    v = evaluate_breakers(ctx(reviews, findings=findings))
     assert v.stop and v.breaker == "cycle-cap" and v.cycles == 4
 
 
@@ -130,6 +138,65 @@ def test_a_cycle_unions_both_reviewers_findings_on_the_same_head():
     cycles = build_cycles(ctx(reviews, findings=findings), required=both)
     assert len(cycles) == 1
     assert cycles[0].comment_keys == frozenset({("a.py", 1), ("b.py", 2)})
+
+
+# --- divergent-cycle counting (the cap's real metric, release#738) --------
+
+
+def test_divergent_count_advances_on_each_new_location():
+    # Four rounds, each introducing a brand-new finding location -> divergent=4.
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
+    cycles = build_cycles(ctx(reviews, findings=findings))
+    assert divergent_cycle_count(cycles) == 4
+
+
+def test_findingless_rounds_do_not_advance_divergence():
+    # A round that left NO finding (a clean/approving pass) adds no divergence
+    # signal -> it never counts toward the cap.
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    cycles = build_cycles(ctx(reviews))  # no findings at all
+    assert divergent_cycle_count(cycles) == 0
+
+
+def test_cosmetic_repeat_round_does_not_advance_divergence():
+    # Rounds 2..4 only RE-flag a location already seen in round 1 (a stubborn
+    # nit re-raised, or a cosmetic re-comment): only round 1 introduced a new
+    # location, so divergent=1 even though there are 4 raw rounds.
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    findings = [
+        finding(1, "a.py", 1),
+        finding(2, "a.py", 1),
+        finding(3, "a.py", 1),
+        finding(4, "a.py", 1),
+    ]
+    cycles = build_cycles(ctx(reviews, findings=findings))
+    assert divergent_cycle_count(cycles) == 1
+
+
+def test_cap_does_not_fire_when_final_round_is_a_false_positive():
+    # The #735 shape: 3 substantive rounds (each a new location), then a 4th
+    # round whose finding is a false positive on an ALREADY-flagged location.
+    # Raw count is 4 (> cap) but divergent count is 3, so the cap does NOT fire.
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    findings = [
+        finding(1, "a.py", 1),
+        finding(2, "b.py", 2),
+        finding(3, "c.py", 3),
+        finding(4, "a.py", 1),  # re-flag of round 1's location -> no new divergence
+    ]
+    v = evaluate_breakers(ctx(reviews, findings=findings))
+    assert not v.stop
+    assert v.cycles == 4  # the human still sees the true round count
+
+
+def test_cap_still_fires_on_a_genuinely_diverging_loop():
+    # Five rounds, each a new location -> divergent=5 > cap -> the cap fires.
+    reviews = [review(i, f"c{i}") for i in range(1, 6)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 6)]
+    v = evaluate_breakers(ctx(reviews, findings=findings))
+    assert v.stop and v.breaker == "cycle-cap"
+    assert "divergent" in v.reason
 
 
 # --- diff trajectory ------------------------------------------------------
@@ -226,8 +293,11 @@ _COPILOT_ONLY = [by_name("copilot")]
 
 
 def test_breaker_overrides_addressing_with_blocked():
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]  # 4 cycles -> cap
-    c = ctx(reviews, threads=[open_copilot_thread()], head="c4")
+    # 4 divergent cycles -> cap fires; an open thread means the PR is NOT
+    # otherwise ready, so the verdict is the STOP-and-surface form.
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
+    c = ctx(reviews, findings=findings, threads=[open_copilot_thread()], head="c4")
     status = evaluate(c, required=_COPILOT_ONLY)
     assert status.state is TaskState.BLOCKED
     assert status.breaker == "cycle-cap"
@@ -242,3 +312,81 @@ def test_converged_pr_not_stopped_despite_many_cycles():
     assert status.state is TaskState.READY
     assert status.cycles == 4
     assert status.breaker is None
+
+
+# --- the cycle-cap escape (release#738) ----------------------------------
+
+
+def _diverging_capped_ctx(*, threads, merge_state="CLEAN"):
+    """4 DIVERGENT rounds (cap fired) on an otherwise-ready PR shape."""
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
+    rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
+    return ctx(
+        reviews,
+        findings=findings,
+        threads=threads,
+        head="c4",
+        checks=rollup,
+        merge_state=merge_state,
+    )
+
+
+def test_converged_but_capped_routes_to_the_ack_command():
+    # Cap fired, 0 open threads, CI green, CLEAN merge -> BLOCKED, but the next
+    # action hands the human the one-command software path, not "surface to the
+    # human" / a raw gh pr ready.
+    c = _diverging_capped_ctx(threads=[])
+    status = evaluate(c, required=_COPILOT_ONLY)
+    assert status.state is TaskState.BLOCKED
+    assert status.breaker == "cycle-cap"
+    assert "--ack-cycle-cap" in status.next_action
+    assert "converged but cycle-capped" in status.next_action
+    assert "STOP" not in status.next_action
+
+
+def test_ack_cycle_cap_flips_an_otherwise_ready_capped_pr_to_ready():
+    c = _diverging_capped_ctx(threads=[])
+    status = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
+    assert status.state is TaskState.READY
+    assert status.cycles == 4
+
+
+def test_capped_with_open_threads_keeps_the_stop_advice():
+    # Not otherwise ready (an open thread): the ack route is NOT offered yet —
+    # the human must still resolve the thread; keep STOP-and-surface.
+    c = _diverging_capped_ctx(threads=[open_copilot_thread()])
+    status = evaluate(c, required=_COPILOT_ONLY)
+    assert status.state is TaskState.BLOCKED
+    assert status.breaker == "cycle-cap"
+    assert "STOP" in status.next_action
+    assert "--ack-cycle-cap" not in status.next_action
+
+
+def test_ack_does_not_flip_a_capped_pr_that_is_not_otherwise_ready():
+    # Ack waives ONLY the cap; an open thread still holds the PR. So acking a
+    # PR with an open thread does NOT reach READY (it returns to ADDRESSING).
+    c = _diverging_capped_ctx(threads=[open_copilot_thread()])
+    status = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
+    assert status.state is TaskState.ADDRESSING
+
+
+def test_ack_does_not_flip_a_capped_pr_with_a_dirty_merge_state():
+    # Cap fired, 0 open threads, but a real conflict (DIRTY). Acking the cap
+    # must NOT bypass the merge-state guard -> still BLOCKED on the conflict.
+    c = _diverging_capped_ctx(threads=[], merge_state="DIRTY")
+    status = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
+    assert status.state is TaskState.BLOCKED
+    assert "conflict" in status.next_action
+
+
+def test_ack_is_a_noop_when_the_cap_did_not_fire():
+    # A normal, uncapped converged PR: --ack-cycle-cap changes nothing.
+    reviews = [review(i, f"c{i}") for i in range(1, 3)]
+    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
+    rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
+    c = ctx(reviews, findings=findings, threads=[], head="c2", checks=rollup)
+    plain = evaluate(c, required=_COPILOT_ONLY)
+    acked = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
+    assert plain.state is TaskState.READY
+    assert acked.state is TaskState.READY
