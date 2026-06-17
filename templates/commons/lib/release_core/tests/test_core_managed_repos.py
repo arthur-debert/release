@@ -190,13 +190,29 @@ class _GitDriver:
     uncommitted changes (the data-loss guard's input)."""
 
     def __init__(
-        self, fail_fetch=None, fail_reset=None, sha="deadbee", default_branch="main", dirty=None
+        self,
+        fail_fetch=None,
+        fail_reset=None,
+        sha="deadbee",
+        default_branch="main",
+        dirty=None,
+        bad_git_dir=None,
+        remote_url=None,
+        path_to_repo=None,
     ):
         self.fail_fetch = fail_fetch or set()
         self.fail_reset = fail_reset or set()
         self.sha = sha
         self.default_branch = default_branch
         self.dirty = dirty or set()
+        # abspaths whose `rev-parse --git-dir` fails (corrupt / half clone, #748).
+        self.bad_git_dir = bad_git_dir or set()
+        # abspath → origin URL the clone reports; None ⇒ a github URL for the
+        # repo at that path (the healthy case). "" ⇒ `remote get-url` fails.
+        self.remote_url = remote_url or {}
+        # abspath → owner/name so the default healthy origin URL names the right
+        # repo (path trailing segment ≠ repo slug for phos-app/dodot).
+        self.path_to_repo = path_to_repo or {}
         self.calls: list[list[str]] = []
         self._real_run = proc.run  # delegate non-git calls (yq manifest read)
 
@@ -212,6 +228,18 @@ class _GitDriver:
         if sub == "status":
             # --porcelain: non-empty stdout ⇒ dirty.
             return _cp(0, stdout=" M file.txt\n" if abspath in self.dirty else "")
+        if sub == "rev-parse" and len(cmd) > 4 and cmd[4] == "--git-dir":
+            # The self-healing health check (#748): a corrupt/half clone fails.
+            return _cp(1 if abspath in self.bad_git_dir else 0, stdout=".git\n")
+        if sub == "remote":
+            # `remote get-url origin` — "" in the map means the call itself fails.
+            url = self.remote_url.get(abspath)
+            if url == "":
+                return _cp(1)
+            if url is None:
+                slug = self.path_to_repo.get(abspath, "owner/name")
+                url = f"https://github.com/{slug}.git"
+            return _cp(0, stdout=f"{url}\n")
         if sub == "symbolic-ref":
             return _cp(0, stdout=f"refs/remotes/origin/{self.default_branch}\n")
         if sub == "fetch":
@@ -227,12 +255,24 @@ def _git_calls(driver, abspath, subcmd):
     return [c for c in driver.calls if c[:4] == ["git", "-C", abspath, subcmd]]
 
 
+def _fixture_path_to_repo(root):
+    """Map each fixture clone's abspath → its owner/name, so a _GitDriver's
+    default `remote get-url origin` reports a URL that passes the #748 health
+    check (path trailing segment ≠ repo slug for phos-app/dodot)."""
+    return {
+        os.path.join(root, "lex-fmt", "lex"): "lex-fmt/lex",
+        os.path.join(root, "lex-fmt", "comms"): "lex-fmt/comms",
+        os.path.join(root, "phos", "phos-app"): "arthur-debert/phos-app",
+        os.path.join(root, "dodot"): "arthur-debert/dodot",
+    }
+
+
 def test_clone_refreshes_existing_clone_unconditionally(fleet, monkeypatch, capsys):
     # No --refresh flag anywhere — an EXISTING clone (lex-fmt/lex) must still be
     # fetched + hard-reset to origin's default branch on a bare --clone (#624).
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
-    driver = _GitDriver(sha="cafef00")
+    driver = _GitDriver(sha="cafef00", path_to_repo=_fixture_path_to_repo(root))
     monkeypatch.setattr(proc, "run", driver)
     # Missing repos would call gh.repo_clone; make it a no-op success so the test
     # stays focused on the refresh path.
@@ -256,7 +296,7 @@ def test_clone_skips_dirty_existing_clone_with_warning(fleet, monkeypatch, capsy
     # hard-reset — it is skipped with a loud warning and the sweep continues.
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
-    driver = _GitDriver(dirty={lex})
+    driver = _GitDriver(dirty={lex}, path_to_repo=_fixture_path_to_repo(root))
     monkeypatch.setattr(proc, "run", driver)
     monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
 
@@ -275,7 +315,7 @@ def test_clone_refreshes_clean_clone_when_a_sibling_is_dirty(fleet, monkeypatch,
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
     dodot = os.path.join(root, "dodot")
-    driver = _GitDriver(dirty={lex}, sha="c1ean99")
+    driver = _GitDriver(dirty={lex}, sha="c1ean99", path_to_repo=_fixture_path_to_repo(root))
     monkeypatch.setattr(proc, "run", driver)
     monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
 
@@ -296,7 +336,9 @@ def test_clone_refresh_preserves_slashed_default_branch(fleet, monkeypatch, caps
     # — an rsplit('/', 1) would truncate it to `v1` and target the wrong ref.
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
-    driver = _GitDriver(sha="beef123", default_branch="release/v1")
+    driver = _GitDriver(
+        sha="beef123", default_branch="release/v1", path_to_repo=_fixture_path_to_repo(root)
+    )
     monkeypatch.setattr(proc, "run", driver)
     monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
 
@@ -312,7 +354,7 @@ def test_clone_refresh_preserves_slashed_default_branch(fleet, monkeypatch, caps
 def test_clone_refresh_failure_is_nonzero_and_named(fleet, monkeypatch, capsys):
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
-    driver = _GitDriver(fail_fetch={lex})
+    driver = _GitDriver(fail_fetch={lex}, path_to_repo=_fixture_path_to_repo(root))
     monkeypatch.setattr(proc, "run", driver)
     monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: _cp(0))
 
@@ -359,3 +401,107 @@ def test_clone_rejects_removed_refresh_flag(fleet, capsys):
     rc = managed_repos.main(["--clone", "--refresh"])
     assert rc == 64
     assert "unknown arg: --refresh" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# --clone self-healing: a poisoned/corrupt clone is re-cloned, not protected (#748)
+# --------------------------------------------------------------------------
+
+
+def test_clone_recreates_corrupt_clone_instead_of_skipping(fleet, monkeypatch, capsys):
+    # The crash case (#747/#748): a leftover dir has a `.git` so it looks
+    # "existing", but `rev-parse --git-dir` fails (half-written / corrupt). The
+    # OLD guard read that as dirty and skipped, poisoning every sweep until a
+    # manual `rm -rf`. It must now be REMOVED and re-cloned — never refreshed.
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    # Drop a sentinel file so we can prove the dir was actually wiped + recloned.
+    poison = os.path.join(lex, "leftover.txt")
+    with open(poison, "w", encoding="utf-8") as fh:
+        fh.write("stale half-clone\n")
+    driver = _GitDriver(sha="fresh01", bad_git_dir={lex}, path_to_repo=_fixture_path_to_repo(root))
+    monkeypatch.setattr(proc, "run", driver)
+    cloned: list[str] = []
+
+    def _fake_clone(repo, dest, **kw):
+        cloned.append((repo, dest))
+        os.makedirs(os.path.join(dest, ".git"), exist_ok=True)
+        return _cp(0)
+
+    monkeypatch.setattr(gh, "repo_clone", _fake_clone)
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0
+    # The corrupt dir was removed (sentinel gone) and the repo re-cloned.
+    assert not os.path.exists(poison)
+    assert cloned == [("lex-fmt/lex", lex)]
+    # No refresh ran against the poisoned path — it was disposed, not reset.
+    assert _git_calls(driver, lex, "fetch") == []
+    assert _git_calls(driver, lex, "reset") == []
+    err = capsys.readouterr().err
+    assert "lex-fmt/lex: re-cloning (poisoned clone removed)" in err
+    assert "skipping refresh" not in err
+
+
+def test_clone_recreates_wrong_remote_clone(fleet, monkeypatch, capsys):
+    # A dir that is a HEALTHY git repo but of a DIFFERENT remote (path reshuffle
+    # / botched clone) must not be reset onto this repo's default branch — it is
+    # disposable cruft and gets re-cloned (#748).
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    driver = _GitDriver(
+        sha="fresh02",
+        remote_url={lex: "https://github.com/someone/else.git"},
+        path_to_repo=_fixture_path_to_repo(root),
+    )
+    monkeypatch.setattr(proc, "run", driver)
+    cloned: list[str] = []
+
+    def _fake_clone(repo, dest, **kw):
+        cloned.append(repo)
+        os.makedirs(os.path.join(dest, ".git"), exist_ok=True)
+        return _cp(0)
+
+    monkeypatch.setattr(gh, "repo_clone", _fake_clone)
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0
+    assert cloned == ["lex-fmt/lex"]
+    assert _git_calls(driver, lex, "reset") == []
+    assert "lex-fmt/lex: re-cloning (poisoned clone removed)" in capsys.readouterr().err
+
+
+def test_clone_protects_dirty_healthy_clone_not_recreated(fleet, monkeypatch, capsys):
+    # The data-loss guard still fires for a HEALTHY clone with real uncommitted
+    # work: it is skipped-with-warning, NOT wiped+recloned. Self-healing only
+    # reclaims corrupt/wrong-remote dirs, never a live checkout's work.
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    sentinel = os.path.join(lex, "my-work.txt")
+    with open(sentinel, "w", encoding="utf-8") as fh:
+        fh.write("uncommitted work\n")
+    driver = _GitDriver(dirty={lex}, path_to_repo=_fixture_path_to_repo(root))
+    monkeypatch.setattr(proc, "run", driver)
+    recloned: list[str] = []
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: recloned.append(repo) or _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0
+    # The dirty healthy clone was protected: its work survives, no re-clone.
+    assert os.path.exists(sentinel)
+    assert recloned == []
+    assert _git_calls(driver, lex, "reset") == []
+    err = capsys.readouterr().err
+    assert "lex-fmt/lex: uncommitted changes — skipping refresh" in err
+    assert "poisoned clone removed" not in err
+
+
+def test_remote_matches_accepts_https_ssh_and_bare_slug():
+    # _remote_matches normalizes the URL shapes `gh repo clone` / `git clone`
+    # produce, matching on the trailing owner/name slug, host-agnostic (#748).
+    assert managed_repos._remote_matches("https://github.com/lex-fmt/lex.git", "lex-fmt/lex")
+    assert managed_repos._remote_matches("https://github.com/lex-fmt/lex", "lex-fmt/lex")
+    assert managed_repos._remote_matches("git@github.com:lex-fmt/lex.git", "lex-fmt/lex")
+    assert managed_repos._remote_matches("lex-fmt/lex", "lex-fmt/lex")
+    assert not managed_repos._remote_matches("https://github.com/other/repo.git", "lex-fmt/lex")
+    assert not managed_repos._remote_matches("garbage", "lex-fmt/lex")
