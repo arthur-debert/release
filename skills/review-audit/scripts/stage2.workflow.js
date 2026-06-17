@@ -42,16 +42,27 @@ let reviewed = cfg.reviewed
 if (Array.isArray(args) && args.length) reviewed = args
 else if (typeof args === 'string' && args.trim().startsWith('[')) reviewed = JSON.parse(args)
 // Input-hardening (#740): if `reviewed` was supplied at all, it MUST be an
-// array of integer PR numbers. A bare string would pass the `.length`
-// truthiness check below and then `.slice()` char-by-char into nonsense
-// batches; a non-integer would only blow up far downstream. Fail fast with a
-// clear message. (undefined/null = not supplied -> derive from slim/ below.)
-if (reviewed != null &&
-    (!Array.isArray(reviewed) || !reviewed.every(Number.isInteger))) {
-  throw new Error(
-    `review-audit: args.reviewed must be an array of integer PR numbers, ` +
-      `got ${JSON.stringify(reviewed)}`,
-  )
+// ARRAY of PR numbers — but workflow/runner inputs routinely arrive as digit
+// STRINGS (["123","124"] from JSON/YAML/CLI typing), so coerce those to ints
+// rather than reject the unambiguous case. A bare string (not an array) would
+// pass the `.length` truthiness check below and then `.slice()` char-by-char
+// into nonsense batches; a non-numeric element is a real mistake. Fail fast on
+// either. (undefined/null = not supplied -> derive from slim/ below.)
+if (reviewed != null) {
+  if (!Array.isArray(reviewed)) {
+    throw new Error(
+      `review-audit: args.reviewed must be an array of PR numbers, ` +
+        `got ${JSON.stringify(reviewed)}`,
+    )
+  }
+  reviewed = reviewed.map((n) => {
+    if (Number.isInteger(n)) return n
+    if (typeof n === 'string' && /^\d+$/.test(n.trim())) return parseInt(n, 10)
+    throw new Error(
+      `review-audit: args.reviewed entries must be integer PR numbers ` +
+        `(or digit strings); got ${JSON.stringify(n)}`,
+    )
+  })
 }
 
 const slimDir = `${DIR}/slim`
