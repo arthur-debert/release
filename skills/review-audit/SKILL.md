@@ -72,7 +72,7 @@ repo's checkout (auto-detected). Pick an output dir once and pass the same
 # requires an absolute `dir`, so anchor it here and reuse the same value for
 # every stage — never a path relative to scripts/.
 SCRIPTS=skills/review-audit/scripts
-DIR="$PWD/analysis/reviews"        # absolute; or any other abs path
+DIR="$(pwd)/analysis/reviews"      # absolute; or any other abs path
 
 python3 "$SCRIPTS/extract.py"   --repo OWNER/NAME --dir "$DIR"   # 1: pull + denoise (slow, resumable)
 python3 "$SCRIPTS/enrich.py"    --repo OWNER/NAME --dir "$DIR"   # 2: resolution flags
@@ -94,7 +94,7 @@ list is derived from the slim files (no hardcoded list):
 # Self-contained: redeclare the same values as the mechanical tier (run from
 # the repo root; DIR must be the SAME absolute path you used above).
 SCRIPTS=skills/review-audit/scripts
-DIR="$PWD/analysis/reviews"
+DIR="$(pwd)/analysis/reviews"
 
 # 5: judge — one agent per ~4 reviewed PRs, writes verdicts/pr-*.json
 #    args: { dir: '<abs DIR>', reviewers: ['copilot','gemini','coderabbit'], batch: 4 }
