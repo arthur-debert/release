@@ -408,20 +408,21 @@ def test_clone_rejects_removed_refresh_flag(fleet, capsys):
 # --------------------------------------------------------------------------
 
 
-def test_clone_recreates_corrupt_clone_instead_of_skipping(fleet, monkeypatch, capsys):
-    # The crash case (#747/#748): a leftover dir has a `.git` so it looks
-    # "existing", but `rev-parse --git-dir` fails (half-written / corrupt). The
-    # OLD guard read that as dirty and skipped, poisoning every sweep until a
-    # manual `rm -rf`. It must now be REMOVED and re-cloned — never refreshed.
+def test_clone_recreates_half_synced_non_git_dir(fleet, monkeypatch, capsys):
+    # The exact crash case (#747/#748): a prior run left a dir with files but no
+    # valid `.git` (init died "not inside a git repo"). It is NOT a git repo, so
+    # the data-loss guard never claims it — it is disposable and gets removed +
+    # re-cloned rather than poisoning every subsequent sweep.
     root = str(fleet)
-    lex = os.path.join(root, "lex-fmt", "lex")
-    # Drop a sentinel file so we can prove the dir was actually wiped + recloned.
-    poison = os.path.join(lex, "leftover.txt")
+    # comms is "missing" in the fixture (no .git) — drop a half-synced leftover.
+    comms = os.path.join(root, "lex-fmt", "comms")
+    os.makedirs(comms, exist_ok=True)
+    poison = os.path.join(comms, "half-synced.txt")
     with open(poison, "w", encoding="utf-8") as fh:
-        fh.write("stale half-clone\n")
-    driver = _GitDriver(sha="fresh01", bad_git_dir={lex}, path_to_repo=_fixture_path_to_repo(root))
+        fh.write("leftover from a crashed run\n")
+    driver = _GitDriver(sha="fresh01", path_to_repo=_fixture_path_to_repo(root))
     monkeypatch.setattr(proc, "run", driver)
-    cloned: list[str] = []
+    cloned: list[tuple[str, str]] = []
 
     def _fake_clone(repo, dest, **kw):
         cloned.append((repo, dest))
@@ -430,11 +431,35 @@ def test_clone_recreates_corrupt_clone_instead_of_skipping(fleet, monkeypatch, c
 
     monkeypatch.setattr(gh, "repo_clone", _fake_clone)
 
+    rc = managed_repos.main(["--clone", "lex-fmt/comms"])
+    assert rc == 0
+    # The half-synced leftover was removed (sentinel gone) and the repo recloned.
+    assert not os.path.exists(poison)
+    assert cloned == [("lex-fmt/comms", comms)]
+    err = capsys.readouterr().err
+    assert "lex-fmt/comms: re-cloning (poisoned clone removed)" in err
+    assert "skipping refresh" not in err
+
+
+def test_clone_recreates_clean_corrupt_git_dir(fleet, monkeypatch, capsys):
+    # A dir that HAS a `.git` but is corrupt (`rev-parse --git-dir` fails) and
+    # carries NO uncommitted work is disposable: removed + re-cloned, not reset.
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")  # fixture gave it a .git
+    driver = _GitDriver(sha="fresh02", bad_git_dir={lex}, path_to_repo=_fixture_path_to_repo(root))
+    monkeypatch.setattr(proc, "run", driver)
+    cloned: list[str] = []
+
+    def _fake_clone(repo, dest, **kw):
+        cloned.append(repo)
+        os.makedirs(os.path.join(dest, ".git"), exist_ok=True)
+        return _cp(0)
+
+    monkeypatch.setattr(gh, "repo_clone", _fake_clone)
+
     rc = managed_repos.main(["--clone", "lex-fmt/lex"])
     assert rc == 0
-    # The corrupt dir was removed (sentinel gone) and the repo re-cloned.
-    assert not os.path.exists(poison)
-    assert cloned == [("lex-fmt/lex", lex)]
+    assert cloned == ["lex-fmt/lex"]
     # No refresh ran against the poisoned path — it was disposed, not reset.
     assert _git_calls(driver, lex, "fetch") == []
     assert _git_calls(driver, lex, "reset") == []
@@ -443,14 +468,13 @@ def test_clone_recreates_corrupt_clone_instead_of_skipping(fleet, monkeypatch, c
     assert "skipping refresh" not in err
 
 
-def test_clone_recreates_wrong_remote_clone(fleet, monkeypatch, capsys):
-    # A dir that is a HEALTHY git repo but of a DIFFERENT remote (path reshuffle
-    # / botched clone) must not be reset onto this repo's default branch — it is
-    # disposable cruft and gets re-cloned (#748).
+def test_clone_recreates_clean_wrong_remote_clone(fleet, monkeypatch, capsys):
+    # A CLEAN git repo of a DIFFERENT remote (path reshuffle / botched clone) is
+    # disposable cruft — re-cloned, never reset onto this repo's default branch.
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
     driver = _GitDriver(
-        sha="fresh02",
+        sha="fresh03",
         remote_url={lex: "https://github.com/someone/else.git"},
         path_to_repo=_fixture_path_to_repo(root),
     )
@@ -474,7 +498,7 @@ def test_clone_recreates_wrong_remote_clone(fleet, monkeypatch, capsys):
 def test_clone_protects_dirty_healthy_clone_not_recreated(fleet, monkeypatch, capsys):
     # The data-loss guard still fires for a HEALTHY clone with real uncommitted
     # work: it is skipped-with-warning, NOT wiped+recloned. Self-healing only
-    # reclaims corrupt/wrong-remote dirs, never a live checkout's work.
+    # reclaims clean disposable dirs, never a live checkout's work.
     root = str(fleet)
     lex = os.path.join(root, "lex-fmt", "lex")
     sentinel = os.path.join(lex, "my-work.txt")
@@ -494,6 +518,102 @@ def test_clone_protects_dirty_healthy_clone_not_recreated(fleet, monkeypatch, ca
     err = capsys.readouterr().err
     assert "lex-fmt/lex: uncommitted changes — skipping refresh" in err
     assert "poisoned clone removed" not in err
+
+
+def test_clone_protects_dirty_wrong_remote_clone_never_deletes_work(fleet, monkeypatch, capsys):
+    # #748 review thread 2: a git repo that is DIRTY but whose remote is wrong /
+    # missing must STILL hit the data-loss guard — it is uncommitted work, never
+    # deleted to "heal" the path. The guard runs before (and independent of) the
+    # health/remote check.
+    root = str(fleet)
+    lex = os.path.join(root, "lex-fmt", "lex")
+    sentinel = os.path.join(lex, "precious.txt")
+    with open(sentinel, "w", encoding="utf-8") as fh:
+        fh.write("work on a fork checked out at this path\n")
+    driver = _GitDriver(
+        dirty={lex},
+        remote_url={lex: ""},  # `remote get-url origin` FAILS — unhealthy AND dirty
+        path_to_repo=_fixture_path_to_repo(root),
+    )
+    monkeypatch.setattr(proc, "run", driver)
+    recloned: list[str] = []
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: recloned.append(repo) or _cp(0))
+
+    rc = managed_repos.main(["--clone", "lex-fmt/lex"])
+    assert rc == 0
+    assert os.path.exists(sentinel)  # work survives
+    assert recloned == []  # never re-cloned
+    assert _git_calls(driver, lex, "reset") == []
+    err = capsys.readouterr().err
+    assert "lex-fmt/lex: uncommitted changes — skipping refresh" in err
+    assert "poisoned clone removed" not in err
+
+
+def test_clone_refuses_manifest_path_escaping_repos_root(tmp_path, monkeypatch, capsys):
+    # #748 review thread 1: an absolute / `..`-climbing manifest `path` resolves
+    # OUTSIDE REPOS_ROOT. It must be REFUSED — never a git op, never a delete —
+    # so a bad manifest entry can't rmtree outside the fleet root.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "do-not-delete.txt"
+    victim.write_text("data outside the fleet root\n")
+    root = tmp_path / "root"
+    root.mkdir()
+    # `path: ../outside` climbs out of REPOS_ROOT.
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text("projects:\n  x:\n    - { repo: o/escape, path: ../outside }\n")
+    monkeypatch.setenv("MANAGED_REPOS_MANIFEST", str(manifest))
+    monkeypatch.setenv("REPOS_ROOT", str(root))
+    monkeypatch.delenv("MANAGED_REPOS_SCRIPT_DIR", raising=False)
+
+    recloned: list[str] = []
+    monkeypatch.setattr(gh, "repo_clone", lambda repo, dest, **kw: recloned.append(repo) or _cp(0))
+
+    rc = managed_repos.main(["--clone"])
+    assert rc == 1  # refusal is a failure exit
+    assert victim.exists()  # the outside path is untouched
+    assert recloned == []  # no clone into an escaping path either
+    assert "REFUSED — resolved path escapes REPOS_ROOT" in capsys.readouterr().err
+
+
+def test_clone_removes_file_or_symlink_leftover_before_recloning(fleet, monkeypatch, capsys):
+    # #748 review thread 2: a non-directory leftover (a stray FILE or SYMLINK at
+    # the repo path) must be removed before cloning — rmtree(ignore_errors=True)
+    # would silently leave it, making `gh repo clone` fail on "already exists".
+    root = str(fleet)
+    comms = os.path.join(root, "lex-fmt", "comms")  # missing in the fixture
+    os.makedirs(os.path.dirname(comms), exist_ok=True)
+    # A plain FILE sitting where the clone dir should be.
+    with open(comms, "w", encoding="utf-8") as fh:
+        fh.write("stray file, not a dir\n")
+    driver = _GitDriver(sha="fresh04", path_to_repo=_fixture_path_to_repo(root))
+    monkeypatch.setattr(proc, "run", driver)
+    cloned: list[str] = []
+
+    def _fake_clone(repo, dest, **kw):
+        # Would fail if the file were still there — assert the path is clear.
+        assert not os.path.lexists(dest)
+        cloned.append(repo)
+        os.makedirs(os.path.join(dest, ".git"), exist_ok=True)
+        return _cp(0)
+
+    monkeypatch.setattr(gh, "repo_clone", _fake_clone)
+
+    rc = managed_repos.main(["--clone", "lex-fmt/comms"])
+    assert rc == 0
+    assert cloned == ["lex-fmt/comms"]
+    assert os.path.isdir(comms)  # now a real clone dir
+
+
+def test_path_within_rejects_absolute_and_dotdot_escapes(tmp_path):
+    # _path_within: the containment predicate behind the rmtree guard (#748).
+    root = str(tmp_path / "root")
+    os.makedirs(root)
+    assert managed_repos._path_within(root, os.path.join(root, "lex-fmt", "lex"))
+    assert not managed_repos._path_within(root, "/etc")
+    assert not managed_repos._path_within(root, os.path.join(root, "..", "outside"))
+    # root itself is not "within" root — a repo never resolves to the fleet root.
+    assert not managed_repos._path_within(root, root)
 
 
 def test_remote_matches_accepts_https_ssh_and_bare_slug():
