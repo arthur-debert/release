@@ -89,9 +89,10 @@ def stratified_sample(targets, n):
     across the PR-number timeline, which is a proxy for the review-config ERA:
     reviewer changes are chronological (none -> one bot -> +a second), so even
     spacing keeps every era represented instead of over-sampling the most
-    recent one. Deterministic (reproducible audits) and always includes the
-    first and last PR so both history extremes are kept. `targets` is assumed
-    sorted ascending; returns it unchanged when n<=0 or n>=len(targets).
+    recent one. Deterministic (reproducible audits); for n >= 2 it includes the
+    first and last PR so both history extremes are kept (n == 1 returns the
+    middle PR). `targets` is assumed sorted ascending; returns it unchanged
+    when n<=0 or n>=len(targets).
     """
     targets = list(targets)
     if n <= 0 or n >= len(targets):

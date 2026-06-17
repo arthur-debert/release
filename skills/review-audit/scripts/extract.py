@@ -229,7 +229,7 @@ def main():
         targets = sorted(p["number"] for p in prs if p.get("merged_at"))
     if not targets:
         sys.exit("no merged PRs found")
-    if a.sample and a.sample < len(targets):
+    if a.sample is not None and 0 < a.sample < len(targets):
         full_n = len(targets)
         targets = stratified_sample(sorted(targets), a.sample)
         print(f"--sample {a.sample}: auditing {len(targets)} of {full_n} PRs "
