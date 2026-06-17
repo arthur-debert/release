@@ -108,3 +108,75 @@ STUB
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing dependency 'click'"* ]]
 }
+
+# ── release#747 — children inherit the checkout lib on PYTHONPATH ─────────────
+# Fleet verbs (verify / canary run / cut) shell out to `<interpreter> -m
+# release_core` (_SELF_CLI). The dev shim only put the lib on the IN-PROCESS
+# sys.path, so a freshly-spawned child died "No module named release_core". The
+# shim now EXPORTS PYTHONPATH (lib first), so any child inherits it.
+
+@test "747: the shim exports PYTHONPATH (lib first) into a spawned child's env" {
+  # The venv-stub recorder logs the env of the child the shim spawns. The shim
+  # exports PYTHONPATH at module load (release#747), so the re-exec child must
+  # inherit it leading with the checkout lib — the exact thing a `-m
+  # release_core` fleet child needs to import the package.
+  _install_venv_stub
+  run "${NOCLICK[@]}" "$SHIM" --version
+  [ "$status" -eq 0 ]
+  grep -q "PYTHONPATH: [^:]*${LIB_REL}" "$REEXEC_LOG"
+}
+
+@test "747+749: the shim exports RELEASE_HOME=<checkout> into a spawned child's env" {
+  # The recorder also captures RELEASE_HOME: the shim defaults it to the checkout
+  # root (release#749) so init has a template source AND fleet children inherit a
+  # correct RELEASE_HOME instead of the wrong ~/release default.
+  _install_venv_stub
+  cat > "$RELEASE_CORE_HOME/venv/bin/python" <<'STUB'
+#!/usr/bin/env bash
+echo "RELEASE_HOME: ${RELEASE_HOME:-<unset>}" >> "$REEXEC_LOG"
+exit 0
+STUB
+  chmod +x "$RELEASE_CORE_HOME/venv/bin/python"
+  run env -u RELEASE_HOME "${NOCLICK[@]}" "$SHIM" --version
+  [ "$status" -eq 0 ]
+  # The checkout root is bin/.. — the recorded value must end with the repo dir,
+  # never <unset>.
+  local root
+  root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  grep -q "RELEASE_HOME: $root" "$REEXEC_LOG"
+}
+
+@test "747: a child python3 -m release_core fails WITHOUT the lib on PYTHONPATH (the bug)" {
+  # Proves the export is load-bearing: strip PYTHONPATH and the bare -m import
+  # fails exactly as the fleet verbs did before the fix.
+  run env -u PYTHONPATH python3 -S -m release_core --version
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"No module named release_core"* ]]
+}
+
+# ── release#749 — init from the dev shim with empty RELEASE_HOME ──────────────
+# The in-checkout release_core has no _bundled_templates (wheel-only), so a
+# bundle-less init died "no bundled templates and $RELEASE_HOME='' is not a git
+# clone". The shim now defaults RELEASE_HOME to the checkout root (a git clone
+# WITH templates/), so init's GitSource has a source to install from. The
+# DEFAULT is asserted hermetically above (test "747+749 …" — the recorder reads
+# the exported RELEASE_HOME). Below: the setdefault SEMANTIC (explicit wins),
+# also via the recorder — both kept env-level so this dedicated suite stays
+# fully offline (bats-only, no click / yq), matching the file header.
+
+@test "749: an explicit RELEASE_HOME is NOT overridden by the shim default (setdefault)" {
+  # The shim uses os.environ.setdefault, so a caller-supplied RELEASE_HOME must
+  # survive into the spawned child unchanged — never replaced by the checkout
+  # root. The recorder reads what the child actually inherited.
+  _install_venv_stub
+  cat > "$RELEASE_CORE_HOME/venv/bin/python" <<'STUB'
+#!/usr/bin/env bash
+echo "RELEASE_HOME: ${RELEASE_HOME:-<unset>}" >> "$REEXEC_LOG"
+exit 0
+STUB
+  chmod +x "$RELEASE_CORE_HOME/venv/bin/python"
+  local explicit="$WORK/explicit-home"
+  run env RELEASE_HOME="$explicit" "${NOCLICK[@]}" "$SHIM" --version
+  [ "$status" -eq 0 ]
+  grep -q "RELEASE_HOME: $explicit\$" "$REEXEC_LOG"
+}
