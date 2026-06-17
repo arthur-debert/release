@@ -1,0 +1,1 @@
+- denoise fixture suite + SKILL.md output-dir fix (#740)

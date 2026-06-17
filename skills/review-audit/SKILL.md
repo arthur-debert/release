@@ -68,13 +68,16 @@ repo's checkout (auto-detected). Pick an output dir once and pass the same
 ### Mechanical tier (cheap default)
 
 ```sh
-cd skills/review-audit/scripts    # scripts live here, relative to the repo root
-DIR=analysis/reviews              # or any abs path; reused below
+# Run from the repo root. DIR must be ABSOLUTE: stage 5 (the release Workflow)
+# requires an absolute `dir`, so anchor it here and reuse the same value for
+# every stage — never a path relative to scripts/.
+SCRIPTS=skills/review-audit/scripts
+DIR="$PWD/analysis/reviews"        # absolute; or any other abs path
 
-python3 extract.py  --repo OWNER/NAME --dir "$DIR"   # 1: pull + denoise (slow, resumable)
-python3 enrich.py   --repo OWNER/NAME --dir "$DIR"   # 2: resolution flags
-python3 finalize.py --dir "$DIR"                     # 3: diff_hunks
-python3 summarize.py --dir "$DIR"                    # 4: headline metrics  <-- read this
+python3 "$SCRIPTS/extract.py"   --repo OWNER/NAME --dir "$DIR"   # 1: pull + denoise (slow, resumable)
+python3 "$SCRIPTS/enrich.py"    --repo OWNER/NAME --dir "$DIR"   # 2: resolution flags
+python3 "$SCRIPTS/finalize.py"  --dir "$DIR"                     # 3: diff_hunks
+python3 "$SCRIPTS/summarize.py" --dir "$DIR"                     # 4: headline metrics  <-- read this
 ```
 
 Checkpoint after stage 4: the latency/volume/convergence tables alone often
@@ -90,10 +93,11 @@ list is derived from the slim files (no hardcoded list):
 ```sh
 # 5: judge — one agent per ~4 reviewed PRs, writes verdicts/pr-*.json
 #    args: { dir: '<abs DIR>', reviewers: ['copilot','gemini','coderabbit'], batch: 4 }
+#    pass the SAME absolute $DIR from the mechanical tier above.
 #    (run via the release Workflow runner; see METHODOLOGY.md for the invocation)
 
-python3 aggregate.py --dir "$DIR"   # 6: synthesis tables + summary.json
-python3 converge.py  --repo OWNER/NAME --dir "$DIR"   # 7: re-request convergence
+python3 "$SCRIPTS/aggregate.py" --dir "$DIR"   # 6: synthesis tables + summary.json
+python3 "$SCRIPTS/converge.py"  --repo OWNER/NAME --dir "$DIR"   # 7: re-request convergence
 ```
 
 `--sample N` stratified by era is the lever for very large repos (full tier is
