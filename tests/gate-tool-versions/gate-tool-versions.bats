@@ -19,7 +19,8 @@ ENV_SETUP="$ROOT/env/setup.sh"
 
 # Every pinned var the shared file MUST set.
 PINS="RUFF_VERSION ACTIONLINT_VERSION YAMLLINT_VERSION LEFTHOOK_VERSION \
-PRETTIER_VERSION MARKDOWNLINT_CLI_VERSION SHELLCHECK_VERSION SHELLCHECK_PY_VERSION"
+PRETTIER_VERSION MARKDOWNLINT_CLI_VERSION SHELLCHECK_VERSION SHELLCHECK_PY_VERSION \
+YQ_VERSION"
 
 @test "sourcing gate-tool-versions.sh sets every pin to a dotted version" {
   for var in $PINS; do
@@ -33,13 +34,13 @@ PRETTIER_VERSION MARKDOWNLINT_CLI_VERSION SHELLCHECK_VERSION SHELLCHECK_PY_VERSI
   run env \
     RUFF_VERSION=9.9.9 ACTIONLINT_VERSION=8.8.8 YAMLLINT_VERSION=7.7.7 \
     LEFTHOOK_VERSION=6.6.6 PRETTIER_VERSION=5.5.5 MARKDOWNLINT_CLI_VERSION=4.4.4 \
-    SHELLCHECK_VERSION=3.3.3 SHELLCHECK_PY_VERSION=2.2.2 \
-    bash -c ". '$VERSIONS'; printf '%s|%s|%s|%s|%s|%s|%s|%s' \
+    SHELLCHECK_VERSION=3.3.3 SHELLCHECK_PY_VERSION=2.2.2 YQ_VERSION=1.1.1 \
+    bash -c ". '$VERSIONS'; printf '%s|%s|%s|%s|%s|%s|%s|%s|%s' \
       \"\$RUFF_VERSION\" \"\$ACTIONLINT_VERSION\" \"\$YAMLLINT_VERSION\" \
       \"\$LEFTHOOK_VERSION\" \"\$PRETTIER_VERSION\" \"\$MARKDOWNLINT_CLI_VERSION\" \
-      \"\$SHELLCHECK_VERSION\" \"\$SHELLCHECK_PY_VERSION\""
+      \"\$SHELLCHECK_VERSION\" \"\$SHELLCHECK_PY_VERSION\" \"\$YQ_VERSION\""
   [ "$status" -eq 0 ]
-  [ "$output" = "9.9.9|8.8.8|7.7.7|6.6.6|5.5.5|4.4.4|3.3.3|2.2.2" ]
+  [ "$output" = "9.9.9|8.8.8|7.7.7|6.6.6|5.5.5|4.4.4|3.3.3|2.2.2|1.1.1" ]
 }
 
 @test "both provisioners source the shared file (no independent re-pin)" {
@@ -48,7 +49,7 @@ PRETTIER_VERSION MARKDOWNLINT_CLI_VERSION SHELLCHECK_VERSION SHELLCHECK_PY_VERSI
   # provision-gate-toolset.sh must NOT carry its own literal pin for ANY tool —
   # match a top-of-line assignment with double, single, or no quotes around a
   # version digit.
-  run grep -E "^(RUFF|ACTIONLINT|YAMLLINT|LEFTHOOK|PRETTIER|MARKDOWNLINT_CLI|SHELLCHECK|SHELLCHECK_PY)_VERSION=['\"]?[0-9]" "$PROVISION"
+  run grep -E "^(RUFF|ACTIONLINT|YAMLLINT|LEFTHOOK|PRETTIER|MARKDOWNLINT_CLI|SHELLCHECK|SHELLCHECK_PY|YQ)_VERSION=['\"]?[0-9]" "$PROVISION"
   [ "$status" -ne 0 ]
 }
 

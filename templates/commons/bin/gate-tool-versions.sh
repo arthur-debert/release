@@ -39,6 +39,18 @@ MARKDOWNLINT_CLI_VERSION="${MARKDOWNLINT_CLI_VERSION:-0.48.0}"
 # version-match check); SHELLCHECK_PY_VERSION is the pip package that delivers it.
 SHELLCHECK_VERSION="${SHELLCHECK_VERSION:-0.11.0}"
 SHELLCHECK_PY_VERSION="${SHELLCHECK_PY_VERSION:-0.11.0.1}"
+# yq (mikefarah/Go) — release_core.yamlio's YAML reader (`yq -o=json`) AND the
+# `yq eval-all` lefthook-merge seam that `release-core init` runs. It is as
+# load-bearing a gate dependency as the rest, but until release#755 it was the
+# one UNPINNED + UNPROVISIONED member: GH runners and brew happened to ship
+# mikefarah, so no provisioner installed it — until a cloud image's kislyuk
+# python-yq (a jq wrapper with no `-o=json`) squatted /usr/bin/yq and hard-failed
+# every gate read + `init`. Pin it and provision it like actionlint (a downloaded
+# GH-release binary). The FIRST dotted token of `yq --version` is 4.x for
+# mikefarah / 3.x for the python stub, so gate_version_matches reconciles a stub
+# (or a wrong mikefarah version) to this pin. Numeric here; the download URL tag
+# prepends `v`.
+YQ_VERSION="${YQ_VERSION:-4.44.3}"
 
 # gate_version_matches <tool> <wanted-version>
 # True (exit 0) iff <tool> is on PATH AND its reported version equals

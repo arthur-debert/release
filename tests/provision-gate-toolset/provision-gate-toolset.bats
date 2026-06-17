@@ -26,7 +26,10 @@ setup() {
   # to the script's checks — without this, "clean machine" assertions pass
   # locally but fail in CI. grep/head are what gate_version_matches uses to
   # extract a present tool's reported version. The test's OWN PATH stays normal.
-  for u in id bash grep head; do ln -sf "$(command -v "$u")" "realbin/$u"; done
+  # mktemp/rm/chmod/mv back the yq install (download to a temp file, install only
+  # if non-empty); under the empty-output curl stub the temp stays empty so the
+  # chmod/mv never fire, but the utils must still resolve on the isolated PATH.
+  for u in id bash grep head mktemp rm chmod mv uname; do ln -sf "$(command -v "$u")" "realbin/$u"; done
 
   # Logging stubs for the package managers + curl. Each records its argv.
   for tool in npm pip curl; do
@@ -116,11 +119,27 @@ run_script() {
   _present_at yamllint 1.38.0
   _present_at shellcheck 0.11.0
   _present_at actionlint 1.7.7
+  _present_at yq 4.44.3
   run_script
   [ "$status" -eq 0 ]
   ! grep -q '^npm' "$LOG"
   ! grep -q '^pip' "$LOG"
   ! grep -q 'curl' "$LOG"
+}
+
+@test "yq: pinned mikefarah binary downloaded to /usr/local/bin (reconciled)" {
+  # No yq present (and the bare exit-0 default stub reports no version) → miss →
+  # download at the pin. The OS/arch-resolved release asset URL is what's logged.
+  run_script
+  [ "$status" -eq 0 ]
+  grep -qE 'curl .*github.com/mikefarah/yq/releases/download/v4\.44\.3/yq_(linux|darwin)_(amd64|arm64)' "$LOG"
+}
+
+@test "yq: drifted python-yq stub (3.x) is reconciled to the mikefarah pin" {
+  _present_at yq 3.1.0   # kislyuk python-yq squatting the PATH
+  run_script
+  [ "$status" -eq 0 ]
+  grep -qE 'github.com/mikefarah/yq/releases/download/v4\.44\.3/' "$LOG"
 }
 
 # --------------------------------------------------------------------------
@@ -183,6 +202,15 @@ run_script() {
 @test "non-root + no sudo but actionlint already at pin: still succeeds" {
   rm -f stub/sudo
   _present_at actionlint 1.7.7
+  _present_at yq 4.44.3      # yq also needs /usr/local/bin → same escalation guard
   run_script
-  [ "$status" -eq 0 ]        # no actionlint install needed → guard not triggered
+  [ "$status" -eq 0 ]        # no actionlint/yq install needed → guard not triggered
+}
+
+@test "non-root + no sudo + yq needed: errors up front (same as actionlint)" {
+  rm -f stub/sudo
+  _present_at actionlint 1.7.7   # actionlint satisfied so the guard fires for yq
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-root without sudo"* ]]
 }
