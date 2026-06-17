@@ -25,11 +25,15 @@ assert_denoise() {
   local raw cleaned raw_len clean_len
   raw_len=$(wc -c <"$fixture")
   cleaned=$($CLEAN "$fixture")
-  clean_len=${#cleaned}
+  # Measure cleaned in BYTES too (wc -c), not characters (${#cleaned}): the
+  # fixtures carry a multibyte marker (✅), so a char count would disagree with
+  # raw_len's byte count and skew the ratio by locale. Compare via
+  # multiplication to avoid integer-division truncation.
+  clean_len=$(printf '%s' "$cleaned" | wc -c)
 
   # (a) shrinks substantially
   [ "$clean_len" -gt 0 ]
-  [ "$((raw_len / clean_len))" -ge "$ratio" ]
+  [ "$raw_len" -ge "$((ratio * clean_len))" ]
   # (b) outcome marker survives — the whole point
   [[ "$cleaned" == *"$marker"* ]]
   # (c) boilerplate is actually gone
