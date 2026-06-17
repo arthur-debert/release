@@ -36,6 +36,11 @@ state refuses with exit 1 and prints the engine's status + next action — an
 agent cannot hand off early. Flipping an already-ready READY PR is a no-op
 success.
 
+Note: in the normal loop you rarely call this directly — `release-core pr
+wait` performs the SAME guarded flip itself the moment the engine reaches
+READY. This verb is the explicit entry point for when you land on READY
+without a wait (and for --undo).
+
 When the cycle-cap circuit breaker has fired on an OTHERWISE-ready PR (0 open
 threads + CI green + a CLEAN merge, or a transient UNSTABLE while the rollup is
 green), the engine reports BLOCKED and routes you

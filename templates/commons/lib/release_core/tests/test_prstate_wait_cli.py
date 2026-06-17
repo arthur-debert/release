@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pytest
 from release_core.prstate.cli import wait
+from release_core.prstate.cli.task_status import emit
 from release_core.prstate.ghapi import GhError
 from release_core.prstate.state import TaskState, TaskStatus
 
@@ -60,6 +61,7 @@ class _Harness:
         self.statuses = list(statuses)
         self.now = 0.0
         self.sleeps: list[float] = []
+        self.flipped: list[int] = []
 
     def snapshot(self, pr: int) -> TaskStatus:
         item = self.statuses.pop(0) if len(self.statuses) > 1 else self.statuses[0]
@@ -74,7 +76,17 @@ class _Harness:
     def clock(self) -> float:
         return self.now
 
+    def flip(self, pr: int) -> int:
+        # Hermetic stand-in for the real draft->ready flip (no gh): record the
+        # call and emit the READY rendering, so the loop-mechanics tests that
+        # use READY as their terminal still see the engine's READY output. The
+        # real flip wiring is covered by the dedicated flip tests below.
+        self.flipped.append(pr)
+        emit(READY)
+        return 0
+
     def run(self, **kwargs) -> int:
+        kwargs.setdefault("flip", self.flip)
         return wait.wait_for_action(
             5,
             registry=REQUIRED,
@@ -135,9 +147,64 @@ def test_injected_required_set_flows_to_the_engine_evaluation(monkeypatch):
         return READY  # READY exits immediately
 
     monkeypatch.setattr(wait, "_snapshot", fake_snapshot)
-    rc = wait.wait_for_action(5, registry=REQUIRED, sleep=lambda s: None, clock=lambda: 0.0)
+    rc = wait.wait_for_action(
+        5, registry=REQUIRED, sleep=lambda s: None, clock=lambda: 0.0, flip=lambda pr: 0
+    )
     assert rc == 0
     assert seen["required"] is REQUIRED
+
+
+# --- READY auto-flips (the wait performs the guarded draft->ready flip) ---------
+
+
+def test_ready_triggers_the_flip(capsys):
+    # The whole point: when the engine reaches READY, the wait flips the PR
+    # itself rather than handing the flip back as a manual step.
+    h = _Harness(READY)
+    assert h.run() == 0
+    assert h.flipped == [5]
+
+
+def test_ready_after_waiting_also_flips(capsys):
+    # READY reached only after polling through waiting states still flips.
+    h = _Harness(PENDING_WAITING, VALIDATING, READY)
+    assert h.run() == 0
+    assert h.flipped == [5]
+
+
+def test_non_ready_agent_action_does_not_flip(capsys):
+    # ADDRESSING (review landed with comments) is handed back, NOT flipped.
+    h = _Harness(_status(TaskState.ADDRESSING))
+    assert h.run() == 0
+    assert h.flipped == []
+    assert "ADDRESSING" in capsys.readouterr().out
+
+
+def test_flip_failure_propagates(capsys):
+    # A gh failure during the flip surfaces (main maps GhError -> exit 1); it is
+    # not swallowed into a false success.
+    def boom(pr):
+        raise GhError("gh pr ready failed")
+
+    h = _Harness(READY)
+    with pytest.raises(GhError, match="gh pr ready failed"):
+        h.run(flip=boom)
+
+
+def test_default_flip_is_the_guarded_ready_flip(monkeypatch):
+    # With no flip injected, the default wiring is ready._flip (the guarded
+    # draft->ready flip), called with the resolved PR number.
+    calls: list[int] = []
+    monkeypatch.setattr(wait.ready, "_flip", lambda pr: calls.append(pr) or 0)
+    rc = wait.wait_for_action(
+        5,
+        registry=REQUIRED,
+        snapshot=lambda pr: READY,
+        sleep=lambda s: None,
+        clock=lambda: 0.0,
+    )
+    assert rc == 0
+    assert calls == [5]
 
 
 # --- the waiting loop ----------------------------------------------------------
@@ -359,10 +426,12 @@ def test_wait_catches_state_landing_during_final_sleep(capsys):
             clock=h.clock,
             poll=30.0,
             timeout=100.0,
+            flip=h.flip,
         )
         == 0
     )
     assert "READY" in capsys.readouterr().out
+    assert h.flipped == [5]
 
 
 # --- main(): argv + resolution + errors -----------------------------------------

@@ -44,3 +44,6 @@ templates/commons/lib/release_core/release_core/_bundled_templates/
 # explicitly too.
 .release/
 .claude/worktrees
+
+# local agent task DB
+.todos.db
