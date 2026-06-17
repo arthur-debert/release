@@ -156,8 +156,15 @@ if ! gate_version_matches yq "$YQ_VERSION" && command -v curl >/dev/null 2>&1; t
   case "$(uname -m)" in x86_64|amd64) _yq_arch=amd64 ;; aarch64|arm64) _yq_arch=arm64 ;; *) _yq_arch="" ;; esac
   if [ -n "${_yq_os}" ] && [ -n "${_yq_arch}" ]; then
     mkdir -p "${HOME}/.local/bin"
-    curl -sSfL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_${_yq_os}_${_yq_arch}" \
-      -o "${HOME}/.local/bin/yq" >/dev/null 2>&1 && chmod +x "${HOME}/.local/bin/yq" || true
+    # Download to a temp file (explicit template — BSD/macOS mktemp rejects a bare
+    # call) and install only if NON-EMPTY, so a failed download never leaves a
+    # truncated yq on PATH. Best-effort: a failure warns below, never aborts.
+    _yq_tmp="$(mktemp "${TMPDIR:-/tmp}/yq.XXXXXXXX")"
+    if curl -sSfL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_${_yq_os}_${_yq_arch}" \
+         -o "${_yq_tmp}" >/dev/null 2>&1 && [ -s "${_yq_tmp}" ]; then
+      chmod +x "${_yq_tmp}" && mv "${_yq_tmp}" "${HOME}/.local/bin/yq"
+    fi
+    rm -f "${_yq_tmp}"
   fi
 fi
 gate_version_matches yq "$YQ_VERSION" || _warn_unarmed "yq==${YQ_VERSION}"

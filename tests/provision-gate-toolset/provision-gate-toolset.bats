@@ -16,9 +16,13 @@ SCRIPT="$BATS_TEST_DIRNAME/../../bin-internal/provision-gate-toolset.sh"
 setup() {
   WORK="$(mktemp -d)"
   cd "$WORK"
-  mkdir -p stub realbin
+  mkdir -p stub realbin localbin sysbin
   export LOG="$WORK/calls.log"
   : > "$LOG"
+  # localbin = the yq install dir (YQ_INSTALL_DIR), models /usr/local/bin.
+  # sysbin   = LAST on PATH, models /usr/bin where a python-yq stub squats — so an
+  # install into localbin genuinely SHADOWS it, exactly as /usr/local/bin precedes
+  # /usr/bin in production. Neither ever touches the real system path.
 
   # realbin/: symlinks to ONLY the genuine utilities the script + the shared
   # gate_version_matches helper invoke. The script runs under PATH=stub:realbin
@@ -31,16 +35,33 @@ setup() {
   # chmod/mv never fire, but the utils must still resolve on the isolated PATH.
   for u in id bash grep head mktemp rm chmod mv uname; do ln -sf "$(command -v "$u")" "realbin/$u"; done
 
-  # Logging stubs for the package managers + curl. Each records its argv.
-  for tool in npm pip curl; do
+  # Logging stubs for the package managers. Each records its argv.
+  for tool in npm pip; do
     {
       echo '#!/usr/bin/env bash'
       echo "printf '${tool} %s\\n' \"\$*\" >> \"\$LOG\""
-      # curl must emit nothing so the `| bash` consumer no-ops cleanly.
       echo 'exit 0'
     } > "stub/$tool"
     chmod +x "stub/$tool"
   done
+
+  # curl stub: logs argv, and for the yq release asset (a `-o <file>` download)
+  # writes a working fake mikefarah yq into the target so the install path
+  # (download → chmod → mv → re-check) completes hermetically. For the actionlint
+  # downloader (`curl | bash`, no -o) it emits nothing so the `| bash` no-ops.
+  # YQ_DL_EMPTY=1 simulates a failed/empty download (writes nothing) so the
+  # hard-gate fail-fast can be exercised.
+  cat > stub/curl <<'STUB'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >> "$LOG"
+_out=""; _prev=""
+for a in "$@"; do [ "$_prev" = "-o" ] && _out="$a"; _prev="$a"; done
+if [ -n "$_out" ] && printf '%s\n' "$*" | grep -q 'mikefarah/yq' && [ -z "${YQ_DL_EMPTY:-}" ]; then
+  printf '#!/usr/bin/env bash\necho "yq (https://github.com/mikefarah/yq/) version v%s"\n' "${YQ_FAKE_VERSION:-4.44.3}" > "$_out"
+fi
+exit 0
+STUB
+  chmod +x stub/curl
 
   # Transparent sudo: log + exec the rest, so the wrapped command still runs.
   cat > stub/sudo <<'STUB'
@@ -51,8 +72,10 @@ STUB
   chmod +x stub/sudo
 }
 
-# The isolated PATH the SCRIPT runs under (stubs + the curated real utils only).
-ISO_PATH() { printf '%s' "$WORK/stub:$WORK/realbin"; }
+# The isolated PATH the SCRIPT runs under (stubs + curated real utils + the yq
+# install dir + the squatter dir last). localbin precedes sysbin so a freshly
+# installed yq shadows a python-yq in sysbin, mirroring /usr/local/bin > /usr/bin.
+ISO_PATH() { printf '%s' "$WORK/stub:$WORK/realbin:$WORK/localbin:$WORK/sysbin"; }
 
 teardown() {
   cd /
@@ -70,7 +93,8 @@ _present_at() {  # <toolname> <version-to-report>
 # visible (env -i drops the inherited PATH that would otherwise leak runner tools).
 run_script() {
   run env -i \
-    PATH="$(ISO_PATH)" LOG="$LOG" \
+    PATH="$(ISO_PATH)" LOG="$LOG" YQ_INSTALL_DIR="$WORK/localbin" \
+    YQ_DL_EMPTY="${YQ_DL_EMPTY:-}" \
     RUFF_VERSION="${RUFF_VERSION:-}" ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-}" \
     bash "$SCRIPT"
 }
@@ -136,10 +160,23 @@ run_script() {
 }
 
 @test "yq: drifted python-yq stub (3.x) is reconciled to the mikefarah pin" {
-  _present_at yq 3.1.0   # kislyuk python-yq squatting the PATH
+  # kislyuk python-yq squatting /usr/bin (sysbin = last on PATH). The pinned
+  # mikefarah install into localbin (before sysbin) must shadow it.
+  printf '#!/usr/bin/env bash\necho "yq 3.1.0"\n' > "$WORK/sysbin/yq"; chmod +x "$WORK/sysbin/yq"
   run_script
   [ "$status" -eq 0 ]
   grep -qE 'github.com/mikefarah/yq/releases/download/v4\.44\.3/' "$LOG"
+  # post-install the install-dir yq reports mikefarah at the pin → re-check passes
+  "$WORK/localbin/yq" --version | grep -q 'mikefarah'
+}
+
+@test "yq: empty/failed download fails fast (hard gate, not silent success)" {
+  # curl logs but writes nothing → temp stays empty → no install → the post-install
+  # re-check finds yq still missing and the provisioner exits non-zero.
+  YQ_DL_EMPTY=1 run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"still not at 4.44.3"* ]]
+  [ ! -e "$WORK/localbin/yq" ]
 }
 
 # --------------------------------------------------------------------------
