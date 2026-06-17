@@ -1,23 +1,28 @@
 name: review-audit tests
 
-# Drift gate for the review-audit skill's bot-markdown de-noiser
-# (skills/review-audit/scripts/audit_config.py:clean()). The denoise regexes
-# are tuned to CodeRabbit / Copilot / Gemini output; when a bot changes its
-# format the regexes silently rot. The BATS fixtures assert clean() keeps
-# shrinking the blobs AND retains the `Addressed in <sha>` outcome markers, so
-# the rot surfaces here instead of in a bad audit report. Pure stdlib Python +
-# bats — no release_core, no network.
+# Test gate for the review-audit skill's pipeline scripts
+# (skills/review-audit/scripts/). Three guards, all pure stdlib + bats, no
+# release_core and no network:
+#   * the bot-markdown de-noiser DRIFT gate (audit_config.py:clean()) — the
+#     denoise regexes are tuned to CodeRabbit / Copilot / Gemini output, so when
+#     a bot changes its format the BATS fixtures catch the rot here instead of
+#     in a bad audit report (and assert the `Addressed in <sha>` outcome markers
+#     survive);
+#   * the pure-helper + extract integration suite (stratified_sample, the
+#     issue-comment-only "first feedback" clock in metrics_row);
+#   * a syntax check on every pipeline script (Python + the stage-5 Workflow JS,
+#     whose runtime is external so it can't otherwise be exercised in CI).
 
 on:
   push:
     branches: ["**"]
     paths:
-      - "skills/review-audit/scripts/audit_config.py"
+      - "skills/review-audit/scripts/**"
       - "tests/review-audit/**"
       - ".github/workflows/review-audit-tests.yml"
   pull_request:
     paths:
-      - "skills/review-audit/scripts/audit_config.py"
+      - "skills/review-audit/scripts/**"
       - "tests/review-audit/**"
       - ".github/workflows/review-audit-tests.yml"
 
@@ -31,7 +36,11 @@ jobs:
       - uses: actions/checkout@v6
       - name: Install bats
         run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Python syntax check (all pipeline scripts)
+        run: python3 -m py_compile skills/review-audit/scripts/*.py
+      - name: Stage-5 Workflow JS syntax check
+        run: node --check skills/review-audit/scripts/stage2.workflow.js
       - name: audit_config inline selftest
         run: python3 skills/review-audit/scripts/audit_config.py
-      - name: Denoise fixture suite
+      - name: Denoise + pipeline fixture suites
         run: bats tests/review-audit/

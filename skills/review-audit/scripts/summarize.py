@@ -58,7 +58,7 @@ def main():
 
     print("=" * 78)
     print("LATENCY BY ERA (minutes)   n | ttm med | ttm p90 | "
-          "ready->merge med | 1st-review-wait med")
+          "ready->merge med | 1st-feedback-wait med")
     print("=" * 78)
     for k in sorted(groups):
         g = groups[k]
@@ -66,7 +66,7 @@ def main():
               f"ttm {str(f(med([x['ttm_min'] for x in g]))):>7} | "
               f"p90 {str(f(pctile([x['ttm_min'] for x in g], .9))):>7} | "
               f"r->m {str(f(med([x['ready_to_merge_min'] for x in g]))):>7} | "
-              f"wait {str(f(med([x['first_review_wait_min'] for x in g]))):>6}")
+              f"wait {str(f(med([x['first_feedback_wait_min'] for x in g]))):>6}")
 
     print("\n" + "=" * 78)
     print("PER-REVIEWER VOLUME & ACTION RATE")
@@ -121,12 +121,12 @@ def main():
                   f"multi-round={sum(1 for x in rs if x > 1)}")
 
     print("\n" + "=" * 78)
-    print("CHURN: commits landing AFTER first review (review-induced rework)")
+    print("CHURN: commits landing AFTER first feedback (review-induced rework)")
     print("=" * 78)
     for k in sorted(groups):
         g = groups[k]
-        vals = [x["commits_after_first_review"] for x in g
-                if x.get("commits_after_first_review") is not None]
+        vals = [x["commits_after_first_feedback"] for x in g
+                if x.get("commits_after_first_feedback") is not None]
         share = sum(1 for v in vals if v > 0) / len(vals) if vals else 0
         print(f"{k:18s} median-commits-after={f(med(vals))} "
               f"share-with-rework={share*100:.0f}%")

@@ -41,13 +41,21 @@ const BATCH =
 let reviewed = cfg.reviewed
 if (Array.isArray(args) && args.length) reviewed = args
 else if (typeof args === 'string' && args.trim().startsWith('[')) reviewed = JSON.parse(args)
-// LIMITATION (#740): `reviewed` (from cfg.reviewed) is trusted to be an array
-// here — a bare string would pass the `.length` truthiness check below and
-// then `.slice()` char-by-char into nonsense batches. Validating it's an
-// array of integers (fail fast otherwise) is part of the stage2 input-
-// hardening tracked in #740.
+// Input-hardening (#740): if `reviewed` was supplied at all, it MUST be an
+// array of integer PR numbers. A bare string would pass the `.length`
+// truthiness check below and then `.slice()` char-by-char into nonsense
+// batches; a non-integer would only blow up far downstream. Fail fast with a
+// clear message. (undefined/null = not supplied -> derive from slim/ below.)
+if (reviewed != null &&
+    (!Array.isArray(reviewed) || !reviewed.every(Number.isInteger))) {
+  throw new Error(
+    `review-audit: args.reviewed must be an array of integer PR numbers, ` +
+      `got ${JSON.stringify(reviewed)}`,
+  )
+}
+
+const slimDir = `${DIR}/slim`
 if (!reviewed || !reviewed.length) {
-  const slimDir = `${DIR}/slim`
   if (!fs.existsSync(slimDir)) {
     throw new Error(
       `review-audit: ${slimDir} not found — run the mechanical tier first ` +
@@ -60,12 +68,25 @@ if (!reviewed || !reviewed.length) {
     .filter(({ p }) => (JSON.parse(fs.readFileSync(p, 'utf8')).reviewers || []).length)
     .map(({ n }) => n)
     .sort((a, b) => a - b)
-  // LIMITATION (#740): a slim file's reviewers[] may name a bot that isn't in
-  // the configured REVIEWERS enum (e.g. one added via the extract --config
-  // overlay). That bot's findings then hit a confusing schema-enum rejection
-  // deep in the judge instead of failing fast here. Cross-checking the slim
-  // reviewers[] against REVIEWERS up front is part of the stage2 input-
-  // hardening tracked in #740.
+}
+
+// Input-hardening (#740): every reviewer named in a slim file we're about to
+// judge must be in the configured REVIEWERS enum — otherwise its findings hit a
+// confusing schema-enum rejection deep inside the judge agent. Cross-check up
+// front (covers BOTH the derived and the operator-supplied list) and fail fast
+// naming the offending bot, PR, and the fix.
+for (const n of reviewed) {
+  const p = `${slimDir}/pr-${n}.json`
+  if (!fs.existsSync(p)) continue // a missing slim file surfaces in the judge prompt
+  const revs = JSON.parse(fs.readFileSync(p, 'utf8')).reviewers || []
+  const unknown = revs.filter((r) => !REVIEWERS.includes(r))
+  if (unknown.length) {
+    throw new Error(
+      `review-audit: PR #${n} names reviewer(s) [${unknown}] absent from the ` +
+        `configured REVIEWERS enum [${REVIEWERS}]. Add them via args.reviewers ` +
+        `so the schema accepts their findings.`,
+    )
+  }
 }
 
 const batches = []
@@ -84,19 +105,18 @@ the comment is about, comments[] = the conversation, plus signals you MUST use:
  - code_changed_after: a commit landed after the comment.
  - bot_followup_rounds: rounds in which the SAME bot re-commented on this thread.
  - n_replies.
+Also issue_comments[] (reviewer, ts, body): issue-LEVEL bot comments, not tied
+to a line. Some bots leave feedback ONLY here (e.g. a summary-only reviewer)
+with no top-level review or inline thread — read these too and judge their
+points exactly like review-body / inline findings. A reviewer that posts only
+issue comments must NOT be scored as silent.
 CodeRabbit puts most signal in review BODIES (reviews[].body) and self-marks
 "Addressed in <sha>" — treat that as actioned=changed. Copilot puts findings both
 in review bodies and inline threads. Gemini is mostly inline.`
-// LIMITATION (#740): the FIELD_GUIDE above describes reviews[] and threads[]
-// but NOT issue_comments[] (which the slim files do carry — extract.py's
-// slim_issue). A reviewer whose feedback lands only as issue-level comments
-// is therefore invisible to the judge. Teaching the guide + rubric to read
-// issue_comments[] is part of the issue-comment-only-reviewers enhancement
-// tracked in #740.
 
 const RUBRIC = `
-For EVERY substantive bot comment (inline thread OR a distinct point in a review body)
-emit a finding:
+For EVERY substantive bot comment (inline thread, a distinct point in a review body,
+OR an issue-level comment) emit a finding:
  - category: correctness|bug|security|perf|maintainability|test|docs|style|nit|noise|false_positive
  - severity: blocker|important|minor|nit|noise
  - true_positive: yes|no|unclear  (is the claim technically correct, judging from diff_hunk + context?)

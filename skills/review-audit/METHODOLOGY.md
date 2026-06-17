@@ -32,7 +32,7 @@ or boundaries, so the same code works for any repo's history.
                about) from the archive, so judges check claims against real
                code instead of guessing.
 4 summarize.py Mechanical headline metrics, ZERO agents: latency by era (TTM,
-               ready->merge, first-review wait), per-reviewer volume +
+               ready->merge, first-feedback wait), per-reviewer volume +
                action-rate, the rounds-vs-PR-number curve that dates
                re-request onset, review-induced churn. The cheap tier.
 5 stage2       The LLM-judging tier as a `release` Workflow fan-out (~4
@@ -114,10 +114,11 @@ their login handles and markdown output formats over time, so:
   }
   ```
 
-- **Add a fixture test** (next slice, see below) that runs `clean()` over a
-  captured CodeRabbit/Copilot comment and asserts the shrink + marker retention,
-  so the gate flags the day denoise stops matching instead of you discovering it
-  in a bad report.
+- **The fixture test exists** (`tests/review-audit/denoise.bats`): it runs
+  `clean()` over captured CodeRabbit/Copilot/Gemini comments and asserts the
+  shrink + outcome-marker retention, so the gate flags the day denoise stops
+  matching instead of you discovering it in a bad report. Add a fixture there
+  when you onboard a new bot.
 
 ## Scope — what landed vs deferred
 
@@ -125,10 +126,16 @@ This skill is the **repo-agnostic mechanical pipeline + the skill scaffold +
 this methodology**, with the LLM-judge tier (`stage2.workflow.js`)
 parameterized and wired but exercised only via the `release` Workflow runtime.
 
-Deferred to follow-up slices (tracked in #740):
+Landed in follow-up slices (#740): the denoise fixture suite
+(`tests/review-audit/denoise.bats`), `--sample N` stratified sampling in
+`extract.py`, issue-level bot comments folded into the mechanical "first
+feedback" clock and the judge's field guide, and `stage2.workflow.js` input
+validation.
 
-- A **denoise fixture test** under `tests/` (captured bot comments → assert
-  shrink + outcome-marker retention) so the gate catches config rot.
-- `--sample N` stratified-by-era sampling in `extract.py` for very large repos.
+Still deferred (tracked in #740):
+
+- **Exercise stage 5 end to end** against a small captured `slim/` corpus under
+  the `release` Workflow runtime (external to this repo, so not a plain CI
+  check) to confirm the parameterized judge produces schema-valid `verdicts/`.
 - A thin `release-core` entrypoint that runs the mechanical tier end to end
   (today the stages are invoked directly, which is fine for an audit run).
