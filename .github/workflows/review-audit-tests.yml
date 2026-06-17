@@ -1,0 +1,37 @@
+name: review-audit tests
+
+# Drift gate for the review-audit skill's bot-markdown de-noiser
+# (skills/review-audit/scripts/audit_config.py:clean()). The denoise regexes
+# are tuned to CodeRabbit / Copilot / Gemini output; when a bot changes its
+# format the regexes silently rot. The BATS fixtures assert clean() keeps
+# shrinking the blobs AND retains the `Addressed in <sha>` outcome markers, so
+# the rot surfaces here instead of in a bad audit report. Pure stdlib Python +
+# bats — no release_core, no network.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "skills/review-audit/scripts/audit_config.py"
+      - "tests/review-audit/**"
+      - ".github/workflows/review-audit-tests.yml"
+  pull_request:
+    paths:
+      - "skills/review-audit/scripts/audit_config.py"
+      - "tests/review-audit/**"
+      - ".github/workflows/review-audit-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: audit_config inline selftest
+        run: python3 skills/review-audit/scripts/audit_config.py
+      - name: Denoise fixture suite
+        run: bats tests/review-audit/
