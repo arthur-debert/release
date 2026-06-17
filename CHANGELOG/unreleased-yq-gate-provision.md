@@ -1,0 +1,1 @@
+- Provision pinned mikefarah yq across all gate environments (#755)

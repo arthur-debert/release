@@ -91,6 +91,10 @@ Pre-installed by the env setup script — don't reinstall:
 - **General:** `gh` (CLI), `lefthook` (pre-commit hook runner; binary only,
   `lefthook install` is per-repo)
 - **Shell tests:** `bats`
+- **YAML:** `yq` (mikefarah/Go, pinned, in `/usr/local/bin` shadowing the
+  base image's python `yq` stub) — the gate's `release_core.yamlio` and
+  `release-core init` need mikefarah's `yq -o=json` / `yq eval-all`; the
+  kislyuk python stub has neither
 - **VS Code extensions:** `vsce` (`@vscode/vsce`), `ovsx`
 - **Nvim plugins:** `lua5.4`, `luarocks`, `busted`, `vusted`, `luacheck`,
   `nvim` ≥0.11 (binary; the apt package ships 0.9.5 which is too old for

@@ -87,4 +87,57 @@ if ! gate_version_matches actionlint "$ACTIONLINT_VERSION"; then
   fi
 fi
 
+# --- yq (mikefarah/Go): pinned GH-release binary → /usr/local/bin -------------
+# release_core.yamlio shells out to mikefarah's `yq -o=json` and `yq eval-all`;
+# a kislyuk python-yq (jq wrapper) on /usr/bin/yq has neither and hard-fails the
+# gate (release#755). No pip/apt package that matches the fleet, so — exactly like
+# actionlint — download the pinned binary to /usr/local/bin (precedes /usr/bin, so
+# it shadows any python stub). Reconcile to the pin: gate_version_matches compares
+# the first dotted token, 4.x (mikefarah) vs 3.x (stub). Download to a temp file
+# and only install once it is NON-EMPTY, so a failed/short download never leaves a
+# truncated binary on PATH. The gate is HARD — after the attempt, RE-CHECK and
+# exit non-zero if yq still is not at the pin, rather than silently succeeding with
+# a missing/wrong yq (release#412). YQ_INSTALL_DIR (default /usr/local/bin) is an
+# internal seam the tests point at a sandbox so the install never touches the real
+# system path.
+_yq_dir="${YQ_INSTALL_DIR:-/usr/local/bin}"
+if ! gate_version_matches yq "$YQ_VERSION"; then
+  if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+    log "ERROR: need to install yq ${YQ_VERSION} but running as non-root without sudo."
+    log "       Re-run as root (or with sudo available), or pre-install mikefarah yq at the pin."
+    exit 1
+  fi
+  command -v curl >/dev/null 2>&1 || { log "ERROR: curl not found — cannot download yq"; exit 1; }
+  case "$(uname -s)" in
+    Linux) _yq_os=linux ;;
+    Darwin) _yq_os=darwin ;;
+    *) log "ERROR: unsupported OS '$(uname -s)' for yq install"; exit 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) _yq_arch=amd64 ;;
+    aarch64|arm64) _yq_arch=arm64 ;;
+    *) log "ERROR: unsupported arch '$(uname -m)' for yq install"; exit 1 ;;
+  esac
+  _yq_url="https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_${_yq_os}_${_yq_arch}"
+  log "download yq ${YQ_VERSION} -> ${_yq_dir}"
+  # Explicit template — BSD/macOS `mktemp` rejects a bare (template-less) call.
+  _yq_tmp="$(mktemp "${TMPDIR:-/tmp}/yq.XXXXXXXX")"
+  if curl -sSfL "$_yq_url" -o "$_yq_tmp" && [ -s "$_yq_tmp" ]; then
+    chmod +x "$_yq_tmp"
+    # Ensure the install dir exists (a minimal image may lack /usr/local/bin) so
+    # the mv lands instead of failing into the generic "still not at" error.
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+      sudo mkdir -p "$_yq_dir" && sudo mv "$_yq_tmp" "${_yq_dir}/yq"
+    else
+      mkdir -p "$_yq_dir" && mv "$_yq_tmp" "${_yq_dir}/yq"
+    fi
+  fi
+  rm -f "$_yq_tmp"
+  # Hard gate: the download/install above is best-effort, so confirm the outcome.
+  gate_version_matches yq "$YQ_VERSION" || {
+    log "ERROR: yq is still not at ${YQ_VERSION} after the install attempt (download failed or empty)."
+    exit 1
+  }
+fi
+
 log "done."

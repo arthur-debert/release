@@ -82,6 +82,7 @@ _warn_unarmed() {
 : "${MARKDOWNLINT_CLI_VERSION:=0.48.0}"
 : "${SHELLCHECK_VERSION:=0.11.0}"
 : "${SHELLCHECK_PY_VERSION:=0.11.0.1}"
+: "${YQ_VERSION:=4.44.3}"
 command -v gate_version_matches >/dev/null 2>&1 || gate_version_matches() {
   command -v "$1" >/dev/null 2>&1 || return 1
   _gvm_have="$("$1" --version 2>/dev/null \
@@ -142,6 +143,31 @@ if ! gate_version_matches actionlint "$ACTIONLINT_VERSION" && command -v curl >/
     | bash -s -- "${ACTIONLINT_VERSION}" "${HOME}/.local/bin" >/dev/null || true
 fi
 gate_version_matches actionlint "$ACTIONLINT_VERSION" || _warn_unarmed "actionlint==${ACTIONLINT_VERSION}"
+
+# yq (mikefarah/Go): pinned GH-release binary → ~/.local/bin. release_core.yamlio
+# shells out to mikefarah's `yq -o=json` and `yq eval-all` (the gate reads + the
+# `release-core init` lefthook merge); a kislyuk python-yq (jq wrapper) squatting
+# /usr/bin/yq has neither and hard-fails the gate (release#755). Like actionlint,
+# install to ~/.local/bin (no sudo, first on PATH) so the pinned binary shadows
+# any python stub. mikefarah ships no installer script, so resolve OS/arch and
+# fetch the raw binary directly.
+if ! gate_version_matches yq "$YQ_VERSION" && command -v curl >/dev/null 2>&1; then
+  case "$(uname -s)" in Linux) _yq_os=linux ;; Darwin) _yq_os=darwin ;; *) _yq_os="" ;; esac
+  case "$(uname -m)" in x86_64|amd64) _yq_arch=amd64 ;; aarch64|arm64) _yq_arch=arm64 ;; *) _yq_arch="" ;; esac
+  if [ -n "${_yq_os}" ] && [ -n "${_yq_arch}" ]; then
+    mkdir -p "${HOME}/.local/bin"
+    # Download to a temp file (explicit template — BSD/macOS mktemp rejects a bare
+    # call) and install only if NON-EMPTY, so a failed download never leaves a
+    # truncated yq on PATH. Best-effort: a failure warns below, never aborts.
+    _yq_tmp="$(mktemp "${TMPDIR:-/tmp}/yq.XXXXXXXX")"
+    if curl -sSfL "https://github.com/mikefarah/yq/releases/download/v${YQ_VERSION}/yq_${_yq_os}_${_yq_arch}" \
+         -o "${_yq_tmp}" >/dev/null 2>&1 && [ -s "${_yq_tmp}" ]; then
+      chmod +x "${_yq_tmp}" && mv "${_yq_tmp}" "${HOME}/.local/bin/yq"
+    fi
+    rm -f "${_yq_tmp}"
+  fi
+fi
+gate_version_matches yq "$YQ_VERSION" || _warn_unarmed "yq==${YQ_VERSION}"
 
 # golangci-lint — the go-quality gate's linter. Only Go repos run that hook, so
 # gate the install on a root go.mod existing (we cd'd to REPO_ROOT above; the

@@ -16,9 +16,13 @@ SCRIPT="$BATS_TEST_DIRNAME/../../bin-internal/provision-gate-toolset.sh"
 setup() {
   WORK="$(mktemp -d)"
   cd "$WORK"
-  mkdir -p stub realbin
+  mkdir -p stub realbin localbin sysbin
   export LOG="$WORK/calls.log"
   : > "$LOG"
+  # localbin = the yq install dir (YQ_INSTALL_DIR), models /usr/local/bin.
+  # sysbin   = LAST on PATH, models /usr/bin where a python-yq stub squats — so an
+  # install into localbin genuinely SHADOWS it, exactly as /usr/local/bin precedes
+  # /usr/bin in production. Neither ever touches the real system path.
 
   # realbin/: symlinks to ONLY the genuine utilities the script + the shared
   # gate_version_matches helper invoke. The script runs under PATH=stub:realbin
@@ -26,18 +30,38 @@ setup() {
   # to the script's checks — without this, "clean machine" assertions pass
   # locally but fail in CI. grep/head are what gate_version_matches uses to
   # extract a present tool's reported version. The test's OWN PATH stays normal.
-  for u in id bash grep head; do ln -sf "$(command -v "$u")" "realbin/$u"; done
+  # mktemp/rm/chmod/mv back the yq install (download to a temp file, install only
+  # if non-empty); under the empty-output curl stub the temp stays empty so the
+  # chmod/mv never fire, but the utils must still resolve on the isolated PATH.
+  for u in id bash grep head mktemp rm chmod mv uname mkdir; do ln -sf "$(command -v "$u")" "realbin/$u"; done
 
-  # Logging stubs for the package managers + curl. Each records its argv.
-  for tool in npm pip curl; do
+  # Logging stubs for the package managers. Each records its argv.
+  for tool in npm pip; do
     {
       echo '#!/usr/bin/env bash'
       echo "printf '${tool} %s\\n' \"\$*\" >> \"\$LOG\""
-      # curl must emit nothing so the `| bash` consumer no-ops cleanly.
       echo 'exit 0'
     } > "stub/$tool"
     chmod +x "stub/$tool"
   done
+
+  # curl stub: logs argv, and for the yq release asset (a `-o <file>` download)
+  # writes a working fake mikefarah yq into the target so the install path
+  # (download → chmod → mv → re-check) completes hermetically. For the actionlint
+  # downloader (`curl | bash`, no -o) it emits nothing so the `| bash` no-ops.
+  # YQ_DL_EMPTY=1 simulates a failed/empty download (writes nothing) so the
+  # hard-gate fail-fast can be exercised.
+  cat > stub/curl <<'STUB'
+#!/usr/bin/env bash
+printf 'curl %s\n' "$*" >> "$LOG"
+_out=""; _prev=""
+for a in "$@"; do [ "$_prev" = "-o" ] && _out="$a"; _prev="$a"; done
+if [ -n "$_out" ] && printf '%s\n' "$*" | grep -q 'mikefarah/yq' && [ -z "${YQ_DL_EMPTY:-}" ]; then
+  printf '#!/usr/bin/env bash\necho "yq (https://github.com/mikefarah/yq/) version v%s"\n' "${YQ_FAKE_VERSION:-4.44.3}" > "$_out"
+fi
+exit 0
+STUB
+  chmod +x stub/curl
 
   # Transparent sudo: log + exec the rest, so the wrapped command still runs.
   cat > stub/sudo <<'STUB'
@@ -48,8 +72,10 @@ STUB
   chmod +x stub/sudo
 }
 
-# The isolated PATH the SCRIPT runs under (stubs + the curated real utils only).
-ISO_PATH() { printf '%s' "$WORK/stub:$WORK/realbin"; }
+# The isolated PATH the SCRIPT runs under (stubs + curated real utils + the yq
+# install dir + the squatter dir last). localbin precedes sysbin so a freshly
+# installed yq shadows a python-yq in sysbin, mirroring /usr/local/bin > /usr/bin.
+ISO_PATH() { printf '%s' "$WORK/stub:$WORK/realbin:$WORK/localbin:$WORK/sysbin"; }
 
 teardown() {
   cd /
@@ -67,7 +93,8 @@ _present_at() {  # <toolname> <version-to-report>
 # visible (env -i drops the inherited PATH that would otherwise leak runner tools).
 run_script() {
   run env -i \
-    PATH="$(ISO_PATH)" LOG="$LOG" \
+    PATH="$(ISO_PATH)" LOG="$LOG" YQ_INSTALL_DIR="$WORK/localbin" \
+    YQ_DL_EMPTY="${YQ_DL_EMPTY:-}" \
     RUFF_VERSION="${RUFF_VERSION:-}" ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-}" \
     bash "$SCRIPT"
 }
@@ -116,11 +143,52 @@ run_script() {
   _present_at yamllint 1.38.0
   _present_at shellcheck 0.11.0
   _present_at actionlint 1.7.7
+  _present_at yq 4.44.3
   run_script
   [ "$status" -eq 0 ]
   ! grep -q '^npm' "$LOG"
   ! grep -q '^pip' "$LOG"
   ! grep -q 'curl' "$LOG"
+}
+
+@test "yq: pinned mikefarah binary downloaded to /usr/local/bin (reconciled)" {
+  # No yq present (and the bare exit-0 default stub reports no version) → miss →
+  # download at the pin. The OS/arch-resolved release asset URL is what's logged.
+  run_script
+  [ "$status" -eq 0 ]
+  grep -qE 'curl .*github.com/mikefarah/yq/releases/download/v4\.44\.3/yq_(linux|darwin)_(amd64|arm64)' "$LOG"
+}
+
+@test "yq: drifted python-yq stub (3.x) is reconciled to the mikefarah pin" {
+  # kislyuk python-yq squatting /usr/bin (sysbin = last on PATH). The pinned
+  # mikefarah install into localbin (before sysbin) must shadow it.
+  printf '#!/usr/bin/env bash\necho "yq 3.1.0"\n' > "$WORK/sysbin/yq"; chmod +x "$WORK/sysbin/yq"
+  run_script
+  [ "$status" -eq 0 ]
+  grep -qE 'github.com/mikefarah/yq/releases/download/v4\.44\.3/' "$LOG"
+  # post-install the install-dir yq reports mikefarah at the pin → re-check passes
+  "$WORK/localbin/yq" --version | grep -q 'mikefarah'
+}
+
+@test "yq: empty/failed download fails fast (hard gate, not silent success)" {
+  # curl logs but writes nothing → temp stays empty → no install → the post-install
+  # re-check finds yq still missing and the provisioner exits non-zero.
+  YQ_DL_EMPTY=1 run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"still not at 4.44.3"* ]]
+  [ ! -e "$WORK/localbin/yq" ]
+}
+
+@test "yq: install dir is created when missing (minimal image)" {
+  # Point the install at a not-yet-existing dir (added to PATH so the re-check can
+  # find what lands there); the provisioner must mkdir -p it, not fail the mv.
+  rmdir "$WORK/localbin"
+  run env -i \
+    PATH="$WORK/stub:$WORK/realbin:$WORK/localbin:$WORK/sysbin" LOG="$LOG" \
+    YQ_INSTALL_DIR="$WORK/localbin" \
+    bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -x "$WORK/localbin/yq" ]
 }
 
 # --------------------------------------------------------------------------
@@ -183,6 +251,15 @@ run_script() {
 @test "non-root + no sudo but actionlint already at pin: still succeeds" {
   rm -f stub/sudo
   _present_at actionlint 1.7.7
+  _present_at yq 4.44.3      # yq also needs /usr/local/bin → same escalation guard
   run_script
-  [ "$status" -eq 0 ]        # no actionlint install needed → guard not triggered
+  [ "$status" -eq 0 ]        # no actionlint/yq install needed → guard not triggered
+}
+
+@test "non-root + no sudo + yq needed: errors up front (same as actionlint)" {
+  rm -f stub/sudo
+  _present_at actionlint 1.7.7   # actionlint satisfied so the guard fires for yq
+  run_script
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"non-root without sudo"* ]]
 }
