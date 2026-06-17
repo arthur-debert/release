@@ -15,9 +15,12 @@ existing fleet clones to the consumer's default branch (resolved from
 `release/v1` are honored too) UNCONDITIONALLY (#624) — a stale clone's
 consumer-authored half makes the pre-flight look faithful while it lies — and
 names the ref/sha each clone now sits at. The reset is a hard reset, so a
-clone with uncommitted work is skipped-with-warning rather than discarded (the
-data-loss guard); the throwaway /tmp clones are always clean, so they always
-refresh.
+HEALTHY clone with uncommitted work is skipped-with-warning rather than
+discarded (the data-loss guard); the throwaway /tmp clones are always clean,
+so they always refresh. A poisoned clone left by a crashed run (corrupt .git,
+half-finished checkout, wrong remote) is self-healing (#748): it is removed and
+re-cloned rather than protected, so a reused fixed root can no longer rot into
+"0 pass, N unexpected" until a manual `rm -rf`.
 
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.

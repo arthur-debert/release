@@ -22,9 +22,17 @@ sweep's freshness is visible, never assumed.
 
 DESTRUCTIVE on a non-disposable root: the refresh is a `git reset --hard`, so
 $REPOS_ROOT should be a DISPOSABLE dir (e.g. /tmp/...) for hermetic clones.
-A clone with UNCOMMITTED work is detected and SKIPPED-with-warning rather than
-reset (the data-loss guard), so a clean/hermetic clone refreshes safely while
-a live ~/h checkout's uncommitted work is never silently discarded.
+A HEALTHY clone with UNCOMMITTED work is detected and SKIPPED-with-warning
+rather than reset (the data-loss guard), so a clean/hermetic clone refreshes
+safely while a live ~/h checkout's uncommitted work is never silently
+discarded.
+
+SELF-HEALING (#748): a leftover dir that is NOT a healthy clone of the
+expected remote — a crashed run's half-clone, a corrupt .git, the wrong repo
+at that path — is treated as disposable cruft and re-cloned, never protected.
+The data-loss guard only ever fires on a healthy repo, so a fixed reused root
+can no longer rot: poisoned dirs heal on the next --clone instead of failing
+every consumer until a manual `rm -rf`.
 
 Any mode accepts trailing owner/name args to restrict to that subset:
   managed-repos --clone arthur-debert/padz lex-fmt/lex
@@ -283,61 +291,186 @@ def _clone(pairs: list[tuple[str, str]], root: str) -> int:
     readout names the ref/sha each clone now sits at so the freshness is
     visible, never assumed.
 
-    One exception, and it is a DATA-LOSS guard not a freshness opt-out: an
-    existing clone with a DIRTY working tree is skipped-with-warning rather
-    than hard-reset, so pointing REPOS_ROOT at live ~/h checkouts can never
-    silently discard uncommitted work (:func:`_is_dirty`). Hermetic /tmp
-    clones are always clean, so they always refresh."""
+    SELF-HEALING (#748): a leftover dir that is NOT a healthy clone of the
+    expected remote — a half-finished clone from a crashed run, a corrupt
+    .git, the wrong repo at this path — is DISPOSABLE only WHEN it carries no
+    uncommitted work: it is removed and re-cloned, never refreshed. A fixed
+    reused root would otherwise rot: `git status` fails on a corrupt repo, the
+    old guard read that as "dirty — protect it," and every consumer then failed
+    sync until the path was manually `rm -rf`'d (the crashed-run poisoning #747
+    surfaced). Only a HEALTHY repo (valid .git, the expected `origin`) is
+    eligible for the fast refresh path.
+
+    The DATA-LOSS guard is checked FIRST and independently of health (#748
+    review): ANY existing git repo with a DIRTY working tree is skipped-with-
+    warning, even one whose remote is wrong/missing — uncommitted work is never
+    deleted to "heal" a path. So pointing REPOS_ROOT at live ~/h checkouts can
+    never silently discard work (:func:`_is_dirty`); hermetic /tmp clones are
+    always clean, so the guard never fires there.
+
+    PATH CONTAINMENT (#748 review): a repo whose resolved path escapes
+    REPOS_ROOT (an absolute or `..` path in the manifest) is REFUSED — never a
+    git op, never a delete — so a bad manifest entry can never `rmtree` outside
+    the fleet root (:func:`_path_within`)."""
     rc = 0
+    root_real = os.path.realpath(root)
     for repo, path in pairs:
         abspath = os.path.join(root, path)
-        if os.path.isdir(os.path.join(abspath, ".git")):
-            # DATA-LOSS GUARD: the refresh hard-resets the working tree, which
-            # would silently discard uncommitted work if REPOS_ROOT points at a
-            # live checkout (default ~/h). A dirty tree is SKIPPED with a loud
-            # warning — never reset — and the sweep continues. This is not the
-            # forbidden `--refresh` opt-out (#624): hermetic /tmp clones are
-            # always clean, so the guard never fires there and they always
-            # refresh; it only protects a human's real working tree.
-            if _is_dirty(abspath):
-                print(
-                    f"⚠ {repo}: uncommitted changes — skipping refresh to protect "
-                    "your work (point REPOS_ROOT at a disposable dir for hermetic "
-                    f"clones) ({abspath})",
-                    file=sys.stderr,
-                )
-                continue
+        # PATH CONTAINMENT: never operate on (let alone delete) a path that
+        # resolves outside REPOS_ROOT. A manifest `path` that is absolute or
+        # climbs out with `..` is a hard refusal, not a silent escape.
+        if not _path_within(root_real, abspath):
+            print(
+                f"→ {repo}: REFUSED — resolved path escapes REPOS_ROOT ({abspath})",
+                file=sys.stderr,
+            )
+            rc = 1
+            continue
+
+        is_git_repo = os.path.isdir(os.path.join(abspath, ".git"))
+
+        # DATA-LOSS GUARD (first, health-independent): any git repo with
+        # uncommitted work is protected — skipped with a loud warning — whether
+        # or not its remote is healthy. Self-healing must never delete real work.
+        if is_git_repo and _is_dirty(abspath):
+            print(
+                f"⚠ {repo}: uncommitted changes — skipping refresh to protect "
+                "your work (point REPOS_ROOT at a disposable dir for hermetic "
+                f"clones) ({abspath})",
+                file=sys.stderr,
+            )
+            continue
+
+        if is_git_repo and _is_healthy_clone(abspath, repo):
+            # Healthy + clean: the fast path — fetch+reset to origin's default.
             ref_sha = _refresh_one(abspath)
             if ref_sha is None:
                 print(f"→ {repo}: refresh FAILED ({abspath})", file=sys.stderr)
                 rc = 1
             else:
                 print(f"→ {repo}: refreshed to {ref_sha} ({abspath})", file=sys.stderr)
+            continue
+
+        # Reach here only for a DISPOSABLE path: nothing there, OR a clean
+        # leftover that is corrupt / half-cloned / wrong-remote. Remove any
+        # leftover (dir, file, or symlink — not just a dir) so the re-clone
+        # lands on a clean path, then clone fresh.
+        if os.path.lexists(abspath):
+            print(f"→ {repo}: re-cloning (poisoned clone removed) {abspath}", file=sys.stderr)
+            if not _remove_disposable(abspath):
+                print(f"→ {repo}: could not remove leftover path ({abspath})", file=sys.stderr)
+                rc = 1
+                continue
         else:
             print(f"→ {repo}: cloning into {abspath}", file=sys.stderr)
-            os.makedirs(os.path.dirname(abspath), exist_ok=True)
-            # gh repo clone works in gh-authenticated sandboxes where plain
-            # git clone is restricted (matches clone-lex-* convention).
-            if gh.repo_clone(repo, abspath).returncode != 0:
-                print(f"→ {repo}: clone FAILED", file=sys.stderr)
-                rc = 1
-            else:
-                head = proc.run(
-                    ["git", "-C", abspath, "rev-parse", "--short", "HEAD"],
-                    check=False,
-                )
-                sha = head.stdout.strip() if head.returncode == 0 else "?"
-                print(f"→ {repo}: cloned at {sha}", file=sys.stderr)
+        os.makedirs(os.path.dirname(abspath), exist_ok=True)
+        # gh repo clone works in gh-authenticated sandboxes where plain
+        # git clone is restricted (matches clone-lex-* convention).
+        if gh.repo_clone(repo, abspath).returncode != 0:
+            print(f"→ {repo}: clone FAILED", file=sys.stderr)
+            rc = 1
+        else:
+            head = proc.run(
+                ["git", "-C", abspath, "rev-parse", "--short", "HEAD"],
+                check=False,
+            )
+            sha = head.stdout.strip() if head.returncode == 0 else "?"
+            print(f"→ {repo}: cloned at {sha}", file=sys.stderr)
     return rc
 
 
-def _is_dirty(abspath: str) -> bool:
-    """True if the clone's working tree has uncommitted changes.
+def _path_within(root_real: str, abspath: str) -> bool:
+    """True if ``abspath`` resolves strictly inside ``root_real`` (#748 review).
 
-    `git status --porcelain` prints one line per changed/untracked path and
-    nothing for a clean tree — so non-empty stdout means dirty. A git failure
-    (e.g. not really a repo) is treated as dirty: fail toward PROTECTING the
-    tree, never toward a hard reset we can't justify."""
+    Guards the self-healing delete: ``os.path.join(root, path)`` silently drops
+    ``root`` when ``path`` is absolute, and ``..`` segments climb out — so a bad
+    manifest entry could otherwise point a ``shutil.rmtree`` at a tree OUTSIDE
+    REPOS_ROOT. We compare realpaths so symlinks can't dodge the check, and
+    require the candidate to be UNDER root (a path equal to root itself is also
+    refused — a repo never legitimately resolves to the fleet root)."""
+    candidate = os.path.realpath(abspath)
+    prefix = root_real.rstrip(os.sep) + os.sep
+    return candidate.startswith(prefix)
+
+
+def _remove_disposable(abspath: str) -> bool:
+    """Remove a disposable leftover at ``abspath`` — dir, file, OR symlink.
+
+    ``shutil.rmtree(..., ignore_errors=True)`` silently does NOTHING on a
+    non-directory (a stray file or a symlink), leaving the path in place so the
+    subsequent ``gh repo clone`` fails on "destination already exists" (#748
+    review). Dispatch on the kind: a real directory → ``rmtree`` (no
+    ignore_errors — a failure must surface); anything else (file / symlink,
+    including a broken symlink, hence ``lexists``/``islink``) → ``os.unlink``.
+    Returns True on success, False if the path still exists afterward."""
+    try:
+        if os.path.islink(abspath) or not os.path.isdir(abspath):
+            os.unlink(abspath)
+        else:
+            shutil.rmtree(abspath)
+    except OSError:
+        return False
+    return not os.path.lexists(abspath)
+
+
+def _is_healthy_clone(abspath: str, repo: str) -> bool:
+    """True if ``abspath`` is a usable git clone of ``repo``'s ``origin``.
+
+    The self-healing gate (#748): only a healthy clone is eligible for the
+    refresh + data-loss-guard path; everything else (a crashed run's
+    half-clone, a corrupt .git, the wrong repo checked out at this path) is
+    DISPOSABLE and gets re-cloned. Two checks, both `check=False` so a broken
+    repo yields ``False`` rather than raising:
+
+    1. ``git rev-parse --git-dir`` succeeds — the dir is a real git repo, not
+       an empty/half-written tree that merely has a ``.git`` entry.
+    2. ``origin`` points at ``repo`` — a path holding a DIFFERENT repo (a
+       manifest path reshuffle, a botched clone) must not be reset onto this
+       repo's default branch.
+
+    Fail toward re-clone: any ambiguity (git error, unreadable remote) returns
+    ``False`` so the path is rebuilt clean rather than silently mis-synced."""
+    git_dir = proc.run(["git", "-C", abspath, "rev-parse", "--git-dir"], check=False)
+    if git_dir.returncode != 0:
+        return False
+    remote = proc.run(["git", "-C", abspath, "remote", "get-url", "origin"], check=False)
+    if remote.returncode != 0:
+        return False
+    return _remote_matches(remote.stdout.strip(), repo)
+
+
+def _remote_matches(url: str, repo: str) -> bool:
+    """True if ``url`` is an origin URL for ``owner/name`` (``repo``).
+
+    Accepts the shapes `gh repo clone` / `git clone` produce — HTTPS
+    (`https://github.com/owner/name(.git)`), SSH
+    (`git@github.com:owner/name(.git)`), and a bare `owner/name` — by
+    normalizing to the trailing `owner/name`, optional `.git` stripped. We
+    match on the slug, not the host, so a clone via either transport is
+    recognized as the same repo."""
+    norm = url.strip()
+    if norm.endswith(".git"):
+        norm = norm[: -len(".git")]
+    norm = norm.replace(":", "/")
+    parts = [p for p in norm.split("/") if p]
+    if len(parts) < 2:
+        return False
+    return "/".join(parts[-2:]) == repo
+
+
+def _is_dirty(abspath: str) -> bool:
+    """True if the git repo at ``abspath`` has uncommitted changes.
+
+    Checked FIRST in the clone loop, before the health/remote check (#748
+    review): a dirty tree is protected from the self-healing delete REGARDLESS
+    of whether its remote is the expected one — uncommitted work is never
+    deleted to heal a path. `git status --porcelain` prints one line per
+    changed/untracked path and nothing for a clean tree — so non-empty stdout
+    means dirty. A `git status` failure (e.g. a `.git` that is present but
+    corrupt) is treated as dirty: fail toward PROTECTING the tree rather than
+    deleting something we can't read. A genuinely corrupt clone with NO work to
+    lose is therefore left for a human, not auto-wiped — the conservative
+    choice the review asked for."""
     status = proc.run(
         ["git", "-C", abspath, "status", "--porcelain"],
         check=False,
