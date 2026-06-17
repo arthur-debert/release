@@ -132,6 +132,33 @@ if ! command -v bats >/dev/null 2>&1; then
   command -v bats >/dev/null 2>&1 && echo "installed bats: $(bats --version | head -1)"
 fi
 
+# mikefarah/yq v4 — release_core.yamlio's canonical YAML reader AND the
+# eval-all YAML-merge seam (release-core init's lefthook composition). Some
+# cloud images ship kislyuk python-yq at /usr/bin/yq — a jq wrapper that
+# rejects mikefarah's `-o=json` flag, so `release-core admin repos audit`
+# (and every other yamlio.load caller) crashes with `jq: Unknown option
+# -o=json`. Install the real one to /usr/local/bin (earlier on PATH) so it
+# shadows the impostor. Idempotent — skip if a mikefarah yq is already first.
+YQ_VERSION="v4.44.3"
+if command -v yq >/dev/null 2>&1 && yq --version 2>&1 | grep -q mikefarah; then
+  echo "mikefarah yq already present: $(yq --version)"
+else
+  case "$(uname -m)" in
+    x86_64) yq_arch=amd64 ;;
+    aarch64 | arm64) yq_arch=arm64 ;;
+    *) yq_arch=amd64 ;;
+  esac
+  if curl -fsSL \
+    "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${yq_arch}" \
+    -o /usr/local/bin/yq 2>/dev/null; then
+    chmod +x /usr/local/bin/yq
+    echo "installed mikefarah yq: $(/usr/local/bin/yq --version)"
+  else
+    echo "warning: mikefarah yq install failed (network?); yamlio adapts to" \
+      "kislyuk python-yq for reads but eval-all/init will fail" >&2
+  fi
+fi
+
 # neovim ≥0.11 — the apt package on noble is 0.9.5, but the pinned
 # nvim-lspconfig in lex-fmt/nvim refuses to load on <0.11 ("nvim-lspconfig
 # support for Nvim 0.10 or older is deprecated"). On 0.9.5 the symptom is

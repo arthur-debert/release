@@ -166,6 +166,29 @@ def test_dep_security_404_is_fail(monkeypatch):
     assert "disabled" in rows["dep_security"][1]
 
 
+def test_secret_names_handles_paginated_pages():
+    # gh --paginate returns a LIST of page objects, not a flat secret list.
+    paginated = [
+        {"total_count": 2, "secrets": [{"name": "RELEASE_TOKEN"}, {"name": "CRATES_IO_KEY"}]}
+    ]
+    assert audit_repo._secret_names(paginated) == {"RELEASE_TOKEN", "CRATES_IO_KEY"}
+
+
+def test_secret_names_handles_single_dict_and_bare_list():
+    assert audit_repo._secret_names({"secrets": [{"name": "X"}]}) == {"X"}
+    assert audit_repo._secret_names([{"name": "Y"}]) == {"Y"}
+
+
+def test_release_token_unqueryable_is_skip(monkeypatch):
+    # A read-only fleet/CI token 403s on /actions/secrets (needs admin scope).
+    # Couldn't-query ≠ absent: SKIP, not a false fleet-wide FAIL.
+    routes = _green_routes()
+    del routes["repos/o/r/actions/secrets"]
+    rows = _rows(monkeypatch, routes)
+    assert rows["release_token"][0] == "SKIP"
+    assert "could not query" in rows["release_token"][1]
+
+
 def test_dep_policy_off_policy_fails(monkeypatch):
     routes = _green_routes()
     routes["repos/o/r/contents/.github/dependabot.yml"] = _b64(

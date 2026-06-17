@@ -208,8 +208,14 @@ def _check_release_token(repo: str, results: list) -> None:
     try:
         secrets = gh.rest(f"repos/{repo}/actions/secrets", paginate=True)
     except gh.GhError:
+        # Couldn't list secrets ≠ secret absent: the /actions/secrets endpoint
+        # needs an admin-scoped token, so a read-only fleet/CI token 403s here.
+        # SKIP (can't determine) rather than a false fleet-wide FAIL.
         _record(
-            results, "FAIL", "release_token", "RELEASE_TOKEN not set (run install-release-token)"
+            results,
+            "SKIP",
+            "release_token",
+            "could not query secrets (token lacks admin scope)",
         )
         return
     names = _secret_names(secrets)
@@ -222,16 +228,27 @@ def _check_release_token(repo: str, results: list) -> None:
 
 
 def _secret_names(secrets: object) -> set[str]:
-    """Names from the /actions/secrets payload (paginated → list of dicts, or one dict)."""
+    """Secret names from the /actions/secrets payload, across its shapes.
+
+    `gh --paginate` yields a LIST of page objects (``[{"total_count":N,
+    "secrets":[…]}, …]``) — not a flat list of secret dicts; a non-paginated
+    call yields one such ``{"secrets":[…]}`` dict; some callers pass a bare
+    list of secret dicts. The pre-fix code treated the paginated list as the
+    secret list itself and so found nothing (every repo false-FAILed on
+    release_token). Normalize all three to the flat secret-dict stream.
+    """
     out: set[str] = set()
-    items: list = []
-    if isinstance(secrets, list):
-        items = secrets
-    elif isinstance(secrets, dict):
-        items = secrets.get("secrets") or []
-    for s in items:
-        if isinstance(s, dict) and s.get("name"):
-            out.add(s["name"])
+    pages: list = secrets if isinstance(secrets, list) else [secrets]
+    for page in pages:
+        if isinstance(page, dict):
+            items = page.get("secrets") if "secrets" in page else [page]
+        elif isinstance(page, list):
+            items = page
+        else:
+            items = []
+        for s in items or []:
+            if isinstance(s, dict) and s.get("name"):
+                out.add(s["name"])
     return out
 
 

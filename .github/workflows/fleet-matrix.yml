@@ -1,0 +1,70 @@
+name: Fleet matrix
+
+# Regenerates docs/fleet-matrix.md — the live fleet conformance matrix — from
+# `release-core admin repos audit --markdown`, and opens a PR when it drifts.
+#
+# The matrix is LIVE external state (every consumer's .github/** + repo
+# config), so unlike the deterministic docs/references/consumer-contract.yaml
+# (which IS gated by a drift check, because it's derived from this repo's own
+# templates/) it is refreshed on a schedule, never gated.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # Mondays 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: fleet-matrix
+  cancel-in-progress: false
+
+jobs:
+  regenerate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A PAT (not the default GITHUB_TOKEN) so the push + PR trigger the
+          # required checks, and so the audit can read every consumer repo
+          # across the arthur-debert/* and lex-fmt/* orgs.
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Install mikefarah yq v4
+        run: |
+          sudo curl -fsSL \
+            https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 \
+            -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Install release-core from this checkout
+        run: bin/install-release-core --from-source . --no-init
+
+      - name: Regenerate docs/fleet-matrix.md
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: release-core admin repos audit --markdown > docs/fleet-matrix.md
+
+      - name: Open a PR if the matrix drifted
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if git diff --quiet -- docs/fleet-matrix.md; then
+            echo "fleet matrix unchanged — nothing to do"
+            exit 0
+          fi
+          stamp="$(date -u +%Y%m%d)"
+          branch="chore/fleet-matrix-${stamp}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add docs/fleet-matrix.md
+          git commit -m "chore: regenerate fleet conformance matrix (${stamp})"
+          git push -u origin "$branch" --force-with-lease
+          gh pr create --base main --head "$branch" --draft \
+            --title "chore: fleet matrix refresh (${stamp})" \
+            --body "Automated weekly regeneration of \`docs/fleet-matrix.md\` from \`release-core admin repos audit --markdown\`. Live fleet state — review and merge (or close if there's no meaningful drift)." \
+            || echo "PR for ${branch} may already exist"
