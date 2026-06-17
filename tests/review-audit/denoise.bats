@@ -36,11 +36,19 @@ assert_denoise() {
   [ "$raw_len" -ge "$((ratio * clean_len))" ]
   # (b) outcome marker survives — the whole point
   [[ "$cleaned" == *"$marker"* ]]
-  # (c) boilerplate is actually gone
+  # (c) boilerplate is actually gone — assert against EVERY denoise family the
+  # fixtures exercise, not one example each, so a regression in any one regex
+  # turns this red:
+  #   <details>/<summary> walls (DETAILS), markdown images + badges (IMG/BADGE),
+  #   and the trailer (BOILER) — which covers BOTH the "review" and "comment"
+  #   wordings ("This review/comment was generated …"), so the Copilot variant
+  #   isn't missed.
   [[ "$cleaned" != *"<details>"* ]]
   [[ "$cleaned" != *"<summary>"* ]]
-  [[ "$cleaned" != *"img.shields.io"* ]]
-  [[ "$cleaned" != *"This review was generated"* ]]
+  [[ "$cleaned" != *'!['* ]]              # no markdown image / badge residue
+  [[ "$cleaned" != *"shields.io"* ]]      # badge host
+  [[ "$cleaned" != *"example.com"* ]]     # fixture image host
+  [[ "$cleaned" != *"was generated"* ]]   # BOILER trailer, review+comment forms
 }
 
 @test "coderabbit: <details> walls shrink >=8x, 'Addressed in abc1234' kept" {

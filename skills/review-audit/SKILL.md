@@ -91,6 +91,11 @@ Workflow runtime, not bare node. Pass the **same** output dir; the reviewed-PR
 list is derived from the slim files (no hardcoded list):
 
 ```sh
+# Self-contained: redeclare the same values as the mechanical tier (run from
+# the repo root; DIR must be the SAME absolute path you used above).
+SCRIPTS=skills/review-audit/scripts
+DIR="$PWD/analysis/reviews"
+
 # 5: judge — one agent per ~4 reviewed PRs, writes verdicts/pr-*.json
 #    args: { dir: '<abs DIR>', reviewers: ['copilot','gemini','coderabbit'], batch: 4 }
 #    pass the SAME absolute $DIR from the mechanical tier above.
