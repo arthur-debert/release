@@ -141,12 +141,18 @@ on:
           <e2e-script>` (see input below). On failure,
           `playwright-report/` is uploaded as a CI artifact.
 
-          Tauri-specific notes: the e2e job does NOT set up the
-          Rust toolchain or install Tauri Linux system deps (a
+          Tauri-specific notes: by default the e2e job does NOT set
+          up the Rust toolchain or install Tauri Linux system deps (a
           Playwright suite against the running renderer doesn't
           need them). If the consumer's `test:e2e` script needs to
           build the native binary first, run that via `pre-test` —
           it shares the same setup with check.
+
+          If the consumer's `pre-test` itself COMPILES Rust (e.g.
+          builds wasm from source via wasm-pack), the e2e job needs a
+          Rust toolchain — set `e2e-rust: true` (below). It stays a
+          renderer-only job; this just adds rustup+cargo so a
+          Rust-building `pre-test` can run here too.
 
           Consumer requirements (when opting in):
           * `tests/e2e/` (or equivalent) under the repo
@@ -164,6 +170,22 @@ on:
         type: string
         required: false
         default: 'test:e2e'
+
+      e2e-rust:
+        description: |
+          Set up a Rust toolchain in the `e2e` job (off by default).
+          Enable when the e2e `pre-test` compiles Rust — e.g. a
+          consumer that builds its wasm packages from source with
+          wasm-pack instead of fetching prebuilt artifacts. The
+          toolchain channel is resolved exactly like the check job
+          (`rust-toolchain` input, else root `rust-toolchain.toml`,
+          else `stable`), with the same `src-tauri` rust-cache. No
+          Tauri Linux system deps are added — a wasm32 build doesn't
+          link GTK/webkit; the consumer's build step is expected to
+          add the `wasm32` target / `wasm-pack` itself.
+        type: boolean
+        required: false
+        default: false
 
       runner:
         description: 'GitHub runner label for the check job.'
@@ -406,9 +428,10 @@ jobs:
   # E2E job — opt-in via `e2e: true`. Runs the consumer's Playwright
   # suite after `check` passes. Auto-installs browsers + uploads the
   # Playwright report on failure. Setup mirrors the JS portion of the
-  # check job — no Rust toolchain, no Tauri Linux build deps; if the
-  # e2e suite needs the native binary, run a `pre-test` step that
-  # produces it.
+  # check job — no Tauri Linux build deps; if the e2e suite needs the
+  # native binary, run a `pre-test` step that produces it. A Rust
+  # toolchain is added only when `e2e-rust: true` (for consumers whose
+  # pre-test compiles Rust, e.g. building wasm from source).
   # -------------------------------------------------------------------
   e2e:
     if: inputs.e2e
@@ -453,6 +476,38 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.pm.outputs.cache }}
+
+      # Rust toolchain — only when e2e-rust: true (e.g. the pre-test
+      # builds wasm from source). Resolution mirrors the check job so
+      # both jobs compile against the same channel; the consumer's
+      # build step adds the wasm32 target / wasm-pack itself.
+      - name: Resolve Rust toolchain channel
+        if: inputs.e2e-rust
+        id: rust-channel
+        shell: bash
+        env:
+          INPUT_CHANNEL: ${{ inputs.rust-toolchain }}
+        run: |
+          if [ -n "${INPUT_CHANNEL}" ]; then
+            CHANNEL="${INPUT_CHANNEL}"
+          elif [ -f rust-toolchain.toml ]; then
+            CHANNEL=$(grep '^channel' rust-toolchain.toml | sed 's/.*= *"\(.*\)"/\1/')
+          else
+            CHANNEL=stable
+          fi
+          echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Rust toolchain
+        if: inputs.e2e-rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-channel.outputs.channel }}
+
+      - name: Cache Rust (src-tauri)
+        if: inputs.e2e-rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
 
       - name: Install dependencies
         run: ${{ steps.pm.outputs.install }}
