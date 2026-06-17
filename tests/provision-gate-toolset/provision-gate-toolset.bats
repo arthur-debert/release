@@ -33,7 +33,7 @@ setup() {
   # mktemp/rm/chmod/mv back the yq install (download to a temp file, install only
   # if non-empty); under the empty-output curl stub the temp stays empty so the
   # chmod/mv never fire, but the utils must still resolve on the isolated PATH.
-  for u in id bash grep head mktemp rm chmod mv uname; do ln -sf "$(command -v "$u")" "realbin/$u"; done
+  for u in id bash grep head mktemp rm chmod mv uname mkdir; do ln -sf "$(command -v "$u")" "realbin/$u"; done
 
   # Logging stubs for the package managers. Each records its argv.
   for tool in npm pip; do
@@ -177,6 +177,18 @@ run_script() {
   [ "$status" -eq 1 ]
   [[ "$output" == *"still not at 4.44.3"* ]]
   [ ! -e "$WORK/localbin/yq" ]
+}
+
+@test "yq: install dir is created when missing (minimal image)" {
+  # Point the install at a not-yet-existing dir (added to PATH so the re-check can
+  # find what lands there); the provisioner must mkdir -p it, not fail the mv.
+  rmdir "$WORK/localbin"
+  run env -i \
+    PATH="$WORK/stub:$WORK/realbin:$WORK/localbin:$WORK/sysbin" LOG="$LOG" \
+    YQ_INSTALL_DIR="$WORK/localbin" \
+    bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ -x "$WORK/localbin/yq" ]
 }
 
 # --------------------------------------------------------------------------

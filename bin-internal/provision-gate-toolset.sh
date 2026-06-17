@@ -124,10 +124,12 @@ if ! gate_version_matches yq "$YQ_VERSION"; then
   _yq_tmp="$(mktemp "${TMPDIR:-/tmp}/yq.XXXXXXXX")"
   if curl -sSfL "$_yq_url" -o "$_yq_tmp" && [ -s "$_yq_tmp" ]; then
     chmod +x "$_yq_tmp"
+    # Ensure the install dir exists (a minimal image may lack /usr/local/bin) so
+    # the mv lands instead of failing into the generic "still not at" error.
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-      sudo mv "$_yq_tmp" "${_yq_dir}/yq"
+      sudo mkdir -p "$_yq_dir" && sudo mv "$_yq_tmp" "${_yq_dir}/yq"
     else
-      mv "$_yq_tmp" "${_yq_dir}/yq"
+      mkdir -p "$_yq_dir" && mv "$_yq_tmp" "${_yq_dir}/yq"
     fi
   fi
   rm -f "$_yq_tmp"
