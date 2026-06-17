@@ -300,10 +300,12 @@ def _dev_cycle_section() -> list[str]:
         "be blocked until it does — that's expected."
     )
     lines.append(
-        "  7. Flip to READY with `release-core pr ready` — the guarded flip; "
-        "it refuses unless the engine says READY (never raw `gh pr ready`). "
-        "That hands it to a human; don't auto-merge. "
-        "(`release-core pr ready --undo` flips back for re-work.)"
+        "  7. The flip to READY is automatic: when the engine reaches READY, "
+        "`release-core pr wait` performs the guarded draft->ready flip itself "
+        "(reviews done + threads resolved + CI green + a CLEAN merge) and "
+        "stops there — it hands the PR to a human and never auto-merges. "
+        "`release-core pr ready` is still the explicit verb (and "
+        "`--undo` flips back for re-work); never raw `gh pr ready`."
     )
     lines.append("")
     lines.append("When infra itself is broken (the gate/build/release tooling)")

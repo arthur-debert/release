@@ -84,8 +84,9 @@ def group() -> None:
     Everything an agent or human needs to drive a single PR through the
     review pipeline: request the required reviews, block until the PR needs
     the agent again (``wait`` — the engine-owned wait over reviews, checks
-    and mergeability alike), resolve review threads, and read the PR's
-    lifecycle state (``status``).
+    and mergeability alike, which flips draft->ready itself once the engine
+    reaches READY), resolve review threads, and read the PR's lifecycle state
+    (``status``). ``ready`` remains the explicit guarded flip (and ``--undo``).
     """
 
 
@@ -94,7 +95,7 @@ group.add_command(
     wrap_verb(
         wait_cli.main,
         name="wait",
-        short_help="Block in-turn until the PR needs the agent again.",
+        short_help="Block in-turn until the PR needs the agent (auto-flips to ready at READY).",
     )
 )
 group.add_command(

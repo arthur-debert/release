@@ -14,6 +14,15 @@ Semantics:
   there is nothing to wait for. So does a REVIEWS_PENDING snapshot where a
   pending required reviewer still needs a (re-)request — placing the request
   is agent action, not waiting.
+- READY is the one agent-action state the wait does NOT just hand back: the
+  flip from draft to ready is a pure predicate (reviews done + threads
+  resolved + CI green + a CLEAN merge), and the engine has already evaluated
+  it to true, so the wait performs the guarded flip itself (via the same
+  `pr ready` path, which re-confirms READY on a fresh snapshot at flip time)
+  instead of asking the agent to retype the command the engine already chose.
+  This removes the fragile manual hop that used to sit between "engine says
+  READY" and an actually-flipped PR. The flip still STOPS at ready — the human
+  merges from there; the wait never merges.
 - Waiting states (REVIEWS_PENDING with every pending required reviewer
   already requested/in-progress on the head, VALIDATING, REVIEWED) block
   IN-TURN, re-polling until agent action is available, then print the new
@@ -44,6 +53,7 @@ from ..ghapi import GhError
 from ..model import ReviewLifecycle
 from ..reviewers import ReviewerAdapter, required_reviewers
 from ..state import TaskState, TaskStatus, evaluate, no_pr
+from . import ready
 from .task_status import emit
 
 # --- cadence (the single source; --poll/--timeout override) ------------------
@@ -81,6 +91,11 @@ CI running, mergeability computing) it blocks IN-TURN — this is how an agent
 waits without yielding — re-polling until agent action is available, then
 prints the new state + next action (the same rendering as `pr status`).
 
+When the engine reaches READY, the wait flips the PR draft->ready itself
+(the guarded `pr ready` flip, re-confirmed on a fresh snapshot) rather than
+handing the flip back as a manual step. It still stops there — the human
+merges from ready.
+
 With no <pr-number>, resolves the PR for the current branch.
 
 Options:
@@ -90,8 +105,8 @@ Options:
   -h --help            show this help
 
 Exit codes:
-  0   agent action available now (including READY)
-  1   gh failure
+  0   agent action available now (READY auto-flips to ready-for-review)
+  1   gh failure (including a failed ready flip)
   2   timeout cap hit with nothing actionable yet
   64  bad usage
 """
@@ -146,6 +161,7 @@ def wait_for_action(
     snapshot: Callable[[int], TaskStatus] | None = None,
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
+    flip: Callable[[int], int] | None = None,
 ) -> int:
     """Poll the state engine until the snapshot calls for agent action.
 
@@ -155,12 +171,26 @@ def wait_for_action(
     a test injects its own. It is resolved ONCE here and used for BOTH the engine
     evaluation (via `_snapshot`) and the request-vs-wait classifier, so an
     injected set flows to both and they can never disagree.
+
+    `flip` is the READY action — what to do when the engine reaches READY.
+    Default is the guarded draft->ready flip (`ready._flip`, which re-confirms
+    READY on a fresh snapshot); a test injects its own to keep the loop hermetic.
     """
     required = registry if registry is not None else required_reviewers()
     # The default snapshot is bound to the SAME resolved `required` set, so the
     # engine evaluation and the classifier below read one source. A test that
     # injects its own `snapshot` owns that wiring itself.
     take = snapshot if snapshot is not None else (lambda pr: _snapshot(pr, required))
+    do_flip = flip if flip is not None else ready._flip
+
+    # Hand an actionable snapshot back to the agent — except READY, which the
+    # wait flips itself (the engine already evaluated the predicate to true).
+    def deliver(status: TaskStatus) -> int:
+        if status.state is TaskState.READY:
+            return do_flip(pr)
+        emit(status)
+        return 0
+
     deadline_cap = MAX_WAIT_S if timeout is None else timeout
     fixed = poll is not None
     interval: float = poll if poll is not None else POLL_INITIAL_S
@@ -183,8 +213,7 @@ def wait_for_action(
     # _poll_with_retry below.
     status = take(pr)
     if _agent_action_needed(status, required):
-        emit(status)
-        return 0
+        return deliver(status)
     print(_cadence_line(poll=poll, timeout=deadline_cap))
     print(_waiting_line(status, elapsed=0.0, interval=next_sleep()))
 
@@ -195,8 +224,7 @@ def wait_for_action(
         status = _poll_with_retry(take, pr, sleep=sleep)
         if _agent_action_needed(status, required):
             print(f"-- agent action available after {_fmt(clock() - start)} --")
-            emit(status)
-            return 0
+            return deliver(status)
         print(_waiting_line(status, elapsed=clock() - start, interval=next_sleep()))
 
     # One last look before declaring timeout: the state can flip during the
@@ -205,8 +233,7 @@ def wait_for_action(
     status = _poll_with_retry(take, pr, sleep=sleep)
     if _agent_action_needed(status, required):
         print(f"-- agent action available after {_fmt(clock() - start)} --")
-        emit(status)
-        return 0
+        return deliver(status)
     print(
         f"timeout: nothing actionable on #{pr} after {_fmt(deadline_cap)} "
         f"(state: {status.state.value}; next: {status.next_action})",

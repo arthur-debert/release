@@ -1,6 +1,6 @@
 ---
 name: gh-pr-review-loop
-description: "Drive a PR to ready-for-human-merge in any repo managed by `arthur-debert/release`. The loop is state-machine-driven: `release-core pr status` reports one lifecycle state plus the single next action; do that action, re-read, repeat — open as a draft, request the required reviews, wait in-turn, triage and resolve threads, flip to ready via `release-core pr ready`, then stop (the human merges). Use when opening a PR, checking where a PR stands, waiting on or triaging review feedback, or driving a PR toward merge-readiness. Triggered by: `gh pr create`, 'check PR status', 'where does this PR stand', requesting a review, or processing review comments."
+description: "Drive a PR to ready-for-human-merge in any repo managed by `arthur-debert/release`. The loop is state-machine-driven: `release-core pr status` reports one lifecycle state plus the single next action; do that action, re-read, repeat — open as a draft, request the required reviews, wait in-turn, triage and resolve threads — and `release-core pr wait` flips draft→ready itself once the engine reaches READY, then stop (the human merges). Use when opening a PR, checking where a PR stands, waiting on or triaging review feedback, or driving a PR toward merge-readiness. Triggered by: `gh pr create`, 'check PR status', 'where does this PR stand', requesting a review, or processing review comments."
 ---
 
 # gh-pr-review-loop
@@ -69,8 +69,10 @@ pairs.
      do that action                → request review / triage threads / fix CI /
                                      release-core pr wait
      re-read
-5. at READY: release-core pr ready → the handoff flip; then STOP
-   (human's turn; merge only on explicit authorization)
+5. at READY: the flip is AUTOMATIC — release-core pr wait performs the guarded
+   draft->ready flip itself when the engine reaches READY, then STOP
+   (human's turn; merge only on explicit authorization). pr ready is the
+   explicit verb if you land on READY without a wait.
 6. ALWAYS end with the final-report contract (below)
 ```
 
@@ -86,7 +88,7 @@ Don't improvise around it.
 | `ADDRESSING` | triage the open threads (A/B/C below), resolve as you go |
 | `REVIEWED` | mergeability still computing — `release-core pr wait` |
 | `VALIDATING` | CI running — `release-core pr wait` |
-| `READY` | `release-core pr ready`, then stop |
+| `READY` | `release-core pr wait` auto-flips draft→ready here; if you reached READY without a wait, `release-core pr ready`. Then stop |
 | `BLOCKED` | stop; surface the reason (see breakers below) |
 
 ## Arming the guard
@@ -113,7 +115,9 @@ ever see the deny, that is the guard doing its job: arm and retry.
   mergeable. Review requests work on drafts — drafting does not suppress
   reviews.
 - **ready = the human's turn.** The flip is the one signal that says "I'm done
-  iterating — come validate and merge."
+  iterating — come validate and merge." You don't hand-flip in the common path:
+  `release-core pr wait` performs the guarded flip itself the moment the engine
+  reaches READY, so driving the wait to completion *is* the handoff.
 - **Re-work flips it back.** If the human asks for changes, flip back to draft
   (`release-core pr ready --undo`), do the work, re-flip when green.
 
@@ -134,7 +138,8 @@ comments by defending remembered choices instead of reading the diff cold.
   never sees a review round.
 - **Coordinator — owns every wait and the flip.** It blocks on
   `release-core pr wait` (a subagent that yields to wait terminates and is
-  never re-woken) and runs the guarded `release-core pr ready` at READY.
+  never re-woken); the wait performs the guarded draft→ready flip itself on
+  reaching READY (`release-core pr ready` remains the explicit fallback).
 - **A fresh shepherd subagent per ADDRESSING round.** Brief: the PR number +
   the Context note. Triage the threads (A/B/C below), fix or reply, resolve,
   push, re-request the review, hand the wait back, terminate. Fresh per round:
@@ -318,15 +323,23 @@ a failure.
 `BLOCKED` without a breaker (failing check, merge conflict) is yours to fix:
 do the fix, push, re-read.
 
-## At READY: the guarded flip, then stop
+## At READY: the flip is automatic, then stop
 
 ```sh
-release-core pr ready [<pr>]
+release-core pr wait [<pr>]   # flips draft->ready itself on reaching READY
+release-core pr ready [<pr>]  # the explicit verb, when you land on READY without a wait
 ```
 
-This is the **only** sanctioned way to flip draft→ready — never raw
-`gh pr ready`. It refuses (exit 1, printing the state and next action) unless
-the engine says `READY`, so a premature flip is impossible by construction.
+The flip is a pure predicate the engine has already evaluated, so the loop does
+it for you: **`release-core pr wait` performs the guarded draft→ready flip the
+moment the engine reaches READY** — driving the wait to completion *is* the
+handoff. `release-core pr ready` is the same guarded flip as an explicit verb,
+for when you arrive at READY without a wait (and `--undo` for re-work).
+
+Both are guarded and are the **only** sanctioned way to flip draft→ready —
+never raw `gh pr ready`. They refuse (exit 1, printing the state and next
+action) unless the engine says `READY`, so a premature flip is impossible by
+construction.
 
 `READY` requires a genuinely-mergeable PR: a **CLEAN** merge state, not just
 GitHub's `mergeable` verdict. GitHub computes `mergeable` asynchronously and
