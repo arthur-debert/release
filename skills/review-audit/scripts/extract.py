@@ -232,6 +232,19 @@ def main():
     if a.sample is not None and 0 < a.sample < len(targets):
         full_n = len(targets)
         targets = stratified_sample(sorted(targets), a.sample)
+        # A sample is only coherent if the output dir doesn't already hold slim
+        # files OUTSIDE the sampled set: extract skips fetching already-present
+        # PRs, but the metrics.jsonl rebuild below AND every downstream stage
+        # (summarize, stage2's derived list) glob the WHOLE slim/ dir, so stray
+        # files would silently widen the audit beyond the sample. Fail fast.
+        stray = sorted({int(p.stem.split("-")[1])
+                        for p in slim_dir.glob("pr-*.json")} - set(targets))
+        if stray:
+            sys.exit(
+                f"--sample {a.sample}: {slim_dir} already holds {len(stray)} "
+                f"slim file(s) outside the sampled set (e.g. PR #{stray[0]}); "
+                f"they would widen metrics.jsonl + downstream stages beyond the "
+                f"sample. Use a fresh --dir for a sampled audit.")
         print(f"--sample {a.sample}: auditing {len(targets)} of {full_n} PRs "
               f"spread evenly across history", flush=True)
     print(f"{owner}/{repo}: {len(targets)} PRs ({targets[0]}..{targets[-1]})",

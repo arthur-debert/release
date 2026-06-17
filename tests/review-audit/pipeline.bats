@@ -31,6 +31,18 @@ PY
   [ "$output" = "ok" ]
 }
 
+@test "extract --sample: fails fast when slim/ holds PRs outside the sample" {
+  # Pre-populate the output dir with a slim file for a PR that won't be in the
+  # sample, then sample 2 of an explicit 5-PR target set (so no network: the
+  # guard fires before the fetch loop). The stray file must abort the run.
+  local dir="$BATS_TEST_TMPDIR/audit"
+  mkdir -p "$dir/slim"
+  echo '{}' >"$dir/slim/pr-99.json"
+  run python3 "$SCRIPTS/extract.py" --repo o/r --dir "$dir" --sample 2 1 2 3 4 5
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"outside the sampled set"* ]]
+}
+
 @test "metrics_row: issue-comment-only feedback is counted (not invisible)" {
   run python3 - "$SCRIPTS" <<'PY'
 import sys
