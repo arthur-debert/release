@@ -21,12 +21,14 @@ from datetime import datetime
 
 from audit_config import (
     clean,
+    first_feedback_ts,
     gh,
     load_overlay,
     rate_resource,
     resolve_dir,
     resolve_repo,
     role,
+    stratified_sample,
     thread_actioned,
 )
 
@@ -164,13 +166,11 @@ def metrics_row(slim):
         return datetime.fromisoformat(s.replace("Z", "+00:00")) if s else None
     created, ready, merged = (iso(slim["created_at"]), iso(slim["ready_at"]),
                               iso(slim["merged_at"]))
-    # LIMITATION (#740): first-feedback timing keys off the first TOP-LEVEL
-    # review only. A bot that leaves only inline threads or issue-level
-    # comments (no submitted review) has first_review=None, so its
-    # first_review_wait_min / commits_after_first_review undercount. Folding
-    # earliest-inline/issue-comment timing into the "first feedback" clock is
-    # the issue-comment-only-reviewers enhancement tracked in #740.
-    first_review = iso(slim["reviews"][0]["submitted_at"]) if slim["reviews"] else None
+    # First-feedback clock spans ALL bot channels — a top-level review, an
+    # inline thread, OR an issue-level comment — via first_feedback_ts(), so a
+    # bot that only leaves issue comments isn't undercounted (it previously had
+    # first_review=None). See audit_config.first_feedback_ts.
+    first_feedback = iso(first_feedback_ts(slim))
     clock = ready or created
     per_reviewer = {}
     for r in slim["reviewers"]:
@@ -189,12 +189,13 @@ def metrics_row(slim):
         if created and merged else None,
         ready_to_merge_min=round((merged - ready).total_seconds() / 60, 1)
         if ready and merged else None,
-        first_review_wait_min=round((first_review - clock).total_seconds() / 60, 1)
-        if first_review and clock else None,
+        first_feedback_wait_min=round(
+            (first_feedback - clock).total_seconds() / 60, 1)
+        if first_feedback and clock else None,
         n_commits=slim["n_commits"],
-        commits_after_first_review=sum(
+        commits_after_first_feedback=sum(
             1 for d in slim["commit_dates"]
-            if first_review and iso(d) and iso(d) > first_review),
+            if first_feedback and iso(d) and iso(d) > first_feedback),
         changed_files=slim["changed_files"],
         additions=slim["additions"], deletions=slim["deletions"],
         total_threads=len(slim["threads"]),
@@ -206,6 +207,9 @@ def main():
     ap.add_argument("--repo", help="OWNER/NAME (default: env or current repo)")
     ap.add_argument("--dir", help="output dir (default: ./analysis/reviews)")
     ap.add_argument("--config", help="JSON overlay for BOTS / denoise")
+    ap.add_argument("--sample", type=int, metavar="N",
+                    help="audit only N PRs, spread evenly across history "
+                         "(stratified-by-era proxy) — for very large repos")
     ap.add_argument("prs", nargs="*", type=int, help="specific PR numbers")
     a = ap.parse_args()
 
@@ -225,6 +229,24 @@ def main():
         targets = sorted(p["number"] for p in prs if p.get("merged_at"))
     if not targets:
         sys.exit("no merged PRs found")
+    if a.sample is not None and 0 < a.sample < len(targets):
+        full_n = len(targets)
+        targets = stratified_sample(sorted(targets), a.sample)
+        # A sample is only coherent if the output dir doesn't already hold slim
+        # files OUTSIDE the sampled set: extract skips fetching already-present
+        # PRs, but the metrics.jsonl rebuild below AND every downstream stage
+        # (summarize, stage2's derived list) glob the WHOLE slim/ dir, so stray
+        # files would silently widen the audit beyond the sample. Fail fast.
+        stray = sorted({int(p.stem.split("-")[1])
+                        for p in slim_dir.glob("pr-*.json")} - set(targets))
+        if stray:
+            sys.exit(
+                f"--sample {a.sample}: {slim_dir} already holds {len(stray)} "
+                f"slim file(s) outside the sampled set (e.g. PR #{stray[0]}); "
+                f"they would widen metrics.jsonl + downstream stages beyond the "
+                f"sample. Use a fresh --dir for a sampled audit.")
+        print(f"--sample {a.sample}: auditing {len(targets)} of {full_n} PRs "
+              f"spread evenly across history", flush=True)
     print(f"{owner}/{repo}: {len(targets)} PRs ({targets[0]}..{targets[-1]})",
           flush=True)
 

@@ -105,10 +105,13 @@ python3 "$SCRIPTS/aggregate.py" --dir "$DIR"   # 6: synthesis tables + summary.j
 python3 "$SCRIPTS/converge.py"  --repo OWNER/NAME --dir "$DIR"   # 7: re-request convergence
 ```
 
-`--sample N` stratified by era is the lever for very large repos (full tier is
-linear in PRs). The cross-**reviewer** comparison (Q3) only holds if config
-**varied over time** or bots ran in parallel — a repo on one stable reviewer
-still gets value/noise/convergence, just not the head-to-head.
+For very large repos, `extract.py --sample N` subsamples to N PRs spread
+**evenly across the PR-number timeline** — a proxy for the review-config era
+(reviewer changes are chronological), so every era stays represented instead of
+over-sampling the most recent PRs; the full tier is ~linear in PRs. The
+cross-**reviewer** comparison (Q3) only holds if config **varied over time** or
+bots ran in parallel — a repo on one stable reviewer still gets
+value/noise/convergence, just not the head-to-head.
 
 ## Output contract
 

@@ -61,6 +61,50 @@ def thread_actioned(t):
                 or t.get("resolved") or t.get("gh_outdated"))
 
 
+def first_feedback_ts(slim):
+    """Earliest moment ANY tracked bot left feedback on the PR, or None.
+
+    The 'first feedback' clock for latency + churn metrics. It spans ALL three
+    bot channels — a top-level review (reviews[].submitted_at), an inline
+    thread (threads[].created_at), and an issue-level comment
+    (issue_comments[].ts) — because some bots leave feedback ONLY as issue
+    comments (a summary-only reviewer) and never submit a top-level review.
+    Keying off reviews[] alone (the old behavior) made such a bot's first
+    feedback vanish, undercounting first_feedback_wait_min /
+    commits_after_first_feedback. Timestamps are same-format ISO-8601 UTC, so
+    the lexicographic min is the chronological earliest.
+    """
+    stamps = ([r.get("submitted_at") for r in slim.get("reviews") or []]
+              + [t.get("created_at") for t in slim.get("threads") or []]
+              + [c.get("ts") for c in slim.get("issue_comments") or []])
+    stamps = [s for s in stamps if s]
+    return min(stamps) if stamps else None
+
+
+def stratified_sample(targets, n):
+    """Pick `n` PRs evenly spaced across the sorted `targets` list.
+
+    For very large repos the full judging tier is ~linear in PRs (~1.6M tokens
+    / ~120 PRs), so an audit may need a subset. The sample is spread evenly
+    across the PR-number timeline, which is a proxy for the review-config ERA:
+    reviewer changes are chronological (none -> one bot -> +a second), so even
+    spacing keeps every era represented instead of over-sampling the most
+    recent one. Deterministic (reproducible audits); for n >= 2 it includes the
+    first and last PR so both history extremes are kept (n == 1 returns the
+    middle PR). `targets` is assumed sorted ascending; returns it unchanged
+    when n<=0 or n>=len(targets).
+    """
+    targets = list(targets)
+    if n <= 0 or n >= len(targets):
+        return targets
+    if n == 1:
+        return [targets[len(targets) // 2]]
+    # Even spacing, endpoints inclusive: step > 1 here (n < len), so the rounded
+    # indices are strictly increasing — no collisions, exactly n picks.
+    step = (len(targets) - 1) / (n - 1)
+    return [targets[round(i * step)] for i in range(n)]
+
+
 # --- bot markdown de-noising ------------------------------------------------
 # Strips CodeRabbit's collapsible <details> walls, badges, boilerplate, etc.
 # (~38x shrink on CodeRabbit) while KEEPING the outcome markers the judges
@@ -213,7 +257,29 @@ def _selftest():
     # The marker must survive even when boilerplate sits on BOTH sides of it.
     assert "Addressed in deadbee" in clean(
         "This review was generated\n✅ Addressed in deadbee\nTip <x>")
-    print("audit_config selftest OK: outcome markers preserved, boilerplate stripped")
+
+    # first_feedback_ts (#740): earliest across reviews / threads / issue
+    # comments — an issue-comment-only bot must NOT register as silent.
+    assert first_feedback_ts({}) is None
+    assert first_feedback_ts(
+        {"issue_comments": [{"ts": "2026-01-02T00:00:00Z"}]}
+    ) == "2026-01-02T00:00:00Z", "issue-comment-only feedback went missing"
+    assert first_feedback_ts({
+        "reviews": [{"submitted_at": "2026-01-03T00:00:00Z"}],
+        "threads": [{"created_at": "2026-01-02T00:00:00Z"}],
+        "issue_comments": [{"ts": "2026-01-01T00:00:00Z"}],
+    }) == "2026-01-01T00:00:00Z", "did not take the earliest channel"
+
+    # stratified_sample (#740): even, deterministic, endpoints kept, exact count.
+    assert stratified_sample([1, 2, 3], 5) == [1, 2, 3]   # n>=len -> unchanged
+    assert stratified_sample([1, 2, 3], 0) == [1, 2, 3]   # n<=0  -> unchanged
+    assert stratified_sample(list(range(100)), 1) == [50]  # n==1  -> middle
+    s = stratified_sample(list(range(100)), 7)
+    assert len(s) == 7 and s[0] == 0 and s[-1] == 99, f"endpoints/count: {s}"
+    assert s == sorted(s) and len(set(s)) == 7, f"not strictly increasing: {s}"
+
+    print("audit_config selftest OK: denoise + first_feedback_ts + "
+          "stratified_sample")
 
 
 if __name__ == "__main__":
