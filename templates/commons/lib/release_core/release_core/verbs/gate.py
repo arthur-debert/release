@@ -81,10 +81,20 @@ Usage:
   release-core gate --hook [lefthook args...]  # git pre-commit: staged-set gate
   release-core gate --install-hook             # wire .git/hooks/pre-commit
 
+On a fresh node-consumer checkout (a root ``package.json`` but no installed
+``node_modules/``) the gate's eslint / svelte-check hooks would otherwise surface
+a raw ``svelte-check: command not found`` / ``npx canceled due to missing
+packages`` (release#718). A node-deps preflight detects that from the filesystem
+BEFORE invoking lefthook and fails FRIENDLY with a one-line ``run `<pm> install`
+first`` remediation — mirroring the runnable-verb preflight UX (release#735). It
+fires ONLY on ``package.json`` present + ``node_modules`` absent (so release-self
+and any non-node repo are unaffected) and never auto-installs.
+
 Exit codes:
   0  — the gate passed (or the hook was installed)
-  1  — the gate failed, the pinned lefthook is not on PATH, or the gate config is
-       not built (all HARD failures — the gate never skips)
+  1  — the gate failed, the pinned lefthook is not on PATH, the gate config is
+       not built, or a node consumer's dependencies are not installed (all HARD
+       failures — the gate never skips)
 """
 
 from __future__ import annotations
@@ -162,6 +172,37 @@ _STUB_BODY = f"""\
 # binary-driven pre-commit hook.
 colors: false
 """
+
+
+def _node_deps_preflight(root: str) -> int:
+    """Friendly-fail BEFORE lefthook when a node consumer's deps are missing.
+
+    On a FRESH checkout of a node consumer (a ``package.json`` at the root but no
+    installed ``node_modules/``), the gate's eslint / svelte-check hooks resolve
+    through ``node_modules/.bin`` and surface a raw, undiscoverable
+    ``svelte-check: command not found`` / ``npx canceled due to missing
+    packages`` (release#718). That is not the gate failing — it is "you ran the
+    gate on a bare tree". Detect it from the filesystem (never run anything) and
+    return ONE actionable remediation line, mirroring the runnable-verb preflight
+    UX (release#735, ``repo_commands.preflight``). Detection + message only — we
+    never auto-install deps (the load-bearing gotcha: a mechanical tool must not
+    pretend to be the consumer's CI).
+
+    Returns 1 (with the remediation printed to stderr) when deps are missing, else
+    0. Fires ONLY on ``package.json`` present + ``node_modules/`` absent, so a
+    non-node repo (release's own — no ``package.json``) is unaffected."""
+    if not os.path.isfile(os.path.join(root, "package.json")):
+        return 0
+    if os.path.isdir(os.path.join(root, "node_modules")):
+        return 0
+    from .. import repo_commands
+
+    pm = repo_commands.detect_pm(root)
+    print(
+        f"release-core gate: dependencies not installed — run `{pm} install` first",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def _repo_root() -> str:
@@ -551,6 +592,17 @@ def main(argv: list[str]) -> int:
     quiet = "--quiet" in argv
     if quiet:
         argv = [a for a in argv if a != "--quiet"]
+
+    # Node-deps preflight (release#718): a fresh node-consumer checkout with no
+    # installed node_modules makes the gate's eslint / svelte-check hooks surface
+    # a raw `svelte-check: command not found`. Fail FRIENDLY with a one-line
+    # remediation instead, mirroring the runnable-verb preflight (release#735).
+    # Fires only on package.json present + node_modules absent, so release's own
+    # repo (no package.json) is unaffected.
+    deps_rc = _node_deps_preflight(root)
+    if deps_rc != 0:
+        print("GATE: FAILED (node dependencies not installed)")
+        return deps_rc
 
     pin = _pinned_lefthook_version(root)
     lefthook = _resolve_lefthook(pin)
