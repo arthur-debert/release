@@ -42,6 +42,30 @@ def test_json_mode_one_object_per_line(monkeypatch, capsys):
     assert {"name", "status", "message"} == set(first["checks"][0])
 
 
+def test_markdown_mode_renders_matrix(monkeypatch, capsys):
+    _patch_audit(monkeypatch)
+    rc = audit_portfolio.main(["--repos", "o/green,o/warn,o/fail", "--markdown"])
+    assert rc == 0  # report mode never propagates the fail/warn exit code
+    out = capsys.readouterr().out
+    assert "# Fleet conformance matrix" in out
+    assert "| Repo | Status | Shared infra | Open findings |" in out
+    assert "| o/green | green |" in out
+    assert "| o/fail | FAIL |" in out
+    assert "Portfolio conformance:" in out
+
+
+def test_markdown_shared_cell_thin_vs_own(monkeypatch, capsys):
+    rows = {
+        "o/thin": [("PASS", "workflows_thin_callers", "all 3 workflows are thin callers")],
+        "o/own": [("WARN", "workflows_thin_callers", "2/3 thin callers; bespoke: deploy.yml")],
+    }
+    monkeypatch.setattr(audit_repo, "audit", lambda r: list(rows[r]))
+    audit_portfolio.main(["--repos", "o/thin,o/own", "--markdown"])
+    out = capsys.readouterr().out
+    assert "| o/thin | green | OK (all thin callers) |" in out
+    assert "| o/own | warn | OWN: deploy.yml |" in out
+
+
 def test_table_exit_code_fail_dominates(monkeypatch, capsys):
     _patch_audit(monkeypatch)
     rc = audit_portfolio.main(["--repos", "o/green,o/warn,o/fail"])

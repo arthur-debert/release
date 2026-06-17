@@ -1,5 +1,13 @@
 # Fleet standardization audit — snapshot 2026-06-14
 
+> **SUPERSEDED as a state source (2026-06-17).** Live fleet conformance — Kind,
+> shared-vs-OWN workflows, per-repo findings — is now generated, not authored:
+> run `release-core admin repos audit` (or `--markdown`) and read
+> [`docs/fleet-matrix.md`](../fleet-matrix.md), which the `fleet-matrix.yml`
+> workflow regenerates weekly. This file is kept ONLY for its §2 common-ground
+> ranking and §3 genuine-specificity analysis (the *why*); do not trust its
+> per-repo state — that drifts within days.
+
 > POINT-IN-TIME research snapshot (17-repo read-only audit + synthesis), not a
 > living doc. Frame: `docs/dev/standardization-model.md`. Use as the input for
 > the README/GLOSSARY rewrite and the #569 rework; expect it to go stale as the

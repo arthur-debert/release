@@ -38,3 +38,15 @@ def test_missing_yq_raises(monkeypatch):
     monkeypatch.setattr(yamlio.shutil, "which", lambda _: None)
     with pytest.raises(yamlio.YamlError):
         yamlio.loads("a: 1")
+
+
+def test_classify_yq_version_mikefarah():
+    banner = "yq (https://github.com/mikefarah/yq/) version v4.44.3"
+    assert yamlio.classify_yq_version(banner) == "mikefarah"
+
+
+def test_classify_yq_version_kislyuk():
+    # kislyuk python-yq (the jq wrapper that squats /usr/bin/yq in some
+    # cloud images) prints a bare version with no mikefarah marker.
+    assert yamlio.classify_yq_version("yq 0.0.0") == "other"
+    assert yamlio.classify_yq_version("yq 3.4.3") == "other"
