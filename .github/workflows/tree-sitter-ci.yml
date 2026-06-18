@@ -30,7 +30,7 @@ name: tree-sitter CI
 #     contents: read
 #   jobs:
 #     ci:
-#       uses: arthur-debert/release/.github/workflows/tree-sitter-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/tree-sitter-ci.yml@v3
 
 on:
   workflow_call:

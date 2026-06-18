@@ -26,7 +26,7 @@ name: Go CI
 #     contents: read
 #   jobs:
 #     ci:
-#       uses: arthur-debert/release/.github/workflows/go-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/go-ci.yml@v3
 #       with:
 #         golangci-lint-version: v2.5.0   # optional
 

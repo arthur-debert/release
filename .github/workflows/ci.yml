@@ -1,6 +1,6 @@
 name: CI
 
-# Self-host of gh-action-ci.yml@v1. This repo IS arthur-debert/release,
+# Self-host of gh-action-ci.yml (local ref). This repo IS arthur-debert/release,
 # so calling its own CI from itself is the dogfood loop: a regression in
 # gh-action-ci.yml's actionlint step fails its own PR.
 
@@ -16,7 +16,13 @@ jobs:
     # Product dogfood: release validates the reusable CI workflow it SHIPS to
     # consumers (gh-action-ci.yml). This is a test of the product, NOT release's
     # own lint gate — that is the `gate` job below.
-    uses: arthur-debert/release/.github/workflows/gh-action-ci.yml@v1
+    #
+    # LOCAL ref (./), not @vN: a frozen tag would test the SHIPPED snapshot, so a
+    # regression introduced to gh-action-ci.yml in a PR would sail through its
+    # own CI. The local ref runs the workflow at the PR head, so a break fails
+    # the PR that caused it — the actual point of a dogfood. Same pattern (and
+    # rationale) as copilot-review-self.yml. (release#786)
+    uses: ./.github/workflows/gh-action-ci.yml
 
   gate:
     # THE gate. CI invokes the SAME lefthook gate defined in lefthook.yml, over

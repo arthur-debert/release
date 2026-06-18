@@ -14,10 +14,10 @@ name: Copilot Review (self)
 #     pass RELEASE_TOKEN to untrusted source).
 #
 # Uses the LOCAL reusable workflow (./.github/workflows/copilot-review.yml)
-# rather than `arthur-debert/release/.github/workflows/copilot-review.yml@v1`
-# to avoid the chicken-and-egg case where a v1 tag doesn't exist yet
-# during initial workflow development. Side benefit: this caller is also
-# a continuous smoke test of the reusable workflow on every release PR.
+# rather than the published `arthur-debert/release/.github/workflows/copilot-review.yml@v3`
+# form: the local ref runs the workflow at the PR head, so this caller is a
+# continuous smoke test of the CURRENT reusable workflow on every release PR
+# (and never depends on a tag existing yet). Same dogfood pattern as ci.yml.
 
 on:
   pull_request:

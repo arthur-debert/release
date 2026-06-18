@@ -30,7 +30,7 @@ name: VS Code Extension CI
 #     contents: read
 #   jobs:
 #     ci:
-#       uses: arthur-debert/release/.github/workflows/vscode-ext-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/vscode-ext-ci.yml@v3
 #       with:
 #         pre-check: app-bin/build-shared.sh   # optional
 

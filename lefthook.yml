@@ -87,12 +87,23 @@ pre-commit:
         SHELLCHECK_OPTS='-S warning' actionlint -color
 
     workflow-action-major:
-      # The reusable workflows must reference release's OWN composite actions at
-      # the floating major (@v3), never a frozen older major. A `rust-cli.yml@v3`
-      # whose internal `uses:` still says `prepare-release@v2` silently runs stale
-      # v2 action code for every consumer "on v3" — exactly the drift that shipped
-      # the -release-rc main-pollution + crates.io publish incident (the @v2 pins
-      # were never advanced at the v3.0.0 cut). Bump this literal at the next major.
+      # Every internal reference to release's OWN reusable workflows / composite
+      # actions / boot resolver must track the floating major (@v3 / --major v3),
+      # never a frozen older major. A `rust-cli.yml@v3` whose internal `uses:`
+      # still says `prepare-release@v2` silently runs stale v2 action code for
+      # every consumer "on v3" — exactly the drift that shipped the -release-rc
+      # main-pollution + crates.io publish incident (the @v2 pins were never
+      # advanced at the v3.0.0 cut). The same class re-bit the v3.4.0 cut through
+      # TWO refs this guard didn't yet inspect: workflow self-refs
+      # (`gh-action.yml@v2`) and `install-release-core --major v2` hardcodes
+      # (release#786). All three are checked below. Bump the @v3 / v3 literals at
+      # the next major.
+      #
+      # Comments: action/workflow ref examples in comment blocks are the
+      # consumer copy-paste templates, so they ARE enforced (a stale example
+      # mis-pins a consumer). `--major vN` mentions in comments are explanatory
+      # prose about internals (e.g. release.yml's history of the v2 bug), so the
+      # --major check strips comments first — only LIVE invocations are enforced.
       glob:
         - ".github/workflows/*.yml"
         - ".github/workflows/*.yaml"
@@ -101,9 +112,26 @@ pre-commit:
         fail=0
         for f in {staged_files}; do
           [ -f "$f" ] || continue
+          # (a) internal composite-action refs
           bad=$(grep -noE 'arthur-debert/release/\.github/actions/[a-z0-9-]+@v[0-9][0-9.]*' "$f" | grep -vE '@v3$') || true
           if [ -n "$bad" ]; then
-            echo "ERROR: $f pins an internal release action off the floating major (@v3):" >&2
+            echo "ERROR: $f pins an internal release ACTION off the floating major (@v3):" >&2
+            echo "$bad" >&2
+            fail=1
+          fi
+          # (b) internal reusable-workflow self-refs (use @v3, or a local ./ ref
+          # for release's own dogfood callers — a local ref carries no @vN and is
+          # not matched here).
+          bad=$(grep -noE 'arthur-debert/release/\.github/workflows/[a-z0-9._-]+@v[0-9][0-9.]*' "$f" | grep -vE '@v3$') || true
+          if [ -n "$bad" ]; then
+            echo "ERROR: $f pins an internal release WORKFLOW off the floating major (@v3) — use @v3 or a local ./ ref:" >&2
+            echo "$bad" >&2
+            fail=1
+          fi
+          # (c) install-release-core boot pins (strip comments: only live calls).
+          bad=$(sed 's/#.*//' "$f" | grep -noE '\-\-major v[0-9]+' | grep -vE 'v3$') || true
+          if [ -n "$bad" ]; then
+            echo "ERROR: $f hardcodes a release boot --major off the floating major (v3):" >&2
             echo "$bad" >&2
             fail=1
           fi

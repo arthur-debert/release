@@ -34,7 +34,7 @@ name: GH Action CI
 #     contents: read
 #   jobs:
 #     ci:
-#       uses: arthur-debert/release/.github/workflows/gh-action-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/gh-action-ci.yml@v3
 
 on:
   workflow_call:
