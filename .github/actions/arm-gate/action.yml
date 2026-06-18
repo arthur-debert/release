@@ -247,18 +247,28 @@ runs:
         # in the runner. Keep --no-commit too (CI must never auto-commit).
         release-core init --no-commit --no-provision
 
-    # Cache B — the gate toolset binaries (actionlint, yq, shellcheck, +
-    # npm-globals: lefthook, prettier, markdownlint) that `gate --provision`
-    # downloads/installs into ~/.local/bin. Keyed on toolset.py (the single _PINS
-    # source) + the ruff/actionlint input overrides, so any pin bump misses
+    # Cache B — the gate toolset binaries `gate --provision` puts in ~/.local/bin
+    # (actionlint, yq, shellcheck; the npm globals lefthook/prettier/markdownlint
+    # land in the npm GLOBAL prefix, not here). Keyed on toolset.py (the single
+    # _PINS source) + the ruff/actionlint input overrides, so any pin bump misses
     # cleanly. On a stale restore the provision step is still safe: it re-checks
     # each tool via version_matches() and only re-fetches a mismatch.
+    #
+    # Gated on install_tree == 'true' as WELL as toolset, NOT toolset alone. The
+    # two share ~/.local/bin with the release-core console-script symlinks. On the
+    # install_tree:false path (release's OWN ci.yml — a single repo, not the fleet
+    # win) the install step is skipped + Cache A (the venv) is NOT restored, so a
+    # restored `~/.local/bin` would carry a release-core symlink DANGLING at the
+    # absent venv. The provision step's `command -v release-core` would then report
+    # it present (command -v doesn't dereference) and SKIP the --from-source install
+    # it needs, breaking the gate. Excluding that path closes the poisoning with
+    # zero correctness risk; install_tree:false simply re-provisions the toolset
+    # each run (it always reinstalls release-core --from-source there anyway).
     - name: Cache gate toolset
-      if: inputs.toolset == 'true'
+      if: inputs.toolset == 'true' && inputs.install_tree == 'true'
       uses: actions/cache@v5
       with:
-        path: |
-          ~/.local/bin
+        path: ~/.local/bin
         key: gate-toolset-${{ runner.os }}-${{ steps.cache_keys.outputs.toolset }}
 
     - name: Provision the gate toolset
