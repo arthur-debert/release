@@ -206,10 +206,11 @@ def _managed_paths_for_commit(
     (re)written (WS4, #761); and the seeded `.release.major.txt` when init created
     it (WS3, #760). Deterministic order, de-duplicated.
 
-    NOTABLY NOT ``CLAUDE.md`` (WS4, #761): the `@import` line is written to disk but
-    is NEVER staged — after insertion CLAUDE.md is 100% consumer-owned, and staging
-    it would fold the consumer's unrelated uncommitted edits into the managed
-    auto-commit. Only the managed TARGET file rides the managed commit.
+    ``CLAUDE.md`` (WS4, #761) rides the commit ONLY on the one-time managed
+    insertion (`create` or `insert` — see below); after that it is 100%
+    consumer-owned and is NEVER staged again, so the managed auto-commit can't fold
+    the consumer's unrelated edits. Only the managed TARGET file (`.claude/
+    IMPORTANT-RELEASE.md`) rides every managed commit.
 
     Notably NOT the created symlink mirrors: since WS7 (release#528) they are
     EPHEMERAL — built every init, excluded via .git/info/exclude, never
@@ -227,10 +228,16 @@ def _managed_paths_for_commit(
     paths.extend(mirror.retired_to_remove)
     if claude.target_action == "write":
         paths.append(sync.CLAUDE_IMPORT_TARGET)
-    # CLAUDE.md is staged ONLY on a fresh CREATE (the file is purely the managed
-    # @import line — no consumer content to fold in). An INSERT into an existing
-    # CLAUDE.md is written to disk but NEVER staged (consumer-owned).
-    if claude.import_action == "create":
+    # CLAUDE.md is staged on the ONE-TIME managed insertion — a fresh CREATE (no
+    # CLAUDE.md existed) OR an INSERT into an existing one (stripping a pre-WS4
+    # managed block and/or prepending the @import). Both ARE the managed migration
+    # and MUST commit: otherwise the @import sits uncommitted forever (dirty tree,
+    # and the next init re-stages it — the migration never lands). After insertion
+    # import_action is "none", so CLAUDE.md is never staged again and the consumer
+    # owns it from then on. (A concurrent uncommitted CLAUDE.md edit could be folded
+    # in by this one-time stage, but that window is the first pull / SessionStart,
+    # where there is none in practice — the proposal's safety-rule-#2 exception.)
+    if claude.import_action in ("create", "insert"):
         paths.append(sync.CLAUDE_FILE)
     if seeded_major:
         paths.append(seeded_major)

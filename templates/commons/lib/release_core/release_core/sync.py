@@ -1500,10 +1500,12 @@ class ClaudeDecision:
     #   create → CLAUDE.md is ABSENT: write it as the pure one-line pointer. Safe
     #            to STAGE (no consumer content to fold in — it IS 100% the managed
     #            line), so the fresh-seed tree stays clean.
-    #   insert → CLAUDE.md EXISTS: strip any pre-WS4 managed block, then prepend the
-    #            one line. Written to disk but NEVER staged — CLAUDE.md is
-    #            consumer-owned, and staging would fold in the consumer's unrelated
-    #            uncommitted edits.
+    #   insert → CLAUDE.md EXISTS without the @import (e.g. a pre-WS4 managed
+    #            block): strip the old block, prepend the one line. STAGED on this
+    #            ONE-TIME migration (like create) so it commits — otherwise the
+    #            @import sits uncommitted and the next init re-stages it. After the
+    #            insertion import_action is "none", so CLAUDE.md is never staged
+    #            again and the consumer owns it from then on.
     #   none   → the @import line is already present.
     #   skip-symlink → CLAUDE.md is a symlink, leave it alone.
     import_action: str = "none"  # create | insert | none | skip-symlink

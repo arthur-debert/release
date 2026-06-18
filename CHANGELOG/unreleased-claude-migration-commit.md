@@ -1,0 +1,1 @@
+- init commits the one-time CLAUDE.md @import migration (insert), not just create — a consumer on the pre-WS4 block no longer ends up with the @import uncommitted + a dirty tree + the next init re-staging it
