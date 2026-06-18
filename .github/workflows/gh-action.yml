@@ -146,6 +146,13 @@ jobs:
           else
             release-core init --no-commit
           fi
+      # arm-gate's toolset step provisions npm globals (lefthook/prettier/
+      # markdownlint), so set up Node deterministically first — the composite
+      # assumes the caller pinned Node + Python (matches ci.yml / rust-cli.yml).
+      - name: Set up Node for the gate toolset
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
       - name: Arm the gate toolset
         # ONE definition of CI gate-arming (pinned toolset), same as
         # rust-cli.yml — but provision-only (the install opt-out; see the step
