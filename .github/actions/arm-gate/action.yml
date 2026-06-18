@@ -61,6 +61,62 @@ inputs:
 runs:
   using: composite
   steps:
+    # Cache key inputs (release#790). `hashFiles()` ONLY matches paths under
+    # $GITHUB_WORKSPACE, but the bundled wheel source + pin file this composite
+    # needs to key on live under the action's checkout (action_path/../../..,
+    # OUTSIDE the workspace) — so `hashFiles('<action_path>/../../...')` returns
+    # an EMPTY string and the keys would collapse to a single global bucket.
+    # Compute the digests here in a shell step instead (it CAN read absolute
+    # out-of-workspace paths) and feed them into the cache keys via outputs.
+    #   - venv digest: a sha over the bundled release_core/ package source +
+    #     pyproject.toml (every candidate / version change misses cleanly). The
+    #     resolved action_ref is folded in too, so an exact `@v3.1.2` pin and a
+    #     floating `@v3` get distinct buckets. _version.py is NOT a useful signal
+    #     on its own (it's build-time stamped, static at rest), hence the source
+    #     digest. A stale restore is self-healing: install-release-core reuses an
+    #     existing venv and `gate --provision` re-checks per tool.
+    #   - toolset digest: a sha over toolset.py (the single _PINS source), so any
+    #     pin bump misses; combined with the ruff/actionlint input overrides.
+    - name: Compute arm-gate cache keys
+      id: cache_keys
+      shell: bash
+      env:
+        ACTION_REF: ${{ github.action_ref }}
+        RUFF_VERSION: ${{ inputs.ruff-version }}
+        ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
+      run: |
+        set -euo pipefail
+        root="${{ github.action_path }}/../../.."
+        pkg="${root}/templates/commons/lib/release_core/release_core"
+        sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
+        # Order-stable digest over the bundled package source + pyproject: sort the
+        # file list deterministically, concat in that order, hash the stream once.
+        venv_digest="$(
+          { find "$pkg" -type f -name '*.py' -print0 | sort -z | xargs -0 cat
+            cat "${root}/pyproject.toml"; } | sha | cut -d' ' -f1
+        )"
+        toolset_digest="$(sha < "${pkg}/toolset.py" | cut -d' ' -f1)"
+        ref_slug="$(printf '%s' "${ACTION_REF:-noref}" | tr -c '[:alnum:]._-' '-')"
+        echo "venv=${ref_slug}-${venv_digest}" >> "$GITHUB_OUTPUT"
+        echo "toolset=${toolset_digest}-${RUFF_VERSION:-pin}-${ACTIONLINT_VERSION:-pin}" >> "$GITHUB_OUTPUT"
+        # Debug breadcrumb for the live-run verification (release#790 open Q):
+        echo "arm-gate cache keys: venv=${ref_slug}-${venv_digest} toolset=${toolset_digest}"
+
+    # Cache A — the release-core venv + the console-scripts symlinked onto PATH.
+    # Gates the install step below; on a hit, install-release-core sees the venv
+    # already present and short-circuits. Keyed per release-core version (the
+    # source digest + resolved ref); NOT .release/ (per-workspace, rewritten every
+    # job by `init`). `~/.local/share/release-core` = the dedicated isolated venv,
+    # `~/.local/bin` = the console-script symlinks (XDG_BIN_HOME).
+    - name: Cache release-core venv
+      if: inputs.install_tree == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.local/share/release-core
+          ~/.local/bin
+        key: release-core-venv-${{ runner.os }}-${{ steps.cache_keys.outputs.venv }}
+
     # Install FIRST: the gate's `bin/check` symlink resolves into `.release/`,
     # which is gitignored + written on-demand (WS4). Install the wheel WITHOUT
     # running its bundled init (--no-init), then run `release-core init --no-commit`
@@ -175,6 +231,21 @@ runs:
         # init (WS5/E) would also try to wire hooks + run app-bin/post-setup-hook.sh
         # in the runner. Keep --no-commit too (CI must never auto-commit).
         release-core init --no-commit --no-provision
+
+    # Cache B — the gate toolset binaries (actionlint, yq, shellcheck, +
+    # npm-globals: lefthook, prettier, markdownlint) that `gate --provision`
+    # downloads/installs into ~/.local/bin. Keyed on toolset.py (the single _PINS
+    # source) + the ruff/actionlint input overrides, so any pin bump misses
+    # cleanly. On a stale restore the provision step is still safe: it re-checks
+    # each tool via version_matches() and only re-fetches a mismatch.
+    - name: Cache gate toolset
+      if: inputs.toolset == 'true'
+      uses: actions/cache@v5
+      with:
+        path: |
+          ~/.local/bin
+        key: gate-toolset-${{ runner.os }}-${{ steps.cache_keys.outputs.toolset }}
+
     - name: Provision the gate toolset
       if: inputs.toolset == 'true'
       shell: bash
