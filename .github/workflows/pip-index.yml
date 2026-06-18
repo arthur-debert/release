@@ -1,0 +1,96 @@
+name: pip-index (build + deploy)
+
+# Publish a PEP 503 "simple" pip index for the release_core wheels to GitHub
+# Pages. Entries point at the EXISTING GitHub release-asset wheel URLs (the
+# repo is PUBLIC → no auth), so this index is a thin static link directory —
+# it carries no wheels of its own. Once deployed, consumers/CI can resolve a
+# wheel by version constraint instead of scraping the releases API:
+#
+#   pip install --extra-index-url https://arthur-debert.github.io/release/simple/ \
+#               'release-core>=3,<4'
+#
+# PyPI stays the PRIMARY index (--extra-index-url, NOT --index-url), so
+# release_core's own deps (click) still resolve from PyPI.
+#
+# This is RELEASE-SPECIFIC plumbing (only arthur-debert/release publishes the
+# release_core wheel), so it lives in a DEDICATED workflow here — NOT a step in
+# the shared `gh-action.yml`, which every consumer calls. Keeping it separate
+# means zero consumer impact: the index serves ALONGSIDE the existing
+# release-asset boot path as a pure, not-yet-consumed fallback (Phase 0 of the
+# boot-simplification epic #757).
+#
+# --- Two de-risk must-haves, both honored here -------------------------------
+#
+# 1. RC-pollution guard. The generator filters to NON-prerelease releases,
+#    mirroring the boot resolver's `select(.draft == false and .prerelease ==
+#    false)` predicate (templates/commons/bin/install-release-core). A
+#    `*-release-rc` verify/RC cut must never appear in the public index
+#    (release#689-class). The filter lives in the generator script — one
+#    definition, not a second hand-rolled copy.
+#
+# 2. Pages-collision avoidance. `mdbook.yml` / `mkdocs.yml` are REUSABLE
+#    workflows for consumers; this repo does not call them (no book.toml /
+#    mkdocs.yml caller), so there is no docs Pages deploy here today and
+#    nothing to clobber. Even so, this workflow uses:
+#      - a DISTINCT concurrency group (`pip-index`, vs the docs workflows'
+#        `mdbook-*` / `mkdocs-*`), so if a docs Pages deploy is ever added to
+#        THIS repo the two serialize (`cancel-in-progress: false`) instead of
+#        cancelling each other, and
+#      - a DISTINCT site subpath (`/simple/`) so the index occupies its own
+#        corner of the Pages site rather than fighting for the root.
+
+on:
+  # Fires once a release is fully published (the wheel asset is already
+  # attached by gh-action.yml's publish step). `released` excludes prereleases
+  # at the trigger level; the generator's prerelease filter is the real guard
+  # (a re-published older release, an edited RC, etc.).
+  release:
+    types: [released]
+  # Manual re-deploy (e.g. after backfilling an old release, or first stand-up).
+  workflow_dispatch:
+
+# Distinct from the docs workflows' `mdbook-${{ github.ref }}` /
+# `mkdocs-${{ github.ref }}` groups. A fixed group name (not per-ref) because
+# release events don't carry a meaningful branch ref and we only ever want one
+# index deploy in flight. `cancel-in-progress: false` lets an in-flight deploy
+# finish rather than clobbering a concurrent docs deploy.
+concurrency:
+  group: pip-index
+  cancel-in-progress: false
+
+jobs:
+  build:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate PEP 503 pip index
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUTPUT_DIR: pip-index
+        # Thin step: all logic lives in the testable bin-internal script.
+        run: bin-internal/generate-pip-index.sh
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pip-index
+
+  deploy:
+    needs: build
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
