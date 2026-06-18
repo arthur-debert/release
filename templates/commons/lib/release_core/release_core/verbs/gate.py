@@ -75,11 +75,22 @@ mask the exit status and lefthook's last lines don't say pass/fail. ``--quiet``
 prints only that verdict line on success (full output on failure), so there's no
 incentive to pipe through tail at all.
 
+Toolset provisioning (WS5/I, #762): ``release-core gate --provision`` reconciles
+the gate toolset (lefthook, prettier, markdownlint, ruff, yamllint, shellcheck,
+actionlint, yq) to the pins in ``release_core.toolset`` — the Python port of
+``bin-internal/provision-gate-toolset.sh``. It is the HARD provisioner (a tool it
+cannot reconcile is a non-zero exit); ``--provision --best-effort`` warns instead
+of failing (the SessionStart / init path, where a transient registry hiccup must
+not abort the session). ``arm-gate`` calls ``--provision`` in CI; ``release-core
+init`` calls the same code (best-effort) so one definition arms the toolset
+everywhere.
+
 Usage:
   release-core gate [extra lefthook args...]   # agent/human: full --all-files gate
   release-core gate --quiet [lefthook args...] # only the verdict line on success
   release-core gate --hook [lefthook args...]  # git pre-commit: staged-set gate
   release-core gate --install-hook             # wire .git/hooks/pre-commit
+  release-core gate --provision [--best-effort]# reconcile the gate toolset to pins
 
 On a fresh node-consumer checkout (a root ``package.json`` but no installed
 ``node_modules/``) the gate's eslint / svelte-check hooks would otherwise surface
@@ -569,6 +580,25 @@ def _run_and_summarize(cmd: list[str], root: str, env: dict[str, str], *, quiet:
     return rc
 
 
+def _provision(argv: list[str]) -> int:
+    """``release-core gate --provision`` — reconcile the gate toolset to its pins.
+
+    The single wheel-carried provisioner (WS5/I, #762): the Python port of
+    ``bin-internal/provision-gate-toolset.sh``, reached identically by CI
+    (``arm-gate``) and the local boot. HARD by default (a tool it cannot
+    reconcile is a non-zero exit, matching the shell's ``exit 1`` — the gate
+    never skips); ``--best-effort`` warns + continues (the SessionStart / init
+    path, where a transient hiccup must not abort the session)."""
+    from .. import toolset
+
+    best_effort = "--best-effort" in argv
+    try:
+        return toolset.provision(best_effort=best_effort)
+    except toolset.ProvisionError as exc:
+        print(f"error: gate toolset not provisioned — {exc}", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] in ("-h", "--help"):
         print(USAGE.strip())
@@ -578,6 +608,9 @@ def main(argv: list[str]) -> int:
 
     if argv and argv[0] == "--install-hook":
         return _install_hook(root)
+
+    if argv and argv[0] == "--provision":
+        return _provision(argv[1:])
 
     # --hook: the git pre-commit entry point. Run lefthook over the STAGED set
     # (lefthook's default — NO --all-files), so stage_fixed auto-fix+restage works

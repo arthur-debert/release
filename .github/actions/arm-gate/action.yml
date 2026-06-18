@@ -125,11 +125,37 @@ runs:
           bash "$resolver" --no-init --from-source "${{ github.action_path }}/../../.."
         fi
         export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
-        release-core init --no-commit
+        # --no-provision: CI installs the managed tree only — toolset arming + hook
+        # wiring are NOT a CI concern (the "Provision the gate toolset" step below
+        # arms the toolset via `release-core gate --provision`; CI runs the gate as
+        # `lefthook run --all-files`, never through a wired git hook). Without this,
+        # init (WS5/E) would also try to wire hooks + run app-bin/post-setup-hook.sh
+        # in the runner. Keep --no-commit too (CI must never auto-commit).
+        release-core init --no-commit --no-provision
     - name: Provision the gate toolset
       if: inputs.toolset == 'true'
       shell: bash
       env:
         RUFF_VERSION: ${{ inputs.ruff-version }}
         ACTIONLINT_VERSION: ${{ inputs.actionlint-version }}
-      run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
+      # WS5/I (#762): arm the toolset through the wheel verb — the Python port of
+      # provision-gate-toolset.sh (release_core.toolset). One definition, reached
+      # by CI here and by the local boot (init → toolset.provision). The HARD
+      # provisioner (a tool it can't reconcile is a non-zero exit — the gate never
+      # skips). The RUFF_VERSION/ACTIONLINT_VERSION env overrides flow through
+      # toolset.pin() exactly as the shell `${VAR:-default}` did.
+      #
+      # Prefer the verb; fall back to the shell script when `release-core` is not
+      # on PATH — release's OWN ci.yml runs this composite with install_tree:false
+      # (no wheel install step), so the verb is unavailable there. The shell script
+      # stays the dual-source until WS8 removes it. Both read the SAME pins
+      # (toolset.py == gate-tool-versions.sh, asserted in-sync by a test), so the
+      # two paths are equivalent.
+      run: |
+        set -euo pipefail
+        export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
+        if command -v release-core >/dev/null 2>&1; then
+          release-core gate --provision
+        else
+          bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
+        fi
