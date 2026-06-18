@@ -313,7 +313,8 @@ STUB
 # --------------------------------------------------------------------------
 # provenance stamp (#580): the resolved release tag lands in the venv so
 # `release-core init` can label the managed-files commit with the REAL release
-# line (the wheel's package version is a static 0.0.1).
+# line (since release#758 the wheel version is tag-stamped too; this explicit
+# stamp remains the provenance channel init reads).
 # --------------------------------------------------------------------------
 
 @test "stamp: install writes the resolved release tag into <venv>/release-source.tag" {

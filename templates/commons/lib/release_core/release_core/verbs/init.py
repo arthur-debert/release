@@ -144,10 +144,12 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
         from .. import __version__ as _v
 
         # release#580: carry the resolved release tag the boot resolver stamped
-        # into the tool venv (the wheel's own version is a static 0.0.1) so the
-        # auto-commit + the .release-sync-source marker can say WHICH release
-        # line seeded this tree. Absent stamp (older resolver) → None; the
-        # ref_sha wheel-version string remains the label fallback.
+        # into the tool venv so the auto-commit + the .release-sync-source marker
+        # can say WHICH release line seeded this tree. (Since release#758 the
+        # wheel version IS tag-stamped, so `__version__` below is also meaningful;
+        # the explicit tag stamp is still the provenance channel init reads.)
+        # Absent stamp (older resolver) → None; the ref_sha wheel-version string
+        # remains the label fallback.
         source: sync.Source = sync.BundleSource(
             bundle_root,
             ref_sha=f"release-core {_v}",
