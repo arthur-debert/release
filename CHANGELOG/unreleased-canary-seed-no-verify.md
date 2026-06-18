@@ -1,0 +1,1 @@
+- canary seed commit uses --no-verify (harness setup; the canary's CI is the real gate) so a node-family (vscode-ext) seed isn't blocked by the missing-deps gate
