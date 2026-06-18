@@ -1,0 +1,1 @@
+- gh-action.yml installs --major v3; release.yml self-cuts via @main (chicken-and-egg fix)
