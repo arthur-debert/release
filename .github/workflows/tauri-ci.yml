@@ -200,12 +200,16 @@ on:
 
       playwright-cache:
         description: |
-          When `true`, cache the Playwright browser binaries
-          (`~/.cache/ms-playwright`) in both the check and e2e jobs.
-          Off by default. The cache is keyed by the installed
-          `@playwright/test` version (resolved at runtime via
+          When `true`, cache the Playwright browser binaries in both the
+          check and e2e jobs. Off by default. Both jobs pin
+          `PLAYWRIGHT_BROWSERS_PATH` to `$GITHUB_WORKSPACE/.playwright-browsers`
+          (a fixed, OS-independent location — the default browser dir is
+          OS-specific) and cache that path. The key is
+          `playwright-<runner.os>-<runner.arch>-<version>`, where version
+          is the installed `@playwright/test` (resolved at runtime via
           `node -p "require('@playwright/test/package.json').version"`),
-          so it invalidates exactly when the consumer bumps Playwright.
+          so it invalidates when the consumer bumps Playwright and never
+          shares incompatible binaries across OS/arch.
           `playwright install --with-deps` still runs — on a HIT the
           browser download is a no-op and only the apt system deps are
           (re)applied.
@@ -481,7 +485,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
-          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw-version.outputs.version }}
 
       - name: Install Playwright browsers
         if: inputs.playwright
@@ -686,7 +690,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
-          key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw-version.outputs.version }}
 
       - name: Install Playwright browsers
         # `e2e: true` implies Playwright. If the consumer doesn't
