@@ -55,9 +55,7 @@ projects:
   lex:
     - { repo: lex-fmt/comms,           path: lex-fmt/comms }
     - { repo: lex-fmt/lex,             path: lex-fmt/lex }
-    - repo: lex-fmt/lexed
-      path: lex-fmt/lexed
-      expect-verify-fail: gate needs the sibling lexed theme checkout, absent in the hermetic clone
+    - { repo: lex-fmt/lexed,           path: lex-fmt/lexed }
     - { repo: lex-fmt/nvim,            path: lex-fmt/nvim }
     - { repo: lex-fmt/tree-sitter-lex, path: lex-fmt/tree-sitter-lex }
     - { repo: lex-fmt/vscode,          path: lex-fmt/vscode }
