@@ -10,7 +10,7 @@
 #
 # A missing tool is a BOOTSTRAP failure, never a reason to pass: every command
 # below exits NON-ZERO when its tool is absent (no `exit 0` skips). If a tool is
-# missing, re-run the bootstrap (setup-dev-env.sh / release-core init) — do NOT
+# missing, re-run `release-core gate --provision` (or release-core init) — do NOT
 # bypass. `--no-verify` is defeated by CI running this same gate on a clean
 # runner where the tools are guaranteed present.
 
@@ -29,7 +29,7 @@ pre-commit:
         - "templates/**/bin/*"
       run: |
         if ! command -v shellcheck >/dev/null 2>&1; then
-          echo "ERROR: shellcheck not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: shellcheck not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         fail=0
@@ -62,7 +62,7 @@ pre-commit:
         - "templates/*.{json,md,yml,yaml}"
       run: |
         if ! command -v prettier >/dev/null 2>&1; then
-          echo "ERROR: prettier not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: prettier not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         prettier --check -- {staged_files}
@@ -75,7 +75,7 @@ pre-commit:
         - ".github/actions/*.yaml"
       run: |
         if ! command -v actionlint >/dev/null 2>&1; then
-          echo "ERROR: actionlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: actionlint not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         # Run actionlint over the whole tree (it needs cross-file
@@ -118,7 +118,7 @@ pre-commit:
       # the CI `py-lint` job.
       #
       # The bin/ + app-bin/ globs deliberately match NON-python files too (the
-      # bash shims `release`, `check-shell`, `setup-dev-env.sh`). We can't hand a
+      # bash shims `install-release-core`, `fetch-artifact`). We can't hand a
       # bash file to ruff — it errors as invalid Python — so file selection is
       # done by CONTENT, not glob, exactly like
       # bin/check-shell: keep only `*.py` plus shebang-detected python shims,
@@ -134,7 +134,7 @@ pre-commit:
         - "templates/commons/app-bin/**"
       run: |
         if ! command -v ruff >/dev/null 2>&1; then
-          echo "ERROR: ruff not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: ruff not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         # POSIX sh — lefthook runs hooks under `sh` (dash on Linux), not bash,
@@ -176,7 +176,7 @@ pre-commit:
         - "docs/references/consumer-contract.yaml"
       run: |
         if ! command -v python3 >/dev/null 2>&1; then
-          echo "ERROR: python3 not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: python3 not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         bin-internal/check-consumer-contract.sh
@@ -198,7 +198,7 @@ pre-commit:
         - "docs/references/consumer-contract-lint-baseline.yaml"
       run: |
         if ! command -v python3 >/dev/null 2>&1; then
-          echo "ERROR: python3 not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: python3 not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         bin-internal/lint-consumer-contract.sh
@@ -221,7 +221,7 @@ pre-commit:
         - "templates/commons/lib/release_core/tests/captured-fixture-lint-baseline.yaml"
       run: |
         if ! command -v python3 >/dev/null 2>&1; then
-          echo "ERROR: python3 not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: python3 not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         bin-internal/lint-captured-fixtures.sh
@@ -237,7 +237,7 @@ pre-commit:
         - "skills/*.md"
       run: |
         if ! command -v markdownlint >/dev/null 2>&1; then
-          echo "ERROR: markdownlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh / release-core init)." >&2
+          echo "ERROR: markdownlint not installed — the gate does not skip. Re-run `release-core gate --provision` (or release-core init)." >&2
           exit 1
         fi
         bin-internal/lint-skills.sh

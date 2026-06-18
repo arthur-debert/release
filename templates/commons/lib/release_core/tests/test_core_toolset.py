@@ -1,49 +1,21 @@
 """toolset — the pins single source + the reconcile-to-pin provisioner (WS5/I, #762).
 
 Covers:
-  * the DUAL-SOURCE in-sync invariant: the Python `toolset.py` pins == the shell
-    `gate-tool-versions.sh` literals (so the two can't drift while both exist
-    through the migration window);
   * the env-override knob (`${NAME:-default}` parity);
   * the reconcile predicate `version_matches` against a fake binary;
   * `provision()` HARD vs best-effort behavior with stubbed steps.
+
+(WS8 #765 removed the shell `gate-tool-versions.sh` — toolset.py is now THE single
+source of pins, so the former dual-source in-sync invariant no longer applies.)
 """
 
 from __future__ import annotations
 
 import os
-import re
 import stat
 
 import pytest
 from release_core import toolset
-
-# Repo paths: this test lives at
-# templates/commons/lib/release_core/tests/, so the shell pins file is four
-# levels up + bin/.
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", "..", "..", "..", ".."))
-_SHELL_PINS = os.path.join(_REPO_ROOT, "templates", "commons", "bin", "gate-tool-versions.sh")
-
-
-def _parse_shell_pins(text: str) -> dict[str, str]:
-    """Pull every `NAME="${NAME:-X}"` pin out of the shell file → {NAME: X}."""
-    pat = re.compile(r'^([A-Z_]+)="\$\{\1:-([0-9][0-9A-Za-z.]*)\}"', re.M)
-    return {m.group(1): m.group(2) for m in pat.finditer(text)}
-
-
-def test_dual_source_pins_in_sync():
-    """The Python pins must byte-match the shell pins — the anti-drift guard for
-    the migration window (both sources exist until WS8)."""
-    assert os.path.isfile(_SHELL_PINS), f"shell pins file missing: {_SHELL_PINS}"
-    with open(_SHELL_PINS, encoding="utf-8") as fh:
-        shell = _parse_shell_pins(fh.read())
-    # Every Python pin appears in the shell file at the same value, and vice versa
-    # (the shell file also defines no EXTRA pins the Python source lacks).
-    assert shell == toolset._PINS, (
-        f"pin drift between toolset.py and gate-tool-versions.sh:\n"
-        f"  python: {toolset._PINS}\n  shell:  {shell}"
-    )
 
 
 def test_pin_env_override(monkeypatch):

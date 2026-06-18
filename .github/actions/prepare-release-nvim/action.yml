@@ -51,7 +51,7 @@ runs:
     # The prep script below runs the consumer's HARD gate (#412) on the bump
     # commit; a missing linter FAILS the release (it never skips). Arm the
     # toolset first — Python is already set up above (for the release_core
-    # console-scripts), Node here, then provision-gate-toolset installs
+    # console-scripts), Node here, then `release-core gate --provision` installs
     # lefthook/prettier/markdownlint/ruff/yamllint/shellcheck. #437 (P2) armed
     # the rust/npm/go/python composites but missed nvim + tauri; this closes
     # that gap.
@@ -63,7 +63,7 @@ runs:
     - name: Arm the gate toolset (release#437)
       if: env.SKIP_PRECOMMIT_GATE != 'true'
       shell: bash
-      run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
+      run: release-core gate --provision
     - name: Prepare Neovim plugin release
       id: prep
       shell: bash

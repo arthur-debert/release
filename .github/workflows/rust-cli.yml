@@ -276,7 +276,7 @@ jobs:
           python-version: '3.13'
       - name: Arm the gate toolset
         # ONE definition of CI gate-arming: the arm-gate composite (→ the
-        # bin-internal/provision-gate-toolset.sh script). Node + Python are set up
+        # release-core gate --provision verb). Node + Python are set up
         # by the steps above; the composite installs the lint/format toolset the
         # hardened gate (run by prepare-release below) needs. (release#416)
         uses: arthur-debert/release/.github/actions/arm-gate@v3

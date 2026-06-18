@@ -159,17 +159,13 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
             )
         from .. import __version__ as _v
 
-        # release#580: carry the resolved release tag the boot resolver stamped
-        # into the tool venv so the auto-commit + the .release-sync-source marker
-        # can say WHICH release line seeded this tree. (Since release#758 the
-        # wheel version IS tag-stamped, so `__version__` below is also meaningful;
-        # the explicit tag stamp is still the provenance channel init reads.)
-        # Absent stamp (older resolver) → None; the ref_sha wheel-version string
-        # remains the label fallback.
+        # The wheel version is tag-stamped at build (release#758), so this
+        # ref_sha label already says which release line seeded the tree. (WS8
+        # #765 removed the separate release-source.tag stamp the boot resolver
+        # used to write — the index install no longer stamps a sidecar.)
         source: sync.Source = sync.BundleSource(
             bundle_root,
             ref_sha=f"release-core {_v}",
-            release_tag=sync.read_source_tag(),
         )
     else:
         assert release_home is not None
@@ -268,27 +264,15 @@ def _managed_paths_for_commit(
 
 
 def _source_label(source: sync.Source) -> str:
-    """The provenance label for the auto-commit message + summary (release#580).
+    """The provenance label for the auto-commit message + summary.
 
-    When the boot resolver stamped the resolved release tag into the tool venv,
-    the label carries the REAL release line — "release v2.17.1 (release-core
-    wheel)" — instead of the static wheel version ("release-core 0.0.1", which
-    cannot tell v2.16 from v2.17 in a consumer's history). A --from-source
-    install stamps "from-source [<shortsha>]" and labels as "release-core
-    (from-source <shortsha>)" — truthful, never a faked tag. No stamp (a wheel
-    installed by an older resolver, or a dev checkout) → the source's ref_sha
-    string, unchanged (GitSource always lands here: its resolved SHA already IS
-    the provenance).
+    The source's ``ref_sha`` IS the provenance: the tag-stamped wheel version
+    for a BundleSource ("release-core 3.1.0", release#758) or the resolved git
+    SHA for a GitSource. (WS8 #765 removed the separate release-source.tag stamp
+    the boot resolver used to write, so there is no longer a distinct release-tag
+    label channel.)
     """
-    tag = source.release_tag
-    if not tag:
-        return source.ref_sha
-    # Exact-sentinel match ("from-source" / "from-source <sha>"), not a loose
-    # prefix: a release tag is free-form, so a tag literally named
-    # "from-source-v2.0.0" must still label as a release tag.
-    if tag == "from-source" or tag.startswith("from-source "):
-        return f"release-core ({tag})"
-    return f"release {tag} (release-core wheel)"
+    return source.ref_sha
 
 
 def _run_full_sync(

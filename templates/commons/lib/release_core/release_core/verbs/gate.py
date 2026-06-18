@@ -21,14 +21,14 @@ gate`` always runs the whole tree so "gate green" is never a lie about an
 unstaged change. (caught in the #501 footprint validation run.)
 
 A missing lefthook is a HARD gate failure — the gate never skips. Re-run the
-bootstrap (``setup-dev-env.sh`` / ``release-core init``) to provision it.
+bootstrap (``install-release-core`` / ``release-core init``) to provision it.
 
 One definition AND one runner (release#567): the gate runs the TOOLSET-provisioned
-lefthook — the binary ``setup-dev-env.sh`` / ``provision-gate-toolset.sh`` pin via
-``gate-tool-versions.sh`` (the single source, release#499/#531) — never whatever a
+lefthook — the binary ``release-core gate --provision`` (the wheel-carried
+``release_core.toolset``, the single source post-WS8) pins — never whatever a
 consumer's ``node_modules/.bin`` or a floating PATH install happens to carry. The
-verb reads the ``LEFTHOOK_VERSION`` pin (env override → ``bin/gate-tool-versions.sh``
-→ the wheel-bundled copy) and resolves the FIRST PATH lefthook that reports that
+verb reads the ``LEFTHOOK_VERSION`` pin (env override → ``release_core.toolset``)
+and resolves the FIRST PATH lefthook that reports that
 version, skipping ``node_modules`` entries (the consumer-dep skew source: the #525
 probe saw ``release-core gate`` and the git hook run DIFFERENT lefthook versions in
 one session). No pinned binary on PATH is a HARD failure, not a fall-back-to-
@@ -121,10 +121,6 @@ import tempfile
 from collections.abc import Iterator
 
 USAGE = __doc__ or ""
-
-# The single-source pin line in gate-tool-versions.sh (release#499):
-#   LEFTHOOK_VERSION="${LEFTHOOK_VERSION:-2.1.9}"
-_PIN_RE = re.compile(r'^LEFTHOOK_VERSION="\$\{LEFTHOOK_VERSION:-([0-9][0-9A-Za-z.]*)\}"', re.M)
 
 # lefthook's own config-discovery basenames — the release-self / not-yet-migrated
 # root-config case. If NONE of these exists and .release/lefthook.yml is absent,
@@ -233,41 +229,19 @@ def _repo_root() -> str:
 def _pinned_lefthook_version(root: str) -> str | None:
     """The toolset's LEFTHOOK_VERSION pin — the single source (release#499/#531).
 
-    Resolution order matches the shell side's contract:
-      1. the LEFTHOOK_VERSION env override (the documented per-env knob),
-      2. ``<root>/bin/gate-tool-versions.sh`` — release-self's live source / the
-         consumer's synced mirror (a symlink into ``.release/``, so it dangles
-         before init has run — hence 3),
-      3. the wheel-bundled copy shipped WITH this very code
-         (``release_core/_bundled_templates/…``) — always present in an installed
-         wheel, so the pin is knowable even on a fresh, pre-init clone.
+    WS8 (#765): the pin lives in ``release_core.toolset`` (the wheel-carried
+    Python single source — the shell ``gate-tool-versions.sh`` was removed), which
+    honors the LEFTHOOK_VERSION env override exactly as the old shell ``${VAR:-}``
+    did. Always knowable from the installed wheel — never None when running from a
+    wheel; ``root`` is unused now (kept for signature stability)."""
+    from .. import toolset
 
-    None only in a source-tree dev checkout with no root file (the bundle is
-    staged at wheel build, not committed)."""
-    env_pin = os.environ.get("LEFTHOOK_VERSION", "").strip()
-    if env_pin:
-        return env_pin
-    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    for path in (
-        os.path.join(root, "bin", "gate-tool-versions.sh"),
-        os.path.join(
-            pkg_root, "_bundled_templates", "templates", "commons", "bin", "gate-tool-versions.sh"
-        ),
-    ):
-        try:
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-        except OSError:
-            continue
-        m = _PIN_RE.search(text)
-        if m:
-            return m.group(1)
-    return None
+    return toolset.lefthook_version()
 
 
 def _lefthook_version(binary: str) -> str | None:
     """The version a lefthook binary reports — first dotted token of --version,
-    mirroring gate_version_matches in gate-tool-versions.sh."""
+    mirroring release_core.toolset.version_matches."""
     try:
         out = subprocess.run([binary, "--version"], capture_output=True, text=True)
     except OSError:
@@ -305,7 +279,7 @@ def _resolve_lefthook(pin: str | None) -> str | None:
     """The ONE gate runner: the first PATH lefthook reporting the toolset pin.
 
     With a known pin, a candidate at any OTHER version is rejected — the
-    provisioners (setup-dev-env.sh / provision-gate-toolset.sh) reconcile every
+    provisioner (release-core gate --provision) reconciles every
     tool TO the pin each session/run, so "present but out of sync" means the toolset
     is unarmed and the gate must fail loud, not silently run a different runner
     than the last environment did. Without a pin (source-tree dev checkout, no
@@ -653,14 +627,14 @@ def main(argv: list[str]) -> int:
                 f"error: no lefthook at the pinned toolset version {pin} on PATH — "
                 "one gate, ONE runner: the gate only runs the toolset-provisioned "
                 "lefthook, never a floating or node_modules one (release#567). The "
-                "gate does not skip. Re-run the bootstrap (setup-dev-env.sh) to "
+                "gate does not skip. Re-run `release-core gate --provision` to "
                 "reconcile the toolset to the pin.",
                 file=sys.stderr,
             )
         else:
             print(
                 "error: lefthook not found — the gate does not skip. Re-run the "
-                "bootstrap (setup-dev-env.sh / release-core init).",
+                "bootstrap (install-release-core / release-core init).",
                 file=sys.stderr,
             )
         print("GATE: FAILED (lefthook unavailable)")

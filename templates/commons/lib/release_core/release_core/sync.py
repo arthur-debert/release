@@ -19,7 +19,6 @@ import contextlib
 import hashlib
 import os
 import re
-import sys
 import tempfile
 from dataclasses import dataclass, field
 
@@ -54,19 +53,10 @@ class Source:
     the lefthook header (the resolved git SHA for GitSource; the wheel version /
     a sentinel for BundleSource). ``label`` is a human-readable description of
     the source used only in error messages (the git ref for GitSource).
-
-    ``release_tag`` is the resolved release PROVENANCE the boot resolver stamped
-    into the tool venv at install time (release#580) — e.g. "v2.17.1", or
-    "from-source <shortsha>" for a --from-source install. Only the bundle path
-    carries it (the wheel is what the stamp describes); GitSource composes from
-    a live clone whose ref_sha already says exactly where the content came from.
-    When set, install_tree() writes it into .release-sync-source alongside the
-    ref_sha line, and init labels the managed auto-commit with it.
     """
 
     ref_sha: str = ""
     label: str = "source"
-    release_tag: str | None = None
 
     def list_tree(self, subtree: str) -> list[tuple[str, str]]:  # pragma: no cover - interface
         raise NotImplementedError
@@ -127,11 +117,10 @@ class BundleSource(Source):
     filesystems.
     """
 
-    def __init__(self, bundle_root: str, ref_sha: str = "", release_tag: str | None = None) -> None:
+    def __init__(self, bundle_root: str, ref_sha: str = "") -> None:
         self.bundle_root = bundle_root
         self.ref_sha = ref_sha
         self.label = ref_sha or "wheel bundle"
-        self.release_tag = release_tag
 
     def _abs(self, relpath: str) -> str:
         # relpath is always POSIX/'/'-separated; translate to the host separator.
@@ -191,35 +180,7 @@ MANAGED_MARKER = "# Managed by release — do not edit. Regenerate via release-c
 # the next init rather than going unrecognized.
 MANAGED_MARKER_SIGNATURE = "# Managed by release"
 SOURCE_MARKER = ".release-sync-source"
-# The resolved-release stamp the boot resolver writes into the tool venv at
-# install time (release#580): <venv>/release-source.tag, one line — the release
-# tag the wheel was downloaded from (e.g. "v2.17.1"), or "from-source
-# [<shortsha>]" for a --from-source install. The FILE (not an env var) is the
-# durable channel: a later bare `release-core init` (the SessionStart self-sync)
-# runs without install-release-core in the chain, and sys.prefix — the venv the
-# running release-core lives in — locates it on every run.
-SOURCE_TAG_FILE = "release-source.tag"
 GITIGNORE_FILE = ".gitignore"
-
-
-def read_source_tag() -> str | None:
-    """The resolved release provenance stamped by install-release-core, or None.
-
-    Reads ``<sys.prefix>/release-source.tag``. None when absent — a wheel
-    installed by an older (pre-#580) resolver, or a dev checkout venv — in
-    which case callers fall back to the static wheel-version string (a
-    one-session boot-window robustness, not a compatibility fallback). The
-    $RELEASE_CORE_SOURCE_TAG env var, when SET, overrides the file (tests;
-    empty value means "no stamp").
-    """
-    if "RELEASE_CORE_SOURCE_TAG" in os.environ:
-        return os.environ["RELEASE_CORE_SOURCE_TAG"].strip() or None
-    path = os.path.join(sys.prefix, SOURCE_TAG_FILE)
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return fh.read().strip() or None
-    except OSError:
-        return None
 
 
 # WS4 (release#521): the whole `.release/` temp dir is EPHEMERAL — gitignored
@@ -374,15 +335,6 @@ CLAUDE_IMPORT_BODY = (
     "- Reference: `release-core --help`, `release-core <cmd> --help`, `release-core detect-kind`.\n"
     "- Quality gate (run every loop, after `git add`): `release-core gate`.\n"
 )
-# Pre-WS4 markers an already-seeded consumer may still carry in CLAUDE.md (the
-# spliced BEGIN..END block). On the next init the block is STRIPPED and replaced by
-# the one-line @import — recognized via either marker, never duplicated.
-CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-core; do not edit -->"
-CLAUDE_BEGIN_LEGACY = (
-    "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
-)
-CLAUDE_END = "<!-- END release-managed orientation -->"
-
 # ── Skill distribution catalogs ──────────────────────────────────────────────
 #
 # WS2 (release#523, "invoke don't discover"): the dev cycle + general-dev guidance
@@ -446,18 +398,19 @@ def should_skip_source(rel: str) -> bool:
     return rel.endswith(".DS_Store")
 
 
-# The irreducible BOOTSTRAP files (WS5, release#526): the SessionStart chain
-# must be readable/executable on a FRESH CLONE, i.e. BEFORE the ephemeral
-# `.release/` exists — a symlink into `.release/` dangles there, so Claude Code
-# could not even read the hooks config, and the boot could not start itself
-# (the chicken-and-egg). These four are therefore written as REAL tracked
+# The irreducible BOOTSTRAP files (WS5, release#526; trimmed WS8 #765): the
+# SessionStart chain must be readable/executable on a FRESH CLONE, i.e. BEFORE
+# the ephemeral `.release/` exists — a symlink into `.release/` dangles there, so
+# Claude Code could not even read the hooks config, and the boot could not start
+# itself (the chicken-and-egg). These three are therefore written as REAL tracked
 # copies (auto-refreshed by init exactly like the workflow copies); everything
-# else stays an ephemeral-targeted symlink.
+# else stays an ephemeral-targeted symlink. (WS8 removed bin/setup-dev-env.sh —
+# its provisioning dissolved into `release-core init`, so SessionStart calls
+# bin/install-release-core directly.)
 BOOTSTRAP_REAL_FILES: frozenset[str] = frozenset(
     {
         ".claude/settings.json",
         "bin/install-release-core",
-        "bin/setup-dev-env.sh",
         "bin/pr-loop-guard",
     }
 )
@@ -779,11 +732,7 @@ def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> 
     with open(gitignore, "w", encoding="utf-8") as fh:
         fh.write(GITIGNORE_BODY)
 
-    # Provenance marker (ADR-0002): static comment lines + the full source SHA,
-    # plus — when the boot resolver stamped one (release#580) — the resolved
-    # release tag, so the marker can tell WHICH release line seeded this tree.
-    # (Since release#758 the wheel version is tag-stamped too; the explicit tag
-    # stamp remains the provenance channel recorded here.)
+    # Provenance marker (ADR-0002): static comment lines + the full source SHA.
     marker = os.path.join(tmp_release, SOURCE_MARKER)
     with open(marker, "w", encoding="utf-8") as fh:
         fh.write(
@@ -793,12 +742,6 @@ def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> 
             "# this marker is transient and has no reader — the out-of-sync check was retired.\n"
             f"{ref_sha}\n"
         )
-        if source.release_tag:
-            fh.write(
-                "# resolved release tag — stamped into the tool venv by\n"
-                "# install-release-core at wheel-install time (release#580).\n"
-                f"{source.release_tag}\n"
-            )
 
 
 def _write_lefthook(source: Source, ref_sha: str, frags: list[str], tmp_release: str) -> None:
@@ -1414,6 +1357,17 @@ RETIRED_FINGERPRINT_FILES: dict[str, str] = {
     # string value is the verbatim fingerprint matched against consumer files —
     # it is data, not prose, and must stay byte-exact.
     "bin/release": "Thin shim around the canonical release-cut CLI",
+    # The SessionStart provisioner (retired WS8 #765): provisioning dissolved into
+    # `release-core init`, and SessionStart now calls bin/install-release-core
+    # directly. A converged consumer still TRACKS this former bootstrap real-file
+    # copy; it is no longer in BOOTSTRAP_REAL_FILES, so neither mirror sweep sees
+    # it — this retired-file entry removes it. The header comment is verbatim
+    # across every synced copy (it was a managed real-file, byte-identical
+    # fleet-wide), so a fingerprint match is exact; a consumer that hand-edited the
+    # header no longer matches and is left alone.
+    "bin/setup-dev-env.sh": (
+        "bin/setup-dev-env.sh — per-session dev-environment setup, invoked by"
+    ),
     # The pre-path-mirror SessionStart script: tailored per repo (extras
     # appended below the rsync marker), so the blob set misses tailored
     # copies — the header comment is verbatim across every template revision
@@ -1501,12 +1455,11 @@ class ClaudeDecision:
     #   create → CLAUDE.md is ABSENT: write it as the pure one-line pointer. Safe
     #            to STAGE (no consumer content to fold in — it IS 100% the managed
     #            line), so the fresh-seed tree stays clean.
-    #   insert → CLAUDE.md EXISTS without the @import (e.g. a pre-WS4 managed
-    #            block): strip the old block, prepend the one line. STAGED on this
-    #            ONE-TIME migration (like create) so it commits — otherwise the
-    #            @import sits uncommitted and the next init re-stages it. After the
-    #            insertion import_action is "none", so CLAUDE.md is never staged
-    #            again and the consumer owns it from then on.
+    #   insert → CLAUDE.md EXISTS without the @import: prepend the one line.
+    #            STAGED on this ONE-TIME insertion (like create) so it commits —
+    #            otherwise the @import sits uncommitted and the next init re-stages
+    #            it. After the insertion import_action is "none", so CLAUDE.md is
+    #            never staged again and the consumer owns it from then on.
     #   none   → the @import line is already present.
     #   skip-symlink → CLAUDE.md is a symlink, leave it alone.
     import_action: str = "none"  # create | insert | none | skip-symlink
@@ -1520,6 +1473,11 @@ def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
     file always carries the current header; the `@import` line is inserted into
     CLAUDE.md only when it is not already present (an existing line is left
     untouched — CLAUDE.md is consumer-owned once seeded).
+
+    The WS4 @import migration is complete fleet-wide (WS8, #765), so this no
+    longer strips a pre-WS4 spliced BEGIN..END block — init manages ONLY the
+    `.claude/IMPORTANT-RELEASE.md` target + the one-line @import, never the old
+    in-CLAUDE.md block.
     """
     # 1. The managed target file: write iff content differs from what's on disk.
     target_path = os.path.join(repo_root, CLAUDE_IMPORT_TARGET)
@@ -1547,22 +1505,14 @@ def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
         return decision
 
     existing = _read_text(claude_path)
-    if _has_import_line(existing) and not _has_claude_begin(existing):
+    if _has_import_line(existing):
         # Already a clean pointer + consumer content; nothing to do.
         decision.import_action = "none"
         return decision
 
-    # Present but missing the import line (or still carrying a pre-WS4 spliced
-    # block): strip any managed block, then PREPEND the one-line @import.
-    if _has_claude_begin(existing):
-        rest = _strip_managed_block_text(existing)
-    else:
-        rest = existing.rstrip("\n")
-    # De-dup any pre-existing @import line(s) from the remainder before prepending
-    # the canonical one, so the result has EXACTLY one. A repo can carry BOTH the
-    # pre-WS4 block AND a stray @import (e.g. a manual migration attempt); without
-    # this the strip-then-prepend would leave two import lines.
-    rest = "\n".join(ln for ln in rest.split("\n") if ln.strip() != CLAUDE_IMPORT_LINE).strip("\n")
+    # Present but missing the import line: PREPEND the one-line @import to the
+    # consumer's existing content.
+    rest = existing.rstrip("\n")
     content = f"{CLAUDE_IMPORT_LINE}\n"
     if rest:
         content += f"\n{rest}\n"
@@ -1571,37 +1521,10 @@ def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
     return decision
 
 
-def _strip_managed_block_text(text: str) -> str:
-    """Strip a pre-WS4 spliced BEGIN..END managed block from CLAUDE.md text,
-    dropping leading blank lines, returning the rest WITHOUT a trailing newline.
-    Used to migrate an already-seeded consumer off the old splice onto the
-    one-line @import."""
-    lines = text.split("\n")
-    kept: list[str] = []
-    skip = False
-    for line in lines:
-        if _has_claude_begin(line):
-            skip = True
-        if not skip:
-            kept.append(line)
-        if CLAUDE_END in line:
-            skip = False
-    while kept and kept[0] == "":
-        kept.pop(0)
-    return "\n".join(kept).rstrip("\n")
-
-
 def _has_import_line(text: str) -> bool:
     """True iff CLAUDE.md already imports the managed target — the verbatim
     `@.claude/IMPORTANT-RELEASE.md` line appears (as its own line)."""
     return any(line.strip() == CLAUDE_IMPORT_LINE for line in text.split("\n"))
-
-
-def _has_claude_begin(text: str) -> bool:
-    """True iff ``text`` carries a pre-WS4 managed-block BEGIN marker — the
-    CLAUDE_BEGIN OR the legacy CLAUDE_BEGIN_LEGACY. Used only to migrate an
-    existing spliced block onto the one-line @import."""
-    return CLAUDE_BEGIN in text or CLAUDE_BEGIN_LEGACY in text
 
 
 def _read_text(path: str) -> str:

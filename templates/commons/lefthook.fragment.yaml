@@ -10,10 +10,10 @@
 # (no auto-fix available).
 #
 # This is a HARD gate: a missing tool exits NON-ZERO (never skips). A
-# missing tool is a BOOTSTRAP failure, not a reason to pass — re-run the
-# bootstrap (setup-dev-env.sh) to arm the toolset. Cloud Claude Code
-# sessions install all three tools via setup-dev-env.sh; local dev gets
-# them the same way (or `brew install markdownlint-cli yamllint shellcheck`).
+# missing tool is a BOOTSTRAP failure, not a reason to pass — re-run
+# `release-core gate --provision` to arm the toolset. Cloud + local Claude
+# Code sessions install all three tools via `release-core init` (SessionStart);
+# or `brew install markdownlint-cli yamllint shellcheck`.
 
 pre-commit:
   commands:
@@ -35,7 +35,7 @@ pre-commit:
         if command -v markdownlint >/dev/null 2>&1; then
           markdownlint --fix --config .release/.markdownlint.json --ignore-path .release/.markdownlintignore -- {staged_files};
         else
-          echo "ERROR: markdownlint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2;
+          echo "ERROR: markdownlint not installed — the gate does not skip. Re-run `release-core gate --provision`." >&2;
           exit 1;
         fi
       stage_fixed: true
@@ -48,7 +48,7 @@ pre-commit:
         if command -v yamllint >/dev/null 2>&1; then
           yamllint -c .release/.yamllint -- {staged_files};
         else
-          echo "ERROR: yamllint not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2;
+          echo "ERROR: yamllint not installed — the gate does not skip. Re-run `release-core gate --provision`." >&2;
           exit 1;
         fi
       priority: 2

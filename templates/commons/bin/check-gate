@@ -33,7 +33,7 @@ if [ -x node_modules/.bin/lefthook ]; then
 elif command -v lefthook >/dev/null 2>&1; then
   _lefthook="lefthook"
 else
-  echo "error: lefthook not found — run the bootstrap (setup-dev-env.sh / release-core init)" >&2
+  echo "error: lefthook not found — run the bootstrap (install-release-core / release-core init)" >&2
   exit 1
 fi
 

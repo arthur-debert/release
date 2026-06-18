@@ -116,9 +116,9 @@ fi
 #                     nvim-lspconfig; we install the official stable tarball
 #                     from github.com/neovim/neovim/releases instead
 #   xvfb            — virtual framebuffer; binary is env-side, starting the
-#                     :99 daemon is per-repo in bin/setup-dev-env.sh for
+#                     :99 daemon is per-repo in app-bin/post-setup-hook.sh for
 #                     GUI-test consumers (lexed, phos-app, future Electron)
-#   libnss3-tools   — provides `certutil` so the shared setup-dev-env.sh
+#   libnss3-tools   — provides `certutil` so `release-core init --cloud`
 #                     can import the sandbox-egress CA into the per-user
 #                     Chromium NSS DB (needed by every Electron / Playwright
 #                     consumer; lexed surfaced this first)
@@ -208,15 +208,15 @@ fi
 
 # xvfb — virtual framebuffer for headless GUI-app tests. Consumers that
 # need a running display start `Xvfb :99` themselves (idempotent, in
-# their bin/setup-dev-env.sh); this just ensures the binary is on
+# their app-bin/post-setup-hook.sh); this just ensures the binary is on
 # disk so that start step works.
 if ! command -v Xvfb >/dev/null 2>&1; then
   apt install -y xvfb || echo "warning: xvfb install failed" >&2
   command -v Xvfb >/dev/null 2>&1 && echo "installed xvfb: $(Xvfb -help 2>&1 | head -1)"
 fi
 
-# libnss3-tools — provides `certutil`, used by the shared
-# setup-dev-env.sh to import the sandbox-egress TLS-inspection CA into
+# libnss3-tools — provides `certutil`, used by `release-core init --cloud`
+# (provision.import_nss_cert) to import the sandbox-egress TLS-inspection CA into
 # ~/.pki/nssdb so Chromium / Electron renderers stop throwing
 # ERR_CERT_AUTHORITY_INVALID on HTTPS resources. The cert import is
 # per-user (lives in $HOME) so it has to happen at session start; the
@@ -364,8 +364,8 @@ else
   echo "warning: env/CLAUDE.md not found in clone — no user-level CLAUDE.md installed" >&2
 fi
 
-# Install bin/fetch-artifact onto /usr/local/bin so consumer
-# bin/setup-dev-env.sh can call it without cloning release/. The
+# Install bin/fetch-artifact onto /usr/local/bin so a consumer's
+# app-bin/post-setup-hook.sh can call it without cloning release/. The
 # script reads ./artifacts.json (per docs/artifacts-schema.md) and
 # pulls pinned cross-repo artifacts from GH releases.
 if [ -f "$CLONE_DIR/bin/fetch-artifact" ]; then
@@ -386,17 +386,20 @@ else
 fi
 
 # Install lefthook at the SHARED pin (single source of truth — same version the
-# gate provisioners reconcile to, release#531). Sourced from the clone so the pin
-# is authoritative, not re-declared here. The `:=` fallback is a last-resort
-# safety net (mirrors setup-dev-env.sh): it only applies if the clone somehow
-# lacks the shared file, and is kept matching it by tests/gate-tool-versions/.
-if [ -f "$CLONE_DIR/templates/commons/bin/gate-tool-versions.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$CLONE_DIR/templates/commons/bin/gate-tool-versions.sh"
-fi
+# gate provisioner reconciles to, release#531). The pin lives in the wheel-carried
+# Python single source release_core.toolset (WS8 #765 removed the shell
+# gate-tool-versions.sh), read from the clone so it stays authoritative, not
+# re-declared here. The `:=` fallback is a last-resort safety net: it only applies
+# if the read somehow fails (no python / odd clone layout).
+LEFTHOOK_VERSION="$(
+  PYTHONPATH="$CLONE_DIR/templates/commons/lib/release_core" \
+    python3 -c 'from release_core import toolset; print(toolset.lefthook_version())' 2>/dev/null
+)" || true
 : "${LEFTHOOK_VERSION:=2.1.9}"
-if command -v gate_version_matches >/dev/null 2>&1 \
-  && gate_version_matches lefthook "$LEFTHOOK_VERSION"; then
+# Reconcile lefthook to the pin (first dotted token of `lefthook version`).
+_have_lefthook="$(command -v lefthook >/dev/null 2>&1 \
+  && lefthook version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+if [ "$_have_lefthook" = "$LEFTHOOK_VERSION" ]; then
   echo "lefthook already at pin: $(lefthook version)"
 else
   npm install -g "lefthook@${LEFTHOOK_VERSION}"

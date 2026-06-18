@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run ./run.sh against every consumer repo and report which steps pass.
 # Each repo's PR branch (not main) is checked when a dev-env PR exists,
-# so we see the latest setup-dev-env.sh attempt against the latest
+# so we see the latest install-release-core attempt against the latest
 # env/setup.sh in this repo.
 #
 # Usage:

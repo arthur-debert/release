@@ -87,11 +87,17 @@ jobs:
       - name: Provision the gate toolset (pinned actionlint + shellcheck)
         shell: bash
         # ONE provisioner, invoked — not a re-listed install (release#531 F3).
-        # The old inline block installed apt shellcheck (0.9.0, years behind the
-        # pinned 0.11) and an UNPINNED actionlint (no version arg -> floating
-        # latest); both now come from bin-internal/provision-gate-toolset.sh at
-        # the gate-tool-versions.sh pins, identical to every other environment.
-        run: bash bin-internal/provision-gate-toolset.sh
+        # WS8 (#765): the shell provisioner was removed; the gate toolset is now
+        # armed by `release-core gate --provision` (the wheel-carried
+        # release_core.toolset, the single source of pins). Install release_core
+        # from THIS checkout (release's own repo) --from-source --no-init so the
+        # verb is reachable, then provision. Pinned actionlint + shellcheck at the
+        # same pins every other environment runs.
+        run: |
+          set -euo pipefail
+          bash bin/install-release-core --no-init --from-source .
+          export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
+          release-core gate --provision
 
       - name: Run actionlint
         shell: bash

@@ -179,7 +179,7 @@ def test_gate_no_lefthook_at_the_pin_is_a_hard_failure(monkeypatch, capsys):
     assert gate.main([]) == 1
     err = capsys.readouterr().err
     assert "pinned toolset version 2.1.9" in err
-    assert "setup-dev-env.sh" in err
+    assert "release-core gate --provision" in err
 
 
 def _gated_root(tmp_path):
@@ -252,44 +252,21 @@ def test_gate_points_lefthook_at_managed_config(monkeypatch, tmp_path):
 # --- one runner: the gate pins its lefthook to the toolset (release#567) ----
 
 
-def test_pin_read_from_root_gate_tool_versions(tmp_path, monkeypatch):
-    """The pin comes from the SAME single source the provisioners use —
-    bin/gate-tool-versions.sh (release#499/#531)."""
+def test_pin_read_from_toolset(tmp_path, monkeypatch):
+    """The pin comes from the SAME single source the provisioner uses — the
+    wheel-carried release_core.toolset (WS8 #765; the shell gate-tool-versions.sh
+    was removed). Always knowable from the installed wheel, no file read."""
+    from release_core import toolset
+
     monkeypatch.delenv("LEFTHOOK_VERSION", raising=False)
-    (tmp_path / "bin").mkdir()
-    (tmp_path / "bin" / "gate-tool-versions.sh").write_text(
-        '# pins\nLEFTHOOK_VERSION="${LEFTHOOK_VERSION:-9.9.9}"\n'
-    )
-    assert gate._pinned_lefthook_version(str(tmp_path)) == "9.9.9"
+    assert gate._pinned_lefthook_version(str(tmp_path)) == toolset.lefthook_version()
 
 
 def test_pin_env_override_wins(tmp_path, monkeypatch):
     """LEFTHOOK_VERSION env is the single source's documented override knob —
-    it wins over the file, matching the shell-side `:-` semantics."""
-    (tmp_path / "bin").mkdir()
-    (tmp_path / "bin" / "gate-tool-versions.sh").write_text(
-        'LEFTHOOK_VERSION="${LEFTHOOK_VERSION:-9.9.9}"\n'
-    )
+    it wins, matching the shell-side `:-` semantics."""
     monkeypatch.setenv("LEFTHOOK_VERSION", "1.2.3")
     assert gate._pinned_lefthook_version(str(tmp_path)) == "1.2.3"
-
-
-def test_pin_falls_back_to_the_wheel_bundle(tmp_path, monkeypatch):
-    """Pre-init (fresh clone), the consumer's bin/gate-tool-versions.sh is a
-    dangling symlink into the not-yet-composed .release/ — the wheel-bundled
-    copy that ships WITH this code still pins the runner."""
-    monkeypatch.delenv("LEFTHOOK_VERSION", raising=False)
-    pkg = tmp_path / "pkg"
-    bundled = pkg / "_bundled_templates" / "templates" / "commons" / "bin"
-    bundled.mkdir(parents=True)
-    (bundled / "gate-tool-versions.sh").write_text(
-        'LEFTHOOK_VERSION="${LEFTHOOK_VERSION:-7.7.7}"\n'
-    )
-    (pkg / "verbs").mkdir()
-    monkeypatch.setattr(gate, "__file__", str(pkg / "verbs" / "gate.py"))
-    repo = tmp_path / "repo"  # no bin/gate-tool-versions.sh here
-    repo.mkdir()
-    assert gate._pinned_lefthook_version(str(repo)) == "7.7.7"
 
 
 def _fake_lefthook(dirpath, version: str) -> None:

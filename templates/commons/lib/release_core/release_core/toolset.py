@@ -1,10 +1,9 @@
 """toolset — the pinned gate-toolset versions + the reconcile-to-pin provisioner.
 
-This is the Python single source for the lint/format toolset the hardened gate
-(``lefthook.yml``) needs. It is the wheel-carried port of the shell duo
-``bin-internal/provision-gate-toolset.sh`` (the CI provisioner) +
-``templates/commons/bin/gate-tool-versions.sh`` (the shell pins): both are
-reached by ``release-core gate --provision`` (WS5/I, #762).
+This is THE single source for the lint/format toolset the hardened gate
+(``lefthook.yml``) needs — the pins AND the reconcile-to-pin provisioner. It is
+reached by ``release-core gate --provision`` (WS5/I, #762), called identically by
+CI (``arm-gate``) and the local boot (``release-core init`` → provisioning).
 
 WHY EVERY tool is pinned (release#531): "one gate, run everywhere" was true for
 the CONFIG (lefthook.yml) but FALSE for the tool binaries it invokes — a floating
@@ -12,15 +11,14 @@ brew/apt/npm binary could give the SAME gate a different verdict on a different
 box. The fix: pin ALL of them and RECONCILE to the pin (a present-but-wrong
 version is reinstalled at the pin, not silently accepted).
 
-DUAL-SOURCE (the migration window, WS5): the pins live here AND in the shell
-``gate-tool-versions.sh``; ``setup-dev-env.sh`` §0 still runs the shell
-provisioning this phase (redundant + safe). A test asserts the two pin sets are
-byte-identical so they cannot drift while both exist. Phase 3 (WS8) removes the
-shell duo and this becomes the only source.
+WS8 (#765): this is now the ONLY source. The shell duo it ported —
+``bin-internal/provision-gate-toolset.sh`` (the CI provisioner) +
+``templates/commons/bin/gate-tool-versions.sh`` (the shell pins) — was removed
+once the fleet converged, so there is no dual-source to keep in sync.
 
-The pre-wheel timing worry the shell file documents dissolves here: provisioning
-runs POST-pull (the wheel is already installed when ``gate --provision`` runs),
-so a Python source is reachable exactly when it is needed.
+Provisioning runs POST-pull (the wheel is already installed when
+``gate --provision`` runs), so this Python source is reachable exactly when it is
+needed — the pre-wheel timing worry the old shell file documented is moot.
 """
 
 from __future__ import annotations
@@ -35,14 +33,14 @@ import urllib.request
 
 from . import proc
 
-# ── The pins — single source (mirror of gate-tool-versions.sh) ───────────────
+# ── The pins — THE single source (WS8 #765) ──────────────────────────────────
 #
 # Each is overridable via the matching env var (the documented per-env knob), so
 # CI / a dev can pin a different version without editing this file — exactly the
-# shell ``${VAR:-default}`` contract. ``pin(name, default)`` reads the env first.
-#
-# The test ``test_dual_source_pins_in_sync`` asserts these defaults equal the
-# ``gate-tool-versions.sh`` literals, so the dual source cannot diverge.
+# old shell ``${VAR:-default}`` contract. ``pin(name)`` reads the env first.
+# (The shell ``gate-tool-versions.sh`` this mirrored was removed once the fleet
+# converged, so these literals are now the only pins — no dual-source to keep in
+# sync.)
 
 _PINS: dict[str, str] = {
     "RUFF_VERSION": "0.15.12",

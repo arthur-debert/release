@@ -37,7 +37,6 @@ tracked_real_files:
     - ".claude/settings.json"
     - "bin/install-release-core"
     - "bin/pr-loop-guard"
-    - "bin/setup-dev-env.sh"
   workflow_copies:
     - ".github/workflows/copilot-review.yml"
 gitignored:
@@ -63,7 +62,6 @@ untracked_mirrors:
   - "bin/check-tests"
   - "bin/diff-since-release"
   - "bin/e2e"
-  - "bin/gate-tool-versions.sh"
   - "lib/bats-harness.bash"
   - "tests/e2e/bats/helpers/setup.bash"
 gate_internal:
@@ -101,6 +99,7 @@ retired_files:
     - "vendor/semver-tool/semver"
   fingerprint:
     - "bin/release"
+    - "bin/setup-dev-env.sh"
     - "scripts/setup-dev-env.sh"
 managed_path_prefixes:
   - ".release/"

@@ -213,15 +213,16 @@ def _verbs_section_kind(kind: str) -> list[str]:
 # coverage`/`test-*` on a freshly-cloned consumer fails with errors that look
 # like a tooling bug but are really "deps not installed yet" — e.g. lex-fmt/vscode
 # hit `Cannot find module out/test/unit/index.js` because neither `npm install`
-# nor `git submodule update --init` had run. SessionStart (`setup-dev-env.sh`)
-# does both for you; the note is for the manual / fresh-clone case where it
-# hasn't. Kind-agnostic (npm/pnpm/cargo/bundle — whatever the repo's `deps`
-# resolves to) and accurate (the bootstrap normally handles it).
+# nor `git submodule update --init` had run. SessionStart (`install-release-core`
+# → `release-core init`) does both for you; the note is for the manual /
+# fresh-clone case where it hasn't. Kind-agnostic (npm/pnpm/cargo/bundle —
+# whatever the repo's `deps` resolves to) and accurate (the bootstrap normally
+# handles it).
 _FRESH_CHECKOUT_NOTE = (
     "  NOTE (fresh checkout): coverage/test need the repo's deps INSTALLED and "
     "any git submodules INITIALISED first — without them you'll see errors that "
     "look like a tooling bug but are just missing content (e.g. a `Cannot find "
-    "module …` from an un-built test dir). SessionStart (`setup-dev-env.sh`) "
+    "module …` from an un-built test dir). SessionStart (`release-core init`) "
     "does both automatically; if you cloned and are running by hand, first run "
     "the `deps` command above (npm/pnpm/cargo/bundle per this repo) and "
     "`git submodule update --init --recursive` (only if the repo has a "

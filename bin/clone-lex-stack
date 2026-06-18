@@ -22,9 +22,9 @@
 # Options:
 #   --all              Clone every repo in the lex-fmt stack.
 #                      Mutually exclusive with positional <repo> args.
-#   --with-setup       After clone, run bin/setup-dev-env.sh in each
-#                      repo if it exists. Opt-in; most read-only tasks
-#                      don't need it.
+#   --with-setup       After clone, run bin/install-release-core (the
+#                      SessionStart boot) in each repo if it exists. Opt-in;
+#                      most read-only tasks don't need it.
 #   --depth=N          Shallow clone with the given depth. Default: full.
 #                      Use --depth=1 for fast read-only grep tasks.
 #   --refresh          If the target dir already exists, `git fetch +
@@ -165,16 +165,16 @@ clone_one() {
   fi
 
   if $with_setup && [[ "$status" =~ ^(cloned|refreshed|skipped-exists)$ ]]; then
-    local setup="$dir/bin/setup-dev-env.sh"
+    local setup="$dir/bin/install-release-core"
     if [ -x "$setup" ]; then
-      echo "→ $repo: running setup-dev-env.sh" >&2
-      if ( cd "$dir" && ./bin/setup-dev-env.sh ) >&2; then
+      echo "→ $repo: running install-release-core (SessionStart boot)" >&2
+      if ( cd "$dir" && ./bin/install-release-core ) >&2; then
         status="setup-ok"
       else
         status="setup-failed"
       fi
     else
-      echo "→ $repo: no bin/setup-dev-env.sh, skipping setup" >&2
+      echo "→ $repo: no bin/install-release-core, skipping setup" >&2
     fi
   fi
 
