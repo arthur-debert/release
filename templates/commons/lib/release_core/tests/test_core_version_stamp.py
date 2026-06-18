@@ -16,7 +16,6 @@ import importlib
 import importlib.metadata
 
 import release_core
-import release_core.prstate
 from release_core import _version
 
 
@@ -31,6 +30,13 @@ def test_build_version_strips_leading_v(monkeypatch):
     # build time; it reads $TAG and strips the leading `v` to a PEP 440 version.
     monkeypatch.setenv("TAG", "v3.4.2")
     assert importlib.reload(_version).VERSION == "3.4.2"
+
+
+def test_build_version_strips_exactly_one_leading_v(monkeypatch):
+    # removeprefix("v") drops exactly ONE leading `v`, not all of them — so a
+    # `vv`-prefixed tag keeps the second `v` rather than being over-stripped.
+    monkeypatch.setenv("TAG", "vv3.1.0")
+    assert importlib.reload(_version).VERSION == "v3.1.0"
 
 
 def test_build_version_falls_back_without_tag(monkeypatch):
@@ -53,8 +59,3 @@ def test_runtime_version_falls_back_for_source_checkout(monkeypatch):
 
     monkeypatch.setattr(importlib.metadata, "version", _missing)
     assert release_core._resolve_version() == _version.DEV_VERSION
-
-
-def test_prstate_version_is_the_same_source():
-    # prstate re-exports the parent version — one source, no second literal.
-    assert release_core.prstate.__version__ == release_core.__version__

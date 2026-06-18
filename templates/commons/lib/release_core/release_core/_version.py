@@ -11,7 +11,7 @@ test suite from source).
 This module is read at BUILD time only. The installed package's version is what
 `importlib.metadata.version("release-core")` returns at RUNTIME — see
 ``release_core.__init__._resolve_version``, which is the single runtime source
-for both ``release_core.__version__`` and ``release_core.prstate.__version__``.
+for ``release_core.__version__``.
 """
 
 from __future__ import annotations
@@ -23,4 +23,4 @@ import os
 # versions), so a dev build never out-ranks a published wheel in pip's compare.
 DEV_VERSION = "0.0.0+dev"
 
-VERSION = (os.environ.get("TAG") or "").lstrip("v") or DEV_VERSION
+VERSION = (os.environ.get("TAG") or "").removeprefix("v") or DEV_VERSION

@@ -17,8 +17,3 @@ Boundary discipline: every GitHub call goes through `ghapi` (shell out to
 tests against captured JSON with no network. stdlib only — no third-party
 runtime deps.
 """
-
-# Single version source: the parent package resolves it from installed wheel
-# metadata (stamped from the release tag — release#758), with a dev fallback for
-# source checkouts. Never a hardcoded literal.
-from .. import __version__ as __version__  # noqa: F401
