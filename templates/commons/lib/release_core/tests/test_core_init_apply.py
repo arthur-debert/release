@@ -24,12 +24,52 @@ def test_apply_claude_write_is_0o644_not_0o600(tmp_path, monkeypatch):
     # tempfile.mkstemp creates the temp at 0o600; the apply phase must chmod to
     # 0o644 before os.replace so the written CLAUDE.md is world-readable.
     monkeypatch.chdir(tmp_path)
-    claude = sync.ClaudeDecision(action="create", desired="# hello\n")
+    claude = sync.ClaudeDecision(
+        target_action="write",
+        target_desired="# managed\n",
+        import_action="insert",
+        import_content="@.claude/IMPORTANT-RELEASE.md\n",
+    )
     init._apply_mirror(sync.MirrorPlan(), claude)
     out = tmp_path / sync.CLAUDE_FILE
-    assert out.read_text() == "# hello\n"
+    assert out.read_text() == "@.claude/IMPORTANT-RELEASE.md\n"
     mode = stat.S_IMODE(out.stat().st_mode)
     assert mode == 0o644, f"expected 0o644, got {oct(mode)}"
+
+
+def test_apply_writes_target_before_import_atomic(tmp_path, monkeypatch):
+    # WS4 atomicity: the managed target file AND the CLAUDE.md @import line both
+    # land — the target always exists so the @import never dangles.
+    monkeypatch.chdir(tmp_path)
+    claude = sync.ClaudeDecision(
+        target_action="write",
+        target_desired=sync.CLAUDE_IMPORT_BODY,
+        import_action="insert",
+        import_content=f"{sync.CLAUDE_IMPORT_LINE}\n",
+    )
+    init._apply_mirror(sync.MirrorPlan(), claude)
+    target = tmp_path / sync.CLAUDE_IMPORT_TARGET
+    claude_md = tmp_path / sync.CLAUDE_FILE
+    assert target.read_text() == sync.CLAUDE_IMPORT_BODY
+    assert claude_md.read_text() == f"{sync.CLAUDE_IMPORT_LINE}\n"
+
+
+def test_apply_skip_symlink_leaves_claude_untouched(tmp_path, monkeypatch):
+    # CLAUDE.md is a symlink → import_action skip-symlink: never write CLAUDE.md,
+    # but still (re)write the managed target.
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "real.md").write_text("consumer\n")
+    os.symlink("real.md", str(tmp_path / sync.CLAUDE_FILE))
+    claude = sync.ClaudeDecision(
+        target_action="write",
+        target_desired=sync.CLAUDE_IMPORT_BODY,
+        import_action="skip-symlink",
+    )
+    init._apply_mirror(sync.MirrorPlan(), claude)
+    assert (tmp_path / sync.CLAUDE_IMPORT_TARGET).read_text() == sync.CLAUDE_IMPORT_BODY
+    # The symlink and its target are untouched.
+    assert (tmp_path / sync.CLAUDE_FILE).is_symlink()
+    assert (tmp_path / "real.md").read_text() == "consumer\n"
 
 
 def test_apply_replaces_real_skill_file_with_symlink(tmp_path, monkeypatch):
@@ -47,7 +87,7 @@ def test_apply_replaces_real_skill_file_with_symlink(tmp_path, monkeypatch):
         migrated=[dest],
         symlinks_to_create=[f"{dest} -> {target}"],
     )
-    init._apply_mirror(mp, sync.ClaudeDecision(action="none"))
+    init._apply_mirror(mp, sync.ClaudeDecision())
 
     link = tmp_path / dest
     assert link.is_symlink()
@@ -83,7 +123,7 @@ def test_apply_replaces_symlinked_skill_root_without_touching_target(tmp_path, m
         migrated=[".claude/skills/lex-primer"],
         symlinks_to_create=[f"{dest} -> {target}"],
     )
-    init._apply_mirror(mp, sync.ClaudeDecision(action="none"))
+    init._apply_mirror(mp, sync.ClaudeDecision())
 
     # Consumer path is now a real symlink into .release/, and the external target
     # file was never deleted or overwritten.
