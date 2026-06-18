@@ -177,6 +177,15 @@ def _prepend_path(d: str) -> None:
     os.environ["PATH"] = os.pathsep.join([d, *parts])
 
 
+def _default_bin_dir() -> str:
+    """Where a pinned binary is installed by default — MUST match the dir the
+    boot/CI prepend to PATH: ``${XDG_BIN_HOME:-$HOME/.local/bin}`` (see
+    install-release-core + arm-gate). Honoring ``XDG_BIN_HOME`` keeps the install
+    target and the PATH dir in sync, so the pinned binary is discoverable by
+    later steps (lefthook etc.) even when XDG_BIN_HOME is customized."""
+    return os.environ.get("XDG_BIN_HOME") or os.path.join(os.path.expanduser("~"), ".local", "bin")
+
+
 def provision_npm(*, best_effort: bool) -> None:
     """Reconcile the npm globals (lefthook + prettier + markdownlint) to their
     pins. ``markdownlint-cli`` is the package; ``markdownlint`` the binary."""
@@ -277,7 +286,7 @@ def provision_actionlint(*, best_effort: bool, bin_dir: str | None = None) -> No
     floating brew/apt actionlint."""
     if version_matches("actionlint", actionlint_version()):
         return
-    dest = bin_dir or os.path.join(os.path.expanduser("~"), ".local", "bin")
+    dest = bin_dir or _default_bin_dir()
     if not _have("curl") or not _have("bash"):
         msg = "curl/bash not found — cannot download actionlint"
         if best_effort:
@@ -316,11 +325,7 @@ def provision_yq(*, best_effort: bool, bin_dir: str | None = None) -> None:
     seam — tests point it at a sandbox so the real PATH is never touched."""
     if version_matches("yq", yq_version()):
         return
-    dest = (
-        bin_dir
-        or os.environ.get("YQ_INSTALL_DIR")
-        or os.path.join(os.path.expanduser("~"), ".local", "bin")
-    )
+    dest = bin_dir or os.environ.get("YQ_INSTALL_DIR") or _default_bin_dir()
     yq_os, arch = _resolve_os_arch()
     if yq_os is None or arch is None:
         msg = f"unsupported OS/arch ({platform.system()}/{platform.machine()}) for yq"

@@ -116,3 +116,12 @@ def test_prepend_path_puts_dest_first_and_dedups(monkeypatch):
     parts = _os.environ["PATH"].split(_os.pathsep)
     assert parts[0] == "/opt/x/bin"
     assert parts.count("/opt/x/bin") == 1
+
+
+def test_default_bin_dir_honors_xdg(monkeypatch, tmp_path):
+    # Must match install-release-core/arm-gate's ${XDG_BIN_HOME:-$HOME/.local/bin}
+    # so the pinned binary installs where the boot prepends PATH.
+    monkeypatch.setenv("XDG_BIN_HOME", str(tmp_path / "custombin"))
+    assert toolset._default_bin_dir() == str(tmp_path / "custombin")
+    monkeypatch.delenv("XDG_BIN_HOME", raising=False)
+    assert toolset._default_bin_dir().endswith("/.local/bin")
