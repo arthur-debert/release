@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 3.3.0 - 2026-06-18
+
+- Drop the now-stale expect-verify-fail annotation for lex-fmt/lexed (its provisioned gate passes)
+- release-core admin repos verify now PROVISIONS each consumer's deps (npm/pnpm/cargo/...) before gating, instead of running the gate on a dep-less tree and laundering the failure as an 'expected npm-deps artifact'; only a genuinely-absent toolchain is an honest skip (#772 follow-up)
+- arm-gate reads .release.major.txt for the wheel major (action_ref fallback kept)
+
 ## 3.2.1 - 2026-06-18
 
 - init commits the one-time CLAUDE.md @import migration (insert), not just create — a consumer on the pre-WS4 block no longer ends up with the @import uncommitted + a dirty tree + the next init re-staging it
