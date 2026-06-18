@@ -330,7 +330,7 @@ CLAUDE_IMPORT_BODY = (
     "This repo's quality gate, build, release, and PR/dev flow are provided by\n"
     "`release-core` (installed at session start; not stored in this repo).\n"
     "\n"
-    "- **Start here:** run `release-core how-to` — the task playbook for *this* repo\n"
+    "- **Start here:** run `release-core how-to` — the task playbook for _this_ repo\n"
     "  (its dev cycle, incl. coordinating a complex / multi-PR feature with subagents).\n"
     "- Reference: `release-core --help`, `release-core <cmd> --help`, `release-core detect-kind`.\n"
     "- Quality gate (run every loop, after `git add`): `release-core gate`.\n"
