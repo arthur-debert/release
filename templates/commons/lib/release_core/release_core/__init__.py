@@ -14,10 +14,18 @@ from __future__ import annotations
 import importlib.metadata
 
 from . import cli, gh, manifest, proc, version, yamlio
-from ._version import DEV_VERSION
 from .cli import EXIT_OK, EXIT_USAGE, Opt, parse
 from .gh import GhError
 from .proc import ProcError, out, run
+
+# Runtime dev-version fallback. Kept LOCAL (a literal, not `from ._version import
+# DEV_VERSION`) so a normal `import release_core` never imports _version.py —
+# that module runs build-time TAG/packaging logic at import (VERSION =
+# _stamp_version()), which would CRASH a plain import whenever $TAG happens to be
+# in the env (CI shells, makefiles), since packaging is a build-only dep. The two
+# `0.0.0+dev` literals (here + _version.DEV_VERSION) are intentionally
+# independent; a test asserts they stay in sync. (release#758)
+_DEV_VERSION = "0.0.0+dev"
 
 
 def _resolve_version() -> str:
@@ -36,7 +44,7 @@ def _resolve_version() -> str:
     try:
         return importlib.metadata.version("release-core")
     except importlib.metadata.PackageNotFoundError:
-        return DEV_VERSION
+        return _DEV_VERSION
 
 
 __version__ = _resolve_version()

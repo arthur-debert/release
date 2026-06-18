@@ -14,6 +14,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 import release_core
@@ -95,3 +99,42 @@ def test_runtime_version_falls_back_for_source_checkout(monkeypatch):
 
     monkeypatch.setattr(importlib.metadata, "version", _missing)
     assert release_core._resolve_version() == _version.DEV_VERSION
+
+
+def test_dev_sentinels_stay_in_sync():
+    # __init__ keeps its OWN local _DEV_VERSION literal (so a normal import never
+    # touches _version.py — see test below). Guard the two literals against drift.
+    assert release_core._DEV_VERSION == _version.DEV_VERSION
+
+
+def test_import_release_core_is_safe_with_TAG_set():
+    # Regression (release#758): a plain `import release_core` with $TAG set in the
+    # env must NOT run _version.py's build-time path. _version imports packaging
+    # (a build-only dep) on the TAG branch, so importing it at runtime would crash
+    # `import release_core` whenever TAG is present (CI shells, makefiles) — and
+    # even with packaging installed, a non-PEP440 TAG would raise InvalidVersion.
+    # Assert the import is clean AND that _version was never dragged in.
+    pkg_parent = Path(release_core.__file__).resolve().parent.parent
+    env = {
+        **os.environ,
+        "TAG": "not-a-version-!!",
+        "PYTHONPATH": os.pathsep.join([str(pkg_parent), os.environ.get("PYTHONPATH", "")]).rstrip(
+            os.pathsep
+        ),
+    }
+    code = (
+        "import sys; import release_core; "
+        "assert 'release_core._version' not in sys.modules, "
+        "sorted(m for m in sys.modules if 'release_core' in m); "
+        "assert 'packaging' not in sys.modules, 'packaging dragged in at import'; "
+        "print(release_core.__version__)"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", code],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, f"import crashed with TAG set:\n{r.stderr}"
+    # No installed metadata in this tree → the runtime fallback sentinel.
+    assert r.stdout.strip() == release_core._DEV_VERSION

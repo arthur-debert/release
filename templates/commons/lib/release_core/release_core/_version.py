@@ -8,22 +8,26 @@ that semver tag to a PEP 440 / pip-comparable version and fall back to a dev
 sentinel for local/editable builds run without that env (`python -m build`, the
 test suite from source).
 
-Hatch *reads* ``VERSION`` at BUILD time to stamp the wheel (it reads ``$TAG``).
-The ``VERSION = …`` assignment below also runs whenever this module is imported
-at runtime, but that runtime value is NOT used: the installed package's version
-is whatever `importlib.metadata.version("release-core")` returns — see
-``release_core.__init__._resolve_version``, the single runtime source for
-``release_core.__version__``. ``DEV_VERSION`` is a plain constant that is ALSO
-imported at runtime by ``release_core.__init__`` as the source-checkout
-fallback when no installed metadata is present; the import is harmless (a cheap
-string), so it stays here rather than being duplicated.
+This module is imported ONLY at BUILD time (by hatch, to stamp the wheel — it
+reads ``$TAG``) and by the version-stamp test. The normal runtime
+``import release_core`` must NEVER reach this module: ``VERSION =
+_stamp_version()`` runs at import, and on the build branch it imports
+``packaging`` (a BUILD-only dep, not a runtime one — release_core's sole runtime
+dep is click). Because ``$TAG`` presence cannot distinguish build from runtime
+(``TAG`` is commonly set in CI shells / makefiles), letting the runtime package
+import this module would crash a plain ``import release_core`` whenever ``TAG``
+is in the env. So ``release_core.__init__`` keeps its OWN local dev sentinel
+(``_DEV_VERSION``) rather than importing ``DEV_VERSION`` from here; the two
+``0.0.0+dev`` literals are kept in sync by a test. The installed package's
+runtime version is whatever ``importlib.metadata.version("release-core")``
+returns — see ``release_core.__init__._resolve_version``.
 
 ``packaging`` does ALL the PEP 440 normalization (it handles standard
-``-rc.N`` / ``-beta.N`` / ``-alpha.N`` prereleases natively). Its import is
-GUARDED to the build-time branch (``$TAG`` set) because ``packaging`` is a
-BUILD dependency (see ``[build-system] requires``), NOT a runtime one —
-release_core's only runtime dep is click. The runtime import of this module
-(for ``DEV_VERSION``) must never reach the ``packaging`` import.
+``-rc.N`` / ``-beta.N`` / ``-alpha.N`` prereleases natively); release's bespoke
+``-release-rc`` verification suffix gets a one-line adapter. This module stays
+SELF-CONTAINED (no relative imports — hatch's code-version source loads the file
+in a way where ``from ._x import`` can fail), so it keeps its own
+``DEV_VERSION`` literal.
 """
 
 from __future__ import annotations
@@ -47,9 +51,9 @@ def _stamp_version() -> str:
     adapter before packaging validates. A genuinely unknown shape re-raises
     ``InvalidVersion`` — fail-loud on the wheel build, which is what we want.
 
-    Runtime / source / editable build ($TAG unset): return the dev sentinel.
-    VERSION's value is unused at runtime (only DEV_VERSION is consumed by
-    __init__), so we never import packaging here.
+    Build run without $TAG (`python -m build` from source, the stamp test):
+    return the dev sentinel without importing packaging. This module is not
+    imported on the normal runtime path at all (see the module docstring).
     """
     tag = os.environ.get("TAG")
     if not tag:
