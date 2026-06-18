@@ -382,10 +382,31 @@ def provision(*, best_effort: bool = False, bin_dir: str | None = None) -> int:
     golangci-lint is intentionally NOT provisioned here — it is Go-repo-only and
     setup-dev-env.sh still installs it conditionally (it is not part of the
     common UNION the shell provisioner reconciles)."""
-    steps = (provision_npm, provision_pip)
-    for step in steps:
-        step(best_effort=best_effort)
-    provision_actionlint(best_effort=best_effort, bin_dir=bin_dir)
-    provision_yq(best_effort=best_effort, bin_dir=bin_dir)
+    _run_step(provision_npm, best_effort=best_effort)
+    _run_step(provision_pip, best_effort=best_effort)
+    _run_step(provision_actionlint, best_effort=best_effort, bin_dir=bin_dir)
+    _run_step(provision_yq, best_effort=best_effort, bin_dir=bin_dir)
     _log("done.")
     return 0
+
+
+def _run_step(step, *, best_effort: bool, **kw) -> None:
+    """Run one ``provision_*`` step with a consistent error boundary.
+
+    A :class:`ProvisionError` is the step's own DELIBERATE hard-fail — it
+    propagates so the caller (``gate --provision``) turns it into a clean exit +
+    message. Any OTHER exception (an unexpected ``OSError`` from a
+    ``makedirs``/``mkstemp``/spawn, a permission/FS hiccup, …) is converted HERE so
+    it can never escape as a raw traceback: HARD mode → ``ProvisionError`` (clean);
+    best-effort → warn + continue. One boundary covers every step, current and
+    future."""
+    try:
+        step(best_effort=best_effort, **kw)
+    except ProvisionError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — the FS/spawn error boundary
+        msg = f"{step.__name__} failed unexpectedly: {exc!r}"
+        if best_effort:
+            _log(f"WARNING: {msg}")
+            return
+        raise ProvisionError(msg) from exc

@@ -125,3 +125,18 @@ def test_default_bin_dir_honors_xdg(monkeypatch, tmp_path):
     assert toolset._default_bin_dir() == str(tmp_path / "custombin")
     monkeypatch.delenv("XDG_BIN_HOME", raising=False)
     assert toolset._default_bin_dir().endswith("/.local/bin")
+
+
+def test_provision_converts_unexpected_oserror(monkeypatch):
+    # An unexpected OSError (e.g. makedirs permission) from ANY step must not
+    # escape as a raw traceback: HARD → ProvisionError; best-effort → warn + 0.
+    def fs_boom(*, best_effort, **kw):
+        raise OSError("Permission denied: /opt/bin")
+
+    monkeypatch.setattr(toolset, "provision_npm", fs_boom)
+    monkeypatch.setattr(toolset, "provision_pip", lambda **k: None)
+    monkeypatch.setattr(toolset, "provision_actionlint", lambda **k: None)
+    monkeypatch.setattr(toolset, "provision_yq", lambda **k: None)
+    with pytest.raises(toolset.ProvisionError):
+        toolset.provision(best_effort=False)
+    assert toolset.provision(best_effort=True) == 0  # best-effort swallows + warns

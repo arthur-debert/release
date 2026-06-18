@@ -597,6 +597,7 @@ STUB
 echo "gh: network error" >&2
 exit 4
 STUB
+  chmod +x stub/gh  # must be executable or PATH lookup falls through to the real gh
   PIP_FAIL_INDEX=1 RETRY_SLEEP=0 run "$BIN" --major v2
   [ "$status" -ne 0 ]
   [[ "$output" == *"FATAL"* ]]
