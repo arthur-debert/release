@@ -912,6 +912,20 @@ def test_decide_claude_strips_pre_ws4_spliced_block(tmp_path):
     assert d.import_content.count(sync.CLAUDE_IMPORT_LINE) == 1
 
 
+def test_decide_claude_dedups_stray_import_with_old_block(tmp_path):
+    # A repo carrying BOTH the pre-WS4 block AND a stray @import line (e.g. a
+    # manual migration attempt): strip the block AND drop the stray import, so the
+    # result has EXACTLY one @import line, not two.
+    old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
+    (tmp_path / "CLAUDE.md").write_text(f"{old}\n{sync.CLAUDE_IMPORT_LINE}\n\n# Proj\n\nmine\n")
+    d = _release_managed_decision(tmp_path)
+    assert d.import_action == "insert"
+    assert d.import_content is not None
+    assert d.import_content.count(sync.CLAUDE_IMPORT_LINE) == 1
+    assert sync.CLAUDE_BEGIN not in d.import_content
+    assert "# Proj" in d.import_content and "mine" in d.import_content
+
+
 def test_decide_claude_strips_legacy_marker_block(tmp_path):
     legacy = f"{sync.CLAUDE_BEGIN_LEGACY}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
     (tmp_path / "CLAUDE.md").write_text(f"{legacy}\n# Proj\n")

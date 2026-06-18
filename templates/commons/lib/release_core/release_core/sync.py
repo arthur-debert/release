@@ -1555,6 +1555,11 @@ def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
         rest = _strip_managed_block_text(existing)
     else:
         rest = existing.rstrip("\n")
+    # De-dup any pre-existing @import line(s) from the remainder before prepending
+    # the canonical one, so the result has EXACTLY one. A repo can carry BOTH the
+    # pre-WS4 block AND a stray @import (e.g. a manual migration attempt); without
+    # this the strip-then-prepend would leave two import lines.
+    rest = "\n".join(ln for ln in rest.split("\n") if ln.strip() != CLAUDE_IMPORT_LINE).strip("\n")
     content = f"{CLAUDE_IMPORT_LINE}\n"
     if rest:
         content += f"\n{rest}\n"
