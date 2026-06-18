@@ -252,3 +252,19 @@ def test_unprovisionable_stacks(tmp_path, monkeypatch):
     assert provision.unprovisionable_stacks(str(tmp_path)) == ["pnpm"]
     # A repo with no manifests is fully provisionable (nothing to install).
     assert provision.unprovisionable_stacks(str(tmp_path / "empty")) == []
+
+
+def test_unprovisionable_stacks_mirrors_node_deps_precedence(tmp_path, monkeypatch):
+    # The probe must mirror _node_deps EXACTLY: a package-lock repo needs npm
+    # specifically — pnpm is NOT a substitute (else the probe says provisionable
+    # but dep_caches installs nothing → false red).
+    (tmp_path / "package.json").write_text("{}\n")
+    (tmp_path / "package-lock.json").write_text("{}\n")
+    monkeypatch.setattr(provision, "_have", lambda c: c == "pnpm")  # only pnpm, no npm
+    assert provision.unprovisionable_stacks(str(tmp_path)) == ["npm"]
+    monkeypatch.setattr(provision, "_have", lambda c: c == "npm")
+    assert provision.unprovisionable_stacks(str(tmp_path)) == []
+    # No lockfile → the npm no-lock fallback, so it still needs npm.
+    (tmp_path / "package-lock.json").unlink()
+    monkeypatch.setattr(provision, "_have", lambda c: False)
+    assert provision.unprovisionable_stacks(str(tmp_path)) == ["npm"]

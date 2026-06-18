@@ -261,15 +261,20 @@ def unprovisionable_stacks(repo_root: str) -> list[str]:
     if os.path.isfile(j(repo_root, "Gemfile")) and not _have("bundle"):
         missing.append("bundle")
     if os.path.isfile(j(repo_root, "package.json")):
-        # Which node tool THIS repo needs, by its committed lockfile (mirrors
-        # _node_deps); no lockfile → any npm/pnpm can install dev tooling.
-        if os.path.isfile(j(repo_root, "pnpm-lock.yaml")):
-            if not _have("pnpm"):
-                missing.append("pnpm")
+        # Mirror _node_deps EXACTLY (same lockfile→tool precedence) so the probe
+        # never disagrees with what dep_caches will actually run: a package-lock
+        # repo needs npm specifically (pnpm is NOT a substitute), and the
+        # no-lockfile fallback also uses npm.
+        if os.path.isfile(j(repo_root, "package-lock.json")):
+            if not _have("npm"):
+                missing.append("npm")
         elif os.path.isfile(j(repo_root, "yarn.lock")):
             if not _have("yarn"):
                 missing.append("yarn")
-        elif not (_have("npm") or _have("pnpm")):
+        elif os.path.isfile(j(repo_root, "pnpm-lock.yaml")):
+            if not _have("pnpm"):
+                missing.append("pnpm")
+        elif not _have("npm"):
             missing.append("npm")
     return missing
 

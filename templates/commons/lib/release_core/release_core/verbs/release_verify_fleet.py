@@ -257,7 +257,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
             print(f"{repo}\t{kind}\tok\tskipped (no {', '.join(unprovisionable)} to provision)")
             n_skipped += 1
             continue
-        provision.dep_caches(abspath)
+        _provision_deps(abspath)
 
         gate_ok, gate_log = _run_gate(abspath)
         gate, kind_of_result = _classify_gate(gate_ok, gate_log, annotations.get(repo))
@@ -298,6 +298,32 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
             file=sys.stderr,
         )
     return 1 if unexpected else 0
+
+
+def _provision_deps(abspath: str) -> None:
+    """Install the consumer's project deps (``provision.dep_caches``) with
+    stdout+stderr redirected to a per-repo ``.verify-provision.log`` — the package
+    managers inherit the fds, so without this their install output would interleave
+    with the tabular report (and leave no log behind). At the OS-fd level so it
+    captures the subprocess output, not just Python prints."""
+    if not os.path.isdir(abspath):
+        provision.dep_caches(abspath)  # no log dir (tests / odd path) → run plainly
+        return
+    sys.stdout.flush()
+    sys.stderr.flush()
+    with open(os.path.join(abspath, ".verify-provision.log"), "w") as logf:
+        out_fd, err_fd = os.dup(1), os.dup(2)
+        os.dup2(logf.fileno(), 1)
+        os.dup2(logf.fileno(), 2)
+        try:
+            provision.dep_caches(abspath)
+        finally:
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os.dup2(out_fd, 1)
+            os.dup2(err_fd, 2)
+            os.close(out_fd)
+            os.close(err_fd)
 
 
 def _classify_gate(gate_ok: bool, gate_log: str, reason: str | None) -> tuple[str, str]:
