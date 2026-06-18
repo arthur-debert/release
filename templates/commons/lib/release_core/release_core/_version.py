@@ -8,9 +8,10 @@ leading ``v`` to a PEP 440 / pip-comparable version and fall back to a dev
 sentinel for local/editable builds run without that env (`python -m build`, the
 test suite from source).
 
-``VERSION`` is evaluated by hatch's code-version source at BUILD time only (it
-reads ``$TAG``), so the installed package's version is whatever
-`importlib.metadata.version("release-core")` returns at RUNTIME — see
+Hatch *reads* ``VERSION`` at BUILD time to stamp the wheel (it reads ``$TAG``).
+The ``VERSION = …`` assignment below also runs whenever this module is imported
+at runtime, but that runtime value is NOT used: the installed package's version
+is whatever `importlib.metadata.version("release-core")` returns — see
 ``release_core.__init__._resolve_version``, the single runtime source for
 ``release_core.__version__``. ``DEV_VERSION`` is a plain constant that is ALSO
 imported at runtime by ``release_core.__init__`` as the source-checkout
