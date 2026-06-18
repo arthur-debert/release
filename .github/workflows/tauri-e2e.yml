@@ -76,14 +76,17 @@ on:
       wasm-cache-path:
         description: >-
           Path to the built phos-core wasm packages, cached across runs so the
-          wasm crates are not rebuilt from source each run. Shares WS-B's blob:
-          the key is wasm-v1-<runner.os>-<hashFiles(Cargo.lock)> (runner.os is
-          the in-container Linux), so a hit populated by tauri-ci restores here
-          too. The output is a pure function of the phos-core git sha
-          (single-sourced via src-tauri/Cargo.lock), so the lock hash is the
+          wasm crates are not rebuilt from source each run. Empty (the default)
+          DISABLES the wasm cache entirely — the per-consumer build output path
+          varies, so it is opt-in. phos sets 'wasm/' (its build-wasm output;
+          WS-E wires this on the phos caller, release#795). Shares WS-B's blob
+          when set: the key is wasm-v1-<runner.os>-<hashFiles(Cargo.lock)>
+          (runner.os is the in-container Linux), so a hit populated by tauri-ci
+          restores here too. The output is a pure function of the phos-core git
+          sha (single-sourced via src-tauri/Cargo.lock), so the lock hash is the
           correct key.
         type: string
-        default: 'src-tauri/pkg'
+        default: ''
       share-debug-binary:
         description: >-
           Build the Tauri debug binary ONCE in a dedicated `build-debug` job and
@@ -181,6 +184,7 @@ jobs:
           key: ${{ inputs.cache-key-prefix }}
 
       - name: Cache built wasm packages
+        if: ${{ inputs.wasm-cache-path != '' }}
         uses: actions/cache@v5
         with:
           path: ${{ inputs.wasm-cache-path }}
@@ -231,6 +235,7 @@ jobs:
       # tauri-ci restores the built phos-core wasm packages here, so the wasm
       # crates aren't rebuilt from source.
       - name: Cache built wasm packages
+        if: ${{ inputs.wasm-cache-path != '' }}
         uses: actions/cache@v5
         with:
           path: ${{ inputs.wasm-cache-path }}
