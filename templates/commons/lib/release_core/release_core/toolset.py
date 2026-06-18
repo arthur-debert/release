@@ -340,17 +340,26 @@ def provision_yq(*, best_effort: bool, bin_dir: str | None = None) -> None:
     fd, tmp = tempfile.mkstemp(prefix="yq.", dir=dest)
     os.close(fd)
     ok = False
+    err: str | None = None
     try:
         urllib.request.urlretrieve(url, tmp)  # noqa: S310 — fixed https GH-release URL
         if os.path.getsize(tmp) > 0:
             os.chmod(tmp, 0o755)
             os.replace(tmp, os.path.join(dest, "yq"))
             ok = True
-    except OSError:
-        ok = False
+        else:
+            err = "downloaded file was empty"
+    except OSError as exc:
+        err = str(exc)
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
+    if not ok and best_effort:
+        # Best-effort must WARN (not silently swallow) — matches the rest of the
+        # module so a still-missing yq is diagnosable from the boot log.
+        _log(
+            f"WARNING: yq {yq_version()} download/install failed ({err or 'unusable binary'}): {url}"
+        )
     # Hard re-check: the download is best-effort, so confirm the outcome.
     if not version_matches("yq", yq_version()) and not best_effort:
         raise ProvisionError(
