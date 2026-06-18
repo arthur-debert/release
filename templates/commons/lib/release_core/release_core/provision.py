@@ -15,11 +15,11 @@ hook, never mutating a tree the shell already converged. Removal of the shell is
 WS8 (Phase 3).
 
 ORDER (load-bearing): the TOOLSET is armed FIRST — the gate (and the hook we wire
-next) needs it, and arming after would be circular. Then the git-hook wiring,
-then (``--cloud`` only) the heavier cloud-snapshot steps: submodule content, the
-tag fetch, dep caches, the NSS cert import. The per-repo
-``app-bin/post-setup-hook.sh`` runs LAST (the consumer extension point), matching
-``setup-dev-env.sh`` §4.
+next) needs it, and arming after would be circular. Then submodule content (BOTH
+local + cloud — a fresh clone needs it for the gate/tests), then the git-hook
+wiring. The ``--cloud``-only heavier cloud-snapshot steps follow: the tag fetch,
+dep caches, the NSS cert import. The per-repo ``app-bin/post-setup-hook.sh`` runs
+LAST (the consumer extension point), matching ``setup-dev-env.sh`` §4.
 
 LOAD-BEARING vs OPTIONAL (the WS6 distinction applies here too): toolset arming +
 hook wiring are load-bearing for the gate but stay BEST-EFFORT inside init —
@@ -279,6 +279,19 @@ def post_setup_hook(repo_root: str) -> None:
 # ── The orchestrator ─────────────────────────────────────────────────────────
 
 
+def _safe(step, repo_root: str) -> None:
+    """Run one provisioning step, swallowing ANY exception (warn + continue).
+
+    The individual steps are already best-effort internally, but ``run()`` wraps
+    each call here too — defense in depth — so the "never raises" contract holds
+    regardless of a step's internals or a FUTURE edit. init must not break the
+    boot over a provisioning hiccup."""
+    try:
+        step(repo_root)
+    except Exception as exc:  # noqa: BLE001 — deliberate best-effort boundary
+        _warn(f"provision step {step.__name__} failed (continuing): {exc}")
+
+
 def run(repo_root: str, *, cloud: bool = False) -> None:
     """Provision the dev env for ``repo_root`` — the init-side entry point.
 
@@ -286,13 +299,13 @@ def run(repo_root: str, *, cloud: bool = False) -> None:
     content, then the git-hook wiring; the ``--cloud`` steps (tag fetch, dep
     caches, cert import) only when ``cloud=True``; the per-repo post-setup hook
     LAST. Every step is best-effort + idempotent (the shell runs them too this
-    phase — see module docstring). Never raises — init must not break the boot
-    over a provisioning hiccup."""
-    arm_toolset(repo_root)
-    init_submodules(repo_root)
-    wire_hook(repo_root)
+    phase — see module docstring). Never raises — each step is wrapped in
+    :func:`_safe`, so init never breaks the boot over a provisioning hiccup."""
+    _safe(arm_toolset, repo_root)
+    _safe(init_submodules, repo_root)
+    _safe(wire_hook, repo_root)
     if cloud:
-        fetch_tags(repo_root)
-        dep_caches(repo_root)
-        import_nss_cert(repo_root)
-    post_setup_hook(repo_root)
+        _safe(fetch_tags, repo_root)
+        _safe(dep_caches, repo_root)
+        _safe(import_nss_cert, repo_root)
+    _safe(post_setup_hook, repo_root)

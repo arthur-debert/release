@@ -126,16 +126,22 @@ def test_run_never_raises_when_a_step_fails(tmp_path, monkeypatch):
     def boom(root):
         raise RuntimeError("registry down")
 
-    # arm_toolset already swallows internally; make a cloud step raise to prove
-    # run() itself does not propagate (best-effort orchestration).
-    monkeypatch.setattr(provision, "arm_toolset", lambda root: None)
-    monkeypatch.setattr(provision, "init_submodules", lambda root: None)
-    monkeypatch.setattr(provision, "wire_hook", lambda root: None)
-    monkeypatch.setattr(provision, "post_setup_hook", lambda root: None)
-    # dep_caches raising must NOT abort run — but run() does not wrap each step in
-    # try/except itself; the STEPS are best-effort. So assert the per-step helpers
-    # swallow. Here we drive a real failing dep step through the real helper.
-    provision.run(str(tmp_path), cloud=False)  # smoke: no raise on the happy path
+    # Make EVERY step raise (an unexpected exception, not the steps' own internal
+    # best-effort warn) and prove run() still returns without propagating — the
+    # load-bearing contract: init must never break the boot over a provisioning
+    # hiccup, even from a future step that forgets to swallow its own errors.
+    for step in (
+        "arm_toolset",
+        "init_submodules",
+        "wire_hook",
+        "fetch_tags",
+        "dep_caches",
+        "import_nss_cert",
+        "post_setup_hook",
+    ):
+        monkeypatch.setattr(provision, step, boom)
+    # cloud=True so the cloud-only steps are reached too; must not raise.
+    provision.run(str(tmp_path), cloud=True)
 
 
 # ── arm_toolset is best-effort (never raises out of init) ────────────────────
