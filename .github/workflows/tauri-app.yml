@@ -117,6 +117,19 @@ on:
         type: string
         required: false
         default: '.'
+      wasm-cache-path:
+        description: |
+          Optional path(s) to the consumer's prebuilt WASM output dir(s),
+          cached under the WS-B per-OS key keyed on src-tauri/Cargo.lock
+          (see the "Cache WASM bundle" step). The WASM bundle is a pure
+          function of the Cargo.lock-pinned phos-core sha, so a cache hit
+          skips the `wasm-pack build` that tauri's `beforeBuildCommand`
+          (e.g. phos-app's `pnpm fetch:wasm`) would otherwise run. Empty =
+          no WASM cache (the step is skipped). Newline- or comma-separated
+          if multiple dirs (e.g. one per wasm crate).
+        type: string
+        required: false
+        default: ''
       bundle-targets-mac:
         description: 'Tauri bundle targets for macOS (passed to `tauri build --bundles`). Empty = use tauri.conf.json setting.'
         type: string
@@ -302,7 +315,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v2
+          ref: v3
           path: .release
           sparse-checkout: bin-internal
 
@@ -332,9 +345,27 @@ jobs:
         with:
           toolchain: ${{ inputs.rust-toolchain }}
 
+      # Warm-cache reuse, NOT artifact reuse. The release leg reads the
+      # cargo registry/dep cache that CI's `check` job populated on `main`
+      # under the SAME `shared-key: tauri-core` (rust-cache's default-branch
+      # fallback). This is the dominant cold cost on the Linux leg.
+      #   - `save-if: github.ref == refs/heads/main` makes CI the sole WRITER
+      #     and every release leg a pure READER — a release runs off a tag /
+      #     dispatch, never `main`, so it never writes (and so can never
+      #     overwrite CI's cache with release-built contents).
+      #   - `cache-targets: false` caches deps ONLY, never compiled `target/`
+      #     units, so a signed release artifact can never be cache-poisoned by
+      #     a debug-profile object restored from CI. (CI builds debug; release
+      #     builds signed release — the binary is NOT reusable; only the dep
+      #     download cost is.)
+      # mac/windows legs are unaffected: no CI runner populates their cache,
+      # so they simply find no warm entry and build cold as before.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ inputs.tauri-dir }}/src-tauri
+          shared-key: tauri-core
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-targets: false
 
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
@@ -345,6 +376,18 @@ jobs:
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/bin-internal/install-js-deps.sh
+
+      # WASM bundle cache (WS-B convention). `runner.os` scopes the key per
+      # leg, so each OS reads only its own writer. The bundle is a pure
+      # function of the Cargo.lock-pinned phos-core sha, so a hit lets
+      # tauri's `beforeBuildCommand` skip `wasm-pack build`. Gated on the
+      # `wasm-cache-path` input — no path, no cache step.
+      - name: Cache WASM bundle
+        if: inputs.wasm-cache-path != ''
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.wasm-cache-path }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
 
       - name: Set Apple signing env (macOS, signing only)
         if: matrix.t.platform == 'mac' && !inputs.notarize
@@ -417,7 +460,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v2
+          ref: v3
           path: .release
           sparse-checkout: bin-internal
 
