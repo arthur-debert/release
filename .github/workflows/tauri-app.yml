@@ -120,8 +120,11 @@ on:
       wasm-cache-path:
         description: |
           Optional path(s) to the consumer's prebuilt WASM output dir(s),
-          cached under the WS-B per-OS key keyed on src-tauri/Cargo.lock
-          (see the "Cache WASM bundle" step). The WASM bundle is a pure
+          cached under the WS-B per-OS key, keyed on the `tauri-dir`-relative
+          `<tauri-dir>/src-tauri/Cargo.lock` (see the "Cache WASM bundle"
+          step). For `tauri-dir: '.'` (phos) that resolves to the same file
+          and hash as WS-B's `src-tauri/Cargo.lock`, so the shared `wasm-v1-`
+          blob with tauri-ci is preserved. The WASM bundle is a pure
           function of the Cargo.lock-pinned phos-core sha, so a cache hit
           skips the `wasm-pack build` that tauri's `beforeBuildCommand`
           (e.g. phos-app's `pnpm fetch:wasm`) would otherwise run. Empty =
