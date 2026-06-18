@@ -1,1 +1,0 @@
-- Extend workflow-action-major guard to workflow self-refs + --major pins; sweep stale @v1/@v2 internal refs to @v3; remove dead arm-gate probe

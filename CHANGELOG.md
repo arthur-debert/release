@@ -4,6 +4,12 @@
 
 ## Unreleased
 
+## 3.4.1 - 2026-06-18
+
+- Add a github-action kind canary fixture + register the gh-action family so gh-action.yml's cut path is exercised pre-cut
+- Fix gh-action-ci.yml gate-toolset provisioning to resolve release_core via arm-gate (the staged release tree) instead of a release-only --from-source .
+- Extend workflow-action-major guard to workflow self-refs + --major pins; sweep stale @v1/@v2 internal refs to @v3; remove dead arm-gate probe
+
 ## 3.4.0 - 2026-06-18
 
 - canary rust fixture skips the apt-flaky emulated aarch64-linux build
