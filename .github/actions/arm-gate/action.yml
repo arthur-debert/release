@@ -131,9 +131,18 @@ runs:
         if [ -n "$ref_major" ]; then
           major_file="${GITHUB_WORKSPACE:-.}/.release.major.txt"
           if [ -f "$major_file" ]; then
-            file_major="$(tr -d '[:space:]' < "$major_file")"
+            # Mirror release_core.sync.read_release_major: strip only OUTER
+            # whitespace, then reject anything non-integer. INTERNAL whitespace
+            # (a malformed multi-line file like "3\n4") must FAIL LOUD, not be
+            # silently squeezed into a bogus "34" — `tr -d` would do the latter.
+            # `$(cat)` drops trailing newlines; the two expansions strip
+            # leading/trailing blanks; any internal newline/space then survives
+            # into the [!0-9] check below.
+            file_major="$(cat "$major_file")"
+            file_major="${file_major#"${file_major%%[![:space:]]*}"}"
+            file_major="${file_major%"${file_major##*[![:space:]]}"}"
             case "$file_major" in
-              "") : ;;  # blank counts as absent → keep the action_ref fallback
+              "") : ;;  # blank/whitespace-only counts as absent → action_ref fallback
               *[!0-9]*)
                 echo "::error::.release.major.txt must contain a bare major integer (e.g. '3'), got '${file_major}' — fix or delete the file to re-seed." >&2
                 exit 1 ;;
