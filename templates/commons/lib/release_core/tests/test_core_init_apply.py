@@ -37,6 +37,32 @@ def test_apply_claude_write_is_0o644_not_0o600(tmp_path, monkeypatch):
     assert mode == 0o644, f"expected 0o644, got {oct(mode)}"
 
 
+def test_managed_paths_commit_claude_on_one_time_migration():
+    # REGRESSION (real-fleet bug): a consumer on the pre-WS4 managed block migrates
+    # via import_action="insert". That one-time migration MUST commit CLAUDE.md —
+    # before this fix only "create" staged it, so an existing consumer ended up with
+    # the OLD block at HEAD and the @import only in the working tree (dirty forever;
+    # the next init re-staged it). Both create AND insert commit; a no-op never does.
+    plan = sync.MirrorPlan()
+    for action in ("create", "insert"):
+        d = sync.ClaudeDecision(import_action=action, import_content="@x\n")
+        assert sync.CLAUDE_FILE in init._managed_paths_for_commit(plan, d), action
+    none = sync.ClaudeDecision(import_action="none")
+    assert sync.CLAUDE_FILE not in init._managed_paths_for_commit(plan, none)
+    sym = sync.ClaudeDecision(import_action="skip-symlink")
+    assert sync.CLAUDE_FILE not in init._managed_paths_for_commit(plan, sym)
+    # Dirty-guard: an INSERT into a CLAUDE.md that had uncommitted edits is NOT
+    # committed (would fold the consumer's concurrent work); a CREATE always is.
+    ins = sync.ClaudeDecision(import_action="insert", import_content="@x\n")
+    assert sync.CLAUDE_FILE not in init._managed_paths_for_commit(
+        plan, ins, None, claude_insert_committable=False
+    )
+    cre = sync.ClaudeDecision(import_action="create", import_content="@x\n")
+    assert sync.CLAUDE_FILE in init._managed_paths_for_commit(
+        plan, cre, None, claude_insert_committable=False
+    )
+
+
 def test_apply_writes_target_before_import_atomic(tmp_path, monkeypatch):
     # WS4 atomicity: the managed target file AND the CLAUDE.md @import line both
     # land — the target always exists so the @import never dangles.

@@ -1482,10 +1482,11 @@ def _has_fingerprint_header(path: str, needle: str) -> bool:
 #   - target_action  → write/none for `.claude/IMPORTANT-RELEASE.md` (MANAGED,
 #                      committed by init's auto-commit, refreshed on the pull).
 #   - import_action  → insert/none for the CLAUDE.md `@import` line. init writes
-#                      the line to disk when absent (so loading works) but NEVER
-#                      stages/commits CLAUDE.md — after insertion CLAUDE.md is 100%
-#                      consumer-owned; folding it into the managed commit would
-#                      drag in the consumer's unrelated uncommitted edits.
+#                      the line to disk when absent (so loading works) and commits
+#                      it ONCE on that one-time insertion (create/insert); after
+#                      that import_action is "none" and CLAUDE.md is never re-staged
+#                      — 100% consumer-owned, so the managed commit can't later drag
+#                      in the consumer's unrelated uncommitted edits.
 # Atomicity (safety rule #2): _apply_mirror writes the target file AND the import
 # line together, target first — there is never a window with a dangling @import.
 
@@ -1500,10 +1501,12 @@ class ClaudeDecision:
     #   create → CLAUDE.md is ABSENT: write it as the pure one-line pointer. Safe
     #            to STAGE (no consumer content to fold in — it IS 100% the managed
     #            line), so the fresh-seed tree stays clean.
-    #   insert → CLAUDE.md EXISTS: strip any pre-WS4 managed block, then prepend the
-    #            one line. Written to disk but NEVER staged — CLAUDE.md is
-    #            consumer-owned, and staging would fold in the consumer's unrelated
-    #            uncommitted edits.
+    #   insert → CLAUDE.md EXISTS without the @import (e.g. a pre-WS4 managed
+    #            block): strip the old block, prepend the one line. STAGED on this
+    #            ONE-TIME migration (like create) so it commits — otherwise the
+    #            @import sits uncommitted and the next init re-stages it. After the
+    #            insertion import_action is "none", so CLAUDE.md is never staged
+    #            again and the consumer owns it from then on.
     #   none   → the @import line is already present.
     #   skip-symlink → CLAUDE.md is a symlink, leave it alone.
     import_action: str = "none"  # create | insert | none | skip-symlink

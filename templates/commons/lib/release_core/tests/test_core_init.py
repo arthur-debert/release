@@ -1239,9 +1239,10 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
     spliced CLAUDE.md block. One bare init converges: the install removes the
     on-disk copy and never re-builds it, the retired-file removal + WS4 untracking
     record the deletion, the managed @import TARGET is written + committed, and
-    CLAUDE.md is migrated off the spliced block to the one-line @import — but
-    CLAUDE.md is left UNSTAGED (consumer-owned), so the consumer's own edit lands
-    on their next commit, never folded into the managed sync."""
+    CLAUDE.md is migrated off the spliced block to the one-line @import AND committed
+    (the one-time migration MUST land — otherwise the @import sits uncommitted and
+    the next init re-stages it). After it, CLAUDE.md is consumer-owned and never
+    re-staged, so a 2nd init is a clean no-op."""
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
@@ -1274,16 +1275,18 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
     assert init.sync.CLAUDE_BEGIN not in claude
     assert "@.release/ORIENTATION.md" not in claude
     assert "# Consumer" in claude
-    # The managed @import TARGET file was committed; CLAUDE.md was NOT staged into
-    # the managed commit (consumer-owned) — so it shows as a pending modification.
+    # The one-time migration committed BOTH the managed @import TARGET and CLAUDE.md
+    # (the @import) — so HEAD no longer carries the old spliced block.
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
     assert sync.CLAUDE_IMPORT_TARGET in committed
-    assert "CLAUDE.md" not in committed
-    # CLAUDE.md is modified in the worktree but UNSTAGED (consumer-owned).
-    claude_status = _git(repo, "status", "--porcelain", "CLAUDE.md")
-    assert claude_status.endswith("CLAUDE.md")
-    assert claude_status.lstrip().startswith("M")  # worktree-modified, not staged
-    # Nothing else dangling (the orientation removal is fully recorded).
+    assert "CLAUDE.md" in committed
+    head_claude = _git(repo, "show", "HEAD:CLAUDE.md")
+    assert head_claude.startswith(sync.CLAUDE_IMPORT_LINE)
+    assert init.sync.CLAUDE_BEGIN not in head_claude
+    assert "# Consumer" in head_claude  # consumer prose preserved in the commit
+    # Tree is CLEAN — CLAUDE.md is committed, not left dangling; the orientation
+    # removal is fully recorded too.
+    assert _git(repo, "status", "--porcelain", "CLAUDE.md") == ""
     assert _git(repo, "status", "--porcelain", ".release/ORIENTATION.md") == ""
 
     # Idempotent: nothing left to converge.
