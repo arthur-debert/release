@@ -1,0 +1,1 @@
+- Drop the now-stale expect-verify-fail annotation for lex-fmt/lexed (its provisioned gate passes)
