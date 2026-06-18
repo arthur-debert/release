@@ -23,8 +23,24 @@ REMOVED in release#532 — post-WS3 it wrote root configs whose gate referenced 
 `.release/` it never created, an internally inconsistent path nothing on the
 fleet used.
 
+Provisioning (WS5/E, #762): after installing the managed tree, init PROVISIONS the
+dev env — arms the gate toolset (FIRST, so the gate + hook have it), inits git
+submodules, wires the pre-commit hook, and runs the per-repo
+``app-bin/post-setup-hook.sh`` LAST. ``--cloud`` adds the cloud-snapshot steps
+(tag fetch, dep caches, NSS cert import). This is the wheel-carried port of
+``setup-dev-env.sh``'s provisioning; through the migration window the shell still
+runs the same steps too (additive + safe — every step is idempotent + best-effort,
+so it never fights the shell or breaks the boot). ``--no-provision`` skips it (the
+arm-gate / test path that provisions separately).
+
 Flags:
   --dry-run    compute + report the change count, write nothing.
+  --cloud      also run the cloud-only provisioning steps (tag fetch, dep caches,
+               NSS cert import) — set by the cloud SessionStart boot.
+  --no-provision
+               install the managed tree but skip the dev-env provisioning
+               (toolset/hooks/caches/cert/submodules + post-setup hook). For CI
+               (arm-gate runs `gate --provision` itself) and tests.
   --no-commit  install but skip the auto-commit (tests / CI inspection —
                CI must never auto-commit the managed files into a checkout).
   --push       fast-forward push the managed commit ONLY when on the repo's
@@ -707,7 +723,14 @@ def _auto_commit(repo_root: str, written: list[str], message: str, *, push: bool
 
 
 def _main_full(
-    repo_root: str, repo_name: str, *, dry_run: bool, no_commit: bool, push: bool
+    repo_root: str,
+    repo_name: str,
+    *,
+    dry_run: bool,
+    no_commit: bool,
+    push: bool,
+    provision: bool,
+    cloud: bool,
 ) -> int:
     """The default init path: install all managed files + auto-commit-on-change.
 
@@ -717,6 +740,11 @@ def _main_full(
     $RELEASE_HOME clone), then — unless --no-commit/--dry-run — stages ONLY the
     managed paths and commits iff they actually changed. Idempotent: a second run
     with no upstream change computes zero changes → no commit.
+
+    Then (unless --no-provision / --dry-run) PROVISIONS the dev env (WS5/E, #762):
+    toolset arming FIRST, submodule init, hook wiring, cloud steps under --cloud,
+    and the per-repo post-setup hook LAST. Best-effort + idempotent — runs AFTER
+    the managed-tree install so the hook has a built `.release/` gate to wire.
     """
     try:
         changes, managed, ref_label, conflicts = _run_full_sync(
@@ -768,6 +796,16 @@ def _main_full(
     # generated, needs no review.
     if changes and not no_commit:
         _auto_commit(repo_root, managed, _full_commit_message(ref_label), push=push)
+
+    # PROVISION the dev env (WS5/E, #762) — AFTER the managed-tree install so the
+    # hook wiring finds a built `.release/` gate. Best-effort + idempotent; the
+    # managed `provision.run` arms the toolset FIRST (the gate/hook need it). The
+    # auto-commit above ran first so a provisioning step (npm/pip install) can
+    # never dirty the managed commit. Skipped under --no-provision (CI / tests).
+    if provision:
+        from .. import provision as _provision
+
+        _provision.run(repo_root, cloud=cloud)
     return 0
 
 
@@ -786,6 +824,8 @@ def main(argv: list[str] | None = None) -> int:
                 cli.Opt("--commit"),
                 cli.Opt("--push"),
                 cli.Opt("--no-commit"),
+                cli.Opt("--cloud"),
+                cli.Opt("--no-provision"),
             ],
             doc=_usage_block(),
         )
@@ -796,6 +836,8 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = bool(values["dry-run"])
     push = bool(values["push"])
     no_commit = bool(values["no-commit"])
+    cloud = bool(values["cloud"])
+    provision = not bool(values["no-provision"])
 
     # --push implies a commit; --no-commit suppresses it — the two contradict.
     # Reject the combo as bad usage rather than silently making --push a no-op.
@@ -832,4 +874,12 @@ def main(argv: list[str] | None = None) -> int:
     os.chdir(repo_root)
     repo_name = os.path.basename(repo_root)
 
-    return _main_full(repo_root, repo_name, dry_run=dry_run, no_commit=no_commit, push=push)
+    return _main_full(
+        repo_root,
+        repo_name,
+        dry_run=dry_run,
+        no_commit=no_commit,
+        push=push,
+        provision=provision,
+        cloud=cloud,
+    )

@@ -305,3 +305,63 @@ def test_main_friendly_fails_a_bare_node_checkout_before_lefthook(tmp_path, caps
     assert rc == 1
     assert "dependencies not installed — run `npm install` first" in captured.err
     assert "GATE: FAILED (node dependencies not installed)" in captured.out
+
+
+# ── --provision (WS5/I, #762) ────────────────────────────────────────────────
+
+
+def test_provision_delegates_to_toolset_hard(monkeypatch):
+    """`gate --provision` calls toolset.provision(best_effort=False) and returns
+    its code — the HARD provisioner (a tool it can't reconcile is a non-zero
+    exit)."""
+    from release_core import toolset
+
+    seen = {}
+
+    def fake(*, best_effort, bin_dir=None):
+        seen["best_effort"] = best_effort
+        return 0
+
+    monkeypatch.setattr(toolset, "provision", fake)
+    assert gate.main(["--provision"]) == 0
+    assert seen["best_effort"] is False
+
+
+def test_provision_best_effort_flag(monkeypatch):
+    from release_core import toolset
+
+    seen = {}
+    monkeypatch.setattr(
+        toolset, "provision", lambda *, best_effort, bin_dir=None: seen.update(be=best_effort) or 0
+    )
+    assert gate.main(["--provision", "--best-effort"]) == 0
+    assert seen["be"] is True
+
+
+def test_provision_rejects_unknown_arg(monkeypatch, capsys):
+    # A typo / unexpected arg must fail loudly (exit 64), not silently no-op and
+    # hide a CI/boot misconfiguration.
+    from release_core import toolset
+
+    called = {"n": 0}
+    monkeypatch.setattr(
+        toolset,
+        "provision",
+        lambda *, best_effort, bin_dir=None: called.update(n=called["n"] + 1) or 0,
+    )
+    rc = gate.main(["--provision", "--provison"])  # typo
+    assert rc == 64
+    assert called["n"] == 0  # never reached the provisioner
+    assert "unexpected argument" in capsys.readouterr().err
+
+
+def test_provision_hard_failure_is_exit_1(monkeypatch, capsys):
+    from release_core import toolset
+
+    def boom(*, best_effort, bin_dir=None):
+        raise toolset.ProvisionError("npm not found")
+
+    monkeypatch.setattr(toolset, "provision", boom)
+    rc = gate.main(["--provision"])
+    assert rc == 1
+    assert "gate toolset not provisioned" in capsys.readouterr().err
