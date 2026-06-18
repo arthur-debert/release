@@ -1,0 +1,1 @@
+- Add a github-action kind canary fixture + register the gh-action family so gh-action.yml's cut path is exercised pre-cut

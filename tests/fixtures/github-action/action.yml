@@ -1,0 +1,26 @@
+name: 'Canary Action'
+description: 'Synthetic composite action exercised by the release pre-cut canary loop. Infrastructure only.'
+author: 'arthur-debert/release'
+
+inputs:
+  who:
+    description: 'Name to greet.'
+    required: false
+    default: 'world'
+
+outputs:
+  greeting:
+    description: 'The greeting that was emitted.'
+    value: ${{ steps.greet.outputs.greeting }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: greet
+      shell: bash
+      env:
+        WHO: ${{ inputs.who }}
+      run: |
+        greeting="hello, ${WHO}"
+        echo "$greeting"
+        echo "greeting=$greeting" >> "$GITHUB_OUTPUT"
