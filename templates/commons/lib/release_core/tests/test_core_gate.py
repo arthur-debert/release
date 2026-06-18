@@ -338,6 +338,23 @@ def test_provision_best_effort_flag(monkeypatch):
     assert seen["be"] is True
 
 
+def test_provision_rejects_unknown_arg(monkeypatch, capsys):
+    # A typo / unexpected arg must fail loudly (exit 64), not silently no-op and
+    # hide a CI/boot misconfiguration.
+    from release_core import toolset
+
+    called = {"n": 0}
+    monkeypatch.setattr(
+        toolset,
+        "provision",
+        lambda *, best_effort, bin_dir=None: called.update(n=called["n"] + 1) or 0,
+    )
+    rc = gate.main(["--provision", "--provison"])  # typo
+    assert rc == 64
+    assert called["n"] == 0  # never reached the provisioner
+    assert "unexpected argument" in capsys.readouterr().err
+
+
 def test_provision_hard_failure_is_exit_1(monkeypatch, capsys):
     from release_core import toolset
 

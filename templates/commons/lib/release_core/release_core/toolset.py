@@ -277,12 +277,12 @@ def provision_actionlint(*, best_effort: bool, bin_dir: str | None = None) -> No
     _log(f"download actionlint {actionlint_version()} -> {dest}")
     url = "https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash"
     # curl | bash -s -- <version> <dir> — the official pinned installer.
-    script = proc.run(["curl", "-sSfL", url], check=False)
+    script = proc.run(["curl", "-sSfL", url], check=False, capture_output=True)
     if script.returncode != 0:
         if best_effort:
-            _log("WARNING: actionlint downloader fetch failed")
+            _log(_with_output("WARNING: actionlint downloader fetch failed", script))
             return
-        raise ProvisionError("actionlint downloader fetch failed")
+        raise ProvisionError(_with_output("actionlint downloader fetch failed", script))
     res = proc.run(
         ["bash", "-s", "--", actionlint_version(), dest],
         input=script.stdout,

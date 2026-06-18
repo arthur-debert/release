@@ -591,6 +591,14 @@ def _provision(argv: list[str]) -> int:
     path, where a transient hiccup must not abort the session)."""
     from .. import toolset
 
+    unknown = [a for a in argv if a != "--best-effort"]
+    if unknown:
+        print(
+            f"error: gate --provision: unexpected argument(s): {' '.join(unknown)}\n"
+            "usage: release-core gate --provision [--best-effort]",
+            file=sys.stderr,
+        )
+        return 64
     best_effort = "--best-effort" in argv
     try:
         return toolset.provision(best_effort=best_effort)
