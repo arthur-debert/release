@@ -119,18 +119,21 @@ teardown() {
 @test "EXCLUDES the prerelease (-release-rc) wheel" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
+  [ -f "$OUTPUT_DIR/simple/release-core/index.html" ]
   ! grep -q '3.1.5rc0' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
 @test "EXCLUDES the draft release wheel" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
+  [ -f "$OUTPUT_DIR/simple/release-core/index.html" ]
   ! grep -q '3.0.9' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
 @test "ignores a release with no release_core wheel asset" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
+  [ -f "$OUTPUT_DIR/simple/release-core/index.html" ]
   ! grep -q 'some-other-tool' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 

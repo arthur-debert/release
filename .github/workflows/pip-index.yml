@@ -73,7 +73,7 @@ jobs:
           REPO: ${{ github.repository }}
           OUTPUT_DIR: pip-index
         # Thin step: all logic lives in the testable bin-internal script.
-        run: bin-internal/generate-pip-index.sh
+        run: bash bin-internal/generate-pip-index.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
