@@ -27,9 +27,10 @@
 #   OUTPUT_DIR  directory to write the index into (default: ./pip-index)
 #   GH_TOKEN    used by `gh` (set in CI; optional for a public repo)
 #
-# Version-agnostic: the wheel version is parsed from each asset filename
-# (release_core-<ver>-py3-none-any.whl), never assumed — WS1 stamps real
-# tag-derived versions and this generator picks up whatever appears.
+# Version-agnostic: this generator never parses or assumes the wheel version —
+# it just links whatever release_core-<ver>-py3-none-any.whl filenames GitHub
+# returns for each non-prerelease release. WS1 stamps real tag-derived versions,
+# and the index picks up whatever filenames appear.
 #
 # Exit codes:
 #   0   index written

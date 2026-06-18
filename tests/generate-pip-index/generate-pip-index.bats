@@ -99,20 +99,20 @@ teardown() {
 @test "root index links to the release-core project" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  grep -q 'href="release-core/"' "$OUTPUT_DIR/simple/index.html"
+  grep -qF 'href="release-core/"' "$OUTPUT_DIR/simple/index.html"
 }
 
 @test "includes both shippable wheels (version-agnostic)" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  grep -q 'release_core-3.2.0-py3-none-any.whl' "$OUTPUT_DIR/simple/release-core/index.html"
-  grep -q 'release_core-3.1.0-py3-none-any.whl' "$OUTPUT_DIR/simple/release-core/index.html"
+  grep -qF 'release_core-3.2.0-py3-none-any.whl' "$OUTPUT_DIR/simple/release-core/index.html"
+  grep -qF 'release_core-3.1.0-py3-none-any.whl' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
 @test "hrefs point at the release-asset download URL" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  grep -q 'href="https://github.com/o/r/releases/download/v3.2.0/release_core-3.2.0-py3-none-any.whl"' \
+  grep -qF 'href="https://github.com/o/r/releases/download/v3.2.0/release_core-3.2.0-py3-none-any.whl"' \
     "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
@@ -120,21 +120,21 @@ teardown() {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -f "$OUTPUT_DIR/simple/release-core/index.html" ]
-  ! grep -q '3.1.5rc0' "$OUTPUT_DIR/simple/release-core/index.html"
+  ! grep -qF '3.1.5rc0' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
 @test "EXCLUDES the draft release wheel" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -f "$OUTPUT_DIR/simple/release-core/index.html" ]
-  ! grep -q '3.0.9' "$OUTPUT_DIR/simple/release-core/index.html"
+  ! grep -qF '3.0.9' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
 @test "ignores a release with no release_core wheel asset" {
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -f "$OUTPUT_DIR/simple/release-core/index.html" ]
-  ! grep -q 'some-other-tool' "$OUTPUT_DIR/simple/release-core/index.html"
+  ! grep -qF 'some-other-tool' "$OUTPUT_DIR/simple/release-core/index.html"
 }
 
 @test "fails loudly when no non-prerelease wheel exists" {
