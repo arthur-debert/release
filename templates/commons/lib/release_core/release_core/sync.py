@@ -244,7 +244,8 @@ GITIGNORE_BODY = (
 # The bootstrap reads this file offline (`cat`) to know which wheel major to pull;
 # the reusable workflow reads it from the consumer checkout (WS7). `init` SEEDS it
 # when absent — derived from the consumer's `@vN` thin-caller pins — and thereafter
-# it is authoritative (a present file is never overwritten). This makes the
+# it is authoritative (a present file carrying a valid major is never overwritten;
+# a blank file counts as absent and is (re)seeded — self-healing). This makes the
 # migration self-healing: one pull seeds the file, no consumer coordination.
 RELEASE_MAJOR_FILE = ".release.major.txt"
 # The release repo whose `@vN` pins declare the consumer's major (mirrors the
@@ -317,8 +318,10 @@ def seed_release_major(repo_root: str) -> str | None:
     consumer's `@vN` pins. Returns the repo-relative path when the file was
     WRITTEN (so init can stage + commit it), else None.
 
-    A PRESENT file is the single source of truth and is NEVER overwritten — once
-    seeded, migrating the release-core logic version is "edit this one file". When
+    A PRESENT file carrying a valid major is the single source of truth and is
+    NEVER overwritten — once seeded, migrating the release-core logic version is
+    "edit this one file". A BLANK file counts as absent (read_release_major →
+    None) and is (re)seeded, so an empty/half-written file self-heals. When
     no major can be derived (no workflows dir / no `@vN` caller, e.g. a brand-new
     repo) the file is left unwritten and the bootstrap falls back to
     ``releases/latest`` — today's behavior.
