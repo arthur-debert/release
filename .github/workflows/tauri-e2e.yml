@@ -195,7 +195,7 @@ jobs:
           NATIVE_E2E_IN_CONTAINER: '1'
           NATIVE_E2E_BUILD_ONLY: '1'
           NATIVE_E2E_BINARY_OUTPUT_DIR: '${{ runner.temp }}/tauri-debug-binary'
-          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+          GH_TOKEN: ${{ secrets['gh-token'] || github.token }}
         run: bash ${{ inputs.runner-script }}
 
       - name: Upload shared debug binary
@@ -262,7 +262,7 @@ jobs:
           # Auth for the private native git dep + the private wasm release. The
           # runner-script wires cargo's git-CLI token rewrite from this (the
           # build clones the private repo as a normal git dep — no checkout step).
-          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+          GH_TOKEN: ${{ secrets['gh-token'] || github.token }}
         run: bash ${{ inputs.runner-script }}
 
       # On failure the runner writes a bundle (event trail, state snapshot,
