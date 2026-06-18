@@ -357,9 +357,8 @@ def provision_yq(*, best_effort: bool, bin_dir: str | None = None) -> None:
     if not ok and best_effort:
         # Best-effort must WARN (not silently swallow) — matches the rest of the
         # module so a still-missing yq is diagnosable from the boot log.
-        _log(
-            f"WARNING: yq {yq_version()} download/install failed ({err or 'unusable binary'}): {url}"
-        )
+        reason = err or "unusable binary"
+        _log(f"WARNING: yq {yq_version()} download/install failed ({reason}): {url}")
     # Hard re-check: the download is best-effort, so confirm the outcome.
     if not version_matches("yq", yq_version()) and not best_effort:
         raise ProvisionError(
