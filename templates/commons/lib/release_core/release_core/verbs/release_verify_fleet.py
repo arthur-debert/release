@@ -326,7 +326,7 @@ def _provision_deps(abspath: str) -> None:
             os.close(err_fd)
 
 
-def _classify_gate(gate_ok: bool, gate_log: str, reason: str | None) -> tuple[str, str]:
+def _classify_gate(gate_ok: bool, _gate_log: str, reason: str | None) -> tuple[str, str]:
     """The gate column value + result class for one consumer (#594).
 
     Returns ``(column_text, kind)`` with kind ∈ {pass, stale, expected,

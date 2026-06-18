@@ -221,6 +221,10 @@ def test_unprovisionable_repo_is_skipped_not_failed(env, monkeypatch, capsys):
     root = "/fleetroot"
     abspath = f"{root}/o/a"
     monkeypatch.setattr(rvf.provision, "unprovisionable_stacks", lambda p: ["npm"])
+    provisioned: list[str] = []
+    gated: list[str] = []
+    monkeypatch.setattr(rvf, "_provision_deps", lambda p: provisioned.append(p))
+    monkeypatch.setattr(rvf, "_run_gate", lambda p: gated.append(p) or (False, ""))
     driver = _Driver(_row("o/a", root) + "\n", kinds={abspath: "vscode-ext"}, gate_rc={abspath: 1})
     monkeypatch.setattr(proc, "run", driver)
     rc = rvf.main(["--root", root])
@@ -229,6 +233,10 @@ def test_unprovisionable_repo_is_skipped_not_failed(env, monkeypatch, capsys):
     assert "o/a\tvscode-ext\tok\tskipped (no npm to provision)" in out.out.splitlines()
     assert "1 skipped (un-provisionable here)" in out.err
     assert "Logs under" not in out.err  # logs are pointed at only for unexpected reds
+    # The skip happens BEFORE provisioning + gating — neither runs on a tree we
+    # can't provision (no regression to "gate on a dep-less tree").
+    assert provisioned == []
+    assert gated == []
 
 
 def test_provisioned_gate_fail_is_unexpected(env, monkeypatch, capsys):
@@ -238,6 +246,8 @@ def test_provisioned_gate_fail_is_unexpected(env, monkeypatch, capsys):
     root = "/fleetroot"
     abspath = f"{root}/o/a"
     monkeypatch.setattr(rvf.provision, "unprovisionable_stacks", lambda p: [])
+    provisioned: list[str] = []
+    monkeypatch.setattr(rvf, "_provision_deps", lambda p: provisioned.append(p))
     driver = _Driver(
         _row("o/a", root) + "\n",
         kinds={abspath: "vscode-ext"},
@@ -248,6 +258,7 @@ def test_provisioned_gate_fail_is_unexpected(env, monkeypatch, capsys):
     rc = rvf.main(["--root", root])
     out = capsys.readouterr()
     assert rc == 1
+    assert provisioned == [abspath]  # deps were provisioned BEFORE the gate ran
     assert "o/a\tvscode-ext\tok\tFAIL" in out.out.splitlines()
     assert "UNEXPECTED failures above" in out.err
 
