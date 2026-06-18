@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 3.2.1 - 2026-06-18
+
+- init commits the one-time CLAUDE.md @import migration (insert), not just create — a consumer on the pre-WS4 block no longer ends up with the @import uncommitted + a dirty tree + the next init re-staging it
+- pip index served at the dedicated pypi.magik.works custom domain (escapes the account user-site domain redirect); update install-release-core + pip-index docs (#772)
+
 ## 3.2.0 - 2026-06-18
 
 - python-pkg (+ all hand-rolled GH-release steps) now re-assert --prerelease on the release-edit/resume path, so a -release-rc / pre-release-suffixed cut is created with isPrerelease=true even when the release already exists (#726)
