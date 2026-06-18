@@ -318,6 +318,13 @@ jobs:
     timeout-minutes: ${{ inputs.timeout }}
     permissions:
       contents: read
+    env:
+      # Pin Playwright's browser dir to a fixed, OS-independent path so
+      # `playwright install`, the cache, and the test run all agree on
+      # one location. The default location is OS-specific
+      # (~/.cache/ms-playwright on Linux, ~/Library/Caches/ms-playwright
+      # on macOS), which would miss the cache on non-Linux runners.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -473,7 +480,7 @@ jobs:
         if: inputs.playwright-cache && (inputs.playwright || inputs.e2e)
         uses: actions/cache@v5
         with:
-          path: ~/.cache/ms-playwright
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
           key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
 
       - name: Install Playwright browsers
@@ -527,6 +534,10 @@ jobs:
         uses: arthur-debert/release/.github/actions/arm-gate@v3
 
       - name: Run project checks
+        # `shell: bash` is required: `check-command` may be an arbitrary
+        # pipeline / `cd … &&` command, which would run under pwsh on a
+        # Windows runner and break `bin/check`.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.gh_token || github.token }}
         # `check-command` defaults to `bin/check` (both halves). WS-F's
@@ -573,6 +584,10 @@ jobs:
     timeout-minutes: ${{ inputs.timeout }}
     permissions:
       contents: read
+    env:
+      # Same fixed Playwright browser dir as the check job — install,
+      # cache, and run all agree on one OS-independent location.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -670,7 +685,7 @@ jobs:
         if: inputs.playwright-cache
         uses: actions/cache@v5
         with:
-          path: ~/.cache/ms-playwright
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
           key: playwright-${{ runner.os }}-${{ steps.pw-version.outputs.version }}
 
       - name: Install Playwright browsers
