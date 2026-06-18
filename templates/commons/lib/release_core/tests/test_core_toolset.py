@@ -11,7 +11,6 @@ source of pins, so the former dual-source in-sync invariant no longer applies.)
 
 from __future__ import annotations
 
-import os
 import stat
 
 import pytest
