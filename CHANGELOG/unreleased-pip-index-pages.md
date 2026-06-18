@@ -1,1 +1,0 @@
-- Publish a GitHub Pages pip index for release_core wheels

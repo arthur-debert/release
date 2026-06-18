@@ -1,1 +1,0 @@
-- gate: friendly-fail on a bare node checkout (no node_modules) with a `<pm> install` remediation instead of a raw svelte-check: command not found (#718)

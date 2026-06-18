@@ -1,1 +1,0 @@
-- Stamp release_core wheel version from the release tag (#758)

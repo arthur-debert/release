@@ -1,1 +1,0 @@
-- pr ready --ack-cycle-cap lands an otherwise-converged but cycle-capped PR through the guarded flip; cap now counts divergent rounds (new finding locations) not raw round count, and status routes converged-but-capped PRs to the ack command

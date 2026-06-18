@@ -1,1 +1,0 @@
-- tauri-ci: opt-in e2e-rust input sets up a Rust toolchain in the e2e job (for consumers whose pre-test compiles wasm from source)

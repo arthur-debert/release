@@ -1,1 +1,0 @@
-- pr-loop: tolerate an UNSTABLE merge state from a non-required check re-running on ready_for_review when the rollup is green (#715)

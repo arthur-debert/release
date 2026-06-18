@@ -1,1 +1,0 @@
-- CLAUDE.md uses a one-line @import of managed .claude/IMPORTANT-RELEASE.md (#761)

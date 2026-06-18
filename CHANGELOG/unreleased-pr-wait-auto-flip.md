@@ -1,1 +1,0 @@
-- pr wait auto-performs the guarded draft->ready flip at READY

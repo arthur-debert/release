@@ -1,2 +1,0 @@
-- fleet conformance matrix is now generated, not authored: `release-core admin repos audit --markdown` renders `docs/fleet-matrix.md` (live shared-vs-OWN workflows + per-repo findings + conformance %), regenerated weekly by `.github/workflows/fleet-matrix.yml`
-- fix two release-core bugs the matrix surfaced: `yamlio` crashed under kislyuk python-yq (now detects the yq flavor and adapts the JSON read; mikefarah yq is installed canonically in `env/setup.sh`), and the `release_token` audit check false-FAILed fleet-wide (it mis-parsed the paginated `/actions/secrets` payload)
