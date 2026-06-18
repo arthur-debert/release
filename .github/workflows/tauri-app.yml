@@ -125,8 +125,9 @@ on:
           function of the Cargo.lock-pinned phos-core sha, so a cache hit
           skips the `wasm-pack build` that tauri's `beforeBuildCommand`
           (e.g. phos-app's `pnpm fetch:wasm`) would otherwise run. Empty =
-          no WASM cache (the step is skipped). Newline- or comma-separated
-          if multiple dirs (e.g. one per wasm crate).
+          no WASM cache (the step is skipped). Newline-separated if
+          multiple dirs (e.g. one per wasm crate) — actions/cache treats
+          only newline-separated `path:` entries as multiple paths.
         type: string
         required: false
         default: ''
@@ -382,12 +383,20 @@ jobs:
       # function of the Cargo.lock-pinned phos-core sha, so a hit lets
       # tauri's `beforeBuildCommand` skip `wasm-pack build`. Gated on the
       # `wasm-cache-path` input — no path, no cache step.
+      #
+      # The Cargo.lock is resolved under `tauri-dir`: `hashFiles('src-tauri/
+      # Cargo.lock')` would return empty for a monorepo (`tauri-dir != '.'`),
+      # collapsing every monorepo caller onto the bare `wasm-v1-<os>-` key.
+      # For phos (`tauri-dir: '.'`) `format('{0}/src-tauri/Cargo.lock', '.')`
+      # → `./src-tauri/Cargo.lock`, the SAME file (and hash) as WS-B's
+      # `src-tauri/Cargo.lock`, so the shared `wasm-v1-` blob with tauri-ci
+      # is preserved.
       - name: Cache WASM bundle
         if: inputs.wasm-cache-path != ''
         uses: actions/cache@v5
         with:
           path: ${{ inputs.wasm-cache-path }}
-          key: wasm-v1-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', inputs.tauri-dir)) }}
 
       - name: Set Apple signing env (macOS, signing only)
         if: matrix.t.platform == 'mac' && !inputs.notarize
