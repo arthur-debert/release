@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import platform
 import re
-import shlex
 import shutil
 import sys
 import tempfile
@@ -412,17 +411,24 @@ def provision_golangci_lint(*, best_effort: bool = True) -> None:
     if _have("curl"):
         _log(f"install golangci-lint {version} -> {dest_dir}")
         install_sh = "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"
-        res = proc.run(
-            [
-                "sh",
-                "-c",
-                f"curl -sSfL {install_sh} | sh -s -- "
-                f"-b {shlex.quote(dest_dir)} {shlex.quote(version)}",
-            ],
-            check=False,
-            capture_output=True,
-        )
-        done = res.returncode == 0
+        # Two steps, NO shell pipeline: download the installer, THEN run it. A
+        # `curl … | sh` pipe without pipefail reports the downstream sh's rc, so a
+        # curl failure (empty stdin → sh exits 0) would falsely set done=True and
+        # skip the go-install fallback. Checking curl's rc explicitly avoids that.
+        fd, tmp = tempfile.mkstemp(prefix="golangci-install.", suffix=".sh")
+        os.close(fd)
+        try:
+            dl = proc.run(
+                ["curl", "-sSfL", "-o", tmp, install_sh], check=False, capture_output=True
+            )
+            if dl.returncode == 0:
+                res = proc.run(
+                    ["sh", tmp, "-b", dest_dir, version], check=False, capture_output=True
+                )
+                done = res.returncode == 0
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
     if not done and _have("go"):
         _log(f"go install golangci-lint {version}")
         res = proc.run(
