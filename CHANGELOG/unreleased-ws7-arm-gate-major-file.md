@@ -1,0 +1,1 @@
+- arm-gate reads .release.major.txt for the wheel major (action_ref fallback kept)

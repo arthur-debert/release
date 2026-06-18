@@ -86,29 +86,76 @@ runs:
         ACTION_REF: ${{ github.action_ref }}
       run: |
         set -euo pipefail
-        # THE INVARIANT (release#541, extended by release#587 OQ4 — confirmed):
-        # the wheel always matches the composite's OWN resolved ref. One rule,
-        # two ref classes — no canary special-case, no skip flag:
-        #   - vN / vN.x.y ref → the released wheel of that major line
-        #     (`--major vN`). The resolver's default `releases/latest` would
-        #     hand a consumer pinned at @v2 the v3 wheel the moment a v3
-        #     release exists.
+        # THE INVARIANT (release#541, extended by release#587 OQ4, refined by
+        # WS7 release#764): the wheel source is decided by the composite's OWN
+        # resolved ref — two ref classes, no canary special-case, no skip flag:
+        #   - vN / vN.x.y ref (a real consumer pin) → install the released wheel
+        #     of a major line. WS7: that major is the consumer's committed
+        #     `.release.major.txt` (the LOGIC-version source of truth) when
+        #     present, ELSE the action_ref-derived `vN` (transitional fallback,
+        #     removed in WS8). The resolver's default `releases/latest` would
+        #     hand a consumer pinned at @v2 the v3 wheel the moment a v3 release
+        #     exists, so the major is always pinned explicitly.
         #   - ANY other ref (a `canary/<sha12>` branch, a bare SHA, a feature
         #     branch) → the wheel is built `--from-source` from the very tree
         #     GitHub staged at the action's resolved ref (action_path), so a
         #     candidate's sync.py/init changes are the code under test — the
         #     old fall-through to `releases/latest` installed the PREVIOUS
-        #     wheel and silently un-tested them.
-        major=""
+        #     wheel and silently un-tested them. `.release.major.txt` is IGNORED
+        #     in this class (see the vN-only guard below).
+        ref_major=""
         case "${ACTION_REF:-}" in
           v[0-9]*)
-            major="${ACTION_REF%%.*}"
+            ref_major="${ACTION_REF%%.*}"
             # Only a pure vN survives — a branch like `v2-experiments` would
             # otherwise leak through the glob as a bogus --major value.
-            case "$major" in
-              v*[!0-9]*) major="" ;;
+            case "$ref_major" in
+              v*[!0-9]*) ref_major="" ;;
             esac ;;
         esac
+        # WS7 (release#764, proposal G): decouple the STRUCTURAL @vN launcher
+        # from the release-core LOGIC major. When this is a real consumer pin (a
+        # clean vN ref), the wheel major comes from the consumer's committed
+        # `.release.major.txt` (sync.py RELEASE_MAJOR_FILE — a bare integer line,
+        # the offline source of truth `init` seeds), FALLING BACK to the
+        # action_ref-derived major when the file is absent/blank (a consumer that
+        # has not pulled the seeder yet). The fallback is what makes G safe to land
+        # in-place on the floating @vN with no @v4 bump; it is removed in WS8
+        # (#765) once `release-core admin repos verify` confirms the fleet carries
+        # the file. A non-vN ref (canary/<sha>, bare SHA, feature branch) leaves
+        # ref_major empty → the --from-source path below builds release's OWN
+        # candidate, and `.release.major.txt` is intentionally IGNORED there so a
+        # fixture/consumer file can never divert a candidate test to a released
+        # wheel (preserves the release#541/#587 OQ4 invariant).
+        major="$ref_major"
+        if [ -n "$ref_major" ]; then
+          major_file="${GITHUB_WORKSPACE:-.}/.release.major.txt"
+          if [ -f "$major_file" ]; then
+            # Mirror release_core.sync.read_release_major: strip only OUTER
+            # whitespace, then reject anything non-integer. INTERNAL whitespace
+            # (a malformed multi-line file like "3\n4") must FAIL LOUD, not be
+            # silently squeezed into a bogus "34" — `tr -d` would do the latter.
+            # `$(cat)` drops trailing newlines; the two expansions strip
+            # leading/trailing blanks; any internal newline/space then survives
+            # into the [!0-9] check below.
+            file_major="$(cat "$major_file")"
+            file_major="${file_major#"${file_major%%[![:space:]]*}"}"
+            file_major="${file_major%"${file_major##*[![:space:]]}"}"
+            case "$file_major" in
+              "") : ;;  # blank/whitespace-only counts as absent → action_ref fallback
+              *[!0-9]*)
+                # Sanitize before printing: the malformed value may carry
+                # newlines/control chars, which would split the ::error:: line and
+                # let a crafted file smuggle extra ::workflow:: commands into the
+                # log. Whitelist to a single safe line (everything else → '?'),
+                # mirroring read_release_major's escaped repr.
+                safe_major="$(printf '%s' "$file_major" | tr -c '[:alnum:] ._-' '?')"
+                echo "::error::.release.major.txt must contain a bare major integer (e.g. '3'), got '${safe_major}' — fix or delete the file to re-seed." >&2
+                exit 1 ;;
+              *) major="v${file_major}" ;;
+            esac
+          fi
+        fi
         resolver="${{ github.action_path }}/../../../bin/install-release-core"
         if [ -n "$major" ]; then
           bash "$resolver" --no-init --major "$major"
