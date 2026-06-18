@@ -47,12 +47,16 @@ semver = "release_core.entrypoints:semver_main"
 dev = ["pytest>=8"]
 
 [build-system]
-requires = ["hatchling"]
+# packaging: used by release_core/_version.py at BUILD time to normalize the
+# release tag ($TAG) to a PEP 440 version. Build-only dep — release_core's sole
+# RUNTIME dep stays click (the _version packaging import is build-branch-guarded).
+requires = ["hatchling", "packaging"]
 build-backend = "hatchling.build"
 
 # Version source (release#758): evaluate VERSION in release_core/_version.py at
 # build time. That module reads $TAG (exported by the release wheel-build step),
-# strips the leading `v`, and falls back to 0.0.0+dev without it.
+# normalizes it to a PEP 440 version via packaging, and falls back to 0.0.0+dev
+# without it.
 [tool.hatch.version]
 source = "code"
 path = "release_core/_version.py"

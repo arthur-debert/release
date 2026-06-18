@@ -15,7 +15,9 @@ from __future__ import annotations
 import importlib
 import importlib.metadata
 
+import pytest
 import release_core
+from packaging.version import InvalidVersion
 from release_core import _version
 
 
@@ -27,16 +29,43 @@ def test_dev_sentinel_is_pep440_local_version():
 
 def test_build_version_strips_leading_v(monkeypatch):
     # The hatch code-version source evaluates release_core/_version.py:VERSION at
-    # build time; it reads $TAG and strips the leading `v` to a PEP 440 version.
+    # build time; it reads $TAG and normalizes it to a PEP 440 version.
     monkeypatch.setenv("TAG", "v3.4.2")
     assert importlib.reload(_version).VERSION == "3.4.2"
 
 
-def test_build_version_strips_exactly_one_leading_v(monkeypatch):
-    # removeprefix("v") drops exactly ONE leading `v`, not all of them — so a
-    # `vv`-prefixed tag keeps the second `v` rather than being over-stripped.
-    monkeypatch.setenv("TAG", "vv3.1.0")
-    assert importlib.reload(_version).VERSION == "v3.1.0"
+@pytest.mark.parametrize(
+    ("tag", "expected"),
+    [
+        # Final release: leading `v` stripped, already PEP 440.
+        ("v3.1.0", "3.1.0"),
+        # Standard semver prereleases packaging normalizes natively
+        # (`-rc.N`→`rcN`, `-beta.N`→`bN`, `-alpha.N`→`aN`).
+        ("v3.1.0-rc.1", "3.1.0rc1"),
+        ("v3.1.0-beta.2", "3.1.0b2"),
+        ("v3.1.0-alpha.3", "3.1.0a3"),
+        # release's bespoke verification suffix (release#663): the one-line
+        # adapter maps it to a PEP 440 rc before packaging validates.
+        ("v3.1.0-release-rc", "3.1.0rc0"),
+        ("v3.1.0-release-rc.5", "3.1.0rc5"),
+    ],
+)
+def test_build_version_normalizes_prerelease_tags(monkeypatch, tag, expected):
+    # Build time ($TAG set): packaging does all PEP 440 normalization; the
+    # bespoke `-release-rc` suffix gets a narrow adapter. Pin the wheel-version
+    # output for every tag shape the pipeline cuts (release#758 round-4 catch:
+    # these semver tags are NOT valid PEP 440 and would fail the wheel build).
+    monkeypatch.setenv("TAG", tag)
+    assert expected == importlib.reload(_version).VERSION
+
+
+def test_build_version_rejects_unknown_shape(monkeypatch):
+    # A genuinely unknown shape is NOT silently passed through: the adapter
+    # leaves it alone and packaging re-raises InvalidVersion — fail-loud on the
+    # wheel build, never a bogus version.
+    monkeypatch.setenv("TAG", "v3.1.0-gibberish.x")
+    with pytest.raises(InvalidVersion):
+        importlib.reload(_version)
 
 
 def test_build_version_falls_back_without_tag(monkeypatch):
@@ -46,8 +75,15 @@ def test_build_version_falls_back_without_tag(monkeypatch):
 
 def test_runtime_version_uses_installed_metadata(monkeypatch):
     # When the package IS installed, __version__ reflects the wheel's stamped
-    # version (importlib.metadata), not a literal.
-    monkeypatch.setattr(importlib.metadata, "version", lambda name: "7.8.9")
+    # version (importlib.metadata), not a literal. The stub asserts the queried
+    # dist name is exactly "release-core" (hyphen, per pyproject `name`) — a
+    # regression to "release_core" (underscore) would raise PackageNotFoundError
+    # and silently fall back to the dev sentinel, which this guards against.
+    def _ver(name):
+        assert name == "release-core"
+        return "7.8.9"
+
+    monkeypatch.setattr(importlib.metadata, "version", _ver)
     assert release_core._resolve_version() == "7.8.9"
 
 
