@@ -41,7 +41,7 @@ from . import proc
 # CI / a dev can pin a different version without editing this file — exactly the
 # shell ``${VAR:-default}`` contract. ``pin(name, default)`` reads the env first.
 #
-# The test ``test_core_toolset_pins_in_sync`` asserts these defaults equal the
+# The test ``test_dual_source_pins_in_sync`` asserts these defaults equal the
 # ``gate-tool-versions.sh`` literals, so the dual source cannot diverge.
 
 _PINS: dict[str, str] = {
@@ -151,6 +151,21 @@ def _have(cmd: str) -> bool:
     return shutil.which(cmd) is not None
 
 
+def _with_output(msg: str, res) -> str:
+    """Append a failed command's captured stdout/stderr to ``msg``.
+
+    HARD mode (``best_effort=False``, which CI/arm-gate uses) runs with
+    ``capture_output=True``, so the underlying tool's output is in ``res`` —
+    surfacing it makes a CI provisioning failure diagnosable (network, PEP 668,
+    404, resolver, …) instead of a bare ``… failed``."""
+    parts = [msg]
+    for label in ("stdout", "stderr"):
+        text = (getattr(res, label, None) or "").strip()
+        if text:
+            parts.append(f"{label}:\n{text}")
+    return "\n".join(parts)
+
+
 def provision_npm(*, best_effort: bool) -> None:
     """Reconcile the npm globals (lefthook + prettier + markdownlint) to their
     pins. ``markdownlint-cli`` is the package; ``markdownlint`` the binary."""
@@ -172,7 +187,7 @@ def provision_npm(*, best_effort: bool) -> None:
     _log(f"npm install -g {' '.join(pkgs)}")
     res = proc.run(["npm", "install", "-g", *pkgs], check=False, capture_output=not best_effort)
     if res.returncode != 0 and not best_effort:
-        raise ProvisionError(f"npm install -g {' '.join(pkgs)} failed")
+        raise ProvisionError(_with_output(f"npm install -g {' '.join(pkgs)} failed", res))
 
 
 def provision_pip(*, best_effort: bool) -> None:
@@ -211,7 +226,7 @@ def provision_pip(*, best_effort: bool) -> None:
     if res.returncode != 0:
         res = proc.run([*pip, "install", *specs], check=False, capture_output=not best_effort)
     if res.returncode != 0 and not best_effort:
-        raise ProvisionError(f"pip install {' '.join(specs)} failed")
+        raise ProvisionError(_with_output(f"pip install {' '.join(specs)} failed", res))
 
 
 def _pip_cmd() -> list[str] | None:
@@ -275,7 +290,7 @@ def provision_actionlint(*, best_effort: bool, bin_dir: str | None = None) -> No
         capture_output=not best_effort,
     )
     if res.returncode != 0 and not best_effort:
-        raise ProvisionError(f"actionlint install to {dest} failed")
+        raise ProvisionError(_with_output(f"actionlint install to {dest} failed", res))
 
 
 def provision_yq(*, best_effort: bool, bin_dir: str | None = None) -> None:
