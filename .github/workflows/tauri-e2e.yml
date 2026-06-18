@@ -50,25 +50,59 @@ on:
         type: string
         required: true
       cache-paths:
-        description: 'Newline-separated paths to cache across runs (cargo registry + tauri target).'
+        description: >-
+          DEPRECATED / IGNORED. The hand-rolled cargo+target cache was replaced
+          by Swatinem/rust-cache (its own pruning bounds target/ growth, so the
+          weekly cold-rebuild is gone). Kept declared so existing thin callers
+          don't break (removing an input is a MAJOR); no longer read.
         type: string
-        default: |
-          /usr/local/cargo/registry
-          src-tauri/target
+        default: ''
       cache-key-file:
-        description: 'File whose hash keys the incremental cache.'
+        description: >-
+          DEPRECATED / IGNORED. Swatinem keys on the workspace Cargo.lock itself;
+          this input is no longer read. Kept declared (removal = MAJOR).
         type: string
-        default: 'src-tauri/Cargo.lock'
+        default: ''
       cache-key-prefix:
         description: >-
-          Namespace for this lane's cache. A consumer running the suite more
-          than once with DIFFERENT cargo features (e.g. a second non-gating
-          `--features X` lane) MUST give each lane its own prefix, or they
-          collide on one key+restore-keys and the heavier lane poisons the lean
-          gate's `target/` (release#491). Both `key` and `restore-keys` are
-          scoped to this prefix, so distinct prefixes never cross-match.
+          Namespace for this lane's cache, passed through as Swatinem's `key:`.
+          A consumer running the suite more than once with DIFFERENT cargo
+          features (e.g. a second non-gating `--features X` lane) MUST give each
+          lane its own prefix, or they collide on one cache and the heavier lane
+          poisons the lean gate's `target/` (release#491). Distinct prefixes
+          never cross-match.
         type: string
         default: 'tauri-e2e-cargo'
+      wasm-cache-path:
+        description: >-
+          Path to the built phos-core wasm packages, cached across runs so the
+          wasm crates are not rebuilt from source each run. Shares WS-B's blob:
+          the key is wasm-v1-<runner.os>-<hashFiles(Cargo.lock)> (runner.os is
+          the in-container Linux), so a hit populated by tauri-ci restores here
+          too. The output is a pure function of the phos-core git sha
+          (single-sourced via src-tauri/Cargo.lock), so the lock hash is the
+          correct key.
+        type: string
+        default: 'src-tauri/pkg'
+      share-debug-binary:
+        description: >-
+          Build the Tauri debug binary ONCE in a dedicated `build-debug` job and
+          share it with native-e2e (instead of each lane compiling its own).
+          Default false → fully INERT: build-debug does not run, native-e2e does
+          not depend on or download anything, behaviour is byte-identical to a
+          single-job compile. The runner-script must implement both roles (the
+          NATIVE_E2E_BUILD_ONLY / NATIVE_E2E_PREBUILT_BINARY contract below)
+          before this is flipped on (WS-E, release#795).
+        type: boolean
+        default: false
+      prebuilt-binary-artifact-name:
+        description: >-
+          Artifact name for the shared debug binary when `share-debug-binary` is
+          true. The `build-debug` job uploads under this name; native-e2e
+          downloads it. Defaults to a Cargo.lock-hash-stamped name so a stale
+          lock never restores a stale binary.
+        type: string
+        default: ''
       failure-artifact-path:
         description: 'Path uploaded as a debugging bundle on failure (absent on green runs is fine).'
         type: string
@@ -98,7 +132,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v2
+          ref: v3
           path: _managed
           sparse-checkout: bin-internal
 
@@ -111,8 +145,69 @@ jobs:
           FULL_SCOPE_PATHS: ${{ inputs.full-scope-paths }}
         run: bash _managed/bin-internal/native-e2e-scope.sh
 
-  native-e2e:
+  # Build-once debug-binary SCAFFOLD (release#792, WS-C). Gated entirely by
+  # `share-debug-binary` — default false ⇒ the `if` is false ⇒ this job never
+  # runs and native-e2e depends on nothing. When flipped on (WS-E, release#795,
+  # once the runner-script learns its two roles), it compiles the Tauri debug
+  # binary ONCE here and native-e2e + the embedded-trial caller consume the
+  # artifact instead of each recompiling (the binary is built 3× across lanes
+  # today).
+  #
+  # CONTRACT — the env this job sets in its BUILD-ONLY role (WS-E implements):
+  #   NATIVE_E2E_BUILD_ONLY=1          build the debug binary, then STOP — do NOT
+  #                                    launch the suite. (Absent/empty ⇒ the
+  #                                    runner-script's normal build+run role.)
+  #   NATIVE_E2E_BINARY_OUTPUT_DIR     directory the runner-script writes the
+  #                                    built binary (+ any sidecars) into; this
+  #                                    exact dir is what gets uploaded.
+  #   NATIVE_E2E_IN_CONTAINER=1        marker: already inside the pinned image.
+  #   GH_TOKEN                         private-dep auth (same as native-e2e).
+  build-debug:
     needs: scope
+    if: ${{ inputs.share-debug-binary }}
+    runs-on: ${{ inputs.runner }}
+    # SAME pinned image as native-e2e — the binary must be ABI-compatible with
+    # the WebKitGTK/glibc the suite runs against, so it is built in-container.
+    container:
+      image: ${{ inputs.container-image }}
+    steps:
+      - name: Checkout consumer
+        uses: actions/checkout@v6
+
+      - name: Cache Rust (src-tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ inputs.cache-key-prefix }}
+
+      - name: Cache built wasm packages
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.wasm-cache-path }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      - name: Build native debug binary (build-only)
+        env:
+          NATIVE_E2E_IN_CONTAINER: '1'
+          NATIVE_E2E_BUILD_ONLY: '1'
+          NATIVE_E2E_BINARY_OUTPUT_DIR: '${{ runner.temp }}/tauri-debug-binary'
+          GH_TOKEN: ${{ secrets.gh-token || github.token }}
+        run: bash ${{ inputs.runner-script }}
+
+      - name: Upload shared debug binary
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ inputs.prebuilt-binary-artifact-name != '' && inputs.prebuilt-binary-artifact-name || format('tauri-debug-binary-{0}', hashFiles('src-tauri/Cargo.lock')) }}
+          path: ${{ runner.temp }}/tauri-debug-binary
+          if-no-files-found: error
+          retention-days: 7
+
+  native-e2e:
+    # `needs` always lists build-debug, but build-debug is skipped when the
+    # switch is off; the `always() && !failure(scope)` guard lets native-e2e
+    # proceed past a SKIPPED build-debug while still gating on scope.
+    needs: [scope, build-debug]
+    if: ${{ always() && needs.scope.result == 'success' && (needs.build-debug.result == 'success' || needs.build-debug.result == 'skipped') }}
     runs-on: ${{ inputs.runner }}
     # The pinned image a dev uses locally too — CI == local, byte-for-byte.
     container:
@@ -121,30 +216,44 @@ jobs:
       - name: Checkout consumer
         uses: actions/checkout@v6
 
-      # Weekly cache rotation bounds growth (release#491). Raw `actions/cache`
-      # of `target/` has no pruning: each new Cargo.lock hash restores the prior
-      # (ever-larger) target via restore-keys, builds on top, and saves a bigger
-      # entry — monotonic creep until `No space left on device`. Swatinem's
-      # pruning isn't an option here (phos bans third-party Marketplace actions).
-      # Instead the key/restore-keys carry an ISO-week stamp scoped to the lane
-      # prefix: incremental WITHIN a week, then a clean cold rebuild at the week
-      # boundary as the bloated prior-week caches age out via GitHub's eviction.
-      - name: Compute weekly cache-rotation stamp
-        id: cache_stamp
-        run: echo "week=$(date -u +%G%V)" >> "$GITHUB_OUTPUT"
+      # Swatinem caches + PRUNES the cargo registry + src-tauri/target. Its
+      # pruning bounds target/ growth, so the deliberate weekly cold-rebuild
+      # (the old ISO-week stamp, release#491) is gone — incremental every run.
+      # CARGO_HOME is /usr/local/cargo in the pinned ivangabriele image, so
+      # Swatinem caches the right registry inside the container.
+      - name: Cache Rust (src-tauri)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ inputs.cache-key-prefix }}
 
-      - name: Cache cargo registry + Tauri target
+      # Shares WS-B's wasm blob via the identical key — a hit populated by
+      # tauri-ci restores the built phos-core wasm packages here, so the wasm
+      # crates aren't rebuilt from source.
+      - name: Cache built wasm packages
         uses: actions/cache@v5
         with:
-          path: ${{ inputs.cache-paths }}
-          key: ${{ inputs.cache-key-prefix }}-${{ steps.cache_stamp.outputs.week }}-${{ hashFiles(inputs.cache-key-file) }}
-          restore-keys: |
-            ${{ inputs.cache-key-prefix }}-${{ steps.cache_stamp.outputs.week }}-
+          path: ${{ inputs.wasm-cache-path }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+
+      # Pull the build-once debug binary when sharing is on. Inert otherwise
+      # (the step is skipped and NATIVE_E2E_PREBUILT_BINARY stays empty, so the
+      # runner-script compiles as it does today).
+      - name: Download shared debug binary
+        if: ${{ inputs.share-debug-binary }}
+        uses: actions/download-artifact@v6
+        with:
+          name: ${{ inputs.prebuilt-binary-artifact-name != '' && inputs.prebuilt-binary-artifact-name || format('tauri-debug-binary-{0}', hashFiles('src-tauri/Cargo.lock')) }}
+          path: ${{ runner.temp }}/tauri-debug-binary
 
       - name: Run native-transport E2E
         env:
           NATIVE_E2E_IN_CONTAINER: '1'
           NATIVE_E2E_SCOPE: ${{ needs.scope.outputs.full == 'true' && 'full' || 'thin' }}
+          # CONTRACT (WS-E implements the consume role): when sharing is on, this
+          # points the runner-script at the downloaded prebuilt binary so it
+          # runs the suite WITHOUT recompiling. Empty ⇒ normal build+run role.
+          NATIVE_E2E_PREBUILT_BINARY: ${{ inputs.share-debug-binary && format('{0}/tauri-debug-binary', runner.temp) || '' }}
           # Auth for the private native git dep + the private wasm release. The
           # runner-script wires cargo's git-CLI token rewrite from this (the
           # build clones the private repo as a normal git dep — no checkout step).

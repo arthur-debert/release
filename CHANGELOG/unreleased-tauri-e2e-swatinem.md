@@ -1,0 +1,1 @@
+- tauri-e2e.yml: Swatinem cache, @v3 ref fix, build-once binary scaffold
