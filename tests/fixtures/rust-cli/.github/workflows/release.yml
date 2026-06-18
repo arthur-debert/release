@@ -41,4 +41,14 @@ jobs:
       bin-name: canary
       publish-crates: false
       brew: false
+      # Canary de-flake (release#765): drop the emulated aarch64-unknown-linux-gnu
+      # build from the pre-ship round. Its "Set up linux aarch64 cross compiler
+      # (apt)" step routinely hangs/overruns on GitHub's apt layer (10s of minutes,
+      # never cached), tipping the canary past its poll budget — pure infra, not a
+      # pipeline defect. The canary validates the SHARED release lifecycle, not each
+      # arch's toolchain: the native x86_64-linux build still exercises the
+      # gnu-linux build job, and darwin-archs (arm64, native on macos-14 + cert
+      # signing) still exercises an aarch64 build — so coverage of the build logic
+      # is preserved. Real consumers keep the default x86_64,aarch64.
+      linux-archs: x86_64
     secrets: inherit
