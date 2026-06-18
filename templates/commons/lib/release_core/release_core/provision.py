@@ -306,8 +306,14 @@ def _symlink_venv_scripts(repo_root: str) -> None:
             continue
         dest = os.path.join(local_bin, name)
         try:
-            if os.path.islink(dest) or os.path.exists(dest):
-                os.remove(dest)
+            if os.path.islink(dest):
+                os.remove(dest)  # refresh our own (possibly stale) symlink — idempotent
+            elif os.path.exists(dest):
+                # A real (non-symlink) file here is a user/agent-installed binary or a
+                # pinned gate-toolset executable that happens to share a name — NEVER
+                # clobber it; leave it and skip linking this one.
+                _warn(f"{dest} is a real file (not our symlink); leaving it, not linking {name}")
+                continue
             os.symlink(src, dest)
         except OSError:
             continue  # best-effort: one permission hiccup must not abort the rest
