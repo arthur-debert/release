@@ -33,7 +33,7 @@ name: Zed Extension CI
 #     contents: read
 #   jobs:
 #     ci:
-#       uses: arthur-debert/release/.github/workflows/zed-extension-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/zed-extension-ci.yml@v3
 #       with:
 #         bats: true              # optional
 #         node: true              # optional

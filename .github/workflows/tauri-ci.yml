@@ -63,7 +63,7 @@ name: Tauri CI
 #     contents: read
 #   jobs:
 #     check:
-#       uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/tauri-ci.yml@v3
 #       with:
 #         node-version: '22'              # default
 #         # rust-toolchain: 'stable'      # default

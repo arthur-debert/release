@@ -8,7 +8,7 @@ name: Cascade handler (reusable)
 #       types: [upstream-released]
 #   jobs:
 #     cascade:
-#       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v1
+#       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v3
 #       secrets:
 #         RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
 #

@@ -20,7 +20,7 @@ name: mkdocs (build + deploy)
 #     id-token: write             # that won't run due to `if:` guards.
 #   jobs:
 #     docs:
-#       uses: arthur-debert/release/.github/workflows/mkdocs.yml@v1
+#       uses: arthur-debert/release/.github/workflows/mkdocs.yml@v3
 #       with:
 #         requirements: docs/requirements.txt   # consumer's pin file
 #         # deploy: 'false'      # opt-out of deploy; build runs anyway

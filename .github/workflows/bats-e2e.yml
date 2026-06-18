@@ -7,7 +7,7 @@ name: BATS e2e
 #
 #   jobs:
 #     e2e:
-#       uses: arthur-debert/release/.github/workflows/bats-e2e.yml@v1
+#       uses: arthur-debert/release/.github/workflows/bats-e2e.yml@v3
 #       with:
 #         pre-test: scripts/build-for-e2e   # optional
 #         runner:   bin/check-e2e            # default

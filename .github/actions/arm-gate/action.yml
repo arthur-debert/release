@@ -162,12 +162,6 @@ runs:
         if [ -n "$major" ]; then
           bash "$resolver" --no-init --major "$major"
         else
-          # Resolution probe FIRST: resolve (never install) a published wheel
-          # through the gh-authenticated path with exactly this step's declared
-          # env — the precise release#535 failure surface (gh exits non-zero
-          # without a token) — even though the wheel we install comes from
-          # source. A probe failure fails the step loudly (set -e).
-          bash "$resolver" --print-url --major v2 >/dev/null
           # Install the candidate: GitHub stages the WHOLE repo at the action's
           # resolved ref under action_path; --from-source accepts the checkout
           # root and builds the wheel from that exact tree.

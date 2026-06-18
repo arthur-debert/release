@@ -20,7 +20,7 @@ name: mdbook (build + deploy)
 #     id-token: write             # that won't run due to `if:` guards.
 #   jobs:
 #     docs:
-#       uses: arthur-debert/release/.github/workflows/mdbook.yml@v1
+#       uses: arthur-debert/release/.github/workflows/mdbook.yml@v3
 #       with:
 #         # book-dir: 'docs'      # if book.toml lives under docs/, not root
 #         # output-dir: 'book'    # mdbook default; override if book.toml's

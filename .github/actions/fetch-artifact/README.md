@@ -11,7 +11,7 @@ exercise identical code.
 
 ```yaml
 - name: Fetch lexd-lsp
-  uses: arthur-debert/release/.github/actions/fetch-artifact@v1
+  uses: arthur-debert/release/.github/actions/fetch-artifact@v3
   with:
     artifact: lexd-lsp
   env:
@@ -45,7 +45,7 @@ The caller must export `GH_TOKEN` for the step that runs this action.
 Composite actions can't read secrets directly; the standard pattern is:
 
 ```yaml
-- uses: arthur-debert/release/.github/actions/fetch-artifact@v1
+- uses: arthur-debert/release/.github/actions/fetch-artifact@v3
   with:
     artifact: lexd-lsp
   env:

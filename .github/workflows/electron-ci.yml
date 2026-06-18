@@ -49,7 +49,7 @@ name: Electron CI
 #     contents: read
 #   jobs:
 #     check:
-#       uses: arthur-debert/release/.github/workflows/electron-ci.yml@v1
+#       uses: arthur-debert/release/.github/workflows/electron-ci.yml@v3
 #       with:
 #         node-version: '22'              # default
 #         shared-build-dir: shared        # if you have one
