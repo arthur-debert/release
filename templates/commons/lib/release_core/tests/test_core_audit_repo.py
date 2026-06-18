@@ -126,7 +126,9 @@ def _green_routes(repo="o/r"):
         f"repos/{repo}": {"default_branch": "main"},
         f"repos/{repo}/actions/runs": {"workflow_runs": [{"name": "CI", "conclusion": "success"}]},
         # no go.mod → SKIP private_mod_auth
-        f"repos/{repo}/contents/scripts": [{"type": "file", "name": "setup-dev-env.sh"}],
+        # no scripts/ dir → SKIP scripts_inventory (the standard consumer has none
+        # post-WS8 #765; provisioning moved into release-core init).
+        f"repos/{repo}/contents/scripts": [],
         f"repos/{repo}/contents/.github/workflows": [
             {"type": "file", "name": "ci.yml"},
             {"type": "file", "name": "copilot-review.yml"},
@@ -153,7 +155,7 @@ def test_audit_all_green(monkeypatch):
     assert rows["dep_policy"][0] == "PASS"
     assert rows["ci_main_green"][0] == "PASS"
     assert rows["private_mod_auth"][0] == "SKIP"  # no go.mod
-    assert rows["scripts_inventory"][0] == "PASS"
+    assert rows["scripts_inventory"][0] == "SKIP"  # no scripts/ dir
     # ci.yml uses rust-ci reusable → workflows_thin_callers PASS
     assert rows["workflows_thin_callers"][0] == "PASS"
 

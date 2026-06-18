@@ -1,0 +1,1 @@
+- WS8: remove the transitional bootstrap shims — setup-dev-env.sh, provision-gate-toolset.sh, gate-tool-versions.sh; install-release-core is index-only; arm-gate requires .release.major.txt for vN refs; provisioning + gate-toolset pins live solely in release_core (toolset.py/provision.py)

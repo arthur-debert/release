@@ -627,10 +627,6 @@ def _setup_full_repo(tmp_path, monkeypatch, src_root):
     repo = _init_git_repo(tmp_path / "consumer")
     monkeypatch.delenv("RELEASE_HOME", raising=False)
     monkeypatch.delenv("RELEASE_REF", raising=False)
-    # Deterministic provenance label: neutralize any ambient resolved-release
-    # stamp (release#580) — env SET + empty means "no stamp" to read_source_tag,
-    # shadowing a real <venv>/release-source.tag on the host.
-    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "")
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
     monkeypatch.setattr(init, "_bundle_root", lambda: str(src_root))
     monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
@@ -797,10 +793,10 @@ def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monk
     ephemeral (never tracked), so the force-add applies only to real-file managed
     copies — the bootstrap quartet and workflow copies."""
     src = _full_source_tree(tmp_path / "src")
-    # Give the synthetic source a bootstrap real-file dest (quartet member).
-    boot = os.path.join(src, "templates", "commons", "bin", "setup-dev-env.sh")
+    # Give the synthetic source a bootstrap real-file dest (trio member).
+    boot = os.path.join(src, "templates", "commons", "bin", "install-release-core")
     with open(boot, "w") as fh:
-        fh.write("#!/usr/bin/env bash\necho setup-dev-env.sh\n")
+        fh.write("#!/usr/bin/env bash\necho install-release-core\n")
     os.chmod(boot, 0o755)
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
     # Consumer ignores a directory the managed files are written into.
@@ -813,7 +809,7 @@ def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monk
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
     # The managed real-file copy is committed despite the .gitignore covering bin/;
     # the ephemeral symlink mirror is not tracked at all.
-    assert "bin/setup-dev-env.sh" in committed
+    assert "bin/install-release-core" in committed
     assert "bin/check" not in committed
     assert _git(repo, "ls-files", "bin/check") == ""
     assert _git(repo, "status", "--porcelain") == ""  # clean tree, nothing stranded
@@ -1020,95 +1016,50 @@ def test_full_uses_release_home_clone_when_present(tmp_path, monkeypatch, capsys
     assert "release-core" not in marker
 
 
-# ── release#580: the resolved-release-tag stamp labels the commit + marker ────
-# install-release-core stamps <venv>/release-source.tag with the release tag the
-# wheel was resolved from (since release#758 the wheel version is tag-stamped too,
-# but this explicit stamp remains the provenance channel init reads). The
-# bundle-path init must carry it into the managed auto-commit subject AND the
-# .release-sync-source marker; absent stamp → the wheel-version fallback. The
-# env override (RELEASE_CORE_SOURCE_TAG) is the test channel for the stamp.
+# ── The managed auto-commit + marker carry the source provenance ──────────────
+# The source's ref_sha IS the provenance: the tag-stamped wheel version for a
+# BundleSource ("release-core <version>", release#758) or the resolved git SHA for
+# a GitSource. (WS8 #765 removed the separate release-source.tag stamp the boot
+# resolver used to write + read_source_tag, so the RELEASE_CORE_SOURCE_TAG channel
+# is gone — the wheel version is the only provenance label now.)
 
 
 @_needs_yq
 @_needs_git
-def test_bundle_init_stamped_tag_labels_commit_and_marker(tmp_path, monkeypatch, capsys):
+def test_bundle_init_labels_commit_and_marker_with_wheel_version(tmp_path, monkeypatch, capsys):
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
-    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "v2.17.1")
 
     assert init.main([]) == 0
     capsys.readouterr()
-    # The commit subject carries the REAL release line — and keeps the exact
-    # "chore(release): sync managed tree" prefix that other tooling greps on.
+    # The commit subject carries the wheel-version provenance and keeps the exact
+    # "chore(release): sync managed tree" prefix other tooling greps on.
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
-    assert subject == "chore(release): sync managed tree from release v2.17.1 (release-core wheel)"
-    # The marker gains the tag line ALONGSIDE the existing source line.
+    assert subject.startswith("chore(release): sync managed tree from release-core ")
+    # The marker carries the ref_sha (wheel-version) line.
     lines = (repo / ".release" / ".release-sync-source").read_text().splitlines()
-    assert "v2.17.1" in lines
     assert any(ln.startswith("release-core ") for ln in lines), "ref_sha line must remain"
 
 
-@_needs_yq
-@_needs_git
-def test_bundle_init_no_stamp_falls_back_to_wheel_version(tmp_path, monkeypatch, capsys):
-    # A wheel installed by an older (pre-#580) resolver has no stamp: the label
-    # falls back to the static wheel-version string — the one-session boot-window
-    # robustness, not a compat shim. (_setup_full_repo already forces "no stamp".)
-    src = _full_source_tree(tmp_path / "src")
-    repo = _setup_full_repo(tmp_path, monkeypatch, src)
-
-    assert init.main([]) == 0
-    capsys.readouterr()
-    subject = _git(repo, "log", "-1", "--pretty=format:%s")
-    assert subject.startswith("chore(release): sync managed tree from release-core ")
-    marker = (repo / ".release" / ".release-sync-source").read_text()
-    assert "install-release-core" not in marker  # no tag block without a stamp
+def test_source_label_is_the_ref_sha():
+    # WS8 #765: _source_label is just the source's ref_sha (the tag-stamped wheel
+    # version for a bundle, the resolved SHA for a clone) — no separate tag channel.
+    src = sync.BundleSource("/x", ref_sha="release-core 3.1.0")
+    assert init._source_label(src) == "release-core 3.1.0"
+    gsrc = sync.GitSource("/x", "HEAD", ref_sha="abc1234")
+    assert init._source_label(gsrc) == "abc1234"
 
 
 @_needs_yq
 @_needs_git
-def test_bundle_init_from_source_stamp_labels_truthfully(tmp_path, monkeypatch, capsys):
-    # A --from-source install stamps "from-source <shortsha>" — the label says
-    # so verbatim (never a faked tag).
-    src = _full_source_tree(tmp_path / "src")
-    repo = _setup_full_repo(tmp_path, monkeypatch, src)
-    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "from-source abc1234")
-
-    assert init.main([]) == 0
-    capsys.readouterr()
-    subject = _git(repo, "log", "-1", "--pretty=format:%s")
-    assert subject == "chore(release): sync managed tree from release-core (from-source abc1234)"
-    lines = (repo / ".release" / ".release-sync-source").read_text().splitlines()
-    assert "from-source abc1234" in lines
-
-
-def test_source_label_matches_the_exact_from_source_sentinel():
-    # The from-source classification is an EXACT sentinel match ("from-source" /
-    # "from-source <sha>"), not a loose prefix: a release tag is free-form, so a
-    # tag literally named "from-source-v2.0.0" still labels as a release tag.
-    src = sync.BundleSource("/x", ref_sha="release-core 0.0.1")
-    src.release_tag = "from-source"
-    assert init._source_label(src) == "release-core (from-source)"
-    src.release_tag = "from-source abc1234"
-    assert init._source_label(src) == "release-core (from-source abc1234)"
-    src.release_tag = "from-source-v2.0.0"
-    assert init._source_label(src) == "release from-source-v2.0.0 (release-core wheel)"
-    src.release_tag = None
-    assert init._source_label(src) == "release-core 0.0.1"
-
-
-@_needs_yq
-@_needs_git
-def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
+def test_git_source_labels_with_the_resolved_sha(tmp_path, monkeypatch, capsys):
     # The $RELEASE_HOME override installs from a live clone: its resolved SHA is
-    # the provenance, so the venv stamp (which describes the installed WHEEL)
-    # must not relabel the commit or reach the marker.
+    # the provenance for the commit subject + marker.
     src = _full_source_tree(tmp_path / "src")
     clone = _git_clone_from(src, tmp_path / "clone")
     repo = _init_git_repo(tmp_path / "consumer")
     monkeypatch.setenv("RELEASE_HOME", str(clone))
     monkeypatch.setenv("RELEASE_REF", "HEAD")
-    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "v2.17.1")
     monkeypatch.setattr(init.gh, "repo_root", lambda: str(repo))
     monkeypatch.setattr(init.manifest, "detect_kind", lambda root: "tree-sitter")
 
@@ -1117,21 +1068,20 @@ def test_git_source_ignores_the_stamp(tmp_path, monkeypatch, capsys):
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
     sha = _git(clone, "rev-parse", "HEAD")
     assert subject == f"chore(release): sync managed tree from {sha}"
-    marker = (repo / ".release" / ".release-sync-source").read_text()
-    assert "v2.17.1" not in marker
 
 
 # ── WS5 (release#526): the bootstrap quartet is written as REAL files ────────
 
 
 def _ws5_source_tree(root) -> str:
-    """_full_source_tree + the bootstrap quartet, so a full install exercises the
-    real-copy path for the SessionStart chain."""
+    """_full_source_tree + the bootstrap trio, so a full install exercises the
+    real-copy path for the SessionStart chain. (WS8 #765: setup-dev-env.sh removed
+    — the trio is .claude/settings.json + install-release-core + pr-loop-guard.)"""
     src = _full_source_tree(root)
     tpl = root / "templates" / "commons"
     (tpl / ".claude").mkdir(parents=True)
     (tpl / ".claude" / "settings.json").write_text('{"hooks": {}}\n')
-    for name in ("install-release-core", "setup-dev-env.sh", "pr-loop-guard"):
+    for name in ("install-release-core", "pr-loop-guard"):
         f = tpl / "bin" / name
         f.write_text(f"#!/usr/bin/env bash\necho {name}\n")
         os.chmod(f, 0o755)
@@ -1140,7 +1090,7 @@ def _ws5_source_tree(root) -> str:
 
 @_needs_yq
 @_needs_git
-def test_full_init_writes_bootstrap_quartet_as_real_executable_files(tmp_path, monkeypatch, capsys):
+def test_full_init_writes_bootstrap_trio_as_real_executable_files(tmp_path, monkeypatch, capsys):
     src = _ws5_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
@@ -1149,7 +1099,6 @@ def test_full_init_writes_bootstrap_quartet_as_real_executable_files(tmp_path, m
     for dest in (
         ".claude/settings.json",
         "bin/install-release-core",
-        "bin/setup-dev-env.sh",
         "bin/pr-loop-guard",
     ):
         p = repo / dest
@@ -1157,11 +1106,11 @@ def test_full_init_writes_bootstrap_quartet_as_real_executable_files(tmp_path, m
         assert not p.is_symlink(), f"{dest} must be a REAL file (fresh-clone boot), not a symlink"
         assert dest in _git(repo, "ls-files"), f"{dest} must be tracked"
     # The executables carry their bit; the JSON does not.
-    for dest in ("bin/install-release-core", "bin/setup-dev-env.sh", "bin/pr-loop-guard"):
+    for dest in ("bin/install-release-core", "bin/pr-loop-guard"):
         assert os.access(repo / dest, os.X_OK), dest
     # No managed-marker header on a shebang script (would break the shebang) or
     # on JSON (no comment syntax).
-    first = (repo / "bin" / "setup-dev-env.sh").read_text().splitlines()[0]
+    first = (repo / "bin" / "install-release-core").read_text().splitlines()[0]
     assert first.startswith("#!"), "shebang must stay line 1"
     assert (repo / ".claude" / "settings.json").read_text().lstrip().startswith("{")
 
@@ -1181,12 +1130,12 @@ def test_full_init_migrates_bootstrap_symlinks_and_replaces_atomically(
     # Seed the pre-WS5 state: a dangling symlink into the not-yet-built .release/.
     (repo / "bin").mkdir(exist_ok=True)
     os.symlink(
-        os.path.join("..", ".release", "bin", "setup-dev-env.sh"),
-        repo / "bin" / "setup-dev-env.sh",
+        os.path.join("..", ".release", "bin", "install-release-core"),
+        repo / "bin" / "install-release-core",
     )
     assert init.main([]) == 0
     capsys.readouterr()
-    p = repo / "bin" / "setup-dev-env.sh"
+    p = repo / "bin" / "install-release-core"
     assert p.is_file() and not p.is_symlink()
     ino_before = os.stat(p).st_ino
 
@@ -1194,7 +1143,7 @@ def test_full_init_migrates_bootstrap_symlinks_and_replaces_atomically(
     p.write_text("#!/usr/bin/env bash\nhand-edited\n")
     assert init.main([]) == 0
     capsys.readouterr()
-    assert "echo setup-dev-env.sh" in p.read_text()
+    assert "echo install-release-core" in p.read_text()
     assert os.stat(p).st_ino != ino_before, "repair must be an atomic rename, not in-place"
 
 
@@ -1234,14 +1183,14 @@ def test_full_removes_retired_files_in_managed_commit(tmp_path, monkeypatch, cap
 @_needs_yq
 @_needs_git
 def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch, capsys):
-    """release#563 + WS4 (#761): a pre-WS4 seed TRACKS .release/ORIENTATION.md
-    (stale, rule-contradicting) and carries the OLD @.release/ORIENTATION.md
-    spliced CLAUDE.md block. One bare init converges: the install removes the
-    on-disk copy and never re-builds it, the retired-file removal + WS4 untracking
-    record the deletion, the managed @import TARGET is written + committed, and
-    CLAUDE.md is migrated off the spliced block to the one-line @import AND committed
-    (the one-time migration MUST land — otherwise the @import sits uncommitted and
-    the next init re-stages it). After it, CLAUDE.md is consumer-owned and never
+    """release#563 + WS4/WS8 (#761/#765): a pre-pull seed TRACKS
+    .release/ORIENTATION.md (stale, rule-contradicting) and carries a consumer
+    CLAUDE.md with no managed @import. One bare init converges: the install removes
+    the on-disk orientation copy and never re-builds it, the retired-file removal +
+    WS4 untracking record the deletion, the managed @import TARGET is written +
+    committed, and the one-line @import is prepended to CLAUDE.md AND committed (the
+    one-time insertion MUST land — otherwise the @import sits uncommitted and the
+    next init re-stages it). After it, CLAUDE.md is consumer-owned and never
     re-staged, so a 2nd init is a clean no-op."""
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
@@ -1254,12 +1203,9 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
         ".release/ORIENTATION.md",
         frozenset({init.sync._git_blob_sha1(str(orientation))}),
     )
-    (repo / "CLAUDE.md").write_text(
-        f"{init.sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{init.sync.CLAUDE_END}\n"
-        "\n# Consumer\n\nmine\n"
-    )
+    (repo / "CLAUDE.md").write_text("# Consumer\n\nmine\n")
     _git(repo, "add", "-f", ".release/ORIENTATION.md", "CLAUDE.md")
-    _git(repo, "commit", "-q", "-m", "pre-WS4 seed: tracked .release + old import stub")
+    _git(repo, "commit", "-q", "-m", "pre-pull seed: tracked .release + consumer CLAUDE.md")
 
     assert init.main([]) == 0
     out = capsys.readouterr().out
@@ -1268,21 +1214,16 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
     assert not orientation.exists()
     # Untracked — the deletion is recorded, not resurrected by the pathspec commit.
     assert _git(repo, "ls-files", ".release/ORIENTATION.md") == ""
-    # CLAUDE.md migrated to the one-line @import; consumer prose survives; the
-    # spliced block is gone.
+    # CLAUDE.md gained the one-line @import; consumer prose survives below it.
     claude = (repo / "CLAUDE.md").read_text()
     assert claude.startswith(sync.CLAUDE_IMPORT_LINE)
-    assert init.sync.CLAUDE_BEGIN not in claude
-    assert "@.release/ORIENTATION.md" not in claude
     assert "# Consumer" in claude
-    # The one-time migration committed BOTH the managed @import TARGET and CLAUDE.md
-    # (the @import) — so HEAD no longer carries the old spliced block.
+    # The one-time insertion committed BOTH the managed @import TARGET and CLAUDE.md.
     committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
     assert sync.CLAUDE_IMPORT_TARGET in committed
     assert "CLAUDE.md" in committed
     head_claude = _git(repo, "show", "HEAD:CLAUDE.md")
     assert head_claude.startswith(sync.CLAUDE_IMPORT_LINE)
-    assert init.sync.CLAUDE_BEGIN not in head_claude
     assert "# Consumer" in head_claude  # consumer prose preserved in the commit
     # Tree is CLEAN — CLAUDE.md is committed, not left dangling; the orientation
     # removal is fully recorded too.

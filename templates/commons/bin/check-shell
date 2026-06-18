@@ -24,7 +24,7 @@
 set -euo pipefail
 
 if ! command -v shellcheck >/dev/null 2>&1; then
-  echo "ERROR: shellcheck not installed — the gate does not skip. Re-run the bootstrap (setup-dev-env.sh)." >&2
+  echo "ERROR: shellcheck not installed — the gate does not skip. Re-run `release-core gate --provision`." >&2
   exit 1
 fi
 

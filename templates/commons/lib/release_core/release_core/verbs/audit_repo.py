@@ -31,8 +31,8 @@ Checks performed:
                          configure git insteadOf with RELEASE_TOKEN
 
 Conformance checks (WARN-only — don't fail; surface adoption gaps):
-  9. scripts_inventory  — what's left in scripts/ beyond the shared
-                           setup-dev-env.sh + project extras
+  9. scripts_inventory  — any scripts/ content (legacy: the standard consumer
+                           has no scripts/ dir post-WS8)
  10. workflows_thin_callers — count of workflows that are NOT thin callers of
                            arthur-debert/release/* (legacy / bespoke surface)
 
@@ -403,11 +403,10 @@ def _check_scripts_inventory(repo: str, results: list) -> None:
     if not listing:
         _record(results, "SKIP", "scripts_inventory", "no scripts/ dir on default branch")
         return
-    extras = [n for n in listing if n != "setup-dev-env.sh"]
-    if not extras:
-        _record(results, "PASS", "scripts_inventory", "only setup-dev-env.sh (the standard one)")
-    else:
-        _record(results, "WARN", "scripts_inventory", f"non-standard: {','.join(extras)}")
+    # Post-WS8 (#765): the standard consumer has NO scripts/ dir — the former
+    # standard `scripts/setup-dev-env.sh` is retired (provisioning moved into
+    # `release-core init`), so ANY scripts/ content is now consumer-owned / legacy.
+    _record(results, "WARN", "scripts_inventory", f"non-standard scripts/: {','.join(listing)}")
 
 
 def _check_workflows_thin_callers(repo: str, results: list) -> None:

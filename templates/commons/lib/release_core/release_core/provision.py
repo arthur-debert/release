@@ -1,38 +1,38 @@
 """provision — the per-session dev-environment provisioning, dissolved into init.
 
-WS5/E (#762): the provisioning ``setup-dev-env.sh`` runs (gate-toolset arming,
-git-hook wiring, dep caches, NSS cert import, submodule init, the per-repo
-post-setup hook) moves INTO ``release-core init`` so the wheel carries it — one
+WS5/E (#762): the provisioning the old ``setup-dev-env.sh`` did (gate-toolset
+arming, git-hook wiring, dep caches, NSS cert import, submodule init, the per-repo
+post-setup hook) moved INTO ``release-core init`` so the wheel carries it — one
 definition, pulled. ``init`` calls :func:`run` after it installs the managed
 tree; ``arm-gate``/CI reaches the same toolset arming through ``release-core gate
 --provision``.
 
-ADDITIVE through the migration window (the #1 safety rule): this phase
-``setup-dev-env.sh`` ALSO still runs these steps (redundant + SAFE — there is
-never a window where neither provisions). So every step here is IDEMPOTENT and
-will not fight the shell: it reconciles to a pin / installs-if-missing / wires a
-hook, never mutating a tree the shell already converged. Removal of the shell is
-WS8 (Phase 3).
+WS8 (#765): this is now the SOLE provisioner — the shell ``setup-dev-env.sh`` was
+removed once the fleet converged onto the pull model (SessionStart now calls
+``install-release-core`` directly → ``release-core init`` → here). Every step is
+still IDEMPOTENT (safe to re-run every session) and best-effort.
 
 ORDER (load-bearing): the TOOLSET is armed FIRST — the gate (and the hook we wire
 next) needs it, and arming after would be circular. Then submodule content (BOTH
 local + cloud — a fresh clone needs it for the gate/tests), then the git-hook
 wiring. The ``--cloud``-only heavier cloud-snapshot steps follow: the tag fetch,
 dep caches, the NSS cert import. The per-repo ``app-bin/post-setup-hook.sh`` runs
-LAST (the consumer extension point), matching ``setup-dev-env.sh`` §4.
+LAST (the consumer extension point), matching the old ``setup-dev-env.sh`` §4.
 
 LOAD-BEARING vs OPTIONAL (the WS6 distinction applies here too): toolset arming +
 hook wiring are load-bearing for the gate but stay BEST-EFFORT inside init —
-init must never break the boot, and the redundant shell run / next session
-self-heals. The cloud steps (caches, cert import) are genuinely optional and
-degrade gracefully. Nothing here raises; every step warns + continues.
+init must never break the boot, and the next session self-heals. The cloud steps
+(caches, cert import) are genuinely optional and degrade gracefully. Nothing here
+raises; every step warns + continues.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 
 from . import toolset
 
@@ -206,14 +206,14 @@ def fetch_tags(repo_root: str) -> None:
 
 
 def dep_caches(repo_root: str) -> None:
-    """Warm the project dep cache for the detected stack — §2 of setup-dev-env.sh.
+    """Warm the project dep cache for the detected stack — §2 of the old
+    setup-dev-env.sh.
 
     Per-stack, idempotent (cheap when warm). Best-effort: a registry hiccup must
-    not abort. Mirrors the shell's stack detection (Rust / Go / Node / Ruby /
-    Python). The Python venv + ~/.local/bin symlink pass is intentionally NOT
-    re-implemented here — it is cloud-snapshot machinery the shell still owns this
-    phase, and replicating the venv-bin symlink loop would risk fighting it. Phase
-    3 (WS8) consolidates the remainder."""
+    not abort. Covers the shell's stack detection (Rust / Go / Node / Ruby /
+    Python). WS8 (#765) folded in the Python venv + ~/.local/bin symlink pass the
+    shell §2 owned (:func:`_python_deps`), so a cloud session's venv-installed CLIs
+    are reachable on the agent's bare PATH with the shell gone."""
     j = os.path.join
     if os.path.isfile(j(repo_root, "Cargo.toml")) and _have("cargo"):
         _run(["cargo", "fetch", "--locked", "--quiet"], cwd=repo_root)
@@ -223,6 +223,7 @@ def dep_caches(repo_root: str) -> None:
         _node_deps(repo_root)
     if os.path.isfile(j(repo_root, "Gemfile")) and _have("bundle"):
         _run(["bundle", "install", "--quiet"], cwd=repo_root)
+    _python_deps(repo_root)
 
 
 def _node_deps(repo_root: str) -> None:
@@ -242,6 +243,88 @@ def _node_deps(repo_root: str) -> None:
         # No committed lockfile (tree-sitter-lex gitignores it): install dev-only
         # tooling without generating a lockfile. Fall back to a plain no-lock install.
         _run(["npm", "install", "--no-package-lock"], cwd=repo_root)
+
+
+def _python_deps(repo_root: str) -> None:
+    """Create/refresh a project ``.venv`` and install deps, then symlink the
+    venv's console-scripts onto ~/.local/bin — the WS8 port of setup-dev-env.sh §2's
+    Python block.
+
+    Runs unconditionally (pip install is idempotent + sub-second when warm), gated
+    on a conventional manifest + python3. The ~/.local/bin symlink pass is what
+    makes a venv-installed CLI (mkdocs etc.) resolvable on the cloud agent's bare
+    PATH — the Bash tool's non-interactive shells don't see ${repo}/.venv/bin, so
+    without the symlinks a test that shells out to a venv CLI gets
+    FileNotFoundError. Best-effort throughout (a failure warns, never aborts)."""
+    j = os.path.join
+    has_manifest = any(
+        os.path.isfile(j(repo_root, m)) for m in ("pyproject.toml", "requirements.txt", "setup.py")
+    )
+    if not has_manifest or not _have("python3"):
+        return
+    venv = j(repo_root, ".venv")
+    venv_pip = j(venv, "bin", "pip")
+    if not os.access(venv_pip, os.X_OK) and (
+        _run(["python3", "-m", "venv", ".venv"], cwd=repo_root) != 0
+    ):
+        _warn("python3 -m venv .venv failed — pip installs will be skipped")
+    if not os.access(venv_pip, os.X_OK):
+        return
+    _run([venv_pip, "install", "--upgrade", "pip", "--quiet"], cwd=repo_root)
+    if os.path.isfile(j(repo_root, "pyproject.toml")):
+        if _run([venv_pip, "install", "-e", ".[dev]", "--quiet"], cwd=repo_root) != 0:
+            _warn("editable install (.[dev]) failed — tests may not run (see pip output)")
+    elif os.path.isfile(j(repo_root, "requirements.txt")):
+        if _run([venv_pip, "install", "-r", "requirements.txt", "--quiet"], cwd=repo_root) != 0:
+            _warn("requirements install failed — tests may not run")
+    elif os.path.isfile(j(repo_root, "setup.py")) and (
+        _run([venv_pip, "install", "-e", ".", "--quiet"], cwd=repo_root) != 0
+    ):
+        _warn("editable install failed — tests may not run")
+    _symlink_venv_scripts(repo_root)
+
+
+def _symlink_venv_scripts(repo_root: str) -> None:
+    """Symlink every executable in ``.venv/bin`` (except the python/pip/activate
+    family) into ~/.local/bin so the cloud agent's bare PATH finds venv CLIs.
+    Idempotent (``ln -sf`` overwrites a stale symlink). Best-effort."""
+    venv_bin = os.path.join(repo_root, ".venv", "bin")
+    if not os.path.isdir(venv_bin):
+        return
+    local_bin = os.path.join(os.path.expanduser("~"), ".local", "bin")
+    try:
+        os.makedirs(local_bin, exist_ok=True)
+    except OSError as exc:
+        _warn(f"could not create {local_bin}: {exc}")
+        return
+    skip_prefixes = ("python", "pip", "activate", "easy_install", "wheel")
+    for name in os.listdir(venv_bin):
+        src = os.path.join(venv_bin, name)
+        if not (os.path.isfile(src) and os.access(src, os.X_OK)):
+            continue
+        if any(name == p or name.startswith(p) for p in skip_prefixes):
+            continue
+        dest = os.path.join(local_bin, name)
+        try:
+            if os.path.islink(dest):
+                # Only refresh OUR OWN symlink — one that already resolves into this
+                # repo's .venv/bin. A symlink pointing ANYWHERE else is user-managed
+                # (or another project's venv); leave it and skip, never clobber it.
+                if os.path.dirname(os.path.realpath(dest)) == os.path.realpath(venv_bin):
+                    os.remove(dest)  # idempotent refresh of our stale/current link
+                else:
+                    _warn(
+                        f"{dest} is a symlink outside our .venv/bin; leaving it, not linking {name}"
+                    )
+                    continue
+            elif os.path.exists(dest):
+                # A real (non-symlink) file is a user/agent-installed binary or a
+                # pinned gate-toolset executable sharing a name — NEVER clobber it.
+                _warn(f"{dest} is a real file (not our symlink); leaving it, not linking {name}")
+                continue
+            os.symlink(src, dest)
+        except OSError:
+            continue  # best-effort: one permission hiccup must not abort the rest
 
 
 def unprovisionable_stacks(repo_root: str) -> list[str]:
@@ -280,19 +363,94 @@ def unprovisionable_stacks(repo_root: str) -> list[str]:
 
 
 def import_nss_cert(repo_root: str) -> None:
-    """Import the cloud sandbox-egress CA into Chromium's NSS DB — §2.5.
+    """Import the cloud sandbox-egress CA into Chromium's NSS DB — the WS8 (#765)
+    Python port of setup-dev-env.sh §2.5.
 
-    GENUINELY OPTIONAL (degrades gracefully): only Electron/Playwright HTTPS in a
-    cloud session needs it. A non-Linux host, a missing certutil/openssl, or no
-    matching cert is a clean no-op. Idempotent — ``certutil -L -n <nick>``
-    short-circuits a present cert. Delegates to the still-shipped shell §2.5 logic
-    by NOT re-implementing the cert-splitting awk loop in Python: this phase the
-    shell setup-dev-env.sh §2.5 still runs (additive), so init only needs to not
-    REGRESS it. Kept as a documented no-op here to mark the seam for WS8, where
-    the shell goes away and this gains the full import.
-    """
-    # Optional + still shell-provided this phase — intentional no-op (see docstring).
-    return
+    Cloud sessions route HTTPS through an "Anthropic sandbox-egress…CA" proxy that
+    re-signs every leaf cert. Chromium on Linux reads its own NSS DB at
+    ~/.pki/nssdb, NOT the OpenSSL bundle — without the CA imported there, every
+    HTTPS resource an Electron/Playwright test loads is rejected with
+    ERR_CERT_AUTHORITY_INVALID.
+
+    GENUINELY OPTIONAL (degrades gracefully): a non-Linux host, a missing
+    certutil/openssl, or no matching cert is a clean no-op. Idempotent —
+    ``certutil -L -n <nick>`` short-circuits a present cert. Two cert layouts are
+    probed: (A) the CA concatenated into /etc/ssl/certs/ca-certificates.crt, and
+    (B) standalone /etc/ssl/certs/swp-ca-*.pem files (2026-05+)."""
+    import platform
+    import re
+
+    if platform.system() != "Linux" or not _have("certutil") or not _have("openssl"):
+        return
+
+    tmp = tempfile.mkdtemp(prefix="ca-import.")
+    try:
+        pems: list[str] = []
+        # Layout A: split the system bundle into per-cert PEMs IF it carries an
+        # Anthropic CA (cheap gate avoids the split on a non-cloud box).
+        bundle = "/etc/ssl/certs/ca-certificates.crt"
+        if os.path.isfile(bundle):
+            try:
+                with open(bundle, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                text = ""
+            if "Anthropic" in text:
+                blocks = re.findall(
+                    r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+                    text,
+                    re.DOTALL,
+                )
+                for i, block in enumerate(blocks):
+                    p = os.path.join(tmp, f"bundle_{i}.pem")
+                    with open(p, "w", encoding="utf-8") as fh:
+                        fh.write(block + "\n")
+                    pems.append(p)
+        # Layout B: standalone swp-ca-*.pem files.
+        ssl_dir = "/etc/ssl/certs"
+        if os.path.isdir(ssl_dir):
+            for name in os.listdir(ssl_dir):
+                if name.startswith("swp-ca-") and name.endswith(".pem"):
+                    pems.append(os.path.join(ssl_dir, name))
+        if not pems:
+            return
+
+        nssdb = os.path.join(os.path.expanduser("~"), ".pki", "nssdb")
+        os.makedirs(nssdb, exist_ok=True)
+        if not os.path.isfile(os.path.join(nssdb, "cert9.db")):
+            _run(["certutil", "-d", f"sql:{nssdb}", "-N", "--empty-password"], cwd=repo_root)
+
+        for pem in pems:
+            try:
+                subj = subprocess.run(
+                    ["openssl", "x509", "-in", pem, "-noout", "-subject"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout
+            except OSError:
+                continue
+            if "Anthropic" not in subj or "sandbox-egress" not in subj:
+                continue
+            m = re.search(r"CN *= *([^,/\n]+)", subj)
+            if not m:
+                continue
+            nick = m.group(1).strip()
+            # Idempotent: skip the import when the nick is already present.
+            present = subprocess.run(
+                ["certutil", "-d", f"sql:{nssdb}", "-L", "-n", nick],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if present.returncode == 0:
+                continue
+            _run(
+                ["certutil", "-d", f"sql:{nssdb}", "-A", "-t", "C,,", "-n", nick, "-i", pem],
+                cwd=repo_root,
+            )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 # ── §4 — the per-repo post-setup hook (LAST) ─────────────────────────────────
@@ -333,8 +491,8 @@ def run(repo_root: str, *, cloud: bool = False) -> None:
     Order (load-bearing): toolset FIRST (the gate/hook need it), then submodule
     content, then the git-hook wiring; the ``--cloud`` steps (tag fetch, dep
     caches, cert import) only when ``cloud=True``; the per-repo post-setup hook
-    LAST. Every step is best-effort + idempotent (the shell runs them too this
-    phase — see module docstring). Never raises — each step is wrapped in
+    LAST. Every step is best-effort + idempotent (WS8: this is the SOLE
+    provisioner — see module docstring). Never raises — each step is wrapped in
     :func:`_safe`, so init never breaks the boot over a provisioning hiccup."""
     _safe(arm_toolset, repo_root)
     _safe(init_submodules, repo_root)

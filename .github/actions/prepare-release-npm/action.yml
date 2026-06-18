@@ -171,7 +171,7 @@ runs:
       # Python here (not every release Kind provides them), then the single
       # provisioning definition installs the rest (the arm-gate script). Skipped
       # when the gate is bypassed (SKIP_PRECOMMIT_GATE) — nothing to arm then.
-      run: bash "${{ github.action_path }}/../../../bin-internal/provision-gate-toolset.sh"
+      run: release-core gate --provision
     - name: Commit, tag, push
       id: push
       if: steps.detect.outputs.skip != 'true'

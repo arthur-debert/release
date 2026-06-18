@@ -1,7 +1,7 @@
 """Unit tests for orchestrator.boot.boot_clone (release#578).
 
 No network, no Claude Agent SDK, no real install-release-core: each test
-builds a tmp git repo carrying a FAKE bin/setup-dev-env.sh that writes
+builds a tmp git repo carrying a FAKE bin/install-release-core that writes
 (or deliberately omits) the two boot-assert artifacts:
 
   (a) .release/.release-sync-source — provenance marker with the source sha
@@ -51,7 +51,7 @@ def install_fake_boot_script(
     exit_code: int = 0,
     extra: str = "",
 ) -> None:
-    """Drop a fake bin/setup-dev-env.sh that fabricates the boot artifacts."""
+    """Drop a fake bin/install-release-core that fabricates the boot artifacts."""
     lines = ["#!/usr/bin/env bash", "set -euo pipefail", 'echo "fake boot ran"']
     if write_marker:
         lines += [
@@ -140,7 +140,7 @@ def test_non_git_dir_fails_as_boot_error(tmp_path):
 
 def test_missing_boot_script_fails_loudly(tmp_path):
     repo = make_repo(tmp_path)
-    with pytest.raises(BootError, match="setup-dev-env.sh not found"):
+    with pytest.raises(BootError, match="install-release-core not found"):
         boot_clone(str(repo))
 
 

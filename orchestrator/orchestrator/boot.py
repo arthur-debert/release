@@ -1,10 +1,11 @@
 """Boot a consumer clone the way a real session would — fail-loud (release#578).
 
 `orc probe` evaluates the orientation a REAL session gets, and a real session
-starts with the consumer's SessionStart boot chain (`bin/setup-dev-env.sh` →
-`install-release-core` → `release-core init`). SDK-launched sessions never
-fire that hook, so probes were evaluating stale, unbooted trees (epic #583,
-root cause C: an instrument must verify its own preconditions).
+starts with the consumer's SessionStart boot chain (`bin/install-release-core` →
+`release-core init`, which also provisions — WS8 #765 removed the
+setup-dev-env.sh wrapper). SDK-launched sessions never fire that hook, so probes
+were evaluating stale, unbooted trees (epic #583, root cause C: an instrument
+must verify its own preconditions).
 
 The fix is an EXPLICIT boot, not SDK hook plumbing: `boot_clone()` runs the
 clone's own boot script (same chain, same order as a real session), then
@@ -25,7 +26,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-BOOT_SCRIPT = "bin/setup-dev-env.sh"
+BOOT_SCRIPT = "bin/install-release-core"
 
 # Provenance marker written by `release-core init` into the `.release/` temp dir
 # (ADR-0002; see release_core/sync.py SOURCE_MARKER). Last non-comment
@@ -150,7 +151,7 @@ def _core_version() -> str:
 
 
 def boot_clone(repo_path: str) -> BootReport:
-    """Boot `repo_path` via its own `bin/setup-dev-env.sh`, assert, report.
+    """Boot `repo_path` via its own `bin/install-release-core`, assert, report.
 
     Raises :class:`BootError` (fail-loud, no fallback) when the boot script is
     missing, exits non-zero, or either boot-assert fails. On success prints a

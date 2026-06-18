@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run env/setup.sh + a consumer repo's bin/setup-dev-env.sh + lefthook
+# Run env/setup.sh + a consumer repo's bin/install-release-core + lefthook
 # + tests inside the cloud-env-approximating Docker image. Reports which
 # step (if any) failed.
 #
@@ -64,7 +64,7 @@ fail() { echo "✗ FAILED at step: $1" >&2; exit 1; }
 # --- Step 1: env/setup.sh ------------------------------------------------
 # Setup scripts run as root in real cloud, with HOME=/root. We use sudo -H
 # (not sudo -E) so npm/cargo writes its global cache under /root, not under
-# the ubuntu user's home — otherwise step 3 (running setup-dev-env.sh as
+# the ubuntu user's home — otherwise step 3 (running install-release-core as
 # ubuntu) can't write to its own .npm cache.
 step env "running /mnt/release/env/setup.sh (as root via sudo -H)"
 if ! sudo -H bash /mnt/release/env/setup.sh; then
@@ -78,7 +78,7 @@ fi
 # branch — testing the wrong revision is worse than failing loudly).
 # Once the clone succeeds, drop the credential from git remote.origin.url
 # and unset GH_TOKEN inside the container so subsequent steps
-# (setup-dev-env.sh, lefthook, tests) cannot exfiltrate it.
+# (install-release-core, lefthook, tests) cannot exfiltrate it.
 step clone "git clone https://github.com/${REPO}.git --branch ${BRANCH}"
 mkdir -p /workspace
 cd /workspace
@@ -93,25 +93,23 @@ cd repo
 git remote set-url origin "https://github.com/${REPO}.git"
 unset GH_TOKEN
 
-# --- Step 3: bin/setup-dev-env.sh ----------------------------------------
-# Run as a child process — sourcing the consumer's script would let any
-# `exit 0` in it terminate the harness. The downside is that exports
-# from the child (e.g. `export DISPLAY=:99` for the Xvfb wrapper) die
-# with the child. We mitigate the DISPLAY case below by reading what
-# the script may have written to ~/.bashrc — the shared Xvfb extras
-# also persist DISPLAY there for interactive shells, so picking it up
-# here keeps lefthook + tests aligned with real cloud usage. Other
-# script-level exports (PATH additions, language-specific vars) won't
-# propagate; consumers that need those at lefthook/tests time should
-# set them in lefthook.yml or in the test command directly.
-if [ -f bin/setup-dev-env.sh ]; then
-  step dev-env "running bin/setup-dev-env.sh"
-  bash bin/setup-dev-env.sh || fail dev-env
+# --- Step 3: bin/install-release-core (the SessionStart boot) ------------
+# WS8 (#765): the SessionStart hook calls bin/install-release-core directly
+# (setup-dev-env.sh was removed; provisioning dissolved into `release-core
+# init`, which install-release-core runs at the end). Run it --cloud to
+# exercise the cloud-only provisioning (tag fetch, dep caches, NSS cert
+# import). Run as a child process — sourcing it would let any `exit 0`
+# terminate the harness; the downside is child exports (e.g. DISPLAY=:99
+# for the Xvfb wrapper, set by app-bin/post-setup-hook.sh) die with the
+# child, which we mitigate by reading ~/.bashrc below.
+if [ -f bin/install-release-core ]; then
+  step dev-env "running bin/install-release-core --cloud"
+  CLAUDE_CODE_REMOTE=true bash bin/install-release-core --cloud || fail dev-env
   if grep -qs '^export DISPLAY=:99' "${HOME}/.bashrc" 2>/dev/null; then
     export DISPLAY=:99
   fi
 else
-  step dev-env "(no bin/setup-dev-env.sh — skipping)"
+  step dev-env "(no bin/install-release-core — skipping)"
 fi
 
 # --- Step 4: lefthook pre-commit -----------------------------------------

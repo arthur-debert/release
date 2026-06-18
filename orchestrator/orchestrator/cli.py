@@ -55,7 +55,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
     NOT persisted (so a later `orc resume` won't pick it up).
 
     Before the agent session launches, the clone is BOOTED via its own
-    `bin/setup-dev-env.sh` (the real SessionStart chain — SDK sessions
+    `bin/install-release-core` (the real SessionStart chain — SDK sessions
     never fire the hook, release#578), with a fail-loud boot-assert and a
     boot report on stderr. A boot failure aborts: an unbooted probe is
     invalid by design. The prompt stays hint-free; only the boot is added.
@@ -327,7 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         "probe",
         help="evaluate a repo's environment via a fresh subordinate agent "
         "(throwaway clone — uses bypassPermissions; boots the clone via its "
-        "own bin/setup-dev-env.sh first, fail-loud)",
+        "own bin/install-release-core first, fail-loud)",
     )
     p_probe.add_argument("repo", help="path to throwaway clone of consumer repo")
     p_probe.add_argument("prompt", help="eval prompt — see orchestrator/README.md")

@@ -78,34 +78,8 @@ def test_is_release_internal(dest, internal):
     assert sync.is_release_internal(dest) is internal
 
 
-# ── read_source_tag: the resolved-release stamp in the tool venv (#580) ───────
-
-
-def test_read_source_tag_reads_the_venv_stamp(tmp_path, monkeypatch):
-    monkeypatch.delenv("RELEASE_CORE_SOURCE_TAG", raising=False)
-    monkeypatch.setattr(sync.sys, "prefix", str(tmp_path))
-    (tmp_path / sync.SOURCE_TAG_FILE).write_text("v2.17.1\n")
-    assert sync.read_source_tag() == "v2.17.1"
-
-
-def test_read_source_tag_absent_or_blank_is_none(tmp_path, monkeypatch):
-    # No stamp (a wheel installed by an older resolver) → None, the fallback.
-    monkeypatch.delenv("RELEASE_CORE_SOURCE_TAG", raising=False)
-    monkeypatch.setattr(sync.sys, "prefix", str(tmp_path))
-    assert sync.read_source_tag() is None
-    (tmp_path / sync.SOURCE_TAG_FILE).write_text("\n")
-    assert sync.read_source_tag() is None
-
-
-def test_read_source_tag_env_override_wins(tmp_path, monkeypatch):
-    # The env var, when SET, shadows the file (the test channel); empty means
-    # "no stamp" so tests can neutralize a real host venv stamp.
-    monkeypatch.setattr(sync.sys, "prefix", str(tmp_path))
-    (tmp_path / sync.SOURCE_TAG_FILE).write_text("v2.16.0\n")
-    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "v2.17.1")
-    assert sync.read_source_tag() == "v2.17.1"
-    monkeypatch.setenv("RELEASE_CORE_SOURCE_TAG", "")
-    assert sync.read_source_tag() is None
+# (read_source_tag / the release-source.tag stamp were removed in WS8 #765 — the
+# index install no longer writes a provenance sidecar.)
 
 
 # ── Symlink target computation (relative, path-mirror) ────────────────────────
@@ -897,44 +871,9 @@ def test_decide_claude_target_refreshes_when_body_drifts(tmp_path):
     assert d.import_action == "none"
 
 
-def test_decide_claude_strips_pre_ws4_spliced_block(tmp_path):
-    # An already-seeded consumer still carrying the pre-WS4 BEGIN..END block:
-    # strip the block, prepend the one-line @import, preserve consumer content.
-    old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
-    (tmp_path / "CLAUDE.md").write_text(f"{old}\n# Proj\n\nmine\n")
-    d = _release_managed_decision(tmp_path)
-    assert d.import_action == "insert"
-    assert d.import_content is not None
-    assert sync.CLAUDE_BEGIN not in d.import_content
-    assert sync.CLAUDE_END not in d.import_content
-    assert d.import_content.startswith(f"{sync.CLAUDE_IMPORT_LINE}\n")
-    assert "# Proj" in d.import_content
-    assert d.import_content.count(sync.CLAUDE_IMPORT_LINE) == 1
-
-
-def test_decide_claude_dedups_stray_import_with_old_block(tmp_path):
-    # A repo carrying BOTH the pre-WS4 block AND a stray @import line (e.g. a
-    # manual migration attempt): strip the block AND drop the stray import, so the
-    # result has EXACTLY one @import line, not two.
-    old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
-    (tmp_path / "CLAUDE.md").write_text(f"{old}\n{sync.CLAUDE_IMPORT_LINE}\n\n# Proj\n\nmine\n")
-    d = _release_managed_decision(tmp_path)
-    assert d.import_action == "insert"
-    assert d.import_content is not None
-    assert d.import_content.count(sync.CLAUDE_IMPORT_LINE) == 1
-    assert sync.CLAUDE_BEGIN not in d.import_content
-    assert "# Proj" in d.import_content and "mine" in d.import_content
-
-
-def test_decide_claude_strips_legacy_marker_block(tmp_path):
-    legacy = f"{sync.CLAUDE_BEGIN_LEGACY}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
-    (tmp_path / "CLAUDE.md").write_text(f"{legacy}\n# Proj\n")
-    d = _release_managed_decision(tmp_path)
-    assert d.import_action == "insert"
-    assert d.import_content is not None
-    assert sync.CLAUDE_BEGIN_LEGACY not in d.import_content
-    assert d.import_content.startswith(f"{sync.CLAUDE_IMPORT_LINE}\n")
-    assert "# Proj" in d.import_content
+# (The pre-WS4 BEGIN..END block-strip / legacy-marker / stray-import-dedup
+# decide_claude tests were removed in WS8 #765 — the @import migration is complete
+# fleet-wide, so decide_claude no longer strips an in-CLAUDE.md managed block.)
 
 
 def test_decide_claude_skip_symlink(tmp_path):
@@ -1064,13 +1003,13 @@ def test_bootstrap_files_are_classified_real_copies():
     """The SessionStart chain must be readable/executable on a FRESH CLONE —
     before the ephemeral .release/ temp dir exists — so it must never be a
     symlink into it. Lock the exact set: the hooks config + the boot resolver +
-    the session provisioner + the PreToolUse guard."""
+    the PreToolUse guard. (WS8 #765 removed bin/setup-dev-env.sh — provisioning
+    dissolved into `release-core init`.)"""
     assert (
         frozenset(
             {
                 ".claude/settings.json",
                 "bin/install-release-core",
-                "bin/setup-dev-env.sh",
                 "bin/pr-loop-guard",
             }
         )
@@ -1087,13 +1026,13 @@ def test_compute_mirror_migrates_bootstrap_symlink_to_real_copy(tmp_path):
     """A pre-WS5 consumer carries TRACKED SYMLINKS at the bootstrap paths
     (pointing into .release/). On re-init those dests are planned as real-file
     writes — the symlink is replaced, never left dangling for a fresh clone."""
-    dest = "bin/setup-dev-env.sh"
+    dest = "bin/install-release-core"
     tmp_release = tmp_path / "tmpbuild"
     (tmp_release / "bin").mkdir(parents=True)
     (tmp_release / dest).write_text("#!/usr/bin/env bash\necho boot\n")
 
     (tmp_path / "bin").mkdir()
-    os.symlink(os.path.join(".release", dest), tmp_path / dest)  # the old mirror
+    os.symlink(os.path.join("..", ".release", dest), tmp_path / dest)  # the old mirror
     mp = sync.compute_mirror([dest], str(tmp_path), str(tmp_release), migrate=False)
     assert dest in mp.copies_to_write
     assert not any(dest in s for s in mp.symlinks_to_create)
@@ -1249,7 +1188,11 @@ def test_retired_tables_inventory_locked():
         assert blobs, dest
         for sha in blobs:
             assert len(sha) == 40 and all(c in "0123456789abcdef" for c in sha), (dest, sha)
-    assert set(sync.RETIRED_FINGERPRINT_FILES) == {"bin/release", "scripts/setup-dev-env.sh"}
+    assert set(sync.RETIRED_FINGERPRINT_FILES) == {
+        "bin/release",
+        "scripts/setup-dev-env.sh",
+        "bin/setup-dev-env.sh",
+    }
 
 
 def test_retired_catalog_pins_the_live_fleet_misses():
@@ -1324,6 +1267,24 @@ def test_retired_tailored_setup_dev_env_swept_by_fingerprint(tmp_path):
 
     f.write_text("#!/usr/bin/env bash\nmy own session setup\n")
     assert "scripts/setup-dev-env.sh" not in sync._find_retired_files(str(tmp_path))
+
+
+def test_retired_bin_setup_dev_env_swept_by_fingerprint(tmp_path):
+    """WS8 (#765): a converged consumer still TRACKS bin/setup-dev-env.sh (the
+    former bootstrap real-file copy). It is no longer managed, so init must sweep
+    it via the verbatim header fingerprint; a consumer-authored script of the same
+    name without the header is left alone."""
+    (tmp_path / "bin").mkdir()
+    managed = tmp_path / "bin" / "setup-dev-env.sh"
+    managed.write_text(
+        "#!/usr/bin/env bash\n"
+        "# bin/setup-dev-env.sh — per-session dev-environment setup, invoked by\n"
+        "# the SessionStart hook in .claude/settings.json.\n"
+    )
+    assert "bin/setup-dev-env.sh" in sync._find_retired_files(str(tmp_path))
+
+    managed.write_text("#!/usr/bin/env bash\n# my own setup\necho hi\n")
+    assert "bin/setup-dev-env.sh" not in sync._find_retired_files(str(tmp_path))
 
 
 def test_retired_fingerprint_requires_header_comment_line(tmp_path):
