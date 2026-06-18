@@ -6,7 +6,7 @@ name: pip-index (build + deploy)
 # it carries no wheels of its own. Once deployed, consumers/CI can resolve a
 # wheel by version constraint instead of scraping the releases API:
 #
-#   pip install --extra-index-url https://arthur-debert.github.io/release/simple/ \
+#   pip install --extra-index-url https://pypi.magik.works/simple/ \
 #               'release-core>=3,<4'
 #
 # PyPI stays the PRIMARY index (--extra-index-url, NOT --index-url), so

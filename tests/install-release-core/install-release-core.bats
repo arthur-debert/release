@@ -261,7 +261,7 @@ EOF
   run "$BIN"
   [ "$status" -eq 0 ]
   line="$(cat "$PIP_LOG")"
-  [[ "$line" == *"--extra-index-url https://arthur-debert.github.io/release/simple/ release-core"* ]]
+  [[ "$line" == *"--extra-index-url https://pypi.magik.works/simple/ release-core"* ]]
   # The version-comparing index path does NOT force-reinstall.
   [[ "$line" != *"--force-reinstall"* ]]
   # gh was never consulted — the index install succeeded.

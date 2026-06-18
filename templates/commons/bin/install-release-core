@@ -76,10 +76,13 @@ FROM_SOURCE=""   # install from a LOCAL path (a checkout's release_core source)
                  # instead of a published wheel — same venv/PATH machinery.
 PYTHON="${PYTHON:-python3}"   # interpreter used to BUILD the isolated tool venv
 
-# The WS2 GitHub-Pages PEP 503 "simple" pip index (release#759). PyPI stays the
+# The WS2 GitHub-Pages PEP 503 "simple" pip index (release#759). Served at the
+# dedicated custom domain pypi.magik.works (release#772): the account's user-site
+# custom domain redirects arthur-debert.github.io/* to a Vercel site, so the repo
+# carries its own per-repo Pages domain to escape that redirect. PyPI stays the
 # PRIMARY index (we pass this as --extra-index-url), so release_core's own deps
 # resolve from PyPI; this index serves only the release_core wheels.
-PIP_INDEX_URL="${RELEASE_CORE_PIP_INDEX:-https://arthur-debert.github.io/release/simple/}"
+PIP_INDEX_URL="${RELEASE_CORE_PIP_INDEX:-https://pypi.magik.works/simple/}"
 
 # release_core lives in its OWN dedicated venv — never the user's pip, the system
 # site-packages, or a project venv (no `pip --user`, no PEP-668 system writes).
