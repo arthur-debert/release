@@ -1482,10 +1482,11 @@ def _has_fingerprint_header(path: str, needle: str) -> bool:
 #   - target_action  → write/none for `.claude/IMPORTANT-RELEASE.md` (MANAGED,
 #                      committed by init's auto-commit, refreshed on the pull).
 #   - import_action  → insert/none for the CLAUDE.md `@import` line. init writes
-#                      the line to disk when absent (so loading works) but NEVER
-#                      stages/commits CLAUDE.md — after insertion CLAUDE.md is 100%
-#                      consumer-owned; folding it into the managed commit would
-#                      drag in the consumer's unrelated uncommitted edits.
+#                      the line to disk when absent (so loading works) and commits
+#                      it ONCE on that one-time insertion (create/insert); after
+#                      that import_action is "none" and CLAUDE.md is never re-staged
+#                      — 100% consumer-owned, so the managed commit can't later drag
+#                      in the consumer's unrelated uncommitted edits.
 # Atomicity (safety rule #2): _apply_mirror writes the target file AND the import
 # line together, target first — there is never a window with a dangling @import.
 
