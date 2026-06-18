@@ -192,10 +192,25 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
     return source, kind, caps.names
 
 
+def _claude_md_clean(repo_root: str) -> bool:
+    """True when CLAUDE.md has no uncommitted change (or is absent).
+
+    An ``insert`` migration rewrites an EXISTING CLAUDE.md; committing it folds in
+    any concurrent consumer edit. Only commit the migration when the file was clean
+    (the normal first-pull moment); a mid-edit consumer keeps their dirty CLAUDE.md
+    and commits the @import themselves. Conservative on any git error: don't commit."""
+    try:
+        out = gh.git(["status", "--porcelain", "--", sync.CLAUDE_FILE], cwd=repo_root)
+    except Exception:
+        return False
+    return not out.strip()
+
+
 def _managed_paths_for_commit(
     mirror: sync.MirrorPlan,
     claude: sync.ClaudeDecision,
     seeded_major: str | None = None,
+    claude_insert_committable: bool = True,
 ) -> list[str]:
     """The exact, repo-relative managed MIRROR pathspecs a full install produced or
     removed — the ONLY paths --commit stages (never `git add -A`).
@@ -228,16 +243,17 @@ def _managed_paths_for_commit(
     paths.extend(mirror.retired_to_remove)
     if claude.target_action == "write":
         paths.append(sync.CLAUDE_IMPORT_TARGET)
-    # CLAUDE.md is staged on the ONE-TIME managed insertion — a fresh CREATE (no
-    # CLAUDE.md existed) OR an INSERT into an existing one (stripping a pre-WS4
-    # managed block and/or prepending the @import). Both ARE the managed migration
-    # and MUST commit: otherwise the @import sits uncommitted forever (dirty tree,
-    # and the next init re-stages it — the migration never lands). After insertion
-    # import_action is "none", so CLAUDE.md is never staged again and the consumer
-    # owns it from then on. (A concurrent uncommitted CLAUDE.md edit could be folded
-    # in by this one-time stage, but that window is the first pull / SessionStart,
-    # where there is none in practice — the proposal's safety-rule-#2 exception.)
-    if claude.import_action in ("create", "insert"):
+    # CLAUDE.md rides the commit on the ONE-TIME managed insertion: a fresh CREATE
+    # (no prior file, nothing to fold) ALWAYS; an INSERT into an existing one (strip
+    # the pre-WS4 block, prepend the @import) ONLY when it had no uncommitted edits
+    # (``claude_insert_committable``) — so the managed commit can't fold a consumer's
+    # concurrent CLAUDE.md edits. The clean case MUST commit, else the @import sits
+    # uncommitted and the next init re-stages it; a dirty-CLAUDE.md insert is written
+    # to disk but left for the consumer to commit with their own edits. After the
+    # insertion import_action is "none" → CLAUDE.md is never staged again.
+    if claude.import_action == "create" or (
+        claude.import_action == "insert" and claude_insert_committable
+    ):
         paths.append(sync.CLAUDE_FILE)
     if seeded_major:
         paths.append(seeded_major)
@@ -303,6 +319,10 @@ def _run_full_sync(
         file_diff, new_files = sync.diff_release(tmp_release, os.path.join(repo_root, ".release"))
         mirror = sync.compute_mirror(new_files, repo_root, tmp_release, migrate=False)
         claude = sync.decide_claude(repo_root, tmp_release)
+        # Capture CLAUDE.md cleanliness BEFORE _apply_mirror rewrites it: an `insert`
+        # migration is only committed when the file had no uncommitted edits, so the
+        # managed commit never folds in a consumer's concurrent CLAUDE.md work.
+        claude_insert_committable = _claude_md_clean(repo_root)
 
         # Consumer-side tripwire (#581): warn — never fail — when a workflow job
         # references one of the ephemeral mirror dests this install owns without
@@ -340,7 +360,10 @@ def _run_full_sync(
 
         if dry_run:
             managed = _managed_paths_for_commit(
-                mirror, claude, sync.RELEASE_MAJOR_FILE if would_seed else None
+                mirror,
+                claude,
+                sync.RELEASE_MAJOR_FILE if would_seed else None,
+                claude_insert_committable,
             )
             return changes, managed, _source_label(source), list(mirror.conflicts)
 
@@ -356,7 +379,7 @@ def _run_full_sync(
         # repo root). Returns the path iff it wrote — a present file is never
         # overwritten. Staged + committed via ``managed``.
         seeded_major = sync.seed_release_major(repo_root)
-        managed = _managed_paths_for_commit(mirror, claude, seeded_major)
+        managed = _managed_paths_for_commit(mirror, claude, seeded_major, claude_insert_committable)
     finally:
         if not swapped:
             shutil.rmtree(tmp_release, ignore_errors=True)

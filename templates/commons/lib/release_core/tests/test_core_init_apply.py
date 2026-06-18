@@ -51,6 +51,16 @@ def test_managed_paths_commit_claude_on_one_time_migration():
     assert sync.CLAUDE_FILE not in init._managed_paths_for_commit(plan, none)
     sym = sync.ClaudeDecision(import_action="skip-symlink")
     assert sync.CLAUDE_FILE not in init._managed_paths_for_commit(plan, sym)
+    # Dirty-guard: an INSERT into a CLAUDE.md that had uncommitted edits is NOT
+    # committed (would fold the consumer's concurrent work); a CREATE always is.
+    ins = sync.ClaudeDecision(import_action="insert", import_content="@x\n")
+    assert sync.CLAUDE_FILE not in init._managed_paths_for_commit(
+        plan, ins, None, claude_insert_committable=False
+    )
+    cre = sync.ClaudeDecision(import_action="create", import_content="@x\n")
+    assert sync.CLAUDE_FILE in init._managed_paths_for_commit(
+        plan, cre, None, claude_insert_committable=False
+    )
 
 
 def test_apply_writes_target_before_import_atomic(tmp_path, monkeypatch):
