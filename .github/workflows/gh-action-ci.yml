@@ -84,20 +84,33 @@ jobs:
         with:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - name: Provision the gate toolset (pinned actionlint + shellcheck)
-        shell: bash
-        # ONE provisioner, invoked — not a re-listed install (release#531 F3).
-        # WS8 (#765): the shell provisioner was removed; the gate toolset is now
-        # armed by `release-core gate --provision` (the wheel-carried
-        # release_core.toolset, the single source of pins). Install release_core
-        # from THIS checkout (release's own repo) --from-source --no-init so the
-        # verb is reachable, then provision. Pinned actionlint + shellcheck at the
-        # same pins every other environment runs.
-        run: |
-          set -euo pipefail
-          bash bin/install-release-core --no-init --from-source .
-          export PATH="${XDG_BIN_HOME:-$HOME/.local/bin}:$PATH"
-          release-core gate --provision
+      # Node + Python back the pinned gate toolset (npm globals + pip tools);
+      # set them up deterministically before arming, same as rust-cli.yml.
+      - name: Set up Node (gate toolset)
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+      - name: Set up Python (gate toolset)
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Arm the gate toolset (pinned actionlint + shellcheck)
+        # ONE definition of CI gate-arming: the arm-gate composite (→ the
+        # release-core gate --provision verb), the same provisioner rust-cli.yml
+        # uses. It installs release_core from the STAGED release tree
+        # (github.action_path) — which works for a real consumer AND for release's
+        # own dogfood. The old inline `install-release-core --from-source .` only
+        # worked in release's own repo (where `.` carries the release_core source);
+        # any actual gh-action consumer hit "no pyproject.toml" (release#786, caught
+        # the moment the github-action canary fixture first ran this workflow).
+        #
+        # install_tree:false — the check job runs actionlint + shellcheck directly,
+        # not the lefthook gate, so it needs the toolset but not the `.release/`
+        # tree; and release's own repo has no detectable Kind (init would fail),
+        # exactly as its ci.yml documents.
+        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        with:
+          install_tree: 'false'
 
       - name: Run actionlint
         shell: bash
