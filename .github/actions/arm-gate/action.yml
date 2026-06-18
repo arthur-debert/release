@@ -144,7 +144,13 @@ runs:
             case "$file_major" in
               "") : ;;  # blank/whitespace-only counts as absent → action_ref fallback
               *[!0-9]*)
-                echo "::error::.release.major.txt must contain a bare major integer (e.g. '3'), got '${file_major}' — fix or delete the file to re-seed." >&2
+                # Sanitize before printing: the malformed value may carry
+                # newlines/control chars, which would split the ::error:: line and
+                # let a crafted file smuggle extra ::workflow:: commands into the
+                # log. Whitelist to a single safe line (everything else → '?'),
+                # mirroring read_release_major's escaped repr.
+                safe_major="$(printf '%s' "$file_major" | tr -c '[:alnum:] ._-' '?')"
+                echo "::error::.release.major.txt must contain a bare major integer (e.g. '3'), got '${safe_major}' — fix or delete the file to re-seed." >&2
                 exit 1 ;;
               *) major="v${file_major}" ;;
             esac
