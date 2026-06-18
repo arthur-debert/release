@@ -89,12 +89,25 @@ runs:
         root="${{ github.action_path }}/../../.."
         pkg="${root}/templates/commons/lib/release_core/release_core"
         sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
-        # Order-stable digest over the bundled package source + pyproject: sort the
-        # file list deterministically, concat in that order, hash the stream once.
-        venv_digest="$(
-          { find "$pkg" -type f -name '*.py' -print0 | sort -z | xargs -0 cat
-            cat "${root}/pyproject.toml"; } | sha | cut -d' ' -f1
-        )"
+        # Order-stable digest over the bundled package source + pyproject. arm-gate
+        # runs on macOS/Windows runners too, where BSD `sort` lacks `-z` and the old
+        # `find -print0 | sort -z | xargs -0` pipeline would fail — so hash with
+        # python3 (present on every GH runner): walk + lexically sort the .py paths,
+        # then fold each relative path AND its bytes into one sha256. Folding the
+        # path in means an add/remove/rename misses cleanly even at constant total
+        # bytes; pyproject.toml is appended last.
+        venv_digest="$(python3 -c '
+        import hashlib, os, sys
+        pkg, pyproject = sys.argv[1], sys.argv[2]
+        h = hashlib.sha256()
+        files = [os.path.join(dp, n)
+                 for dp, _d, ns in os.walk(pkg) for n in ns if n.endswith(".py")]
+        for p in sorted(files):
+            h.update(os.path.relpath(p, pkg).encode()); h.update(b"\0")
+            with open(p, "rb") as f: h.update(f.read())
+        with open(pyproject, "rb") as f: h.update(f.read())
+        print(h.hexdigest())
+        ' "$pkg" "${root}/pyproject.toml")"
         toolset_digest="$(sha < "${pkg}/toolset.py" | cut -d' ' -f1)"
         ref_slug="$(printf '%s' "${ACTION_REF:-noref}" | tr -c '[:alnum:]._-' '-')"
         echo "venv=${ref_slug}-${venv_digest}" >> "$GITHUB_OUTPUT"
@@ -102,19 +115,21 @@ runs:
         # Debug breadcrumb for the live-run verification (release#790 open Q):
         echo "arm-gate cache keys: venv=${ref_slug}-${venv_digest} toolset=${toolset_digest}"
 
-    # Cache A — the release-core venv + the console-scripts symlinked onto PATH.
-    # Gates the install step below; on a hit, install-release-core sees the venv
-    # already present and short-circuits. Keyed per release-core version (the
-    # source digest + resolved ref); NOT .release/ (per-workspace, rewritten every
-    # job by `init`). `~/.local/share/release-core` = the dedicated isolated venv,
-    # `~/.local/bin` = the console-script symlinks (XDG_BIN_HOME).
+    # Cache A — ONLY the release-core venv dir. Gates the install step below; on a
+    # hit, install-release-core sees the venv already present and short-circuits.
+    # Keyed per release-core version (the source digest + resolved ref); NOT
+    # .release/ (per-workspace, rewritten every job by `init`). Deliberately does
+    # NOT cache `~/.local/bin` — Cache B owns that dir (console-scripts + tool
+    # binaries). Decoupling avoids two problems: Cache A capturing toolset binaries
+    # (a toolset-pin bump wouldn't bust Cache A), and the two caches clobbering each
+    # other's `~/.local/bin` on restore. The install step re-symlinks the
+    # console-scripts into `~/.local/bin` on EVERY run regardless of cache state, so
+    # a release-core bump (Cache A miss → fresh venv) still refreshes the scripts.
     - name: Cache release-core venv
       if: inputs.install_tree == 'true'
       uses: actions/cache@v5
       with:
-        path: |
-          ~/.local/share/release-core
-          ~/.local/bin
+        path: ~/.local/share/release-core
         key: release-core-venv-${{ runner.os }}-${{ steps.cache_keys.outputs.venv }}
 
     # Install FIRST: the gate's `bin/check` symlink resolves into `.release/`,
