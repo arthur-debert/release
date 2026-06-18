@@ -28,16 +28,31 @@ name: pip-index (build + deploy)
 #    (release#689-class). The filter lives in the generator script — one
 #    definition, not a second hand-rolled copy.
 #
-# 2. Pages-collision avoidance. `mdbook.yml` / `mkdocs.yml` are REUSABLE
-#    workflows for consumers; this repo does not call them (no book.toml /
-#    mkdocs.yml caller), so there is no docs Pages deploy here today and
-#    nothing to clobber. Even so, this workflow uses:
-#      - a DISTINCT concurrency group (`pip-index`, vs the docs workflows'
-#        `mdbook-*` / `mkdocs-*`), so if a docs Pages deploy is ever added to
-#        THIS repo the two serialize (`cancel-in-progress: false`) instead of
-#        cancelling each other, and
-#      - a DISTINCT site subpath (`/simple/`) so the index occupies its own
-#        corner of the Pages site rather than fighting for the root.
+# 2. Sole Pages deployer. This is the ONLY GitHub Pages deploy in release's
+#    own repo. `mdbook.yml` / `mkdocs.yml` are REUSABLE *consumer* workflows
+#    (`workflow_call`) that release never invokes for itself (no book.toml /
+#    mkdocs.yml caller here), so there is no other `deploy-pages` run in this
+#    repo and nothing to collide with today.
+#
+#    Two forward-looking choices, neither of which is a cross-workflow
+#    collision guard:
+#      - a fixed concurrency group (`pip-index`) that serializes THIS
+#        workflow's own runs with each other (e.g. two releases cut close
+#        together), `cancel-in-progress: false` so an in-flight index deploy
+#        finishes rather than being cancelled. Concurrency groups only
+#        serialize runs WITHIN the same group, so this does NOT (and is not
+#        meant to) coordinate with any other workflow, and
+#      - a DISTINCT site subpath (`/simple/`) so the index lives in its own
+#        corner of the Pages tree.
+#
+#    Honest forward note: `actions/deploy-pages` publishes a FULL site
+#    artifact that REPLACES the entire Pages site, so two independent Pages
+#    workflows clobber each other regardless of concurrency group. If a docs
+#    Pages deploy is ever added to THIS repo, the two cannot simply coexist as
+#    separate `deploy-pages` runs — they would need to publish into ONE
+#    combined artifact (a single unified Pages workflow, or a branch-based
+#    partial deploy with keep_files). A future-coordination constraint, not
+#    something to build now.
 
 on:
   # Fires once a release is fully published (the wheel asset is already
@@ -49,11 +64,12 @@ on:
   # Manual re-deploy (e.g. after backfilling an old release, or first stand-up).
   workflow_dispatch:
 
-# Distinct from the docs workflows' `mdbook-${{ github.ref }}` /
-# `mkdocs-${{ github.ref }}` groups. A fixed group name (not per-ref) because
-# release events don't carry a meaningful branch ref and we only ever want one
-# index deploy in flight. `cancel-in-progress: false` lets an in-flight deploy
-# finish rather than clobbering a concurrent docs deploy.
+# A fixed group name (not per-ref) because release events don't carry a
+# meaningful branch ref and we only ever want one index deploy in flight.
+# `cancel-in-progress: false` lets an in-flight index deploy finish rather than
+# being cancelled by the next one. This serializes pip-index's OWN runs only —
+# a concurrency group never coordinates across different groups/workflows (see
+# the sole-Pages-deployer note in the header).
 concurrency:
   group: pip-index
   cancel-in-progress: false
