@@ -19,10 +19,18 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-import release_core
-from packaging.version import InvalidVersion
-from release_core import _version
+# Deterministic collection: importing release_core._version below runs
+# _stamp_version() at module load, which on an ambient $TAG would take the
+# build-time path and could raise InvalidVersion at COLLECTION time (the
+# suite-side of the runtime-import bug). Clear TAG before that import; the tests
+# that exercise the build path set TAG explicitly via monkeypatch + reload.
+# (release#758)
+os.environ.pop("TAG", None)
+
+import pytest  # noqa: E402
+import release_core  # noqa: E402
+from packaging.version import InvalidVersion  # noqa: E402
+from release_core import _version  # noqa: E402
 
 
 def test_dev_sentinel_is_pep440_local_version():
