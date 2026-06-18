@@ -381,55 +381,60 @@ def provision_golangci_lint(*, best_effort: bool = True) -> None:
     of the block the deleted setup-dev-env.sh carried (WS8 #765, rehoming it into
     the unified provisioner so ``release-core init`` / ``gate --provision`` really
     install it as the go-quality fragment promises). Acts ONLY when a root
-    ``go.mod`` exists, and is ALWAYS best-effort (never raises): it needs a Go
-    toolchain or brew, and CI installs it via the shared setup-go action BEFORE the
-    gate, so a local boot that cannot install it WARNS — the go-quality lefthook
-    hook is the hard run-time gate. Skips silently when golangci-lint is already on
-    PATH. ``best_effort`` is accepted for the :func:`_run_step` signature; this step
-    never hard-fails provisioning."""
+    ``go.mod`` exists, and is ALWAYS best-effort (never raises): CI installs it via
+    the shared setup-go action BEFORE the gate, so a local boot that cannot install
+    it WARNS — the go-quality lefthook hook is the hard run-time gate. Skips
+    silently when golangci-lint is already on PATH. ``best_effort`` is accepted for
+    the :func:`_run_step` signature; this step never hard-fails provisioning.
+
+    Installed at the PINNED version via the official install-script (or ``go
+    install`` fallback) — BOTH honor the pin. brew is intentionally NOT used: its
+    formula floats (currently the v2 line, whose config schema differs from the
+    pinned v1 line), so a brew install would silently break the pinned-toolset
+    contract."""
     if not os.path.exists("go.mod") or _have("golangci-lint"):
         return
     version = f"v{golangci_lint_version()}"
-    if _have("brew"):
-        _log(f"brew install golangci-lint ({version} line)")
-        proc.run(["brew", "install", "golangci-lint"], check=False, capture_output=True)
-    elif _have("go"):
-        # GOBIN wins if set; else the FIRST GOPATH entry's bin (a multi-entry
-        # GOPATH makes a bare "$(go env GOPATH)/bin" a broken path).
+    # Install dir: the Go bin dir when go is present (GOBIN, else the FIRST GOPATH
+    # entry's bin — a multi-entry GOPATH makes a bare "$(go env GOPATH)/bin" wrong),
+    # else the standard pinned-binary dir.
+    dest_dir = ""
+    if _have("go"):
         r = proc.run(["go", "env", "GOBIN"], check=False, capture_output=True)
-        gobin = (r.stdout or "").strip()
-        if not gobin:
+        dest_dir = (r.stdout or "").strip()
+        if not dest_dir:
             r = proc.run(["go", "env", "GOPATH"], check=False, capture_output=True)
             gopath = (r.stdout or "").strip()
-            gobin = os.path.join(gopath.split(os.pathsep)[0], "bin") if gopath else ""
-        done = False
-        if gobin and _have("curl"):
-            _log(f"install golangci-lint {version} -> {gobin}")
-            install_sh = (
-                "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"
-            )
-            res = proc.run(
-                [
-                    "sh",
-                    "-c",
-                    f"curl -sSfL {install_sh} | sh -s -- "
-                    f"-b {shlex.quote(gobin)} {shlex.quote(version)}",
-                ],
-                check=False,
-                capture_output=True,
-            )
-            done = res.returncode == 0
-        if not done:
-            _log(f"go install golangci-lint {version}")
-            proc.run(
-                ["go", "install", f"github.com/golangci/golangci-lint/cmd/golangci-lint@{version}"],
-                check=False,
-                capture_output=True,
-            )
+            dest_dir = os.path.join(gopath.split(os.pathsep)[0], "bin") if gopath else ""
+    if not dest_dir:
+        dest_dir = _default_bin_dir()
+    done = False
+    if _have("curl"):
+        _log(f"install golangci-lint {version} -> {dest_dir}")
+        install_sh = "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"
+        res = proc.run(
+            [
+                "sh",
+                "-c",
+                f"curl -sSfL {install_sh} | sh -s -- "
+                f"-b {shlex.quote(dest_dir)} {shlex.quote(version)}",
+            ],
+            check=False,
+            capture_output=True,
+        )
+        done = res.returncode == 0
+    if not done and _have("go"):
+        _log(f"go install golangci-lint {version}")
+        res = proc.run(
+            ["go", "install", f"github.com/golangci/golangci-lint/cmd/golangci-lint@{version}"],
+            check=False,
+            capture_output=True,
+        )
+        done = res.returncode == 0
     if not _have("golangci-lint"):
         _log(
-            "WARNING: golangci-lint not on PATH after install (needs brew or a Go "
-            "toolchain + the Go bin dir on PATH); the go-quality gate hard-fails"
+            "WARNING: golangci-lint not on PATH after install (needs curl or a Go "
+            "toolchain + the install dir on PATH); the go-quality gate hard-fails"
         )
 
 
@@ -444,8 +449,8 @@ def provision(*, best_effort: bool = False, bin_dir: str | None = None) -> int:
     by the caller as a non-zero exit.
 
     golangci-lint is provisioned ONLY in Go repos (gated on ``go.mod``) and ALWAYS
-    best-effort — it needs a Go toolchain/brew and CI installs it via setup-go, so
-    it never hard-fails provisioning; the go-quality lefthook hook is its hard
+    best-effort — it needs curl or a Go toolchain and CI installs it via setup-go,
+    so it never hard-fails provisioning; the go-quality lefthook hook is its hard
     run-time gate."""
     _run_step(provision_npm, best_effort=best_effort)
     _run_step(provision_pip, best_effort=best_effort)

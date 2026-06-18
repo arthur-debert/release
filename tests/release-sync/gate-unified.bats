@@ -59,8 +59,8 @@ CHECK_SHELL="$BATS_TEST_DIRNAME/../../templates/commons/bin/check-shell"
   command -v shellcheck >/dev/null || skip "shellcheck not installed"
   release_sync >/dev/null
   # The synced consumer's bin/ holds the distributed tools (install-release-core,
-  # install-release-core, vendored share/, ...). The unified gate must pass over
-  # them — non-shell falls out by content.
+  # vendored share/, ...). The unified gate must pass over them — non-shell falls
+  # out by content.
   run bash -c 'shopt -s nullglob; "'"$CHECK_SHELL"'" bin/* .release/bin/*'
   [ "$status" -eq 0 ]
 }

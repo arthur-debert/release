@@ -307,11 +307,19 @@ def _symlink_venv_scripts(repo_root: str) -> None:
         dest = os.path.join(local_bin, name)
         try:
             if os.path.islink(dest):
-                os.remove(dest)  # refresh our own (possibly stale) symlink — idempotent
+                # Only refresh OUR OWN symlink — one that already resolves into this
+                # repo's .venv/bin. A symlink pointing ANYWHERE else is user-managed
+                # (or another project's venv); leave it and skip, never clobber it.
+                if os.path.dirname(os.path.realpath(dest)) == os.path.realpath(venv_bin):
+                    os.remove(dest)  # idempotent refresh of our stale/current link
+                else:
+                    _warn(
+                        f"{dest} is a symlink outside our .venv/bin; leaving it, not linking {name}"
+                    )
+                    continue
             elif os.path.exists(dest):
-                # A real (non-symlink) file here is a user/agent-installed binary or a
-                # pinned gate-toolset executable that happens to share a name — NEVER
-                # clobber it; leave it and skip linking this one.
+                # A real (non-symlink) file is a user/agent-installed binary or a
+                # pinned gate-toolset executable sharing a name — NEVER clobber it.
                 _warn(f"{dest} is a real file (not our symlink); leaving it, not linking {name}")
                 continue
             os.symlink(src, dest)
