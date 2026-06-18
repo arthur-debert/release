@@ -1009,7 +1009,8 @@ def test_full_uses_release_home_clone_when_present(tmp_path, monkeypatch, capsys
 
 # ── release#580: the resolved-release-tag stamp labels the commit + marker ────
 # install-release-core stamps <venv>/release-source.tag with the release tag the
-# wheel was resolved from (the wheel's package version is a static 0.0.1). The
+# wheel was resolved from (since release#758 the wheel version is tag-stamped too,
+# but this explicit stamp remains the provenance channel init reads). The
 # bundle-path init must carry it into the managed auto-commit subject AND the
 # .release-sync-source marker; absent stamp → the wheel-version fallback. The
 # env override (RELEASE_CORE_SOURCE_TAG) is the test channel for the stamp.

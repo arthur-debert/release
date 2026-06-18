@@ -60,7 +60,7 @@ class BootReport:
 
     repo_path: str
     source_ref: str  # provenance sha/ref parsed from .release/.release-sync-source
-    core_version: str  # `release-core --version` (self-reports 0.0.1 — #580, recorded anyway)
+    core_version: str  # `release-core --version` (tag-stamped since release#758)
     sync_commit: str | None  # subject of the sync commit created by THIS boot, if any
 
 
@@ -136,7 +136,7 @@ def _assert_exclude_sentinel(repo: Path) -> None:
 
 
 def _core_version() -> str:
-    """Informational: what `release-core --version` self-reports (0.0.1 today — #580)."""
+    """Informational: what `release-core --version` self-reports (tag-stamped since release#758)."""
     try:
         out = subprocess.run(
             ["release-core", "--version"],
@@ -191,8 +191,7 @@ def boot_clone(repo_path: str) -> BootReport:
                 "===== orc probe boot report =====",
                 f"clone:          {report.repo_path}",
                 f"provenance ref: {report.source_ref}",
-                f"release-core:   {report.core_version}  "
-                "(wheel self-reports 0.0.1 — release#580; recorded as-is)",
+                f"release-core:   {report.core_version}  (wheel version tag-stamped — release#758)",
                 "sync commit:    "
                 + (report.sync_commit or "(none — clone already converged; not a failure)"),
                 "===== end boot report =====",

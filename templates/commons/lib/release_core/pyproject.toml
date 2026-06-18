@@ -1,6 +1,10 @@
 [project]
 name = "release-core"
-version = "0.0.1"
+# Version is stamped from the release tag at wheel-build time (release#758): the
+# `code` source below evaluates release_core/_version.py:VERSION, which reads the
+# $TAG env the release pipeline exports. Local/editable builds (no $TAG) fall
+# back to a dev sentinel. Never hardcode a literal here.
+dynamic = ["version"]
 description = "Shared primitives + CLI for release's Python verbs (proc/gh/cli/yaml/semver/manifest)"
 requires-python = ">=3.11"
 # Third-party runtime deps ARE permitted (reversing the Phase 0–1 stdlib-only
@@ -43,8 +47,20 @@ semver = "release_core.entrypoints:semver_main"
 dev = ["pytest>=8"]
 
 [build-system]
-requires = ["hatchling"]
+# packaging: used by release_core/_version.py at BUILD time to normalize the
+# release tag ($TAG) to a PEP 440 version. Build-only dep — release_core's sole
+# RUNTIME dep stays click (the _version packaging import is build-branch-guarded).
+requires = ["hatchling", "packaging"]
 build-backend = "hatchling.build"
+
+# Version source (release#758): evaluate VERSION in release_core/_version.py at
+# build time. That module reads $TAG (exported by the release wheel-build step),
+# normalizes it to a PEP 440 version via packaging, and falls back to 0.0.0+dev
+# without it.
+[tool.hatch.version]
+source = "code"
+path = "release_core/_version.py"
+expression = "VERSION"
 
 [tool.hatch.build.targets.wheel]
 packages = ["release_core"]

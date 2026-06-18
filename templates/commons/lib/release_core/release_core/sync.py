@@ -658,8 +658,9 @@ def install_tree(source: Source, ref_sha: str, plan: Plan, tmp_release: str) -> 
 
     # Provenance marker (ADR-0002): static comment lines + the full source SHA,
     # plus — when the boot resolver stamped one (release#580) — the resolved
-    # release tag, so the marker can tell WHICH release line seeded this tree
-    # (the wheel's package version is a static 0.0.1).
+    # release tag, so the marker can tell WHICH release line seeded this tree.
+    # (Since release#758 the wheel version is tag-stamped too; the explicit tag
+    # stamp remains the provenance channel recorded here.)
     marker = os.path.join(tmp_release, SOURCE_MARKER)
     with open(marker, "w", encoding="utf-8") as fh:
         fh.write(

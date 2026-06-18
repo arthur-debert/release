@@ -11,14 +11,16 @@
 # Install model = "latest, force-reinstall":
 #   - Default source is the repo's `releases/latest`.
 #   - `--major vN` instead picks the LATEST release in that major line that
-#     carries the wheel. This is the load-bearing v3-safety filter: the wheel
-#     version is not stamped from the tag (it is a static 0.0.1), so once a v3
+#     carries the wheel. This is the load-bearing v3-safety filter: once a v3
 #     release exists, `releases/latest` would hand a v2-pinned consumer the v3
-#     wheel. Pinning to the consumer's major line keeps `@vN` honest.
-#   - Install is `pip install --force-reinstall "$url"`, NOT `-U`: because the
-#     wheel version is static, `pip install -U` sees the same 0.0.1 already
-#     satisfied and SKIPS it, defeating the pull model. --force-reinstall always
-#     reinstalls. There is deliberately NO --no-deps: release_core declares real
+#     wheel. Pinning to the consumer's major line keeps `@vN` honest. (The wheel
+#     version is now stamped from the tag — release#758 — so a future resolver
+#     could compare versions; that simplification is WS3's, not this filter's.)
+#   - Install is `pip install --force-reinstall "$url"`, NOT `-U`: --force-reinstall
+#     always reinstalls the resolved wheel, so re-running the boot on the same
+#     `@vN` line reliably re-lands the current managed tree (the pull-model
+#     self-sync) regardless of what pip's version compare would decide.
+#     There is deliberately NO --no-deps: release_core declares real
 #     third-party dependencies (click) that pip must resolve from PyPI on each
 #     boot. They are pure-Python and PyPI is reachable wherever this release URL
 #     is, so the boot stays a no-compile wheel pull.
@@ -267,8 +269,10 @@ if ! "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
   rm -rf "$VENV_DIR"
   "$PYTHON" -m venv "$VENV_DIR"
 fi
-# --force-reinstall: the wheel version is static (0.0.1), so `-U` would see it
-# already satisfied and skip — force-reinstall always reinstalls the wheel.
+# --force-reinstall: always reinstalls the resolved wheel, so re-running the boot
+# on the same `@vN` line reliably re-lands the current managed tree regardless of
+# pip's version compare (the wheel is now tag-stamped — release#758 — but the
+# pull-model self-sync still relies on the unconditional reinstall here).
 # NO --no-deps: release_core declares real third-party deps (click) which the
 # venv's pip resolves from PyPI on each boot (reachable wherever the wheel URL
 # was; pure-Python, no compile).
@@ -278,10 +282,11 @@ fi
 # Stamp the resolved release PROVENANCE into the tool venv (release#580):
 # `release-core init` reads <venv>/release-source.tag (located via sys.prefix)
 # to label the managed-sync auto-commit and the .release-sync-source marker
-# with the REAL release line — the wheel's package version is a static 0.0.1,
-# so without the stamp a consumer's history can't tell v2.16 from v2.17. The
-# FILE (not an env var) is the durable channel: a later bare `release-core
-# init` (the SessionStart self-sync) runs without this resolver in the chain.
+# with the REAL release line. (The wheel version is now tag-stamped too —
+# release#758 — but this file remains the provenance channel init reads today;
+# folding the two is WS3's, not this PR's.) The FILE (not an env var) is the
+# durable channel: a later bare `release-core init` (the SessionStart
+# self-sync) runs without this resolver in the chain.
 if [ -n "$FROM_SOURCE" ]; then
   # Truthful from-source stamp — never fake a tag: "from-source" plus the
   # source checkout's short HEAD when it is a git tree (release's own CI).

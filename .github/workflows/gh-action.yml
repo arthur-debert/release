@@ -396,6 +396,11 @@ jobs:
         if: hashFiles('templates/commons/lib/release_core/pyproject.toml') != ''
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          # TAG is LOAD-BEARING for the build, not just the upload (release#758):
+          # pyproject's `[tool.hatch.version] source = "code"` reads $TAG from this
+          # env during `python -m build`, strips the leading `v`, and stamps it as
+          # the wheel version (without it the build falls back to 0.0.0+dev). Do
+          # not remove it from this step's env.
           TAG: v${{ needs.prepare.outputs.version }}
           PKG_DIR: templates/commons/lib/release_core
         run: |
@@ -404,6 +409,8 @@ jobs:
           # the package (pyproject `dependencies` stays empty by design).
           python -m pip install --upgrade build
           rm -rf "${PKG_DIR}/dist"
+          # $TAG is exported above; the hatch code-version source reads it to
+          # stamp the wheel version from the release tag.
           python -m build --wheel "${PKG_DIR}"
           # Exactly one wheel is expected. Collect matches into an array and
           # assert the count so a zero-match (build produced nothing) or a
