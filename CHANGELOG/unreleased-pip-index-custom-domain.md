@@ -1,0 +1,1 @@
+- pip index served at the dedicated pypi.magik.works custom domain (escapes the account user-site domain redirect); update install-release-core + pip-index docs (#772)
