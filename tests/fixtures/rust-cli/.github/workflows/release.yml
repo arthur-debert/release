@@ -41,7 +41,7 @@ jobs:
       bin-name: canary
       publish-crates: false
       brew: false
-      # Canary de-flake (release#765): drop the emulated aarch64-unknown-linux-gnu
+      # Canary de-flake (arthur-debert/release#765): drop the emulated aarch64-unknown-linux-gnu
       # build from the pre-ship round. Its "Set up linux aarch64 cross compiler
       # (apt)" step routinely hangs/overruns on GitHub's apt layer (10s of minutes,
       # never cached), tipping the canary past its poll budget — pure infra, not a
