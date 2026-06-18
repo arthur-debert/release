@@ -79,6 +79,10 @@ runs:
     #     pin bump misses; combined with the ruff/actionlint input overrides.
     - name: Compute arm-gate cache keys
       id: cache_keys
+      # Both Cache A and Cache B now require install_tree == 'true', so these keys
+      # are only consumed on that path — skip the digest work (and its failure
+      # surface) entirely on the provision-only install_tree:false path.
+      if: inputs.install_tree == 'true'
       shell: bash
       env:
         ACTION_REF: ${{ github.action_ref }}
@@ -87,15 +91,22 @@ runs:
       run: |
         set -euo pipefail
         root="${{ github.action_path }}/../../.."
-        pkg="${root}/templates/commons/lib/release_core/release_core"
+        # The wheel `install-release-core --from-source` builds is the NESTED
+        # package under templates/commons/lib/release_core/ — NOT the repo root. So
+        # the venv-cache digest must cover that package's source + its OWN
+        # pyproject.toml. Hashing the repo-root pyproject.toml (release's dev-tooling
+        # manifest) would both false-MISS on unrelated workspace edits and false-HIT
+        # past real changes to the package actually built.
+        pkgroot="${root}/templates/commons/lib/release_core"
+        pkg="${pkgroot}/release_core"
         sha() { if command -v sha256sum >/dev/null 2>&1; then sha256sum; else shasum -a 256; fi; }
-        # Order-stable digest over the bundled package source + pyproject. arm-gate
+        # Order-stable digest over the bundled package source + its pyproject. arm-gate
         # runs on macOS/Windows runners too, where BSD `sort` lacks `-z` and the old
         # `find -print0 | sort -z | xargs -0` pipeline would fail — so hash with
         # python3 (present on every GH runner): walk + lexically sort the .py paths,
         # then fold each relative path AND its bytes into one sha256. Folding the
         # path in means an add/remove/rename misses cleanly even at constant total
-        # bytes; pyproject.toml is appended last.
+        # bytes; the package pyproject.toml is appended last.
         venv_digest="$(python3 -c '
         import hashlib, os, sys
         pkg, pyproject = sys.argv[1], sys.argv[2]
@@ -107,7 +118,7 @@ runs:
             with open(p, "rb") as f: h.update(f.read())
         with open(pyproject, "rb") as f: h.update(f.read())
         print(h.hexdigest())
-        ' "$pkg" "${root}/pyproject.toml")"
+        ' "$pkg" "${pkgroot}/pyproject.toml")"
         toolset_digest="$(sha < "${pkg}/toolset.py" | cut -d' ' -f1)"
         ref_slug="$(printf '%s' "${ACTION_REF:-noref}" | tr -c '[:alnum:]._-' '-')"
         echo "venv=${ref_slug}-${venv_digest}" >> "$GITHUB_OUTPUT"
