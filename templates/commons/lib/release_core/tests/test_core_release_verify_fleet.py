@@ -144,7 +144,10 @@ def test_all_pass_exits_zero_with_table(env, monkeypatch, capsys):
     assert "o/a\trust-cli\tok\tpass" in lines
     assert "o/b\trust-cli\tok\tpass" in lines
     assert "no unexpected failures" in out.err
-    assert "2 pass, 0 expected-artifact FAILs (classified), 0 unexpected" in out.err
+    assert (
+        "2 pass, 0 annotated-expected FAILs, 0 skipped (un-provisionable here), 0 unexpected"
+        in out.err
+    )
 
 
 def test_gate_fail_exits_1(env, monkeypatch, capsys):
@@ -204,39 +207,60 @@ def test_paths_line_with_extra_tab_does_not_crash(env, monkeypatch, capsys):
 
 # ── expected-FAIL classification (#594) ───────────────────────────────────────
 
-# A failing pinned-lefthook gate log whose failed checks are ALL npm-deps ones
-# (captured-output summary glyphs: `✓` pass / `✗` fail — see classify.py).
-_NPM_DEPS_LOG = (
-    "summary: (done in 0.42 seconds)\n"
-    "✓ markdownlint (0.10 seconds)\n"
-    "✗ eslint (0.01 seconds)\n"
-    "✗ typecheck (0.02 seconds)\n"
-)
-
-# A failing log with a toolset-provided check in the failed set — real debt.
+# A failing log (the gate ran on a provisioned tree and a check genuinely failed).
 _MIXED_LOG = (
     "summary: (done in 0.42 seconds)\n✗ eslint (0.01 seconds)\n✗ markdownlint (0.10 seconds)\n"
 )
 
 
-def test_npm_deps_gate_fail_is_expected_and_exits_zero(env, monkeypatch, capsys):
+def test_unprovisionable_repo_is_skipped_not_failed(env, monkeypatch, capsys):
+    # release#772 follow-up: when a NEEDED toolchain is absent in this env, verify
+    # SKIPS-with-reason (never a false red, never a laundered "artifact") and does
+    # NOT run the gate on a dep-less tree. The gate would FAIL here (gate_rc=1) — but
+    # the repo is un-provisionable, so it's a skip, not a fail; exit stays 0.
     root = "/fleetroot"
     abspath = f"{root}/o/a"
-    paths = _row("o/a", root) + "\n"
-    driver = _Driver(
-        paths,
-        kinds={abspath: "vscode-ext"},
-        gate_rc={abspath: 1},
-        gate_out={abspath: _NPM_DEPS_LOG},
-    )
+    monkeypatch.setattr(rvf.provision, "unprovisionable_stacks", lambda p: ["npm"])
+    provisioned: list[str] = []
+    gated: list[str] = []
+    monkeypatch.setattr(rvf, "_provision_deps", lambda p: provisioned.append(p))
+    monkeypatch.setattr(rvf, "_run_gate", lambda p: gated.append(p) or (False, ""))
+    driver = _Driver(_row("o/a", root) + "\n", kinds={abspath: "vscode-ext"}, gate_rc={abspath: 1})
     monkeypatch.setattr(proc, "run", driver)
     rc = rvf.main(["--root", root])
     out = capsys.readouterr()
     assert rc == 0
-    rows = out.out.splitlines()
-    assert "o/a\tvscode-ext\tok\texpected-FAIL (npm-deps: eslint, typecheck)" in rows
-    assert "1 expected-artifact FAILs (classified), 0 unexpected" in out.err
+    assert "o/a\tvscode-ext\tok\tskipped (no npm to provision)" in out.out.splitlines()
+    assert "1 skipped (un-provisionable here)" in out.err
     assert "Logs under" not in out.err  # logs are pointed at only for unexpected reds
+    # The skip happens BEFORE provisioning + gating — neither runs on a tree we
+    # can't provision (no regression to "gate on a dep-less tree").
+    assert provisioned == []
+    assert gated == []
+
+
+def test_provisioned_gate_fail_is_unexpected(env, monkeypatch, capsys):
+    # PROVISIONED (unprovisionable_stacks == []) + gate FAILs + no annotation → a
+    # REAL failure. No npm-deps "artifact" excuse survives the provision-then-gate
+    # model: the deps were installed, so the failure is the consumer's (or release's).
+    root = "/fleetroot"
+    abspath = f"{root}/o/a"
+    monkeypatch.setattr(rvf.provision, "unprovisionable_stacks", lambda p: [])
+    provisioned: list[str] = []
+    monkeypatch.setattr(rvf, "_provision_deps", lambda p: provisioned.append(p))
+    driver = _Driver(
+        _row("o/a", root) + "\n",
+        kinds={abspath: "vscode-ext"},
+        gate_rc={abspath: 1},
+        gate_out={abspath: _MIXED_LOG},
+    )
+    monkeypatch.setattr(proc, "run", driver)
+    rc = rvf.main(["--root", root])
+    out = capsys.readouterr()
+    assert rc == 1
+    assert provisioned == [abspath]  # deps were provisioned BEFORE the gate ran
+    assert "o/a\tvscode-ext\tok\tFAIL" in out.out.splitlines()
+    assert "UNEXPECTED failures above" in out.err
 
 
 def test_mixed_gate_fail_stays_unexpected(env, monkeypatch, capsys):
@@ -275,7 +299,10 @@ def test_annotated_gate_fail_is_expected_and_exits_zero(env, monkeypatch, capsys
         "o/a\trust-cli\tok\texpected-FAIL (annotated: needs the sibling theme checkout)"
         in out.out.splitlines()
     )
-    assert "1 expected-artifact FAILs (classified), 0 unexpected" in out.err
+    assert (
+        "0 pass, 1 annotated-expected FAILs, 0 skipped (un-provisionable here), 0 unexpected"
+        in out.err
+    )
 
 
 def test_annotated_repo_that_passes_is_flagged_stale(env, monkeypatch, capsys):
@@ -437,3 +464,16 @@ def test_python_dash_m_release_core_runs_the_cli():
     )
     assert r.returncode == 0
     assert "release-core" in r.stdout
+
+
+def test_provision_deps_captures_output_to_log(tmp_path, monkeypatch):
+    # _provision_deps redirects dep_caches' (subprocess) output to a per-repo
+    # .verify-provision.log so it doesn't interleave with the tabular report.
+    def fake_dep_caches(p):
+        os.write(1, b"installing deps via pnpm...\n")  # fd-level, like a subprocess
+
+    monkeypatch.setattr(rvf.provision, "dep_caches", fake_dep_caches)
+    rvf._provision_deps(str(tmp_path))
+    log = tmp_path / ".verify-provision.log"
+    assert log.is_file()
+    assert "installing deps via pnpm" in log.read_text()

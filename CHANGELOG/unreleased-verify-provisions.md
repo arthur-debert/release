@@ -1,0 +1,1 @@
+- release-core admin repos verify now PROVISIONS each consumer's deps (npm/pnpm/cargo/...) before gating, instead of running the gate on a dep-less tree and laundering the failure as an 'expected npm-deps artifact'; only a genuinely-absent toolchain is an honest skip (#772 follow-up)
