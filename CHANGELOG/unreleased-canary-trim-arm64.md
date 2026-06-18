@@ -1,0 +1,1 @@
+- canary rust fixture skips the apt-flaky emulated aarch64-linux build
