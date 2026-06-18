@@ -166,6 +166,17 @@ def _with_output(msg: str, res) -> str:
     return "\n".join(parts)
 
 
+def _prepend_path(d: str) -> None:
+    """Ensure ``d`` is FIRST on this process's PATH so a freshly-installed pinned
+    binary in ``d`` shadows any earlier floating copy — for both the post-install
+    ``version_matches()`` re-check AND the gate run in this process. Without it an
+    earlier-PATH unpinned tool (e.g. a kislyuk python-yq squatting /usr/bin/yq —
+    release#755) keeps winning ``shutil.which``: a FALSE hard-mode failure even
+    though the pinned binary was installed, plus the gate running the wrong tool."""
+    parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p != d]
+    os.environ["PATH"] = os.pathsep.join([d, *parts])
+
+
 def provision_npm(*, best_effort: bool) -> None:
     """Reconcile the npm globals (lefthook + prettier + markdownlint) to their
     pins. ``markdownlint-cli`` is the package; ``markdownlint`` the binary."""
@@ -274,6 +285,7 @@ def provision_actionlint(*, best_effort: bool, bin_dir: str | None = None) -> No
             return
         raise ProvisionError(msg)
     os.makedirs(dest, exist_ok=True)
+    _prepend_path(dest)  # the pinned binary must shadow any earlier-PATH actionlint
     _log(f"download actionlint {actionlint_version()} -> {dest}")
     url = "https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash"
     # curl | bash -s -- <version> <dir> — the official pinned installer.
@@ -317,6 +329,7 @@ def provision_yq(*, best_effort: bool, bin_dir: str | None = None) -> None:
             return
         raise ProvisionError(msg)
     os.makedirs(dest, exist_ok=True)
+    _prepend_path(dest)  # the pinned yq must shadow an earlier-PATH yq (release#755)
     url = f"https://github.com/mikefarah/yq/releases/download/v{yq_version()}/yq_{yq_os}_{arch}"
     _log(f"download yq {yq_version()} -> {dest}")
     fd, tmp = tempfile.mkstemp(prefix="yq.", dir=dest)

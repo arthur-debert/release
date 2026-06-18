@@ -104,3 +104,15 @@ def test_provision_all_present_is_a_clean_noop(monkeypatch):
     monkeypatch.setattr(toolset, "version_matches", lambda *a, **k: True)
     # No npm/pip/curl needed when nothing is missing.
     assert toolset.provision(best_effort=False) == 0
+
+
+def test_prepend_path_puts_dest_first_and_dedups(monkeypatch):
+    # The pinned binary's dir must end up FIRST on PATH (shadowing an earlier
+    # floating copy) and not be duplicated if already present (release#755).
+    monkeypatch.setenv("PATH", "/usr/bin:/opt/x/bin:/usr/local/bin")
+    toolset._prepend_path("/opt/x/bin")
+    import os as _os
+
+    parts = _os.environ["PATH"].split(_os.pathsep)
+    assert parts[0] == "/opt/x/bin"
+    assert parts.count("/opt/x/bin") == 1
