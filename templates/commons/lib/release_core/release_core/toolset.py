@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shlex
 import shutil
 import sys
 import tempfile
@@ -56,6 +57,10 @@ _PINS: dict[str, str] = {
     "SHELLCHECK_PY_VERSION": "0.11.0.1",
     # yq (mikefarah/Go) — release_core.yamlio's reader + the init lefthook merge.
     "YQ_VERSION": "4.44.3",
+    # golangci-lint — the go-quality gate's linter; provisioned ONLY in Go repos
+    # (WS8 #765 rehomed this from the deleted setup-dev-env.sh). Pinned to the v1
+    # line for config compatibility (v2 changed the config schema).
+    "GOLANGCI_LINT_VERSION": "1.64.8",
 }
 
 
@@ -99,6 +104,10 @@ def shellcheck_version() -> str:
 
 def shellcheck_py_version() -> str:
     return pin("SHELLCHECK_PY_VERSION")
+
+
+def golangci_lint_version() -> str:
+    return pin("GOLANGCI_LINT_VERSION")
 
 
 def yq_version() -> str:
@@ -367,6 +376,63 @@ def provision_yq(*, best_effort: bool, bin_dir: str | None = None) -> None:
         _log(f"installed yq {yq_version()}")
 
 
+def provision_golangci_lint(*, best_effort: bool = True) -> None:
+    """Install golangci-lint (the go-quality gate's linter) in Go repos — the port
+    of the block the deleted setup-dev-env.sh carried (WS8 #765, rehoming it into
+    the unified provisioner so ``release-core init`` / ``gate --provision`` really
+    install it as the go-quality fragment promises). Acts ONLY when a root
+    ``go.mod`` exists, and is ALWAYS best-effort (never raises): it needs a Go
+    toolchain or brew, and CI installs it via the shared setup-go action BEFORE the
+    gate, so a local boot that cannot install it WARNS — the go-quality lefthook
+    hook is the hard run-time gate. Skips silently when golangci-lint is already on
+    PATH. ``best_effort`` is accepted for the :func:`_run_step` signature; this step
+    never hard-fails provisioning."""
+    if not os.path.exists("go.mod") or _have("golangci-lint"):
+        return
+    version = f"v{golangci_lint_version()}"
+    if _have("brew"):
+        _log(f"brew install golangci-lint ({version} line)")
+        proc.run(["brew", "install", "golangci-lint"], check=False, capture_output=True)
+    elif _have("go"):
+        # GOBIN wins if set; else the FIRST GOPATH entry's bin (a multi-entry
+        # GOPATH makes a bare "$(go env GOPATH)/bin" a broken path).
+        r = proc.run(["go", "env", "GOBIN"], check=False, capture_output=True)
+        gobin = (r.stdout or "").strip()
+        if not gobin:
+            r = proc.run(["go", "env", "GOPATH"], check=False, capture_output=True)
+            gopath = (r.stdout or "").strip()
+            gobin = os.path.join(gopath.split(os.pathsep)[0], "bin") if gopath else ""
+        done = False
+        if gobin and _have("curl"):
+            _log(f"install golangci-lint {version} -> {gobin}")
+            install_sh = (
+                "https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh"
+            )
+            res = proc.run(
+                [
+                    "sh",
+                    "-c",
+                    f"curl -sSfL {install_sh} | sh -s -- "
+                    f"-b {shlex.quote(gobin)} {shlex.quote(version)}",
+                ],
+                check=False,
+                capture_output=True,
+            )
+            done = res.returncode == 0
+        if not done:
+            _log(f"go install golangci-lint {version}")
+            proc.run(
+                ["go", "install", f"github.com/golangci/golangci-lint/cmd/golangci-lint@{version}"],
+                check=False,
+                capture_output=True,
+            )
+    if not _have("golangci-lint"):
+        _log(
+            "WARNING: golangci-lint not on PATH after install (needs brew or a Go "
+            "toolchain + the Go bin dir on PATH); the go-quality gate hard-fails"
+        )
+
+
 def provision(*, best_effort: bool = False, bin_dir: str | None = None) -> int:
     """Reconcile the WHOLE gate toolset to its pins — the port of
     ``provision-gate-toolset.sh``. Returns 0 on success.
@@ -377,13 +443,15 @@ def provision(*, best_effort: bool = False, bin_dir: str | None = None) -> int:
     gate: a tool that can't be reconciled raises :class:`ProvisionError`, surfaced
     by the caller as a non-zero exit.
 
-    golangci-lint is intentionally NOT provisioned here — it is Go-repo-only and
-    setup-dev-env.sh still installs it conditionally (it is not part of the
-    common UNION the shell provisioner reconciles)."""
+    golangci-lint is provisioned ONLY in Go repos (gated on ``go.mod``) and ALWAYS
+    best-effort — it needs a Go toolchain/brew and CI installs it via setup-go, so
+    it never hard-fails provisioning; the go-quality lefthook hook is its hard
+    run-time gate."""
     _run_step(provision_npm, best_effort=best_effort)
     _run_step(provision_pip, best_effort=best_effort)
     _run_step(provision_actionlint, best_effort=best_effort, bin_dir=bin_dir)
     _run_step(provision_yq, best_effort=best_effort, bin_dir=bin_dir)
+    _run_step(provision_golangci_lint, best_effort=best_effort)
     _log("done.")
     return 0
 
