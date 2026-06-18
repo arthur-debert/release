@@ -1,15 +1,18 @@
 name: Release
 
-# Thin caller of this repo's own gh-action.yml@v2.
+# Thin caller of this repo's own gh-action.yml@v3.
 #
 # Yes, this repo cuts ITS OWN release tags via the shared
 # gh-action.yml stack workflow, dogfooding the SAME floating major
-# (`@v2`) the fleet pins — not a stale older line. Chicken-and-egg
-# note: the first tag that included gh-action.yml had to be cut
-# manually (v1.4.0); every subsequent patch / minor / major cut can
-# go through this caller now.
+# (`@v3`) the fleet pins — not a stale older line. This ref MUST track
+# the floating major: it derives the wheel-install `--major` for the
+# prepare job, and since WS8 (#765) dropped install-release-core's
+# GH-release-asset fallback, a stale `@v2` resolves `release-core>=2,<3`
+# against the pip index (which only serves v3+) and FAILS the cut.
+# Chicken-and-egg note: the first tag that included gh-action.yml had
+# to be cut manually (v1.4.0); every subsequent cut goes through here.
 #
-# What `gh-action.yml@v2` gives us here:
+# What `gh-action.yml@v3` gives us here:
 # - validate semver + ensure release-time invariants
 # - tag + push HEAD
 # - GH release with notes rolled from the CHANGELOG/ fragment dir at
@@ -41,7 +44,7 @@ permissions:
 
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/gh-action.yml@v2
+    uses: arthur-debert/release/.github/workflows/gh-action.yml@v3
     with:
       version: ${{ inputs.version }}
       # Multi-action repo: many composite actions under
