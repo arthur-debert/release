@@ -98,8 +98,11 @@ jobs:
       # via the consumer's synced pull-model bootstrap. The bin/semver /
       # bin/changelog shims were retired (release#476); the prepare job now
       # uses the pip-installed console-scripts. --no-init: we only need the
-      # package + its scripts here, not a `.release/` re-install. --major v2
-      # is the v3-safety pin (this workflow ships in the v2 line).
+      # package + its scripts here, not a `.release/` re-install. --major v3
+      # pins the floating major the index serves — it MUST track the floating
+      # major: since WS8 (#765) dropped install-release-core's GH-asset fallback,
+      # a stale `--major vN` resolves `release-core>=N,<N+1` against the pip index
+      # (v3+ only) and FATALs the cut. Bump this at the next major.
       - name: Set up Python for release_core console-scripts
         uses: actions/setup-python@v6
         with:
@@ -112,9 +115,9 @@ jobs:
         # isolated venv, symlinks the console-scripts onto PATH, and (detecting
         # $GITHUB_PATH) persists that dir for later steps. CI just invokes it —
         # same script, same behavior as a local session; the only CI-specific
-        # setup is the Python above. --major v2 pins the v3-safety line; --no-init
+        # setup is the Python above. --major v3 pins the floating major; --no-init
         # because the release run needs the scripts, not a `.release/` install.
-        run: bash bin/install-release-core --major v2 --no-init
+        run: bash bin/install-release-core --major v3 --no-init
 
       - name: Install the .release/ temp dir
         # The bot gate below runs the gate from .release/ — which is gitignored
