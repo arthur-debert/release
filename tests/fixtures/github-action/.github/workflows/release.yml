@@ -1,0 +1,36 @@
+name: Release
+
+# Thin caller — the canonical pipeline lives at
+# arthur-debert/release/.github/workflows/gh-action.yml@v3.
+#
+# Canary fencing (arthur-debert/release#587, fail-closed by design):
+# this repo cuts prerelease tags + GH release assets on ITSELF only. The
+# github-action stack has no package index and no publish secrets, so
+# there is nothing to fence beyond the floating-major advance — and
+# gh-action.yml already skips that for prereleases (every canary cut is a
+# `-canary.<runid>` prerelease).
+#
+# action-manifest defaults to action.yml at the repo root; the prepare
+# job verifies it exists (proving this IS a GitHub Action repo).
+#
+# The `@v3` ref below is a readable default: `release-core admin canary
+# init` rewrites it to the current floating major at seed time, and
+# `admin canary run` rewrites it to `canary/<sha12>` every round.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. 0.0.1-canary.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: arthur-debert/release/.github/workflows/gh-action.yml@v3
+    with:
+      version: ${{ inputs.version }}
+    secrets: inherit

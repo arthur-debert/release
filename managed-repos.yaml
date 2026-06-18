@@ -101,6 +101,7 @@ projects:
 canaries:
   rust: arthur-debert/release-canary-rust
   vscode-ext: arthur-debert/release-canary-vscode-ext
+  gh-action: arthur-debert/release-canary-gh-action
 
 # NOT managed even though they carry the main-branch-protection
 # ruleset (which was applied broadly across arthur-debert/* for

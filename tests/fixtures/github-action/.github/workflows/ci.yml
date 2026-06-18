@@ -1,0 +1,26 @@
+name: CI
+
+# Thin caller for the canonical reusable GitHub-Action CI workflow at
+# arthur-debert/release. This repo is release-owned canary infra
+# (arthur-debert/release#587): a synthetic github-action consumer
+# exercised pre-cut. Standard recipe only — no escape hatches.
+#
+# The gh-action stack has no `bin/check` (the action IS the deliverable),
+# so check-command stays at its empty default — actionlint + the shell/
+# markdown/yaml gate is the full check surface.
+#
+# The `@v3` ref below is a readable default: `release-core admin canary
+# init` rewrites it to the current floating major at seed time, and
+# `admin canary run` rewrites it to `canary/<sha12>` every round.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: arthur-debert/release/.github/workflows/gh-action-ci.yml@v3

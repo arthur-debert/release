@@ -1,0 +1,3 @@
+# A composite GitHub Action has no build output to ignore. The pull-model
+# managed tree (.release/ + working-tree mirrors) is excluded by the boot
+# (release-core init writes .git/info/exclude entries), not tracked here.

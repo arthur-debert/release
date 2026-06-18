@@ -1,0 +1,33 @@
+name: 'Canary Action'
+description: 'Synthetic composite action exercised by the release pre-cut canary loop. Infrastructure only.'
+author: 'arthur-debert/release'
+
+inputs:
+  who:
+    description: 'Name to greet.'
+    required: false
+    default: 'world'
+
+outputs:
+  greeting:
+    description: 'The greeting that was emitted.'
+    value: ${{ steps.greet.outputs.greeting }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: greet
+      shell: bash
+      env:
+        WHO: ${{ inputs.who }}
+      run: |
+        set -euo pipefail
+        greeting="hello, ${WHO}"
+        echo "$greeting"
+        # Heredoc form so a newline in WHO can't smuggle extra entries into
+        # $GITHUB_OUTPUT (the multi-line-output injection class).
+        {
+          echo "greeting<<__CANARY_EOF__"
+          echo "$greeting"
+          echo "__CANARY_EOF__"
+        } >> "$GITHUB_OUTPUT"
