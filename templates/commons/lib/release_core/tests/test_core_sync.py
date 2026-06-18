@@ -1002,6 +1002,15 @@ def test_read_release_major_roundtrip(tmp_path):
     assert sync.read_release_major(str(tmp_path)) == "3"
 
 
+def test_read_release_major_rejects_non_integer(tmp_path):
+    # The offline source of truth must fail loud on a malformed value rather than
+    # silently mis-resolving a major line.
+    for bad in ("v3", "3.1", "latest", "3-rc"):
+        (tmp_path / sync.RELEASE_MAJOR_FILE).write_text(bad + "\n")
+        with pytest.raises(ValueError, match="bare major integer"):
+            sync.read_release_major(str(tmp_path))
+
+
 # ── file diff ─────────────────────────────────────────────────────────────────
 
 

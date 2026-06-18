@@ -81,12 +81,15 @@ teardown() {
   [ -L bin/check-docs ]
 }
 
-@test "the commons gate + header stub land on a docs-site repo" {
+@test "the commons gate + @import land on a docs-site repo" {
   release_sync >/dev/null
   [ -f .release/lefthook.yml ]
   [ -f CLAUDE.md ]
-  # WS2 (#523): the CLAUDE.md block is the stub pointing at the binary.
-  grep -qF 'release-core how-to' CLAUDE.md
+  # WS4 (#761): CLAUDE.md carries a one-line @import of the managed target;
+  # the `release-core how-to` orientation body now lives in that target file.
+  grep -qF '@.claude/IMPORTANT-RELEASE.md' CLAUDE.md
+  [ -f .claude/IMPORTANT-RELEASE.md ]
+  grep -qF 'release-core how-to' .claude/IMPORTANT-RELEASE.md
 }
 
 @test "a second init is idempotent — reports already current" {

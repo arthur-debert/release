@@ -291,13 +291,25 @@ def read_release_major(repo_root: str) -> str | None:
 
     The file is one line — the bare major integer (e.g. "3"). Trailing
     whitespace/newline tolerated. A blank or absent file → None.
+
+    This file is the OFFLINE source of truth for selecting the release-core major
+    line, so a non-integer value is a misconfiguration that must FAIL LOUD here
+    rather than silently mis-resolving a major downstream (raises ValueError).
     """
     path = os.path.join(repo_root, RELEASE_MAJOR_FILE)
     try:
         with open(path, encoding="utf-8") as fh:
-            return fh.read().strip() or None
+            content = fh.read().strip()
     except OSError:
         return None
+    if not content:
+        return None
+    if not content.isdigit():
+        raise ValueError(
+            f"{RELEASE_MAJOR_FILE} must contain a bare major integer (e.g. '3'), "
+            f"got {content!r} — fix or delete the file to re-seed."
+        )
+    return content
 
 
 def seed_release_major(repo_root: str) -> str | None:

@@ -264,7 +264,7 @@ jobs:
           cd "$full"
           release-core init
           # The FULL managed files must be installed on disk: the .release/ temp
-          # dir, working-tree symlink mirrors, and the CLAUDE.md stub block.
+          # dir, working-tree symlink mirrors, and the CLAUDE.md @import line.
           test -d .release || { echo "ERROR: no .release/ temp dir written" >&2; exit 1; }
           # WS4 (#761): CLAUDE.md is a one-line @import of the managed target file
           # (.claude/IMPORTANT-RELEASE.md), which carries the orientation body
