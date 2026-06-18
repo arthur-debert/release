@@ -200,11 +200,16 @@ on:
 
       playwright-cache:
         description: |
-          When `true`, cache the Playwright browser binaries in both the
-          check and e2e jobs. Off by default. Both jobs pin
-          `PLAYWRIGHT_BROWSERS_PATH` to `$GITHUB_WORKSPACE/.playwright-browsers`
-          (a fixed, OS-independent location — the default browser dir is
-          OS-specific) and cache that path. The key is
+          When `true`, cache the Playwright browser binaries. Off by
+          default. Both jobs export `PLAYWRIGHT_BROWSERS_PATH` =
+          `$GITHUB_WORKSPACE/.playwright-browsers` (a fixed,
+          OS-independent location — the default browser dir is
+          OS-specific; the export is inert unless Playwright is used, so
+          a default caller is unaffected). This input adds the cache of
+          that path: in the check job only when `playwright: true`
+          (the only condition under which the check job installs
+          browsers); in the e2e job whenever this input is on (the e2e
+          job always installs browsers). The key is
           `playwright-<runner.os>-<runner.arch>-<version>`, where version
           is the installed `@playwright/test` (resolved at runtime via
           `node -p "require('@playwright/test/package.json').version"`),
@@ -328,6 +333,10 @@ jobs:
       # one location. The default location is OS-specific
       # (~/.cache/ms-playwright on Linux, ~/Library/Caches/ms-playwright
       # on macOS), which would miss the cache on non-Linux runners.
+      # Inert unless Playwright is used: it's read only by the playwright
+      # CLI, so for a default caller (playwright/e2e off) it changes no
+      # command's behavior — the "byte-identical by default" guarantee
+      # holds.
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     steps:
       - name: Checkout
@@ -472,7 +481,14 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Resolve Playwright version
-        if: inputs.playwright-cache && (inputs.playwright || inputs.e2e)
+        # Gated on `playwright` (NOT `e2e`): the check job only installs
+        # browsers when `playwright: true`. If this cached on `e2e: true`
+        # while `playwright: false`, it would store an EMPTY browser dir
+        # under the shared key — the e2e job would then restore empty and
+        # be unable to save the real browsers (immutable key), a
+        # permanent cache miss. The e2e job (which always installs
+        # browsers) gates its own copy on `playwright-cache` alone.
+        if: inputs.playwright-cache && inputs.playwright
         id: pw-version
         shell: bash
         # Resolve the installed @playwright/test version so the browser
@@ -481,7 +497,7 @@ jobs:
           PW_VERSION=$(node -p "require('@playwright/test/package.json').version")
           echo "version=$PW_VERSION" >> "$GITHUB_OUTPUT"
       - name: Cache Playwright browsers
-        if: inputs.playwright-cache && (inputs.playwright || inputs.e2e)
+        if: inputs.playwright-cache && inputs.playwright
         uses: actions/cache@v5
         with:
           path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
