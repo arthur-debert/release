@@ -39,6 +39,18 @@
 # --from-source (load-bearing for release's own CI / canary) is unchanged: a LOCAL
 # path install, no release resolution, no network.
 #
+# FAIL-LOUD (WS6/F, release#763): the wheel pull is the FOUNDATION — no wheel ⇒ no
+# `release-core gate --hook` ⇒ no gate at all. So a pull failure HALTS this resolver
+# LOUDLY (non-zero exit, a clear root-cause message), never a silent half-state. But
+# halt only AFTER a bounded transient-retry (`retry`, below: 3 attempts, short
+# backoff) — a 1-second network/`gh`/pip hiccup must NOT red-alert a session. The
+# network calls (the pip installs, the gh-API resolve) run THROUGH `retry`; only a
+# still-failing pull after the retries aborts. This script's own `set -e` + the
+# explicit `exit 1` on an unresolvable wheel are the halt; the SessionStart caller
+# (setup-dev-env.sh §0.1) DROPS its old `|| warn` so the halt actually surfaces.
+# init + gate wiring downstream stay best-effort (the committed tree degrades
+# gracefully); only the load-bearing PULL is fail-loud.
+#
 # After installing, this runs `release-core init` in the current repo by default
 # (--no-init to skip) — the "one command does the boot" ergonomic. A bare `init`
 # installs the WHOLE set of managed files from the wheel bundle (the .release/
@@ -57,6 +69,9 @@ REPO="arthur-debert/release"
 MAJOR=""
 PRINT_URL=0
 NO_INIT=0
+CLOUD=0          # forward --cloud to `release-core init` (cloud-only provisioning:
+                 # tag fetch, dep caches, NSS cert import — WS5/E). Set by the cloud
+                 # SessionStart boot (setup-dev-env.sh).
 FROM_SOURCE=""   # install from a LOCAL path (a checkout's release_core source)
                  # instead of a published wheel — same venv/PATH machinery.
 PYTHON="${PYTHON:-python3}"   # interpreter used to BUILD the isolated tool venv
@@ -75,6 +90,35 @@ PIP_INDEX_URL="${RELEASE_CORE_PIP_INDEX:-https://arthur-debert.github.io/release
 # the install the way `pip --user` did (rejected inside a venv).
 VENV_DIR="${RELEASE_CORE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/release-core}/venv"
 BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+
+# Bounded transient-retry around a load-bearing network call (WS6/F, release#763).
+# Fail-loud must HALT on a real failure but NOT on a 1-second blip, so the network
+# calls (pip installs, the gh-API resolve) run through this: up to RETRY_ATTEMPTS
+# tries with a short, growing backoff; returns the LAST attempt's exit code so the
+# caller still fails loud when every attempt failed. Overridable for tests via
+# RETRY_ATTEMPTS / RETRY_SLEEP (set RETRY_SLEEP=0 to make tests instant).
+RETRY_ATTEMPTS="${RETRY_ATTEMPTS:-3}"
+RETRY_SLEEP="${RETRY_SLEEP:-2}"
+retry() {
+  _attempt=1
+  while :; do
+    # Capture the command's exit code directly (NOT via `if cmd; then`: a failed
+    # `if` condition leaves $? = 0, so the rc would always read as 0 — the bug a
+    # naive `if "$@"; then return 0; fi; _rc=$?` form hides). `&& _rc=0 || _rc=$?`
+    # records the real status while keeping `set -e` happy.
+    "$@" && _rc=0 || _rc=$?
+    if [ "$_rc" -eq 0 ]; then
+      return 0
+    fi
+    if [ "$_attempt" -ge "$RETRY_ATTEMPTS" ]; then
+      echo "install-release-core: command failed after ${RETRY_ATTEMPTS} attempt(s) (rc=${_rc}): $*" >&2
+      return "$_rc"
+    fi
+    echo "install-release-core: attempt ${_attempt}/${RETRY_ATTEMPTS} failed (rc=${_rc}); retrying in $(( RETRY_SLEEP * _attempt ))s — transient?" >&2
+    sleep "$(( RETRY_SLEEP * _attempt ))"
+    _attempt=$(( _attempt + 1 ))
+  done
+}
 
 usage() {
   cat <<'EOF'
@@ -102,6 +146,9 @@ Options:
                     asset-fallback wheel URL) and exit (resolve only, no install).
   --no-init         Install only; do NOT run `release-core init` afterwards
                     (pure-transport mode, e.g. just updating the package).
+  --cloud           Forward --cloud to `release-core init` so it runs the
+                    cloud-only provisioning steps (tag fetch, dep caches, NSS cert
+                    import). Set by the cloud SessionStart boot; no-op locally.
   -h, --help        Show this help.
 
 Env:
@@ -129,6 +176,7 @@ while [ $# -gt 0 ]; do
       FROM_SOURCE="$2"; shift 2 ;;
     --from-source=*) FROM_SOURCE="${1#--from-source=}"; shift ;;
     --no-init) NO_INIT=1; shift ;;
+    --cloud) CLOUD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "install-release-core: unknown argument '$1'" >&2; usage >&2; exit 64 ;;
   esac
@@ -294,8 +342,11 @@ PIP="$VENV_DIR/bin/python -m pip install --disable-pip-version-check"
 
 if [ -n "$FROM_SOURCE" ]; then
   echo "install-release-core: installing $FROM_SOURCE into $VENV_DIR" >&2
+  # FAIL-LOUD + transient-retry (WS6/F): a from-source install reads a LOCAL tree but
+  # still resolves deps (click) over the network, so wrap it in `retry`; set -e halts
+  # on a still-failing install after the retries.
   # shellcheck disable=SC2086
-  $PIP --force-reinstall "$FROM_SOURCE"
+  retry $PIP --force-reinstall "$FROM_SOURCE"
   # Truthful from-source stamp — never fake a tag: "from-source" plus the source
   # checkout's short HEAD when it is a git tree (release's own CI).
   stamp="from-source"
@@ -315,8 +366,12 @@ else
     _spec="release-core"
   fi
   echo "install-release-core: installing '$_spec' from the pip index ($PIP_INDEX_URL)" >&2
+  # transient-retry the index install (WS6/F): a network blip must not skip straight
+  # to the asset fallback. A genuine "no such version in the index" is deterministic
+  # (every retry fails the same way), so this just costs a few seconds before the
+  # fallback — acceptable for a load-bearing pull.
   # shellcheck disable=SC2086
-  if $PIP --extra-index-url "$PIP_INDEX_URL" "$_spec"; then
+  if retry $PIP --extra-index-url "$PIP_INDEX_URL" "$_spec"; then
     installed=1
     stamp="index ${MAJOR:-latest}"
   else
@@ -331,13 +386,17 @@ else
   # no version compare) re-lands the managed tree on a re-run, its long-standing
   # behavior, kept intact here.
   if [ "$installed" -eq 0 ]; then
-    if ! source="$(resolve_url)"; then
-      echo "install-release-core: neither the pip index nor the release-asset fallback could resolve a release_core wheel" >&2
+    # transient-retry the gh-API resolve (WS6/F): `gh api` can blip on the network.
+    # A still-failing resolve after the retries is the FAIL-LOUD halt — there is no
+    # wheel, so there is no gate; exit non-zero with a clear root-cause message
+    # rather than warn-and-continue into an undefined half-state.
+    if ! source="$(retry resolve_url)"; then
+      echo "install-release-core: FATAL — neither the pip index nor the release-asset fallback could resolve a release_core wheel (after ${RETRY_ATTEMPTS} attempt(s)). The wheel pull is load-bearing: no wheel means no gate. Check network / gh auth (GH_TOKEN) and re-run." >&2
       exit 1
     fi
     echo "install-release-core: installing $source into $VENV_DIR (asset fallback)" >&2
     # shellcheck disable=SC2086
-    $PIP --force-reinstall "$source"
+    retry $PIP --force-reinstall "$source"
     # The wheel asset URL is .../releases/download/<tag>/<asset> — the resolved
     # release tag is the second-to-last path segment.
     stamp="${source%/*}"; stamp="${stamp##*/}"
@@ -388,9 +447,16 @@ fi
 # SessionStart shouldn't push on the consumer's behalf. init stays best-effort — a
 # commit/init failure does NOT fail the resolver.
 rc="$VENV_DIR/bin/release-core"
+# Build the init arg list as a plain string (NOT a bash array): macOS bash 3.2 +
+# `set -u` errors on an empty-array `${arr[@]}` expansion, and the only arg is a
+# single literal flag with no whitespace, so word-splitting it is safe + portable.
+_init_flag=""
+[ "$CLOUD" -eq 1 ] && _init_flag="--cloud"   # cloud-only provisioning (WS5/E)
 if [ -x "$rc" ]; then
   echo "install-release-core: installed; running release-core init (full install)" >&2
-  "$rc" init || echo "warning: release-core init failed — managed files not refreshed" >&2
+  # _init_flag is a single controlled literal (--cloud or empty), intentionally split.
+  # shellcheck disable=SC2086
+  "$rc" init $_init_flag || echo "warning: release-core init failed — managed files not refreshed" >&2
 else
   echo "warning: release-core not found in the tool venv ($rc) — skipping init" >&2
 fi

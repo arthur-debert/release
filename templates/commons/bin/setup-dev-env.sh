@@ -215,10 +215,16 @@ fi
 # init installs the ephemeral .release/ (the gate config), so the very first
 # session of a fresh clone wires a hook that has a gate to run.
 #
-# BEST-EFFORT, never aborts the session: every call is `|| warn`, and init
-# failure inside the resolver is itself best-effort. The committed tree already
-# in the repo degrades gracefully if the pull fails (a stale repo is
-# older-but-working, never broken).
+# FAIL-LOUD on the load-bearing pull (WS6/F, release#763): the wheel pull is the
+# FOUNDATION — no wheel ⇒ no `release-core gate --hook` ⇒ no gate. So this no longer
+# `|| warn`s past a failed resolver: a genuine pull failure HALTS the session loudly
+# (the resolver already retries transient blips internally — 3 attempts with
+# backoff — and only a still-failing pull aborts, so a 1-second hiccup never
+# red-alerts). The DOWNSTREAM steps (init's managed-file refresh, gate wiring) stay
+# best-effort inside the resolver — the committed tree degrades gracefully there;
+# only the PULL itself is fail-loud. A consumer not yet seeded with the resolver
+# (no bin/install-release-core, not on PATH) still no-ops safely — there is nothing
+# to fail.
 #
 # The resolver is part of the committed bootstrap: it ships in the synced set
 # (templates/commons/bin/ → consumer bin/install-release-core), so it is found at
@@ -239,8 +245,16 @@ elif command -v install-release-core >/dev/null 2>&1; then
   _resolver="install-release-core"
 fi
 if [ -n "${_resolver}" ]; then
-  "${_resolver}" \
-    || echo "warning: install-release-core failed — release_core not updated this session" >&2
+  # FAIL-LOUD (WS6/F): no `|| warn` — a failed wheel pull HALTS the session loudly.
+  # The resolver retries transient blips internally and only aborts on a genuine
+  # failure (no wheel ⇒ no gate). Pass --cloud (WS5/E) so the resolver's
+  # `release-core init` runs the cloud-only provisioning steps (tag fetch, dep
+  # caches, NSS cert import) when in a cloud session; locally they are skipped.
+  if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+    "${_resolver}" --cloud
+  else
+    "${_resolver}"
+  fi
 fi
 
 # --- 0.2. Pre-commit hook wiring (BOTH local and cloud) -----------------

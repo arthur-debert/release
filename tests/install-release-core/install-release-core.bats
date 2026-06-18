@@ -558,3 +558,105 @@ STUB
   run "$BIN" --major
   [ "$status" -eq 64 ]
 }
+
+# --------------------------------------------------------------------------
+# WS5/E (#762): --cloud forwards to `release-core init --cloud` (cloud-only
+# provisioning: tag fetch, dep caches, NSS cert import).
+# --------------------------------------------------------------------------
+
+@test "init: --cloud forwards --cloud to release-core init" {
+  run "$BIN" --cloud
+  [ "$status" -eq 0 ]
+  [ "$(cat "$INIT_LOG")" = "release-core init --cloud" ]
+}
+
+@test "init: without --cloud passes NO cloud flag (local default)" {
+  run "$BIN"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$INIT_LOG")" = "release-core init" ]
+}
+
+@test "init: --cloud + --no-init still skips init (no cloud provisioning either)" {
+  run "$BIN" --cloud --no-init
+  [ "$status" -eq 0 ]
+  [ ! -s "$INIT_LOG" ]
+}
+
+# --------------------------------------------------------------------------
+# WS6/F (#763): fail-loud boot — the load-bearing wheel pull HALTS LOUDLY after
+# a bounded transient-retry; a transient blip retries then proceeds; the verbose
+# retry message names the attempt count.
+# --------------------------------------------------------------------------
+
+@test "fail-loud: a wholly-unresolvable wheel HALTS non-zero with a clear message" {
+  # Index install fails (PIP_FAIL_INDEX), AND the asset-path resolve fails (gh
+  # errors) → neither path resolves a wheel → the resolver must exit non-zero with
+  # a fail-loud root-cause message, never warn-and-continue into a half-state.
+  cat > stub/gh <<'STUB'
+#!/usr/bin/env bash
+echo "gh: network error" >&2
+exit 4
+STUB
+  PIP_FAIL_INDEX=1 RETRY_SLEEP=0 run "$BIN" --major v2
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"FATAL"* ]]
+  [[ "$output" == *"no wheel means no gate"* ]]
+  # init never ran — there was no wheel to install.
+  [ ! -s "$INIT_LOG" ]
+}
+
+@test "fail-loud: the index pull is RETRIED (bounded) before the fallback kicks in" {
+  # PIP_FAIL_INDEX makes the index install fail every time; with RETRY_ATTEMPTS=3
+  # the resolver retries it 3x (the verbose retry notice fires) THEN falls back to
+  # the asset path (which succeeds), so the overall run still succeeds.
+  PIP_FAIL_INDEX=1 RETRY_ATTEMPTS=3 RETRY_SLEEP=0 run "$BIN" --major v2
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"attempt 1/3 failed"* ]]
+  [[ "$output" == *"attempt 2/3 failed"* ]]
+  [[ "$output" == *"falling back to the GitHub release-asset path"* ]]
+}
+
+@test "fail-loud: a transient index blip (fail once, then succeed) RETRIES and proceeds" {
+  # A python stub whose pip --extra-index-url fails ONLY on the first attempt
+  # (tracked via a counter file), succeeding on the retry — proves the bounded
+  # retry recovers a 1-second hiccup instead of red-alerting the session.
+  cat > stub/python3 <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$PY_LOG"
+if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then
+  d="$3"; mkdir -p "$d/bin"
+  cat > "$d/bin/python" <<INNER
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$PIP_LOG"
+case "\$*" in
+  *--extra-index-url*)
+    # Counter lives beside PIP_LOG (an EXPORTED path; \$WORK is not exported into
+    # the stub's env, so a \$WORK-based path would be empty/unwritable).
+    _c="${PIP_LOG}.idx_attempts"
+    _n=\$(( \$(cat "\$_c" 2>/dev/null || echo 0) + 1 ))
+    echo "\$_n" > "\$_c"
+    [ "\$_n" -lt 2 ] && exit 1   # fail the FIRST attempt only
+    ;;
+esac
+exit 0
+INNER
+  chmod +x "$d/bin/python"
+  for s in release-core changelog changelog-render changelog-add changelog-cut semver; do
+    cat > "$d/bin/$s" <<INNER
+#!/usr/bin/env bash
+printf '%s\n' "\$(basename "\$0") \$*" >> "$INIT_LOG"
+exit \${RELEASE_CORE_RC:-0}
+INNER
+    chmod +x "$d/bin/$s"
+  done
+fi
+exit 0
+STUB
+  chmod +x stub/python3
+  RETRY_ATTEMPTS=3 RETRY_SLEEP=0 run "$BIN" --major v2
+  [ "$status" -eq 0 ]
+  # It retried (attempt 1 failed) but then the INDEX path succeeded — so the stamp
+  # is the index provenance, NOT the asset fallback.
+  [[ "$output" == *"attempt 1/3 failed"* ]]
+  [ "$(cat "$WORK/relcore/venv/release-source.tag")" = "index v2" ]
+}
