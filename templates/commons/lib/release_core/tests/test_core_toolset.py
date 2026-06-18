@@ -54,7 +54,8 @@ def test_pin_env_override(monkeypatch):
 
 
 def test_pin_blank_env_falls_back(monkeypatch):
-    # A blank/whitespace override counts as unset (matches the shell `:-`).
+    # A blank/whitespace override counts as unset — STRICTER than shell `:-`
+    # (which only falls back for unset/empty; whitespace is "set"). pin() strips.
     monkeypatch.setenv("LEFTHOOK_VERSION", "  ")
     assert toolset.lefthook_version() == toolset._PINS["LEFTHOOK_VERSION"]
 

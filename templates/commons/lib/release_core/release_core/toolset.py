@@ -63,7 +63,9 @@ _PINS: dict[str, str] = {
 
 def pin(name: str) -> str:
     """The pinned version for ``name`` — the env override (the per-env knob),
-    else the default literal. Mirrors the shell ``${NAME:-default}``."""
+    else the default literal. Close to the shell ``${NAME:-default}`` but STRICTER:
+    the value is ``.strip()``-ed, so a whitespace-only override counts as unset
+    (shell ``:-`` falls back only for unset/empty, treating whitespace as set)."""
     val = os.environ.get(name, "").strip()
     return val or _PINS[name]
 
