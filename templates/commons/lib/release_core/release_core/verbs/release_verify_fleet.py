@@ -288,8 +288,8 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     if unexpected:
         print(
             "release-verify-fleet: UNEXPECTED failures above. Logs under "
-            f"{root}: <repo>/.verify-sync.log (sync) and "
-            "<repo>/.verify-gate.log (gate).",
+            f"{root}: <repo>/.verify-sync.log (sync), <repo>/.verify-provision.log "
+            "(deps), and <repo>/.verify-gate.log (gate).",
             file=sys.stderr,
         )
     else:

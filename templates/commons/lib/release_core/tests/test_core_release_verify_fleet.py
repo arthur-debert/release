@@ -464,3 +464,16 @@ def test_python_dash_m_release_core_runs_the_cli():
     )
     assert r.returncode == 0
     assert "release-core" in r.stdout
+
+
+def test_provision_deps_captures_output_to_log(tmp_path, monkeypatch):
+    # _provision_deps redirects dep_caches' (subprocess) output to a per-repo
+    # .verify-provision.log so it doesn't interleave with the tabular report.
+    def fake_dep_caches(p):
+        os.write(1, b"installing deps via pnpm...\n")  # fd-level, like a subprocess
+
+    monkeypatch.setattr(rvf.provision, "dep_caches", fake_dep_caches)
+    rvf._provision_deps(str(tmp_path))
+    log = tmp_path / ".verify-provision.log"
+    assert log.is_file()
+    assert "installing deps via pnpm" in log.read_text()
