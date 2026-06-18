@@ -176,14 +176,24 @@ def _resolve_full_source(repo_root: str, repo_name: str) -> tuple[sync.Source, s
     return source, kind, caps.names
 
 
-def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> list[str]:
+def _managed_paths_for_commit(
+    mirror: sync.MirrorPlan,
+    claude: sync.ClaudeDecision,
+    seeded_major: str | None = None,
+) -> list[str]:
     """The exact, repo-relative managed MIRROR pathspecs a full install produced or
     removed — the ONLY paths --commit stages (never `git add -A`).
 
     Covers: each symlink removed (swept from disk — the deletion must commit);
     each real-file copy written or removed; each retired file removed
-    (WS6, release#527); and CLAUDE.md when the header block was
-    created/injected/refreshed. Deterministic order, de-duplicated.
+    (WS6, release#527); the managed `.claude/IMPORTANT-RELEASE.md` target when
+    (re)written (WS4, #761); and the seeded `.release.major.txt` when init created
+    it (WS3, #760). Deterministic order, de-duplicated.
+
+    NOTABLY NOT ``CLAUDE.md`` (WS4, #761): the `@import` line is written to disk but
+    is NEVER staged — after insertion CLAUDE.md is 100% consumer-owned, and staging
+    it would fold the consumer's unrelated uncommitted edits into the managed
+    auto-commit. Only the managed TARGET file rides the managed commit.
 
     Notably NOT the created symlink mirrors: since WS7 (release#528) they are
     EPHEMERAL — built every init, excluded via .git/info/exclude, never
@@ -199,8 +209,15 @@ def _managed_paths_for_commit(mirror: sync.MirrorPlan, claude: sync.ClaudeDecisi
     paths.extend(mirror.copies_to_write)
     paths.extend(mirror.copies_to_remove)
     paths.extend(mirror.retired_to_remove)
-    if claude.action in ("create", "inject", "refresh"):
+    if claude.target_action == "write":
+        paths.append(sync.CLAUDE_IMPORT_TARGET)
+    # CLAUDE.md is staged ONLY on a fresh CREATE (the file is purely the managed
+    # @import line — no consumer content to fold in). An INSERT into an existing
+    # CLAUDE.md is written to disk but NEVER staged (consumer-owned).
+    if claude.import_action == "create":
         paths.append(sync.CLAUDE_FILE)
+    if seeded_major:
+        paths.append(seeded_major)
     # de-dup, preserve first-seen order
     seen: set[str] = set()
     out: list[str] = []
@@ -270,7 +287,20 @@ def _run_full_sync(
         # can add a bad job any day), dry-run included (read-only scan).
         _warn_unbuilt_workflow_refs(repo_root, mirror.mirror_dests)
 
-        claude_change = 1 if claude.action in ("create", "inject", "refresh") else 0
+        # WS3 (#760): seed `.release.major.txt` from the consumer's `@vN` pins when
+        # absent. Read-only probe here (would-seed?); the WRITE happens after the
+        # dry-run gate so --dry-run never touches the tree. ``seeded_major`` is the
+        # repo-relative path when init created the file (→ staged + committed).
+        would_seed = (
+            sync.read_release_major(repo_root) is None
+            and sync.derive_caller_major(repo_root) is not None
+        )
+
+        # The CLAUDE.md @import counts as a change when the managed TARGET is
+        # (re)written OR the import line is created/inserted into CLAUDE.md.
+        claude_change = 1 if claude.target_action == "write" else 0
+        if claude.import_action in ("create", "insert"):
+            claude_change += 1
         changes = (
             len(file_diff.added)
             + len(file_diff.modified)
@@ -282,10 +312,13 @@ def _run_full_sync(
             + len(mirror.copies_to_remove)
             + len(mirror.retired_to_remove)
             + claude_change
+            + (1 if would_seed else 0)
         )
-        managed = _managed_paths_for_commit(mirror, claude)
 
         if dry_run:
+            managed = _managed_paths_for_commit(
+                mirror, claude, sync.RELEASE_MAJOR_FILE if would_seed else None
+            )
             return changes, managed, _source_label(source), list(mirror.conflicts)
 
         # Apply: atomic `.release/` swap, then the mirror/CLAUDE.md apply phase.
@@ -296,6 +329,11 @@ def _run_full_sync(
         os.rename(tmp_release, release_dir)
         swapped = True
         _apply_mirror(mirror, claude)
+        # WS3 (#760): actually SEED `.release.major.txt` now (after the swap, in the
+        # repo root). Returns the path iff it wrote — a present file is never
+        # overwritten. Staged + committed via ``managed``.
+        seeded_major = sync.seed_release_major(repo_root)
+        managed = _managed_paths_for_commit(mirror, claude, seeded_major)
     finally:
         if not swapped:
             shutil.rmtree(tmp_release, ignore_errors=True)
@@ -435,20 +473,39 @@ def _apply_mirror(mirror: sync.MirrorPlan, claude: sync.ClaudeDecision) -> None:
     # conflict the user is told to resolve.
     _write_mirror_excludes(mirror.mirror_dests - set(mirror.conflicts))
 
-    # Write the consumer CLAUDE.md header block.
-    if claude.action in ("create", "inject", "refresh"):
-        # Atomic same-filesystem replace via a sibling temp file.
-        assert claude.desired is not None
-        fd, tmp = tempfile.mkstemp(prefix=sync.CLAUDE_FILE + ".tmp.", dir=".")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(claude.desired)
-            os.chmod(tmp, 0o644)
-            os.replace(tmp, sync.CLAUDE_FILE)
-        except BaseException:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            raise
+    # WS4 (#761): the managed orientation = a managed TARGET file
+    # (.claude/IMPORTANT-RELEASE.md) + a one-line `@import` of it in CLAUDE.md.
+    # ATOMICITY (safety rule #2): write the TARGET FIRST, then the import line —
+    # so the @import never dangles (target always exists before CLAUDE.md points
+    # at it). The target is committed by init's auto-commit; the CLAUDE.md import
+    # line is written to disk but NEVER staged (CLAUDE.md is consumer-owned).
+    if claude.target_action == "write":
+        assert claude.target_desired is not None
+        d = os.path.dirname(sync.CLAUDE_IMPORT_TARGET)
+        if d:
+            os.makedirs(d, exist_ok=True)
+        _atomic_write_text(sync.CLAUDE_IMPORT_TARGET, claude.target_desired)
+
+    if claude.import_action in ("create", "insert"):
+        assert claude.import_content is not None
+        _atomic_write_text(sync.CLAUDE_FILE, claude.import_content)
+
+
+def _atomic_write_text(path: str, content: str) -> None:
+    """Write ``content`` to ``path`` atomically (sibling temp + os.replace) at
+    0o644. Same-filesystem replace so a partially-written file is never observed
+    — the CLAUDE.md @import target and the import line both rely on this."""
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".tmp.", dir=d or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
 
 
 def _prune_empty_parents(d: str) -> None:

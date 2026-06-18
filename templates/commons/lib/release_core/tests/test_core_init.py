@@ -655,10 +655,12 @@ def test_bare_init_does_full_install_and_auto_commits(tmp_path, monkeypatch, cap
     # `.release/` temp dir (on disk) + working-tree mirrors + CLAUDE.md header block.
     assert (repo / ".release" / "bin" / "check").is_file()
     assert (repo / "bin" / "check").is_symlink()
-    # WS2 (#523): the CLAUDE.md header block is the stub pointing at the binary.
+    # WS4 (#761): CLAUDE.md is a one-line @import of the managed target file.
     claude = (repo / "CLAUDE.md").read_text()
-    assert "release-core how-to" in claude
-    assert "@.release/ORIENTATION.md" not in claude
+    assert claude.strip() == sync.CLAUDE_IMPORT_LINE
+    target = (repo / sync.CLAUDE_IMPORT_TARGET).read_text()
+    assert "release-core how-to" in target
+    assert "@.release/ORIENTATION.md" not in target
     # Auto-committed (the default) — deterministic message.
     assert "committed" in out
     subject = _git(repo, "log", "-1", "--pretty=format:%s")
@@ -667,12 +669,17 @@ def test_bare_init_does_full_install_and_auto_commits(tmp_path, monkeypatch, cap
     # WS4 (release#521): the ephemeral `.release/` temp dir is gitignored and never
     # committed. WS7 (release#528): the symlink mirrors are EPHEMERAL too —
     # installed + excluded, never tracked — so only real-file copies and the
-    # CLAUDE.md header block commit.
+    # managed CLAUDE.md @import TARGET commit.
     assert "bin/check" not in committed
     assert _git(repo, "ls-files", "bin/check") == ""
     assert _git(repo, "status", "--porcelain", "bin/check") == ""  # excluded
     assert not any(p.startswith(".release/") for p in committed)
+    # WS4 (#761): the managed @import target is committed. CLAUDE.md did not exist
+    # → init CREATED it as the pure one-line pointer, which is safe to commit (no
+    # consumer content to fold in), so the fresh-seed tree stays clean.
+    assert sync.CLAUDE_IMPORT_TARGET in committed
     assert "CLAUDE.md" in committed
+    assert (repo / "CLAUDE.md").read_text().strip() == sync.CLAUDE_IMPORT_LINE
     assert "my-feature.txt" not in committed
 
 
@@ -734,10 +741,13 @@ def test_full_installs_tree_and_symlinks(tmp_path, monkeypatch, capsys):
     # Working-tree symlinks mirrored.
     assert (repo / "bin" / "check").is_symlink()
     assert (repo / ".claude" / "skills" / "gh-pr-review-loop" / "SKILL.md").is_symlink()
-    # CLAUDE.md header block created (WS2, #523): points at the binary, no ORIENTATION.
+    # CLAUDE.md @import created (WS4, #761): a one-line pointer; the managed
+    # target file carries the orientation, points at the binary, no ORIENTATION.
     claude = (repo / "CLAUDE.md").read_text()
-    assert "release-core how-to" in claude
-    assert "@.release/ORIENTATION.md" not in claude
+    assert claude.strip() == sync.CLAUDE_IMPORT_LINE
+    target = (repo / sync.CLAUDE_IMPORT_TARGET).read_text()
+    assert "release-core how-to" in target
+    assert "@.release/ORIENTATION.md" not in target
     assert not (repo / ".release" / "ORIENTATION.md").exists()
     assert not (repo / "ORIENTATION.md").exists()
 
@@ -767,6 +777,9 @@ def test_full_auto_commits_only_managed_paths_when_changed(tmp_path, monkeypatch
     assert not any(p.startswith(".release/") for p in committed)
     assert "bin/check" not in committed
     assert _git(repo, "ls-files", "bin/check") == ""
+    # WS4 (#761): the managed @import target is committed; CLAUDE.md was created
+    # fresh as the pure pointer (safe to commit), the unrelated file is NOT.
+    assert sync.CLAUDE_IMPORT_TARGET in committed
     assert "CLAUDE.md" in committed
     assert "my-feature.txt" not in committed
     assert _git(repo, "status", "--porcelain", "my-feature.txt") == "?? my-feature.txt"
@@ -1221,12 +1234,14 @@ def test_full_removes_retired_files_in_managed_commit(tmp_path, monkeypatch, cap
 @_needs_yq
 @_needs_git
 def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch, capsys):
-    """release#563: a pre-WS4 seed TRACKS .release/ORIENTATION.md (stale,
-    rule-contradicting) and carries the OLD @.release/ORIENTATION.md
-    CLAUDE.md import. One bare init converges BOTH: the install removes the
+    """release#563 + WS4 (#761): a pre-WS4 seed TRACKS .release/ORIENTATION.md
+    (stale, rule-contradicting) and carries the OLD @.release/ORIENTATION.md
+    spliced CLAUDE.md block. One bare init converges: the install removes the
     on-disk copy and never re-builds it, the retired-file removal + WS4 untracking
-    record the deletion, and the stub refresh rewrites the managed block to
-    the how-to-pointing form. The second init is a no-op."""
+    record the deletion, the managed @import TARGET is written + committed, and
+    CLAUDE.md is migrated off the spliced block to the one-line @import — but
+    CLAUDE.md is left UNSTAGED (consumer-owned), so the consumer's own edit lands
+    on their next commit, never folded into the managed sync."""
     src = _full_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
@@ -1252,12 +1267,24 @@ def test_full_converges_pre_pull_seed_orientation_and_stub(tmp_path, monkeypatch
     assert not orientation.exists()
     # Untracked — the deletion is recorded, not resurrected by the pathspec commit.
     assert _git(repo, "ls-files", ".release/ORIENTATION.md") == ""
-    # The stub converged to the how-to-pointing form; consumer prose survives.
+    # CLAUDE.md migrated to the one-line @import; consumer prose survives; the
+    # spliced block is gone.
     claude = (repo / "CLAUDE.md").read_text()
-    assert "release-core how-to" in claude
+    assert claude.startswith(sync.CLAUDE_IMPORT_LINE)
+    assert init.sync.CLAUDE_BEGIN not in claude
     assert "@.release/ORIENTATION.md" not in claude
     assert "# Consumer" in claude
-    assert _git(repo, "status", "--porcelain") == ""
+    # The managed @import TARGET file was committed; CLAUDE.md was NOT staged into
+    # the managed commit (consumer-owned) — so it shows as a pending modification.
+    committed = set(_git(repo, "show", "--name-only", "--pretty=format:", "HEAD").split())
+    assert sync.CLAUDE_IMPORT_TARGET in committed
+    assert "CLAUDE.md" not in committed
+    # CLAUDE.md is modified in the worktree but UNSTAGED (consumer-owned).
+    claude_status = _git(repo, "status", "--porcelain", "CLAUDE.md")
+    assert claude_status.endswith("CLAUDE.md")
+    assert claude_status.lstrip().startswith("M")  # worktree-modified, not staged
+    # Nothing else dangling (the orientation removal is fully recorded).
+    assert _git(repo, "status", "--porcelain", ".release/ORIENTATION.md") == ""
 
     # Idempotent: nothing left to converge.
     head = _git(repo, "rev-parse", "HEAD")

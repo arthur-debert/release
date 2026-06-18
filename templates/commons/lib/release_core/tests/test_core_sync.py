@@ -844,109 +844,92 @@ def test_compute_mirror_non_skill_real_file_still_conflicts(tmp_path):
     assert not mp.symlinks_to_create
 
 
-# ── CLAUDE.md header block ────────────────────────────────────────────────────
+# ── CLAUDE.md @import (WS4, #761) ─────────────────────────────────────────────
 
 
-def test_claude_desired_creates_block_only_when_no_file(tmp_path):
-    desired = sync.claude_desired(str(tmp_path))
-    # WS2 (#523): the block is the stub pointing at the binary, not an ORIENTATION import.
-    assert desired == (f"{sync.CLAUDE_BEGIN}\n{sync.CLAUDE_STUB_BODY}\n{sync.CLAUDE_END}\n")
-    assert "release-core how-to" in desired
-    assert "@.release/ORIENTATION.md" not in desired
+def _release_managed_decision(tmp_path):
+    tmp_release = tmp_path / "tmpbuild"
+    if not tmp_release.exists():
+        tmp_release.mkdir()
+    return sync.decide_claude(str(tmp_path), str(tmp_release))
 
 
-def test_claude_desired_preserves_existing_content(tmp_path):
+def test_decide_claude_no_file_creates_pointer_and_target(tmp_path):
+    # No CLAUDE.md, no target → write the target AND insert the one-line @import.
+    d = _release_managed_decision(tmp_path)
+    assert d.target_action == "write"
+    assert d.target_desired == sync.CLAUDE_IMPORT_BODY
+    assert "release-core how-to" in d.target_desired
+    # No CLAUDE.md → CREATE it as the pure pointer (safe to stage).
+    assert d.import_action == "create"
+    assert d.import_content == f"{sync.CLAUDE_IMPORT_LINE}\n"
+
+
+def test_decide_claude_preserves_existing_consumer_content(tmp_path):
+    # A consumer CLAUDE.md with no managed bits → prepend the @import line,
+    # keeping all consumer content verbatim below it.
     (tmp_path / "CLAUDE.md").write_text("# Proj\n\nmine\n")
-    desired = sync.claude_desired(str(tmp_path))
-    assert desired.startswith(sync.CLAUDE_BEGIN)
-    assert "# Proj" in desired
-    assert "mine" in desired
-    # Block, blank line, then content.
-    assert f"{sync.CLAUDE_END}\n\n# Proj" in desired
+    d = _release_managed_decision(tmp_path)
+    assert d.import_action == "insert"
+    assert d.import_content == f"{sync.CLAUDE_IMPORT_LINE}\n\n# Proj\n\nmine\n"
 
 
-def test_claude_desired_strips_prior_block_idempotent(tmp_path):
-    p = tmp_path / "CLAUDE.md"
-    first = sync.claude_desired(str(tmp_path))
-    p.write_text(first)
-    # Feeding its own output back yields a byte-identical file.
-    assert sync.claude_desired(str(tmp_path)) == first
+def test_decide_claude_import_present_is_noop(tmp_path):
+    # CLAUDE.md already imports the target AND the managed target file already
+    # carries the current body → nothing to do.
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / sync.CLAUDE_IMPORT_TARGET).write_text(sync.CLAUDE_IMPORT_BODY)
+    (tmp_path / "CLAUDE.md").write_text(f"{sync.CLAUDE_IMPORT_LINE}\n\n# Proj\n")
+    d = _release_managed_decision(tmp_path)
+    assert d.target_action == "none"
+    assert d.import_action == "none"
 
 
-def test_claude_desired_strips_stale_block_and_refreshes(tmp_path):
-    p = tmp_path / "CLAUDE.md"
-    # An old consumer's block imported @.release/ORIENTATION.md — it must be
-    # stripped and refreshed to the stub, not duplicated.
+def test_decide_claude_target_refreshes_when_body_drifts(tmp_path):
+    # The @import line is present but the managed target is stale → rewrite the
+    # target, leave CLAUDE.md alone (its import line is already correct).
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / sync.CLAUDE_IMPORT_TARGET).write_text("# stale managed body\n")
+    (tmp_path / "CLAUDE.md").write_text(f"{sync.CLAUDE_IMPORT_LINE}\n")
+    d = _release_managed_decision(tmp_path)
+    assert d.target_action == "write"
+    assert d.target_desired == sync.CLAUDE_IMPORT_BODY
+    assert d.import_action == "none"
+
+
+def test_decide_claude_strips_pre_ws4_spliced_block(tmp_path):
+    # An already-seeded consumer still carrying the pre-WS4 BEGIN..END block:
+    # strip the block, prepend the one-line @import, preserve consumer content.
     old = f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
-    p.write_text(f"{old}\n# Proj\n\nmine\n")
-    desired = sync.claude_desired(str(tmp_path))
-    assert "release-core how-to" in desired
-    assert "@.release/ORIENTATION.md" not in desired
-    assert "# Proj" in desired
-    assert desired.count(sync.CLAUDE_BEGIN) == 1
+    (tmp_path / "CLAUDE.md").write_text(f"{old}\n# Proj\n\nmine\n")
+    d = _release_managed_decision(tmp_path)
+    assert d.import_action == "insert"
+    assert d.import_content is not None
+    assert sync.CLAUDE_BEGIN not in d.import_content
+    assert sync.CLAUDE_END not in d.import_content
+    assert d.import_content.startswith(f"{sync.CLAUDE_IMPORT_LINE}\n")
+    assert "# Proj" in d.import_content
+    assert d.import_content.count(sync.CLAUDE_IMPORT_LINE) == 1
 
 
-def test_claude_refresh_converges_from_both_historical_forms(tmp_path):
-    """release#563: every init must rewrite the managed block to the current
-    how-to-pointing stub regardless of WHICH historical form it finds — the
-    @.release/ORIENTATION.md import form (padz/phos-app seeds, including the
-    blank-line variant) and any older inlined-prose body. (The legacy-marker
-    form is covered by test_claude_legacy_marker_is_rewritten_not_duplicated.)"""
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    p = tmp_path / "CLAUDE.md"
-    stub = sync.claude_desired(str(tmp_path))  # no CLAUDE.md yet → the bare stub
-
-    historical_blocks = [
-        # the import form (padz seed)
-        f"{sync.CLAUDE_BEGIN}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n",
-        # the import form with a blank line inside the block (phos-app seed)
-        f"{sync.CLAUDE_BEGIN}\n\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n",
-        # an older inlined-prose body
-        (
-            f"{sync.CLAUDE_BEGIN}\n"
-            "Open a live PR (never a draft — stale pre-#456 rule).\n"
-            f"{sync.CLAUDE_END}\n"
-        ),
-    ]
-    for block in historical_blocks:
-        p.write_text(f"{block}\n# Proj\n\nmine\n")
-        decision = sync.decide_claude(str(tmp_path), str(tmp_release))
-        assert decision.action == "refresh", block
-        assert decision.desired is not None
-        assert decision.desired.startswith(stub)
-        assert "@.release/ORIENTATION.md" not in decision.desired
-        assert "never a draft" not in decision.desired
-        assert "release-core how-to" in decision.desired
-        assert "# Proj" in decision.desired
-        assert decision.desired.count(sync.CLAUDE_BEGIN) == 1
-        # Convergence is a fixpoint: applying the refresh ends the loop.
-        p.write_text(decision.desired)
-        assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
-
-
-def test_claude_legacy_marker_is_rewritten_not_duplicated(tmp_path):
-    """De-jargon (#655): the BEGIN marker moved from 'managed by release-sync' to
-    'managed by release-core'. An already-seeded consumer whose CLAUDE.md still
-    opens with the legacy marker must be RECOGNIZED (so the block is rewritten to
-    the current marker), never have a second block injected above it."""
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    p = tmp_path / "CLAUDE.md"
+def test_decide_claude_strips_legacy_marker_block(tmp_path):
     legacy = f"{sync.CLAUDE_BEGIN_LEGACY}\n@.release/ORIENTATION.md\n{sync.CLAUDE_END}\n"
-    p.write_text(f"{legacy}\n# Proj\n\nmine\n")
+    (tmp_path / "CLAUDE.md").write_text(f"{legacy}\n# Proj\n")
+    d = _release_managed_decision(tmp_path)
+    assert d.import_action == "insert"
+    assert d.import_content is not None
+    assert sync.CLAUDE_BEGIN_LEGACY not in d.import_content
+    assert d.import_content.startswith(f"{sync.CLAUDE_IMPORT_LINE}\n")
+    assert "# Proj" in d.import_content
 
-    decision = sync.decide_claude(str(tmp_path), str(tmp_release))
-    assert decision.action == "refresh"  # recognized, not "inject"
-    assert decision.desired is not None
-    # Rewritten to the new marker; the legacy line is gone; no duplicate block.
-    assert decision.desired.count(sync.CLAUDE_BEGIN) == 1
-    assert sync.CLAUDE_BEGIN_LEGACY not in decision.desired
-    assert "release-core how-to" in decision.desired
-    assert "# Proj" in decision.desired
-    # Applying the refresh is a fixpoint — the next init is a no-op.
-    p.write_text(decision.desired)
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
+
+def test_decide_claude_skip_symlink(tmp_path):
+    (tmp_path / "real.md").write_text("x\n")
+    os.symlink("real.md", str(tmp_path / "CLAUDE.md"))
+    d = _release_managed_decision(tmp_path)
+    # CLAUDE.md is a symlink → never touch it; the managed target still writes.
+    assert d.import_action == "skip-symlink"
+    assert d.target_action == "write"
 
 
 def test_no_orientation_file_anywhere_in_the_template_source():
@@ -968,46 +951,55 @@ def test_no_orientation_file_anywhere_in_the_template_source():
     assert offenders == []
 
 
-def test_decide_claude_unconditional_no_orientation_gate(tmp_path):
-    # WS2 (#523): the stub block is unconditional — no ORIENTATION.md needs to be
-    # installed for the header block to be created (the old gate is gone).
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()  # no ORIENTATION.md
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "create"
+# ── .release.major.txt seeder (WS3, #760) ─────────────────────────────────────
 
 
-def test_decide_claude_create(tmp_path):
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "create"
+def test_derive_caller_major_picks_highest(tmp_path):
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "release.yml").write_text("uses: arthur-debert/release/.github/workflows/x.yml@v2\n")
+    (wf / "stack.yml").write_text(
+        "uses: arthur-debert/release/.github/actions/arm-gate@v3\n"
+        "uses: arthur-debert/release/.github/workflows/y.yml@v1\n"
+    )
+    assert sync.derive_caller_major(str(tmp_path)) == "3"
 
 
-def test_decide_claude_skip_symlink(tmp_path):
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    (tmp_path / "real.md").write_text("x\n")
-    os.symlink("real.md", str(tmp_path / "CLAUDE.md"))
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "skip-symlink"
+def test_derive_caller_major_none_without_workflows(tmp_path):
+    assert sync.derive_caller_major(str(tmp_path)) is None
 
 
-def test_decide_claude_inject_vs_refresh(tmp_path):
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    claude = tmp_path / "CLAUDE.md"
-    # No managed marker → inject.
-    claude.write_text("# Proj\n")
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "inject"
-    # Has a (stale) managed marker → refresh.
-    claude.write_text(f"{sync.CLAUDE_BEGIN}\n@.release/STALE.md\n{sync.CLAUDE_END}\n")
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "refresh"
+def test_seed_release_major_writes_when_absent(tmp_path):
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "release.yml").write_text("uses: arthur-debert/release/.github/workflows/x.yml@v3\n")
+    written = sync.seed_release_major(str(tmp_path))
+    assert written == sync.RELEASE_MAJOR_FILE
+    assert (tmp_path / sync.RELEASE_MAJOR_FILE).read_text() == "3\n"
 
 
-def test_decide_claude_none_when_already_synced(tmp_path):
-    tmp_release = tmp_path / "tmpbuild"
-    tmp_release.mkdir()
-    claude = tmp_path / "CLAUDE.md"
-    claude.write_text(sync.claude_desired(str(tmp_path)))
-    assert sync.decide_claude(str(tmp_path), str(tmp_release)).action == "none"
+def test_seed_release_major_does_not_overwrite_present_file(tmp_path):
+    # A present file is the single source of truth — never overwritten, even if
+    # the @vN pins would derive a different major.
+    (tmp_path / sync.RELEASE_MAJOR_FILE).write_text("2\n")
+    wf = tmp_path / ".github" / "workflows"
+    wf.mkdir(parents=True)
+    (wf / "release.yml").write_text("uses: arthur-debert/release/.github/workflows/x.yml@v3\n")
+    assert sync.seed_release_major(str(tmp_path)) is None
+    assert (tmp_path / sync.RELEASE_MAJOR_FILE).read_text() == "2\n"
+
+
+def test_seed_release_major_noop_when_no_major_derivable(tmp_path):
+    # No workflows dir / no @vN caller → nothing to seed (bootstrap falls back to
+    # releases/latest); the file is left unwritten.
+    assert sync.seed_release_major(str(tmp_path)) is None
+    assert not (tmp_path / sync.RELEASE_MAJOR_FILE).exists()
+
+
+def test_read_release_major_roundtrip(tmp_path):
+    assert sync.read_release_major(str(tmp_path)) is None
+    (tmp_path / sync.RELEASE_MAJOR_FILE).write_text(" 3 \n")
+    assert sync.read_release_major(str(tmp_path)) == "3"
 
 
 # ── file diff ─────────────────────────────────────────────────────────────────

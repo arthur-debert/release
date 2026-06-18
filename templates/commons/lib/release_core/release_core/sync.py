@@ -15,10 +15,12 @@ that pin each bash construct.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 
 from . import gh
@@ -233,32 +235,138 @@ GITIGNORE_BODY = (
     "*\n"
 )
 
+# ── `.release.major.txt` — the release-core LOGIC-version source of truth ──────
+#
+# WS3 (release#760): the committed single source for the release-core MAJOR line.
+# This is one of the two version axes (proposal §"two version axes"):
+#   - `.release.major.txt`  = release-core LOGIC version (FREQUENT; migrate = edit 1 file).
+#   - `uses: …@vN`          = workflow STRUCTURE version (RARE).
+# The bootstrap reads this file offline (`cat`) to know which wheel major to pull;
+# the reusable workflow reads it from the consumer checkout (WS7). `init` SEEDS it
+# when absent — derived from the consumer's `@vN` thin-caller pins — and thereafter
+# it is authoritative (a present file is never overwritten). This makes the
+# migration self-healing: one pull seeds the file, no consumer coordination.
+RELEASE_MAJOR_FILE = ".release.major.txt"
+# The release repo whose `@vN` pins declare the consumer's major (mirrors the
+# bootstrap's REPO default). Used only by the transitional derive fallback.
+RELEASE_REPO = "arthur-debert/release"
+_CALLER_MAJOR_RE = re.compile(re.escape(RELEASE_REPO) + r"/[^@\"']*@v([0-9]+)")
+
+
+def derive_caller_major(repo_root: str) -> str | None:
+    """The release-core MAJOR line declared by this repo's `@vN` thin callers.
+
+    Python port of the bootstrap shell's ``derive_caller_major`` (release#551):
+    ``uses: <repo>/...@vN`` in ``.github/workflows/`` IS the consumer's pin
+    declaration. The HIGHEST major wins — consumers legitimately mix lines (the
+    copilot-review.yml caller stayed @v1 while the stack workflows moved on), and
+    a mid-migration repo should follow the line it is moving TO. Returns the
+    bare integer string ("3") or None when there is no workflows dir / no match.
+
+    This is the transitional FALLBACK used to SEED ``.release.major.txt`` (and, in
+    the bootstrap, to derive the major when the file is still absent). Removed in
+    WS8 once the fleet carries the file.
+    """
+    wf_dir = os.path.join(repo_root, ".github", "workflows")
+    if not os.path.isdir(wf_dir):
+        return None
+    majors: set[int] = set()
+    for dirpath, _dirs, files in os.walk(wf_dir):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            try:
+                with open(path, encoding="utf-8", errors="replace") as fh:
+                    text = fh.read()
+            except OSError:
+                continue
+            for m in _CALLER_MAJOR_RE.finditer(text):
+                majors.add(int(m.group(1)))
+    if not majors:
+        return None
+    return str(max(majors))
+
+
+def read_release_major(repo_root: str) -> str | None:
+    """The committed major from ``.release.major.txt``, or None when absent.
+
+    The file is one line — the bare major integer (e.g. "3"). Trailing
+    whitespace/newline tolerated. A blank or absent file → None.
+    """
+    path = os.path.join(repo_root, RELEASE_MAJOR_FILE)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip() or None
+    except OSError:
+        return None
+
+
+def seed_release_major(repo_root: str) -> str | None:
+    """SEED ``.release.major.txt`` when ABSENT, deriving the major from the
+    consumer's `@vN` pins. Returns the repo-relative path when the file was
+    WRITTEN (so init can stage + commit it), else None.
+
+    A PRESENT file is the single source of truth and is NEVER overwritten — once
+    seeded, migrating the release-core logic version is "edit this one file". When
+    no major can be derived (no workflows dir / no `@vN` caller, e.g. a brand-new
+    repo) the file is left unwritten and the bootstrap falls back to
+    ``releases/latest`` — today's behavior.
+    """
+    if read_release_major(repo_root) is not None:
+        return None
+    major = derive_caller_major(repo_root)
+    if major is None:
+        return None
+    path = os.path.join(repo_root, RELEASE_MAJOR_FILE)
+    # Atomic same-dir replace; the file is a one-line bare integer + newline.
+    fd, tmp = tempfile.mkstemp(prefix=RELEASE_MAJOR_FILE + ".tmp.", dir=repo_root)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(f"{major}\n")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(tmp)
+        raise
+    return RELEASE_MAJOR_FILE
+
+
 CLAUDE_FILE = "CLAUDE.md"
-CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-core; do not edit -->"
-# The pre-de-jargon BEGIN marker an already-seeded consumer carries. The block is
-# located by EITHER marker (see _has_claude_begin) so an existing consumer whose
-# CLAUDE.md still opens with this legacy line is RECOGNIZED and REWRITTEN to the
-# CLAUDE_BEGIN above on its next init — never duplicated.
-CLAUDE_BEGIN_LEGACY = (
-    "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
-)
-CLAUDE_END = "<!-- END release-managed orientation -->"
-# WS2 (release#523): the managed block is a small header block (~7 lines)
-# pointing at the CLI — `release-core how-to` is the single source of orientation
-# (kind-aware, renders the dev cycle), so there is no synced ORIENTATION.md to
-# fall out of sync (discovery is the CLI, not docs). The block is located by the
-# BEGIN marker (current OR legacy — see _has_claude_begin), so an existing
-# consumer's block (which imported @.release/ORIENTATION.md) is recognized and
-# REFRESHED to this stub, not duplicated.
-CLAUDE_STUB_BODY = (
+# WS4 (release#761): the managed orientation no longer SPLICES a BEGIN..END block
+# into the consumer's CLAUDE.md. Instead init emits a managed target file —
+# `.claude/IMPORTANT-RELEASE.md` — carrying the header content, and ensures
+# CLAUDE.md @imports it with a ONE-LINE pointer. After insertion CLAUDE.md is 100%
+# consumer-owned: the header rides the pull via the managed target, never by
+# re-editing CLAUDE.md. The atomicity rule (proposal §"Three load-bearing safety
+# rules" #2): the @import line and its target land TOGETHER — a dangling @import
+# (target missing) breaks CLAUDE.md loading — and init NEVER re-stages CLAUDE.md
+# (which would fold the consumer's uncommitted edits into the managed auto-commit).
+CLAUDE_IMPORT_TARGET = ".claude/IMPORTANT-RELEASE.md"
+CLAUDE_IMPORT_LINE = f"@{CLAUDE_IMPORT_TARGET}"
+# The header content, now living in the managed target file (was CLAUDE_STUB_BODY,
+# spliced into CLAUDE.md pre-WS4). `release-core how-to` remains the single source
+# of orientation; this file just points at it.
+CLAUDE_IMPORT_BODY = (
+    "# Release-managed orientation\n"
+    "\n"
+    "<!-- Managed by release-core; do not edit. Regenerate via release-core init. -->\n"
+    "\n"
     "This repo's quality gate, build, release, and PR/dev flow are provided by\n"
     "`release-core` (installed at session start; not stored in this repo).\n"
     "\n"
     "- **Start here:** run `release-core how-to` — the task playbook for *this* repo\n"
     "  (its dev cycle, incl. coordinating a complex / multi-PR feature with subagents).\n"
     "- Reference: `release-core --help`, `release-core <cmd> --help`, `release-core detect-kind`.\n"
-    "- Quality gate (run every loop, after `git add`): `release-core gate`."
+    "- Quality gate (run every loop, after `git add`): `release-core gate`.\n"
 )
+# Pre-WS4 markers an already-seeded consumer may still carry in CLAUDE.md (the
+# spliced BEGIN..END block). On the next init the block is STRIPPED and replaced by
+# the one-line @import — recognized via either marker, never duplicated.
+CLAUDE_BEGIN = "<!-- BEGIN release-managed orientation — managed by release-core; do not edit -->"
+CLAUDE_BEGIN_LEGACY = (
+    "<!-- BEGIN release-managed orientation — managed by release-sync; do not edit -->"
+)
+CLAUDE_END = "<!-- END release-managed orientation -->"
 
 # ── Skill distribution catalogs ──────────────────────────────────────────────
 #
@@ -1350,32 +1458,102 @@ def _has_fingerprint_header(path: str, needle: str) -> bool:
     return any(line.startswith(f"# {needle}") for line in head)
 
 
-# ── CLAUDE.md header block (#348) ─────────────────────────────────────────────
+# ── CLAUDE.md @import (#348, WS4 #761) ────────────────────────────────────────
+#
+# The orientation is delivered as a managed TARGET file
+# (`.claude/IMPORTANT-RELEASE.md`) plus a one-line `@import` of it in CLAUDE.md —
+# replacing the pre-WS4 splice that injected a BEGIN..END block into CLAUDE.md.
+# Two parts, with strict ownership:
+#   - target_action  → write/none for `.claude/IMPORTANT-RELEASE.md` (MANAGED,
+#                      committed by init's auto-commit, refreshed on the pull).
+#   - import_action  → insert/none for the CLAUDE.md `@import` line. init writes
+#                      the line to disk when absent (so loading works) but NEVER
+#                      stages/commits CLAUDE.md — after insertion CLAUDE.md is 100%
+#                      consumer-owned; folding it into the managed commit would
+#                      drag in the consumer's unrelated uncommitted edits.
+# Atomicity (safety rule #2): _apply_mirror writes the target file AND the import
+# line together, target first — there is never a window with a dangling @import.
 
 
-def claude_desired(repo_root: str) -> str:
-    """Mirror claude_desired(): the managed header block at the top, then the
-    consumer's existing content (with any prior managed block stripped, leading
-    blanks trimmed) below it. Reads $CLAUDE_FILE; returns the candidate content."""
-    rest = ""
+@dataclass
+class ClaudeDecision:
+    # The managed target file `.claude/IMPORTANT-RELEASE.md`:
+    #   write → (re)write it (content in ``target_desired``); none → already current.
+    target_action: str = "none"  # write | none
+    target_desired: str | None = None
+    # The CLAUDE.md `@import` line:
+    #   create → CLAUDE.md is ABSENT: write it as the pure one-line pointer. Safe
+    #            to STAGE (no consumer content to fold in — it IS 100% the managed
+    #            line), so the fresh-seed tree stays clean.
+    #   insert → CLAUDE.md EXISTS: strip any pre-WS4 managed block, then prepend the
+    #            one line. Written to disk but NEVER staged — CLAUDE.md is
+    #            consumer-owned, and staging would fold in the consumer's unrelated
+    #            uncommitted edits.
+    #   none   → the @import line is already present.
+    #   skip-symlink → CLAUDE.md is a symlink, leave it alone.
+    import_action: str = "none"  # create | insert | none | skip-symlink
+    import_content: str | None = None  # the full CLAUDE.md bytes to write
+
+
+def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
+    """Decide the managed target write + the CLAUDE.md `@import` insertion.
+
+    ``tmp_release`` is unused (kept for signature stability). The managed target
+    file always carries the current header; the `@import` line is inserted into
+    CLAUDE.md only when it is not already present (an existing line is left
+    untouched — CLAUDE.md is consumer-owned once seeded).
+    """
+    # 1. The managed target file: write iff content differs from what's on disk.
+    target_path = os.path.join(repo_root, CLAUDE_IMPORT_TARGET)
+    target_action = "none"
+    if not os.path.isfile(target_path) or _read_text(target_path) != CLAUDE_IMPORT_BODY:
+        target_action = "write"
+
+    decision = ClaudeDecision(
+        target_action=target_action,
+        target_desired=CLAUDE_IMPORT_BODY if target_action == "write" else None,
+    )
+
+    # 2. The CLAUDE.md `@import` line.
     claude_path = os.path.join(repo_root, CLAUDE_FILE)
-    if os.path.isfile(claude_path) and not os.path.islink(claude_path):
-        rest = _strip_managed_block(claude_path)
+    if os.path.islink(claude_path):
+        decision.import_action = "skip-symlink"
+        return decision
 
-    out = f"{CLAUDE_BEGIN}\n{CLAUDE_STUB_BODY}\n{CLAUDE_END}\n"
+    if not os.path.lexists(claude_path):
+        # No CLAUDE.md yet → create it as the one-line pointer. This file IS the
+        # managed line (no consumer content), so it is safe to stage+commit — the
+        # fresh-seed tree stays clean.
+        decision.import_action = "create"
+        decision.import_content = f"{CLAUDE_IMPORT_LINE}\n"
+        return decision
+
+    existing = _read_text(claude_path)
+    if _has_import_line(existing) and not _has_claude_begin(existing):
+        # Already a clean pointer + consumer content; nothing to do.
+        decision.import_action = "none"
+        return decision
+
+    # Present but missing the import line (or still carrying a pre-WS4 spliced
+    # block): strip any managed block, then PREPEND the one-line @import.
+    if _has_claude_begin(existing):
+        rest = _strip_managed_block_text(existing)
+    else:
+        rest = existing.rstrip("\n")
+    content = f"{CLAUDE_IMPORT_LINE}\n"
     if rest:
-        out += f"\n{rest}\n"
-    return out
+        content += f"\n{rest}\n"
+    decision.import_action = "insert"
+    decision.import_content = content
+    return decision
 
 
-def _strip_managed_block(path: str) -> str:
-    """Mirror the awk(strip BEGIN..END block) | sed('/./,$!d')(drop leading blank
-    lines). The awk skips lines from the one containing BEGIN through the one
-    containing END (inclusive), printing the rest; sed then deletes leading blank
-    lines. Returns the result WITHOUT a trailing newline (matches `$(...)`)."""
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        lines = fh.read().split("\n")
-    # The file content split on '\n'; a trailing newline yields a final ''.
+def _strip_managed_block_text(text: str) -> str:
+    """Strip a pre-WS4 spliced BEGIN..END managed block from CLAUDE.md text,
+    dropping leading blank lines, returning the rest WITHOUT a trailing newline.
+    Used to migrate an already-seeded consumer off the old splice onto the
+    one-line @import."""
+    lines = text.split("\n")
     kept: list[str] = []
     skip = False
     for line in lines:
@@ -1385,44 +1563,21 @@ def _strip_managed_block(path: str) -> str:
             kept.append(line)
         if CLAUDE_END in line:
             skip = False
-    # sed '/./,$!d' deletes leading blank lines (until the first non-blank).
     while kept and kept[0] == "":
         kept.pop(0)
-    # The command substitution $(...) strips trailing newlines; rejoin then strip.
     return "\n".join(kept).rstrip("\n")
 
 
-@dataclass
-class ClaudeDecision:
-    action: str  # none | create | inject | refresh | skip-symlink
-    desired: str | None = None  # the candidate content (None for none/skip)
-
-
-def decide_claude(repo_root: str, tmp_release: str) -> ClaudeDecision:
-    """The `--- CLAUDE.md header block ---` decision. The managed block is the
-    unconditional stub (WS2, release#523) — it points at `release-core how-to` and
-    no longer depends on an installed ORIENTATION.md, so there is no content gate.
-    ``tmp_release`` is unused now (kept for signature stability)."""
-    claude_path = os.path.join(repo_root, CLAUDE_FILE)
-    if os.path.islink(claude_path):
-        return ClaudeDecision("skip-symlink")
-
-    desired = claude_desired(repo_root)
-    if not os.path.lexists(claude_path):
-        return ClaudeDecision("create", desired)
-    existing = _read_text(claude_path)
-    if existing == desired:
-        return ClaudeDecision("none", desired)
-    if _has_claude_begin(existing):
-        return ClaudeDecision("refresh", desired)
-    return ClaudeDecision("inject", desired)
+def _has_import_line(text: str) -> bool:
+    """True iff CLAUDE.md already imports the managed target — the verbatim
+    `@.claude/IMPORTANT-RELEASE.md` line appears (as its own line)."""
+    return any(line.strip() == CLAUDE_IMPORT_LINE for line in text.split("\n"))
 
 
 def _has_claude_begin(text: str) -> bool:
-    """True iff ``text`` carries the managed-block BEGIN marker — the current
-    CLAUDE_BEGIN OR the legacy CLAUDE_BEGIN_LEGACY. Recognizing the legacy line is
-    what lets an already-seeded consumer's block be REWRITTEN to the current
-    marker on the next init rather than a second block injected above it."""
+    """True iff ``text`` carries a pre-WS4 managed-block BEGIN marker — the
+    CLAUDE_BEGIN OR the legacy CLAUDE_BEGIN_LEGACY. Used only to migrate an
+    existing spliced block onto the one-line @import."""
     return CLAUDE_BEGIN in text or CLAUDE_BEGIN_LEGACY in text
 
 
