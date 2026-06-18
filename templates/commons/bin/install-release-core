@@ -190,7 +190,10 @@ if [ -z "$MAJOR" ] && [ -z "$FROM_SOURCE" ] && [ -f .release.major.txt ]; then
   _file_major="$(tr -d '[:space:]' < .release.major.txt)"
   if [ -n "$_file_major" ]; then
     MAJOR="v${_file_major}"
-    echo "install-release-core: pinned to major line $MAJOR (from .release.major.txt)" >&2
+    # --print-url is a resolve-only probe: emit ONLY the constraint, nothing else
+    # (callers + the bats contract treat its output as machine-readable). Keep the
+    # human "pinned to" note for the real install path.
+    [ "$PRINT_URL" -eq 1 ] || echo "install-release-core: pinned to major line $MAJOR (from .release.major.txt)" >&2
   fi
 fi
 
