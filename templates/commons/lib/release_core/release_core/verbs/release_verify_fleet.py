@@ -25,16 +25,20 @@ re-cloned rather than protected, so a reused fixed root can no longer rot into
 This is the "checkout all repos, release-sync them, try to commit" idea:
 real consumer files (the genuine edge cases), zero synthetic fixtures.
 
-The tool owns the expected-FAIL classification (#594): the hermetic clones
-carry no project toolchain (no `npm install` — out of scope by design), so a
-gate FAIL whose failed checks are ALL project-toolchain ones (eslint /
-prettier / typecheck; see release_core.classify) is an expected toolchain
-artifact, reported as such and NOT a failure exit. A repo whose expected FAIL
-has an environmental cause the sweep can't satisfy (a sibling checkout)
-carries an `expect-verify-fail: <reason>` annotation in managed-repos.yaml;
-an annotated repo that PASSES is flagged STALE (shrink-only ratchet — remove
-the annotation). The operator only sees deviations: logs and a non-zero exit
-are reserved for UNEXPECTED failures.
+PROVISION, then gate (release#772 follow-up): release IS the provisioning
+authority, so the sweep INSTALLS each consumer's project deps
+(`provision.dep_caches` — npm/pnpm/yarn/cargo/go/bundle) BEFORE running the gate,
+exactly as a real boot does. It does NOT run the gate on a dep-less tree and
+then blame the consumer. The ONLY honest non-result is a SKIP: when a NEEDED
+toolchain is genuinely absent in THIS environment (no `npm` to install node
+deps), the repo is "skipped (no <tool> to provision)" — never a false red, never
+a laundered "artifact". Once provisioned, a gate FAIL is a REAL failure.
+
+A repo whose gate needs an environmental cause the sweep still can't satisfy (a
+sibling REPO checkout, not deps) carries an `expect-verify-fail: <reason>`
+annotation in managed-repos.yaml; an annotated repo that PASSES is flagged STALE
+(shrink-only ratchet — remove the annotation). The operator only sees
+deviations: logs and a non-zero exit are reserved for UNEXPECTED failures.
 
 Usage:
   release-verify-fleet [--ref <ref>] [--root <dir>] [--only <owner/name,...>]
@@ -47,9 +51,10 @@ Usage:
   --only <list>   restrict to a comma-separated subset of owner/name.
 
 Exit codes:
-  0  — no unexpected failures (expected-artifact FAILs are classified, not red)
-  1  — at least one UNEXPECTED failure (missing clone, sync FAIL, or a gate
-       FAIL that doesn't classify as an expected toolchain artifact)
+  0  — no unexpected failures (annotated-expected FAILs + un-provisionable SKIPs
+       are classified, not red)
+  1  — at least one UNEXPECTED failure (missing clone, sync FAIL, or a gate FAIL
+       on a PROVISIONED tree that carries no expect-verify-fail annotation)
   2  — setup/dependency error
   64 — bad usage
 """
@@ -60,7 +65,7 @@ import os
 import shutil
 import sys
 
-from .. import classify, gh, proc
+from .. import gh, proc, provision
 from . import managed_repos
 
 # Re-invoke THIS package's CLI in a subprocess: same interpreter, same env, same
@@ -208,6 +213,7 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     print("repo\tkind\tsync\tgate")
     n_pass = 0
     n_expected = 0
+    n_skipped = 0
     unexpected = 0
     stale: list[str] = []
     seen = 0
@@ -240,6 +246,19 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
             unexpected += 1
             continue
 
+        # PROVISION the consumer's deps BEFORE gating: release IS the provisioning
+        # authority, so the pre-flight installs what the gate needs (npm/pnpm/cargo/
+        # …) instead of running the gate on a dep-less tree and blaming the consumer
+        # (release#772 follow-up). Only when a NEEDED toolchain is genuinely absent
+        # in this environment do we SKIP-with-reason — never a false red, never a
+        # laundered "artifact".
+        unprovisionable = provision.unprovisionable_stacks(abspath)
+        if unprovisionable:
+            print(f"{repo}\t{kind}\tok\tskipped (no {', '.join(unprovisionable)} to provision)")
+            n_skipped += 1
+            continue
+        provision.dep_caches(abspath)
+
         gate_ok, gate_log = _run_gate(abspath)
         gate, kind_of_result = _classify_gate(gate_ok, gate_log, annotations.get(repo))
         if kind_of_result == "pass":
@@ -256,8 +275,8 @@ def main(argv: list[str]) -> int:  # noqa: C901, PLR0911, PLR0912, PLR0915 — f
     print(file=sys.stderr)
     print(
         f"release-verify-fleet: {seen} consumer(s) swept from release@{ref_sha[:12]}: "
-        f"{n_pass} pass, {n_expected} expected-artifact FAILs (classified), "
-        f"{unexpected} unexpected.",
+        f"{n_pass} pass, {n_expected} annotated-expected FAILs, "
+        f"{n_skipped} skipped (un-provisionable here), {unexpected} unexpected.",
         file=sys.stderr,
     )
     if stale:
@@ -285,21 +304,20 @@ def _classify_gate(gate_ok: bool, gate_log: str, reason: str | None) -> tuple[st
     """The gate column value + result class for one consumer (#594).
 
     Returns ``(column_text, kind)`` with kind ∈ {pass, stale, expected,
-    unexpected}. Precedence: an annotation explains ANY gate FAIL of its repo
-    (the environmental cause usually drags dep-needing checks down with it);
-    without one, a FAIL is expected only when EVERY failed check parsed from
-    the lefthook summary is a project-toolchain check the hermetic clone can
-    never run (release_core.classify). An unparseable log stays unexpected —
-    fail toward visibility."""
+    unexpected}. The caller has already PROVISIONED the deps (or skipped an
+    un-provisionable repo before gating), so the only remaining excuse for a FAIL
+    is an ``expect-verify-fail`` annotation (a sibling-repo checkout the sweep
+    can't fetch). Any other FAIL — on a provisioned tree, unannotated — is REAL
+    and unexpected. A passing repo that carries an annotation is STALE."""
     if gate_ok:
         if reason is not None:
             return "pass (STALE expect-verify-fail annotation)", "stale"
         return "pass", "pass"
     if reason is not None:
         return f"expected-FAIL (annotated: {reason})", "expected"
-    failed_checks = classify.failed_gate_checks(gate_log)
-    if classify.expected_artifact_fail(failed_checks):
-        return f"expected-FAIL (npm-deps: {', '.join(failed_checks)})", "expected"
+    # No npm-deps "artifact" excuse: the caller PROVISIONED the deps before gating
+    # (or honestly SKIPPED when the toolchain was absent), so a non-annotated FAIL
+    # here is a REAL failure — fail toward visibility.
     return "FAIL", "unexpected"
 
 

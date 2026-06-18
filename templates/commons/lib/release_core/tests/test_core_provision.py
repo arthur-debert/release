@@ -239,3 +239,16 @@ def test_wire_hook_prefers_release_core_install_hook(tmp_path, monkeypatch):
     monkeypatch.setattr(provision, "_run", lambda cmd, *, cwd, **k: calls.append(cmd) or 0)
     provision.wire_hook(str(tmp_path))
     assert calls == [["release-core", "gate", "--install-hook"]]
+
+
+def test_unprovisionable_stacks(tmp_path, monkeypatch):
+    # Probes which stacks the repo NEEDS but whose toolchain is absent here.
+    (tmp_path / "package.json").write_text("{}\n")
+    (tmp_path / "pnpm-lock.yaml").write_text("\n")
+    # pnpm present → provisionable; absent → reported.
+    monkeypatch.setattr(provision, "_have", lambda c: c == "pnpm")
+    assert provision.unprovisionable_stacks(str(tmp_path)) == []
+    monkeypatch.setattr(provision, "_have", lambda c: False)
+    assert provision.unprovisionable_stacks(str(tmp_path)) == ["pnpm"]
+    # A repo with no manifests is fully provisionable (nothing to install).
+    assert provision.unprovisionable_stacks(str(tmp_path / "empty")) == []

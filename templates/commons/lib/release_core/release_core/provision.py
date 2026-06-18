@@ -244,6 +244,36 @@ def _node_deps(repo_root: str) -> None:
         _run(["npm", "install", "--no-package-lock"], cwd=repo_root)
 
 
+def unprovisionable_stacks(repo_root: str) -> list[str]:
+    """Stacks the repo NEEDS (by manifest) but whose toolchain is ABSENT here, so
+    :func:`dep_caches` can't install them and a gate can't run faithfully against
+    the repo's own project checks. Empty == fully provisionable in this env.
+
+    A caller (e.g. ``release-core admin repos verify``) uses this to SKIP-with-
+    reason a repo it cannot provision, instead of running the gate on a dep-less
+    tree and blaming the consumer for the environment's missing toolchain."""
+    j = os.path.join
+    missing: list[str] = []
+    if os.path.isfile(j(repo_root, "Cargo.toml")) and not _have("cargo"):
+        missing.append("cargo")
+    if os.path.isfile(j(repo_root, "go.mod")) and not _have("go"):
+        missing.append("go")
+    if os.path.isfile(j(repo_root, "Gemfile")) and not _have("bundle"):
+        missing.append("bundle")
+    if os.path.isfile(j(repo_root, "package.json")):
+        # Which node tool THIS repo needs, by its committed lockfile (mirrors
+        # _node_deps); no lockfile → any npm/pnpm can install dev tooling.
+        if os.path.isfile(j(repo_root, "pnpm-lock.yaml")):
+            if not _have("pnpm"):
+                missing.append("pnpm")
+        elif os.path.isfile(j(repo_root, "yarn.lock")):
+            if not _have("yarn"):
+                missing.append("yarn")
+        elif not (_have("npm") or _have("pnpm")):
+            missing.append("npm")
+    return missing
+
+
 def import_nss_cert(repo_root: str) -> None:
     """Import the cloud sandbox-egress CA into Chromium's NSS DB — §2.5.
 
