@@ -264,12 +264,17 @@ jobs:
           cd "$full"
           release-core init
           # The FULL managed files must be installed on disk: the .release/ temp
-          # dir, working-tree symlink mirrors, and the CLAUDE.md stub block.
+          # dir, working-tree symlink mirrors, and the CLAUDE.md @import line.
           test -d .release || { echo "ERROR: no .release/ temp dir written" >&2; exit 1; }
-          # WS2 (#523): the CLAUDE.md block is a stub pointing at `release-core
-          # how-to` — no synced ORIENTATION.md anymore.
-          grep -qF 'release-core how-to' CLAUDE.md \
-            || { echo "ERROR: CLAUDE.md stub block not injected" >&2; exit 1; }
+          # WS4 (#761): CLAUDE.md is a one-line @import of the managed target file
+          # (.claude/IMPORTANT-RELEASE.md), which carries the orientation body
+          # pointing at `release-core how-to` — no synced ORIENTATION.md anymore.
+          grep -qF '@.claude/IMPORTANT-RELEASE.md' CLAUDE.md \
+            || { echo "ERROR: CLAUDE.md @import line not written" >&2; exit 1; }
+          test -f .claude/IMPORTANT-RELEASE.md \
+            || { echo "ERROR: managed .claude/IMPORTANT-RELEASE.md not written" >&2; exit 1; }
+          grep -qF 'release-core how-to' .claude/IMPORTANT-RELEASE.md \
+            || { echo "ERROR: orientation body missing from .claude/IMPORTANT-RELEASE.md" >&2; exit 1; }
           if [ -e .release/ORIENTATION.md ]; then
             echo "ERROR: .release/ORIENTATION.md should be retired (WS2)" >&2; exit 1
           fi
@@ -361,10 +366,12 @@ jobs:
           cd "${FIXTURE}"
           release-core init
           # The full managed files installed: .release/ temp dir + working-tree
-          # mirrors + the CLAUDE.md stub; .release/ stays untracked (WS4).
+          # mirrors + the CLAUDE.md @import + its target; .release/ stays untracked (WS4).
           test -d .release || { echo "ERROR: no .release/ temp dir written" >&2; exit 1; }
-          grep -qF 'release-core how-to' CLAUDE.md \
-            || { echo "ERROR: CLAUDE.md stub block not injected" >&2; exit 1; }
+          grep -qF '@.claude/IMPORTANT-RELEASE.md' CLAUDE.md \
+            || { echo "ERROR: CLAUDE.md @import line not written" >&2; exit 1; }
+          test -f .claude/IMPORTANT-RELEASE.md \
+            || { echo "ERROR: managed .claude/IMPORTANT-RELEASE.md not written" >&2; exit 1; }
           if git ls-files --error-unmatch .release >/dev/null 2>&1; then
             echo "ERROR: .release/ is git-tracked — it must be ephemeral" >&2; exit 1
           fi

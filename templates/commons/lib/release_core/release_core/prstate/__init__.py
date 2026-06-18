@@ -17,5 +17,3 @@ Boundary discipline: every GitHub call goes through `ghapi` (shell out to
 tests against captured JSON with no network. stdlib only — no third-party
 runtime deps.
 """
-
-__version__ = "0.0.1"

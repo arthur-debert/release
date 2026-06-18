@@ -1,0 +1,1 @@
+- init seeds .release.major.txt and install-release-core installs from the pip index with asset-path fallback (#760)
