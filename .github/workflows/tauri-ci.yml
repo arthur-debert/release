@@ -428,10 +428,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-          # Shared cache scope so the release workflow's Linux build
-          # leg can reuse CI's warm src-tauri/target (CI on `main` is
-          # the writer). WS-D's tauri-app.yml release leg sets the same
-          # `shared-key: tauri-core`.
+          # Stable cache scope shared across CI runs (debug profile).
+          # The release workflow (tauri-app.yml) uses its OWN
+          # `tauri-release` key for release-profile deps — it does NOT
+          # reuse this debug cache.
           shared-key: tauri-core
 
       - name: Install cargo-nextest
@@ -516,7 +516,7 @@ jobs:
         run: npx --no-install playwright install --with-deps
 
       - name: Restore wasm build cache
-        if: inputs.wasm-cache-path != ''
+        if: inputs.wasm-cache-path != '' && hashFiles(inputs.wasm-cache-key-file) != ''
         # For a consumer that builds wasm from source in `pre-test`.
         # Keyed by the wasm-source lockfile hash; the `wasm-v1-` salt is
         # a shared manual bust lever (the release/native workflows mirror
@@ -717,7 +717,7 @@ jobs:
         run: npx --no-install playwright install --with-deps
 
       - name: Restore wasm build cache
-        if: inputs.wasm-cache-path != ''
+        if: inputs.wasm-cache-path != '' && hashFiles(inputs.wasm-cache-key-file) != ''
         # Same key as the check job (`wasm-v1-…`). On a HIT the e2e
         # job's `pre-test` wasm build no-ops via the consumer's revision
         # stamp — killing the second from-scratch wasm build with no

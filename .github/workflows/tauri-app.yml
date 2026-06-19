@@ -398,7 +398,7 @@ jobs:
       # `src-tauri/Cargo.lock`, so the shared `wasm-v1-` blob with tauri-ci
       # is preserved.
       - name: Cache WASM bundle
-        if: inputs.wasm-cache-path != ''
+        if: inputs.wasm-cache-path != '' && hashFiles(format('{0}/src-tauri/Cargo.lock', inputs.tauri-dir)) != ''
         uses: actions/cache@v5
         with:
           path: ${{ inputs.wasm-cache-path }}
