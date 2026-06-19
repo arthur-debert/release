@@ -1,0 +1,1 @@
+- tauri-app.yml: release leg reuses compiled release-profile deps (own tauri-release key), ~2x faster warm releases
