@@ -95,6 +95,19 @@ on:
         required: false
         default: ''
 
+      check-command:
+        description: |
+          Command run by the "Run project checks" step. Default
+          `bin/check` (the standard umbrella that runs BOTH the
+          frontend and rust halves). Override to run only one half —
+          e.g. WS-F's split workflows pass the frontend-only check or
+          a `cargo test`-in-`src-tauri` invocation. Additive: renames
+          nothing, and the default reproduces the prior behavior
+          byte-for-byte.
+        type: string
+        required: false
+        default: 'bin/check'
+
       tauri-build:
         description: |
           When true, runs `<pm> tauri build` after `bin/check` as a
@@ -121,6 +134,59 @@ on:
         required: false
         default: ''
 
+      wasm-cache-path:
+        description: |
+          Path(s) to cache for a consumer that builds wasm from source
+          in `pre-test` (e.g. phos-app's `pnpm fetch:wasm` building the
+          `phos-core` wasm package). Empty (default) disables the cache
+          step entirely — a caller that sets nothing gets unchanged
+          behavior. Set to the wasm output dir (phos-app: `'wasm/'`);
+          on a cache HIT the consumer's build no-ops via its
+          `.phos-core-rev` stamp, killing the second from-scratch wasm
+          build in the e2e job. Cache key is
+          `wasm-v1-<runner.os>-<hashFiles(wasm-cache-key-file)>` — the
+          `wasm-v1-` salt is a manual bust lever shared with the
+          release/native workflows; bump it to invalidate fleet-wide.
+        type: string
+        required: false
+        default: ''
+
+      wasm-cache-key-file:
+        description: |
+          File whose hash keys the wasm cache. Default
+          `src-tauri/Cargo.lock` — the wasm package is built from the
+          Rust source the lockfile pins, so its hash changes exactly
+          when the inputs to the wasm build change. Override if the
+          consumer's wasm source is pinned elsewhere. Only consulted
+          when `wasm-cache-path` is set.
+        type: string
+        required: false
+        default: 'src-tauri/Cargo.lock'
+
+      provision-wasm-tools:
+        description: |
+          When `true`, pre-install the wasm toolchain — `wasm-pack`
+          (via `taiki-e/install-action`) + `rustup target add
+          wasm32-unknown-unknown` — before `pre-test`. Off by default.
+          Enable for a consumer whose `pre-test` builds wasm from
+          source so the toolchain exists without a slow
+          `cargo install wasm-pack`. In the e2e job this also forces
+          the Rust toolchain setup (it ORs with `e2e-rust`), since a
+          wasm build needs cargo.
+        type: boolean
+        required: false
+        default: false
+
+      wasm-pack-version:
+        description: |
+          Concrete `wasm-pack` version installed when
+          `provision-wasm-tools` is true. A concrete pin (not
+          `latest`) avoids taiki-e/install-action's `tool:` version
+          ambiguity. Bump deliberately.
+        type: string
+        required: false
+        default: '0.13.1'
+
       playwright:
         description: |
           When `true`, install Playwright browsers (`npx playwright
@@ -128,6 +194,30 @@ on:
           `bin/check` itself needs browsers. For real e2e suites,
           prefer the `e2e: true` input below — it adds a dedicated
           e2e job and auto-installs browsers.
+        type: boolean
+        required: false
+        default: false
+
+      playwright-cache:
+        description: |
+          When `true`, cache the Playwright browser binaries. Off by
+          default. Both jobs export `PLAYWRIGHT_BROWSERS_PATH` =
+          `$GITHUB_WORKSPACE/.playwright-browsers` (a fixed,
+          OS-independent location — the default browser dir is
+          OS-specific; the export is inert unless Playwright is used, so
+          a default caller is unaffected). This input adds the cache of
+          that path: in the check job only when `playwright: true`
+          (the only condition under which the check job installs
+          browsers); in the e2e job whenever this input is on (the e2e
+          job always installs browsers). The key is
+          `playwright-<runner.os>-<runner.arch>-<version>`, where version
+          is the installed `@playwright/test` (resolved at runtime via
+          `node -p "require('@playwright/test/package.json').version"`),
+          so it invalidates when the consumer bumps Playwright and never
+          shares incompatible binaries across OS/arch.
+          `playwright install --with-deps` still runs — on a HIT the
+          browser download is a no-op and only the apt system deps are
+          (re)applied.
         type: boolean
         required: false
         default: false
@@ -237,6 +327,17 @@ jobs:
     timeout-minutes: ${{ inputs.timeout }}
     permissions:
       contents: read
+    env:
+      # Pin Playwright's browser dir to a fixed, OS-independent path so
+      # `playwright install`, the cache, and the test run all agree on
+      # one location. The default location is OS-specific
+      # (~/.cache/ms-playwright on Linux, ~/Library/Caches/ms-playwright
+      # on macOS), which would miss the cache on non-Linux runners.
+      # Inert unless Playwright is used: it's read only by the playwright
+      # CLI, so for a default caller (playwright/e2e off) it changes no
+      # command's behavior — the "byte-identical by default" guarantee
+      # holds.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -327,6 +428,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Stable cache scope shared across CI runs (debug profile).
+          # The release workflow (tauri-app.yml) uses its OWN
+          # `tauri-release` key for release-profile deps — it does NOT
+          # reuse this debug cache.
+          shared-key: tauri-core
 
       - name: Install cargo-nextest
         # Standard test runner used by bin/check-tests when nextest
@@ -361,6 +467,42 @@ jobs:
       - name: Install dependencies
         run: ${{ steps.pm.outputs.install }}
 
+      - name: Provision wasm tools
+        if: inputs.provision-wasm-tools
+        # Pre-install the wasm toolchain so a Rust-building `pre-test`
+        # (e.g. phos-app's `pnpm fetch:wasm`) doesn't pay a slow
+        # `cargo install wasm-pack`. A concrete `wasm-pack-version`
+        # pin sidesteps taiki-e/install-action's `tool:` ambiguity.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@${{ inputs.wasm-pack-version }}
+      - name: Add wasm32 target
+        if: inputs.provision-wasm-tools
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Resolve Playwright version
+        # Gated on `playwright` (NOT `e2e`): the check job only installs
+        # browsers when `playwright: true`. If this cached on `e2e: true`
+        # while `playwright: false`, it would store an EMPTY browser dir
+        # under the shared key — the e2e job would then restore empty and
+        # be unable to save the real browsers (immutable key), a
+        # permanent cache miss. The e2e job (which always installs
+        # browsers) gates its own copy on `playwright-cache` alone.
+        if: inputs.playwright-cache && inputs.playwright
+        id: pw-version
+        shell: bash
+        # Resolve the installed @playwright/test version so the browser
+        # cache invalidates exactly when the consumer bumps Playwright.
+        run: |
+          PW_VERSION=$(node -p "require('@playwright/test/package.json').version")
+          echo "version=$PW_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        if: inputs.playwright-cache && inputs.playwright
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw-version.outputs.version }}
+
       - name: Install Playwright browsers
         if: inputs.playwright
         # `npx --no-install` so we use the playwright CLI version
@@ -368,8 +510,23 @@ jobs:
         # fetch a potentially newer release. If playwright isn't a
         # consumer dep, the step fails loudly — opting into the
         # `playwright: true` input but not declaring the dep is
-        # misconfiguration, not a fallback case.
+        # misconfiguration, not a fallback case. With `playwright-cache`
+        # on, a cache HIT makes the browser download a no-op; only the
+        # apt system deps are (re)applied.
         run: npx --no-install playwright install --with-deps
+
+      - name: Restore wasm build cache
+        if: inputs.wasm-cache-path != '' && hashFiles(inputs.wasm-cache-key-file) != ''
+        # For a consumer that builds wasm from source in `pre-test`.
+        # Keyed by the wasm-source lockfile hash; the `wasm-v1-` salt is
+        # a shared manual bust lever (the release/native workflows mirror
+        # this exact key). On a HIT the cached output lands before
+        # `pre-test`, whose build no-ops via the consumer's revision
+        # stamp — killing the redundant from-scratch wasm build.
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.wasm-cache-path }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles(inputs.wasm-cache-key-file) }}
 
       - name: Run pre-test
         if: inputs.pre-test != ''
@@ -396,10 +553,16 @@ jobs:
         # lint/format toolset the hardened gate needs.
         uses: arthur-debert/release/.github/actions/arm-gate@v3
 
-      - name: Run project checks (bin/check)
+      - name: Run project checks
+        # `shell: bash` is required: `check-command` may be an arbitrary
+        # pipeline / `cd … &&` command, which would run under pwsh on a
+        # Windows runner and break `bin/check`.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.gh_token || github.token }}
-        run: bin/check
+        # `check-command` defaults to `bin/check` (both halves). WS-F's
+        # split workflows override it to run a single half.
+        run: ${{ inputs.check-command }}
 
       - name: Tauri build (smoke)
         if: inputs.tauri-build
@@ -430,8 +593,9 @@ jobs:
   # Playwright report on failure. Setup mirrors the JS portion of the
   # check job — no Tauri Linux build deps; if the e2e suite needs the
   # native binary, run a `pre-test` step that produces it. A Rust
-  # toolchain is added only when `e2e-rust: true` (for consumers whose
-  # pre-test compiles Rust, e.g. building wasm from source).
+  # toolchain is added when `e2e-rust: true` OR `provision-wasm-tools:
+  # true` (for consumers whose pre-test compiles Rust, e.g. building
+  # wasm from source).
   # -------------------------------------------------------------------
   e2e:
     if: inputs.e2e
@@ -440,6 +604,10 @@ jobs:
     timeout-minutes: ${{ inputs.timeout }}
     permissions:
       contents: read
+    env:
+      # Same fixed Playwright browser dir as the check job — install,
+      # cache, and run all agree on one OS-independent location.
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -477,12 +645,13 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: ${{ steps.pm.outputs.cache }}
 
-      # Rust toolchain — only when e2e-rust: true (e.g. the pre-test
-      # builds wasm from source). Resolution mirrors the check job so
-      # both jobs compile against the same channel; the consumer's
-      # build step adds the wasm32 target / wasm-pack itself.
+      # Rust toolchain — when e2e-rust OR provision-wasm-tools is set
+      # (either signals the pre-test builds Rust/wasm from source).
+      # Resolution mirrors the check job so both jobs compile against
+      # the same channel; the wasm32 target / wasm-pack come from the
+      # provisioning steps below (or the consumer's own build step).
       - name: Resolve Rust toolchain channel
-        if: inputs.e2e-rust
+        if: inputs.e2e-rust || inputs.provision-wasm-tools
         id: rust-channel
         shell: bash
         env:
@@ -498,25 +667,65 @@ jobs:
           echo "channel=${CHANNEL}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Rust toolchain
-        if: inputs.e2e-rust
+        if: inputs.e2e-rust || inputs.provision-wasm-tools
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ steps.rust-channel.outputs.channel }}
 
       - name: Cache Rust (src-tauri)
-        if: inputs.e2e-rust
+        if: inputs.e2e-rust || inputs.provision-wasm-tools
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Same shared scope as the check job — reuse its warm cache.
+          shared-key: tauri-core
 
       - name: Install dependencies
         run: ${{ steps.pm.outputs.install }}
 
+      - name: Provision wasm tools
+        if: inputs.provision-wasm-tools
+        # Mirrors the check job: pre-install the wasm toolchain so a
+        # Rust-building `pre-test` doesn't pay a slow cargo install.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack@${{ inputs.wasm-pack-version }}
+      - name: Add wasm32 target
+        if: inputs.provision-wasm-tools
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Resolve Playwright version
+        if: inputs.playwright-cache
+        id: pw-version
+        shell: bash
+        run: |
+          PW_VERSION=$(node -p "require('@playwright/test/package.json').version")
+          echo "version=$PW_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Cache Playwright browsers
+        if: inputs.playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.PLAYWRIGHT_BROWSERS_PATH }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.pw-version.outputs.version }}
+
       - name: Install Playwright browsers
         # `e2e: true` implies Playwright. If the consumer doesn't
         # declare @playwright/test in devDependencies this fails
-        # loudly — misconfiguration, not a fallback case.
+        # loudly — misconfiguration, not a fallback case. With
+        # `playwright-cache` on, a HIT makes the browser download a
+        # no-op (only apt system deps are reapplied).
         run: npx --no-install playwright install --with-deps
+
+      - name: Restore wasm build cache
+        if: inputs.wasm-cache-path != '' && hashFiles(inputs.wasm-cache-key-file) != ''
+        # Same key as the check job (`wasm-v1-…`). On a HIT the e2e
+        # job's `pre-test` wasm build no-ops via the consumer's revision
+        # stamp — killing the second from-scratch wasm build with no
+        # cross-job artifact plumbing.
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.wasm-cache-path }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles(inputs.wasm-cache-key-file) }}
 
       - name: Run pre-test
         if: inputs.pre-test != ''

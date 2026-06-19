@@ -117,6 +117,23 @@ on:
         type: string
         required: false
         default: '.'
+      wasm-cache-path:
+        description: |
+          Optional path(s) to the consumer's prebuilt WASM output dir(s),
+          cached under the WS-B per-OS key, keyed on the `tauri-dir`-relative
+          `<tauri-dir>/src-tauri/Cargo.lock` (see the "Cache WASM bundle"
+          step). For `tauri-dir: '.'` (phos) that resolves to the same file
+          and hash as WS-B's `src-tauri/Cargo.lock`, so the shared `wasm-v1-`
+          blob with tauri-ci is preserved. The WASM bundle is a pure
+          function of the Cargo.lock-pinned phos-core sha, so a cache hit
+          skips the `wasm-pack build` that tauri's `beforeBuildCommand`
+          (e.g. phos-app's `pnpm fetch:wasm`) would otherwise run. Empty =
+          no WASM cache (the step is skipped). Newline-separated if
+          multiple dirs (e.g. one per wasm crate) — actions/cache treats
+          only newline-separated `path:` entries as multiple paths.
+        type: string
+        required: false
+        default: ''
       bundle-targets-mac:
         description: 'Tauri bundle targets for macOS (passed to `tauri build --bundles`). Empty = use tauri.conf.json setting.'
         type: string
@@ -302,7 +319,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v2
+          ref: v3
           path: .release
           sparse-checkout: bin-internal
 
@@ -332,9 +349,30 @@ jobs:
         with:
           toolchain: ${{ inputs.rust-toolchain }}
 
+      # Warm-cache reuse of compiled RELEASE-PROFILE dependencies, reused
+      # release-to-release on `main` — the dominant cost on the Linux leg.
+      #   - Distinct `tauri-release` key (NOT shared with CI's debug-profile
+      #     `tauri-core`), so release and debug compiled objects never mix.
+      #   - Swatinem prunes the workspace's own crates from the saved
+      #     `target/`, so OUR first-party code is always recompiled from
+      #     source — no stale first-party object can enter a signed artifact;
+      #     only the pinned dependencies are reused.
+      #   - Safe to reuse those compiled deps because: deps are lockfile-pinned,
+      #     the cache key includes the rustc version + OS, and our only build
+      #     script is the stock `tauri_build::build()` (the app version comes
+      #     from the tracked `tauri.conf.json`, not an undeclared `build.rs`
+      #     input).
+      #   - `save-if: github.ref == refs/heads/main` makes main releases the
+      #     sole WRITER; PR / dispatch releases are pure READERS. The warm
+      #     benefit therefore appears only once this lands on `main` (branch
+      #     caches don't propagate up — GitHub cache security scoping).
+      # mac/windows legs are unaffected: no main release has populated their
+      # cache yet, so they find no warm entry and build cold as before.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ inputs.tauri-dir }}/src-tauri
+          shared-key: tauri-release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
@@ -345,6 +383,26 @@ jobs:
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/bin-internal/install-js-deps.sh
+
+      # WASM bundle cache (WS-B convention). `runner.os` scopes the key per
+      # leg, so each OS reads only its own writer. The bundle is a pure
+      # function of the Cargo.lock-pinned phos-core sha, so a hit lets
+      # tauri's `beforeBuildCommand` skip `wasm-pack build`. Gated on the
+      # `wasm-cache-path` input — no path, no cache step.
+      #
+      # The Cargo.lock is resolved under `tauri-dir`: `hashFiles('src-tauri/
+      # Cargo.lock')` would return empty for a monorepo (`tauri-dir != '.'`),
+      # collapsing every monorepo caller onto the bare `wasm-v1-<os>-` key.
+      # For phos (`tauri-dir: '.'`) `format('{0}/src-tauri/Cargo.lock', '.')`
+      # → `./src-tauri/Cargo.lock`, the SAME file (and hash) as WS-B's
+      # `src-tauri/Cargo.lock`, so the shared `wasm-v1-` blob with tauri-ci
+      # is preserved.
+      - name: Cache WASM bundle
+        if: inputs.wasm-cache-path != '' && hashFiles(format('{0}/src-tauri/Cargo.lock', inputs.tauri-dir)) != ''
+        uses: actions/cache@v5
+        with:
+          path: ${{ inputs.wasm-cache-path }}
+          key: wasm-v1-${{ runner.os }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', inputs.tauri-dir)) }}
 
       - name: Set Apple signing env (macOS, signing only)
         if: matrix.t.platform == 'mac' && !inputs.notarize
@@ -417,7 +475,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: arthur-debert/release
-          ref: v2
+          ref: v3
           path: .release
           sparse-checkout: bin-internal
 
