@@ -349,27 +349,30 @@ jobs:
         with:
           toolchain: ${{ inputs.rust-toolchain }}
 
-      # Warm-cache reuse, NOT artifact reuse. The release leg reads the
-      # cargo registry/dep cache that CI's `check` job populated on `main`
-      # under the SAME `shared-key: tauri-core` (rust-cache's default-branch
-      # fallback). This is the dominant cold cost on the Linux leg.
-      #   - `save-if: github.ref == refs/heads/main` makes CI the sole WRITER
-      #     and every release leg a pure READER — a release runs off a tag /
-      #     dispatch, never `main`, so it never writes (and so can never
-      #     overwrite CI's cache with release-built contents).
-      #   - `cache-targets: false` caches deps ONLY, never compiled `target/`
-      #     units, so a signed release artifact can never be cache-poisoned by
-      #     a debug-profile object restored from CI. (CI builds debug; release
-      #     builds signed release — the binary is NOT reusable; only the dep
-      #     download cost is.)
-      # mac/windows legs are unaffected: no CI runner populates their cache,
-      # so they simply find no warm entry and build cold as before.
+      # Warm-cache reuse of compiled RELEASE-PROFILE dependencies, reused
+      # release-to-release on `main` — the dominant cost on the Linux leg.
+      #   - Distinct `tauri-release` key (NOT shared with CI's debug-profile
+      #     `tauri-core`), so release and debug compiled objects never mix.
+      #   - Swatinem prunes the workspace's own crates from the saved
+      #     `target/`, so OUR first-party code is always recompiled from
+      #     source — no stale first-party object can enter a signed artifact;
+      #     only the pinned dependencies are reused.
+      #   - Safe to reuse those compiled deps because: deps are lockfile-pinned,
+      #     the cache key includes the rustc version + OS, and our only build
+      #     script is the stock `tauri_build::build()` (the app version comes
+      #     from the tracked `tauri.conf.json`, not an undeclared `build.rs`
+      #     input).
+      #   - `save-if: github.ref == refs/heads/main` makes main releases the
+      #     sole WRITER; PR / dispatch releases are pure READERS. The warm
+      #     benefit therefore appears only once this lands on `main` (branch
+      #     caches don't propagate up — GitHub cache security scoping).
+      # mac/windows legs are unaffected: no main release has populated their
+      # cache yet, so they find no warm entry and build cold as before.
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ${{ inputs.tauri-dir }}/src-tauri
-          shared-key: tauri-core
+          shared-key: tauri-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-targets: false
 
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
