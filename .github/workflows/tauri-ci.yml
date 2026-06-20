@@ -314,6 +314,14 @@ on:
           set. Name matches the convention used in
           `copilot-review.yml`.
         required: false
+      sccache_gcs_key:
+        description: |
+          base64 GCS service-account key (the `SCCACHE_GCS_KEY` fleet
+          secret) enabling the shared GCS-backed sccache compiler cache
+          alongside the src-tauri Swatinem cache. Optional: when unset
+          the build uses Swatinem caching only. Cross-org callers (phos)
+          must pass it explicitly.
+        required: false
 
 permissions:
   contents: read
@@ -433,6 +441,11 @@ jobs:
           # `tauri-release` key for release-profile deps — it does NOT
           # reuse this debug cache.
           shared-key: tauri-core
+
+      - name: Enable sccache (GCS, shared across branches)
+        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        with:
+          gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Install cargo-nextest
         # Standard test runner used by bin/check-tests when nextest
@@ -679,6 +692,11 @@ jobs:
           workspaces: src-tauri
           # Same shared scope as the check job — reuse its warm cache.
           shared-key: tauri-core
+
+      - name: Enable sccache (GCS, shared across branches)
+        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        with:
+          gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Install dependencies
         run: ${{ steps.pm.outputs.install }}

@@ -1,8 +1,9 @@
 """install-release-secrets — install rust-cli release secrets across onboarded rust repos.
 
 Why: the `arthur-debert/release` rust-cli reusable workflow needs up
-to 8 GH secrets to do its job (Apple sign+notarize, crates.io publish,
-Homebrew tap push, optional npm publish for wasm-bindgen workspaces).
+to 9 GH secrets to do its job (Apple sign+notarize, crates.io publish,
+Homebrew tap push, optional npm publish for wasm-bindgen workspaces,
+optional sccache GCS cache key).
 This script propagates them from the shared local sources so onboarding
 a new project — or rotating secrets across all projects — is a single
 command. Companion to `install-release-token` (which handles
@@ -18,6 +19,11 @@ Sources:
   HOMEBREW_TAP_TOKEN            = $HOMEBREW_TAP_TOKEN (env)
   NPM_TOKEN                     = $NPM_TOKEN (env, optional — only set
                                    when present, else warned and skipped)
+  SCCACHE_GCS_KEY               = $SCCACHE_GCS_KEY (env, optional — base64
+                                   GCS SA key for the shared sccache Rust
+                                   compiler cache; only set when present,
+                                   else warned and skipped. Source from
+                                   Doppler github/prd)
 
 Usage:
   install-release-secrets                          # auto-discover rust repos
@@ -35,7 +41,8 @@ fleet source of truth.
 Shell→Python migration: the gh-api+jq
 discovery and the `gh secret set` loop moved into Python (gh.rest /
 gh.secret_set, no jq). The set-of-7-secrets contract, the optional NPM_TOKEN
-8th slot, stdout lines, and exit codes are preserved byte-for-byte.
+8th slot and optional SCCACHE_GCS_KEY 9th slot, stdout lines, and exit codes
+are preserved byte-for-byte.
 """
 
 from __future__ import annotations
@@ -135,6 +142,14 @@ def collect_secrets(auth_dir: str, env: dict[str, str]) -> tuple[list[tuple[str,
     npm_present = bool(npm_token)
     if npm_present:
         secrets.append(("NPM_TOKEN", npm_token))
+
+    # Optional sccache GCS cache key (base64 SA JSON) — the shared
+    # GCS-backed Rust compiler cache. Set only when present in env, like
+    # NPM_TOKEN. Source it from Doppler: `SCCACHE_GCS_KEY=$(doppler secrets
+    # get SCCACHE_GCS_KEY --plain --project github --config prd)`.
+    sccache_gcs_key = env.get("SCCACHE_GCS_KEY") or ""
+    if sccache_gcs_key:
+        secrets.append(("SCCACHE_GCS_KEY", sccache_gcs_key))
 
     return secrets, npm_present
 
@@ -286,6 +301,14 @@ def main(argv: list[str]) -> int:
             "re-running if any consumer uses the WASM/npm slot."
         )
 
+    sccache_present = any(name == "SCCACHE_GCS_KEY" for name, _ in secrets)
+    if not sccache_present:
+        print(
+            "note: SCCACHE_GCS_KEY not in env — skipping the sccache cache "
+            "secret. Source it from Doppler (github/prd) before re-running to "
+            "enable the shared GCS Rust compiler cache."
+        )
+
     # --- set ---
     failed_repos = 0
     for repo in repos:
@@ -307,6 +330,6 @@ def main(argv: list[str]) -> int:
     if failed_repos > 0:
         print(f"summary: {len(repos)} repos, {failed_repos} with failures", file=sys.stderr)
         return 1
-    secret_count = 8 if npm_present else 7
+    secret_count = len(secrets)
     print(f"summary: {len(repos)} repos, all {secret_count} secrets set")
     return 0

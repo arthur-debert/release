@@ -114,6 +114,13 @@ on:
       gh-token:
         description: 'PAT able to read the private native git dep (e.g. phos-core) + the private wasm release. REQUIRED when either is a private repo OTHER than the caller: the GITHUB_TOKEN fallback only reads the calling repo, so it will NOT fetch a private cross-repo sibling. Falls back to GITHUB_TOKEN only for public/same-repo deps.'
         required: false
+      sccache_gcs_key:
+        description: |
+          base64 GCS service-account key (the `SCCACHE_GCS_KEY` fleet
+          secret) enabling the shared GCS-backed sccache compiler cache
+          alongside the src-tauri Swatinem cache. Optional: when unset
+          the build uses Swatinem caching only.
+        required: false
 
 permissions:
   contents: read
@@ -183,6 +190,11 @@ jobs:
           workspaces: src-tauri
           key: ${{ inputs.cache-key-prefix }}
 
+      - name: Enable sccache (GCS, shared across branches)
+        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        with:
+          gcs-key: ${{ secrets.sccache_gcs_key }}
+
       - name: Cache built wasm packages
         if: ${{ inputs.wasm-cache-path != '' }}
         uses: actions/cache@v5
@@ -230,6 +242,11 @@ jobs:
         with:
           workspaces: src-tauri
           key: ${{ inputs.cache-key-prefix }}
+
+      - name: Enable sccache (GCS, shared across branches)
+        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        with:
+          gcs-key: ${{ secrets.sccache_gcs_key }}
 
       # Shares WS-B's wasm blob via the identical key — a hit populated by
       # tauri-ci restores the built phos-core wasm packages here, so the wasm

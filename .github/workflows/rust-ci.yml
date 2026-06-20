@@ -190,6 +190,16 @@ on:
         required: false
         default: 'bundler'
 
+    secrets:
+      sccache_gcs_key:
+        description: |
+          base64 GCS service-account key (the `SCCACHE_GCS_KEY` fleet
+          secret) enabling the shared GCS-backed sccache compiler cache.
+          Optional: when unset the build uses Swatinem caching only.
+          arthur-debert/* callers get it via `secrets: inherit`; cross-org
+          callers (phos, lex) must pass it explicitly.
+        required: false
+
 permissions:
   contents: read
 
@@ -214,6 +224,7 @@ jobs:
         with:
           components: clippy, rustfmt
           targets: ${{ inputs.extra-targets }}
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Install cargo-nextest
         # Standard test runner used by bin/check-tests across the fleet.
@@ -418,6 +429,7 @@ jobs:
         with:
           components: clippy
           targets: wasm32-unknown-unknown
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: clippy (wasm32)
         # Pin bash: `runner` is caller-overridable (a Windows self-hosted
@@ -454,6 +466,7 @@ jobs:
         uses: arthur-debert/release/.github/actions/setup-rust@v3
         with:
           targets: wasm32-unknown-unknown
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Install wasm-pack
         uses: taiki-e/install-action@v2
