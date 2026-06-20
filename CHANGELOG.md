@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 3.7.0 - 2026-06-20
+
+- setup-rust + tauri-app install a repo-selected fast linker (mold/lld) so a committed .cargo linker config builds
+
 ## 3.6.0 - 2026-06-20
 
 - Install mold in the Tauri Linux deps so a committed mold linker config builds in the release lane
