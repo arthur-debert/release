@@ -160,15 +160,19 @@ re-derive these commands. Its env var names are the convention to follow
 (`ASC_KEY_BASE64` → decoded `--key` path, `ASC_KEY_ID` → `--key-id`,
 `ASC_ISSUER_ID` → `--issuer`):
 
+The snippet below is a **simplified illustration** of the concept (one-shot
+`--wait`), not a copy of the action — the action is the real implementation
+and submits with `--no-wait` + JSON-polls the submission id, decoding the key
+with `base64 --decode`. WS4 should call the action, not this snippet:
+
 ```sh
-# what notarize-mac/action.yml runs, distilled (use `-D` on macOS; the
-# action runs on macOS runners where `base64 -D` decodes):
-echo "$ASC_KEY_BASE64" | base64 -D > "$RUNNER_TEMP/AuthKey.p8"
+# simplified illustration — the action is the source of truth:
+printf '%s' "$ASC_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
 xcrun notarytool submit "$out" \
   --key    "$RUNNER_TEMP/AuthKey.p8" \
   --key-id "$ASC_KEY_ID" \
   --issuer "$ASC_ISSUER_ID" \
-  --wait
+  --wait                       # action uses --no-wait + polling instead
 xcrun stapler staple "$out"
 codesign --verify --verbose=2 "$out"
 spctl -a -t open --context context:primary-signature -vvv "$out"   # expect: accepted
