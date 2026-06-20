@@ -864,11 +864,29 @@ jobs:
   # fan-out list now rides as one `with:` line). (release#426 P3, #804.)
   # -------------------------------------------------------------------
   notify-downstreams:
-    needs: [prepare, create-release]
-    # Fire only on a successful release AND when the caller named downstreams.
-    # Empty list (the default) → the job skips, so a consumer with no
-    # dependents pays nothing and needs no `with:` line.
-    if: needs.create-release.result == 'success' && inputs.notify-downstreams != ''
+    # Gate on EVERY publish job, not just create-release: create-release
+    # only opens the GH release shell early in the DAG; build-binaries
+    # uploads the assets and publish-crates/homebrew/wasm/npm run after it.
+    # Notifying downstreams before those finish (or while one is failing)
+    # would cascade an incomplete release. `always() && !failure() &&
+    # !cancelled()` lets optional jobs SKIP (feature off) but blocks the
+    # notify if any one FAILED; create-release success confirms the release
+    # itself exists.
+    needs:
+      - prepare
+      - create-release
+      - build-binaries
+      - publish-crates
+      - homebrew-formula
+      - build-wasm
+      - publish-npm
+    # Fire only on a fully successful release AND when the caller named
+    # downstreams. Empty list (the default) → the job skips, so a consumer
+    # with no dependents pays nothing and needs no `with:` line.
+    if: >-
+      always() && !failure() && !cancelled()
+      && needs.create-release.result == 'success'
+      && inputs.notify-downstreams != ''
     runs-on: ubuntu-latest
     # The dispatch authenticates via the RELEASE_TOKEN PAT (GH_TOKEN below),
     # so this job's automatic GITHUB_TOKEN needs no scopes.
