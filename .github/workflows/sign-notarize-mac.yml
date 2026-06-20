@@ -159,10 +159,21 @@ jobs:
           out="$RUNNER_TEMP/signed-out"
           mkdir -p "$out"
           # Carry the consumer's original .dmg name if the unsigned artifact
-          # shipped one; otherwise fall back to the .app basename.
-          orig=$(find unsigned -maxdepth 2 -type f -name '*.dmg' | head -1 || true)
-          if [ -n "$orig" ]; then
-            name=$(basename "$orig")
+          # shipped one; otherwise fall back to the .app basename. This workflow
+          # is documented single-.app + single-.dmg, so >1 .dmg is an error: a
+          # head -1 pick would sign one nondeterministically and silently drop
+          # the rest. Mirror the zero/multi-.app guard in unpack-unsigned-app.sh.
+          # (while-read, not mapfile — the macOS runner is bash 3.2.)
+          dmgs=()
+          while IFS= read -r d; do
+            dmgs+=("$d")
+          done < <(find unsigned -maxdepth 2 -type f -name '*.dmg')
+          if [ "${#dmgs[@]}" -gt 1 ]; then
+            echo "::error::expected at most one .dmg in the unsigned artifact, found ${#dmgs[@]}: ${dmgs[*]}"
+            exit 1
+          fi
+          if [ "${#dmgs[@]}" -eq 1 ]; then
+            name=$(basename "${dmgs[0]}")
           else
             app="${{ steps.unpack.outputs.app }}"
             name="$(basename "$app" .app).dmg"
