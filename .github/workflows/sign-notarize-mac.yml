@@ -73,6 +73,16 @@ on:
         description: 'Name of the uploaded signed artifact.'
         value: ${{ jobs.sign.outputs.signed-artifact }}
 
+# The composite actions below are REMOTE `@v3` refs, not local `./` refs. A
+# reusable workflow does not auto-checkout its own repo, and a `./` action path
+# resolves against $GITHUB_WORKSPACE — the CONSUMER's checkout (e.g. phos),
+# which does not carry release's composites — so a local ref would fail
+# "action.yml not found" at runtime. The remote `@v3` ref makes GitHub fetch the
+# action (with its sibling bin-internal/ scripts) independently of the
+# workspace, and satisfies the workflow-action-major @v3 guard. (The CALLER
+# still reaches THIS workflow via a local `./.github/workflows/...` ref — a
+# workflow self-ref auto-tracks the caller's repo+ref, which an action `uses:`
+# does not.)
 jobs:
   sign:
     runs-on: ${{ inputs.runs-on }}
@@ -94,13 +104,13 @@ jobs:
 
       - name: Unpack unsigned app
         id: unpack
-        uses: ./.github/actions/unpack-unsigned-app
+        uses: arthur-debert/release/.github/actions/unpack-unsigned-app@v3
         with:
           artifact-dir: unsigned
 
       # 1. Codesign the inner .app (hardened runtime + secure timestamp).
       - name: Sign .app
-        uses: ./.github/actions/sign-mac
+        uses: arthur-debert/release/.github/actions/sign-mac@v3
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -109,14 +119,14 @@ jobs:
       # 2. Reseal the .dmg from the SIGNED .app via hdiutil (never re-bundle).
       - name: Reseal dmg
         id: reseal
-        uses: ./.github/actions/reseal-mac-dmg
+        uses: arthur-debert/release/.github/actions/reseal-mac-dmg@v3
         with:
           app-path: ${{ steps.unpack.outputs.app }}
           dmg-out: ${{ runner.temp }}/signed.dmg
 
       # 3. Codesign the resealed .dmg.
       - name: Sign .dmg
-        uses: ./.github/actions/sign-mac
+        uses: arthur-debert/release/.github/actions/sign-mac@v3
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -125,7 +135,7 @@ jobs:
       # 4. Notarize + staple the signed .dmg (skipped when notarize=false).
       - name: Notarize + staple
         if: ${{ inputs.notarize }}
-        uses: ./.github/actions/notarize-mac
+        uses: arthur-debert/release/.github/actions/notarize-mac@v3
         with:
           artifact-path: ${{ runner.temp }}/signed.dmg
           asc-key-base64: ${{ secrets.ASC_KEY_BASE64 }}

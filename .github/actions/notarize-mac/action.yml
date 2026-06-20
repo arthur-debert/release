@@ -72,13 +72,17 @@ runs:
         # all accept either the `--key/--key-id/--issuer` trio or the
         # `--apple-id/--password/--team-id` trio, so we build the shared flag
         # array once and reuse it for every notarytool call.
+        # Wipe any decoded credential material on ANY exit (success, error, or
+        # early failure between decode and the next explicit cleanup) — never
+        # leave the .p8 on the runner.
         KEY_PATH=""
+        cleanup() { [ -n "$KEY_PATH" ] && rm -f "$KEY_PATH" || true; }
+        trap cleanup EXIT
+
         AUTH=()
+        HAS_ASC=false
         if [ -n "$ASC_KEY_BASE64" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ]; then
-          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
-          echo "$ASC_KEY_BASE64" | base64 --decode > "$KEY_PATH"
-          AUTH=(--key "$KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
-          echo "→ notarizing with App Store Connect API key auth"
+          HAS_ASC=true
         elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
           AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
           echo "→ notarizing with Apple-ID auth"
@@ -88,9 +92,16 @@ runs:
           exit 0
         fi
 
+        # Validate the artifact BEFORE decoding the key, so a bad artifact-path
+        # never leaves credential material on disk.
         [ -e "$ARTIFACT" ] || { echo "::error::artifact-path not found: $ARTIFACT"; exit 1; }
 
-        cleanup() { [ -n "$KEY_PATH" ] && rm -f "$KEY_PATH" || true; }
+        if [ "$HAS_ASC" = true ]; then
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo "$ASC_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          AUTH=(--key "$KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
+          echo "→ notarizing with App Store Connect API key auth"
+        fi
 
         echo "→ submitting $ARTIFACT to notary service"
         RESULT=$(xcrun notarytool submit "$ARTIFACT" \
@@ -117,20 +128,17 @@ runs:
               xcrun stapler staple "$ARTIFACT" || \
                 echo "::warning::Staple failed (non-fatal — online Gatekeeper check still works)"
             fi
-            cleanup
             echo "notarized=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
             xcrun notarytool log "$ID" \
               "${AUTH[@]}" 2>&1 || true
-            cleanup
             echo "::error::Notarization $STATUS"
             exit 1
           fi
           sleep 30
         done
 
-        cleanup
         echo "::warning::Notarization timed out after $TIMEOUT_MIN min — submission $ID last status: $STATUS. Binary is signed but Apple has not confirmed yet. Check status with: xcrun notarytool info $ID ... ."
         echo "notarized=false" >> "$GITHUB_OUTPUT"

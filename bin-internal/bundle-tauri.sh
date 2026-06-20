@@ -27,14 +27,19 @@ cd "${TAURI_DIR}"
 
 bundles="${BUNDLES:-}"
 
-# macOS reseal needs the standalone .app. Ensure `app` is in the target
-# list so `tauri bundle` produces it (dmg-only would build the .app then
-# delete it). A consumer that only asked for `dmg` still gets the .app we
-# reseal from.
-if [ "${PLATFORM}" = "mac" ] && [ -n "${bundles}" ]; then
+# macOS reseal needs the standalone .app. Ensure `app` is in the target list
+# so `tauri bundle` produces it (a dmg-only bundle builds the .app then DELETES
+# it, leaving no payload to reseal → post-hoc signing later fails "no
+# *.unsigned-app.tar.gz found"). This must hold even when BUNDLES is empty (the
+# tauri.conf default target list): an empty `--bundles` lets tauri.conf pick the
+# targets, which may be dmg-only, so we make the mac target list explicit and
+# always include `app`. A consumer that only asked for `dmg` still gets the
+# .app we reseal from.
+if [ "${PLATFORM}" = "mac" ]; then
   case ",${bundles}," in
-    *,app,*) : ;;
-    *) bundles="app,${bundles}" ;;
+    *,app,*) : ;;                       # already requested
+    ,,)      bundles="app,dmg" ;;       # empty (tauri.conf default) → app + dmg
+    *)       bundles="app,${bundles}" ;;
   esac
 fi
 

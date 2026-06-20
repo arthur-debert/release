@@ -268,6 +268,23 @@ jobs:
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
     steps:
+      # Fail fast on a bad sign-mode (e.g. a `posthoc` typo): otherwise BOTH
+      # build paths' `if:` are false, the build produces nothing, and the run
+      # dies deep in `collect-tauri-bundles.sh` with a confusing "bundle root
+      # not found". No checkout needed — pure input validation.
+      - name: Validate sign-mode
+        shell: bash
+        env:
+          SIGN_MODE: ${{ inputs.sign-mode }}
+        run: |
+          case "$SIGN_MODE" in
+            inline|post-hoc) ;;
+            *)
+              echo "::error::invalid sign-mode: '$SIGN_MODE' (expected 'inline' or 'post-hoc')"
+              exit 1
+              ;;
+          esac
+
       # Pin `ref: main` (matching the prepare job's checkout) so preflight
       # validates the exact changelog prepare will bump + tag, even when the
       # reusable workflow runs from a non-main ref (e.g. a harness branch).

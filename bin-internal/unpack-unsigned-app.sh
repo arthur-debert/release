@@ -20,7 +20,12 @@ ARTIFACT_DIR="${ARTIFACT_DIR:?ARTIFACT_DIR required}"
 WORK_DIR="${WORK_DIR:-${ARTIFACT_DIR}/signing}"
 mkdir -p "${WORK_DIR}"
 
-mapfile -t tarballs < <(find "${ARTIFACT_DIR}" -type f -name '*.unsigned-app.tar.gz')
+# Collect the payload tarballs. `mapfile`/`readarray` is bash 4+; the macOS
+# runner ships bash 3.2, so read into the array with a portable while-loop.
+tarballs=()
+while IFS= read -r t; do
+  tarballs+=("${t}")
+done < <(find "${ARTIFACT_DIR}" -type f -name '*.unsigned-app.tar.gz')
 
 if [ "${#tarballs[@]}" -eq 0 ]; then
   echo "::error::no *.unsigned-app.tar.gz found under ${ARTIFACT_DIR} — was this an unsigned post-hoc mac build?"
@@ -33,8 +38,22 @@ fi
 
 tar -C "${WORK_DIR}" -xzf "${tarballs[0]}"
 
-app="$(find "${WORK_DIR}" -maxdepth 1 -type d -name '*.app' | head -1)"
-[ -n "${app}" ] || { echo "::error::no .app extracted from ${tarballs[0]}"; exit 1; }
+# Exactly one .app must come out — fail loudly on zero or many rather than
+# silently signing an arbitrary one.
+apps=()
+while IFS= read -r a; do
+  apps+=("${a}")
+done < <(find "${WORK_DIR}" -maxdepth 1 -type d -name '*.app')
+
+if [ "${#apps[@]}" -eq 0 ]; then
+  echo "::error::no .app extracted from ${tarballs[0]}"
+  exit 1
+fi
+if [ "${#apps[@]}" -gt 1 ]; then
+  echo "::error::expected one .app in ${tarballs[0]}, found ${#apps[@]}: ${apps[*]}"
+  exit 1
+fi
+app="${apps[0]}"
 
 echo "extracted ${app}"
 if [ -n "${GITHUB_OUTPUT:-}" ]; then

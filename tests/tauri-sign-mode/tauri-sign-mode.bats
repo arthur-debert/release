@@ -80,6 +80,16 @@ teardown() { rm -rf "$TMP"; }
   ! grep -q 'app,app' "$NPX_LOG"
 }
 
+@test "bundle-tauri forces app even when BUNDLES is empty (tauri.conf default)" {
+  # Empty BUNDLES → tauri.conf picks targets (maybe dmg-only, which deletes the
+  # .app). The mac path must still request `app` explicitly so the reseal
+  # payload exists.
+  run env PLATFORM=mac bash "$BIN/bundle-tauri.sh"
+  [ "$status" -eq 0 ]
+  grep -q 'tauri bundle --no-sign --bundles app,dmg' "$NPX_LOG"
+  [ -f src-tauri/target/release/bundle/macos/MyApp.unsigned-app.tar.gz ]
+}
+
 @test "bundle-tauri does not package .app on linux" {
   # linux: no macos dir, no packaging, no forced `app` target.
   run env PLATFORM=linux BUNDLES=deb bash "$BIN/bundle-tauri.sh"
@@ -144,4 +154,20 @@ EOF
   tar -C art -czf art/b.unsigned-app.tar.gz b.app
   run env ARTIFACT_DIR="$TMP/art" bash "$BIN/unpack-unsigned-app.sh"
   [ "$status" -ne 0 ]
+}
+
+@test "unpack-unsigned-app fails when one tarball holds multiple .app bundles" {
+  mkdir -p art/A.app art/B.app
+  # a single tarball carrying two .app dirs — must not silently sign one.
+  tar -C art -czf art/combined.unsigned-app.tar.gz A.app B.app
+  rm -rf art/A.app art/B.app
+  run env ARTIFACT_DIR="$TMP/art" bash "$BIN/unpack-unsigned-app.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "unpack-unsigned-app works under bash 3.2 (no mapfile/readarray call)" {
+  # Guard the macOS-runner bash version: the script must not INVOKE mapfile /
+  # readarray (bash 4+). Match a command invocation (start of a line, after
+  # optional indent), not a mention in a comment.
+  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/unpack-unsigned-app.sh"
 }
