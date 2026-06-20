@@ -169,6 +169,23 @@ on:
         type: boolean
         required: false
         default: true
+      sign-mode:
+        description: |
+          How the macOS bundle gets signed + notarized (epic #811).
+            inline   — (default) tauri signs + notarizes inside the bundle
+                       job from the APPLE_* env. Byte-identical to the
+                       historical behavior; a caller that omits this sees no
+                       change.
+            post-hoc — the bundle job builds UNSIGNED (compile + bundle as
+                       separate steps, no APPLE_* env), uploads the unsigned
+                       .app, and a dedicated `sign` job codesigns + reseals
+                       the .dmg with hdiutil + notarizes via the reusable
+                       sign-notarize-mac workflow. Use to decouple signing
+                       from the build, or to put signing on its own runner.
+          Linux / Windows are unaffected by this input.
+        type: string
+        required: false
+        default: 'inline'
       node-version:
         description: 'Node.js version for the frontend build env.'
         type: string
@@ -251,6 +268,23 @@ jobs:
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
     steps:
+      # Fail fast on a bad sign-mode (e.g. a `posthoc` typo): otherwise BOTH
+      # build paths' `if:` are false, the build produces nothing, and the run
+      # dies deep in `collect-tauri-bundles.sh` with a confusing "bundle root
+      # not found". No checkout needed — pure input validation.
+      - name: Validate sign-mode
+        shell: bash
+        env:
+          SIGN_MODE: ${{ inputs.sign-mode }}
+        run: |
+          case "$SIGN_MODE" in
+            inline|post-hoc) ;;
+            *)
+              echo "::error::invalid sign-mode: '$SIGN_MODE' (expected 'inline' or 'post-hoc')"
+              exit 1
+              ;;
+          esac
+
       # Pin `ref: main` (matching the prepare job's checkout) so preflight
       # validates the exact changelog prepare will bump + tag, even when the
       # reusable workflow runs from a non-main ref (e.g. a harness branch).
@@ -275,13 +309,37 @@ jobs:
           CHANGELOG: ${{ inputs.changelog-path }}
         run: bash .release/bin-internal/check-changelog-unreleased.sh
 
-      # Only gate on Apple secrets when signing is actually requested
-      # (build-mac AND notarization or an explicit signing identity).
-      # A no-sign mac build (notarize=false, no identity) must not fail
-      # for absent Apple secrets.
-      - name: Validate Apple secrets
-        if: ${{ inputs.build-mac && (inputs.notarize || env.APPLE_ID_PRESENT == 'yes') }}
+      # INLINE mode only. Gate on Apple secrets when signing is requested
+      # (build-mac AND notarization or an explicit signing identity). A
+      # no-sign mac build (notarize=false, no identity) must not fail for
+      # absent Apple secrets. The inline path passes APPLE_SIGNING_IDENTITY
+      # into `tauri build`, so the existing action (which requires it) is
+      # correct here.
+      - name: Validate Apple secrets (inline)
+        if: ${{ inputs.sign-mode == 'inline' && inputs.build-mac && (inputs.notarize || env.APPLE_ID_PRESENT == 'yes') }}
         uses: arthur-debert/release/.github/actions/validate-apple-secrets@v3
+
+      # POST-HOC mode. The `sign` job's sign-mac composite derives the
+      # identity from the imported cert via `security find-identity`, so
+      # APPLE_SIGNING_IDENTITY is NOT needed — only the cert (always) and the
+      # notary trio (when notarize). Validate exactly those here so missing
+      # creds fail fast in preflight instead of deep in the sign job (or
+      # silently skipping notarization).
+      - name: Validate Apple secrets (post-hoc)
+        if: ${{ inputs.sign-mode == 'post-hoc' && inputs.build-mac }}
+        shell: bash
+        run: |
+          fail=0
+          if [ "${APPLE_CERT_PRESENT}" != "yes" ]; then
+            echo "::error::sign-mode=post-hoc with build-mac=true requires APPLE_CERTIFICATE (the Developer ID .p12)"
+            fail=1
+          fi
+          if [ "${NOTARIZE}" = "true" ]; then
+            [ "${NOTARY_ID_PRESENT}" = "yes" ]   || { echo "::error::notarize=true requires APPLE_ID"; fail=1; }
+            [ "${NOTARY_PASS_PRESENT}" = "yes" ] || { echo "::error::notarize=true requires APPLE_PASSWORD"; fail=1; }
+            [ "${NOTARY_TEAM_PRESENT}" = "yes" ] || { echo "::error::notarize=true requires APPLE_TEAM_ID"; fail=1; }
+          fi
+          exit "${fail}"
 
   # -------------------------------------------------------------------
   # 1. Prepare: bump all three version files (package.json,
@@ -477,8 +535,11 @@ jobs:
           path: ${{ inputs.wasm-cache-path }}
           key: wasm-v1-${{ runner.os }}-${{ hashFiles(format('{0}/src-tauri/Cargo.lock', inputs.tauri-dir)) }}
 
+      # Apple signing env is set ONLY in inline mode — in post-hoc mode the
+      # bundle must be produced UNSIGNED (no APPLE_* in the build env), and the
+      # dedicated `sign` job signs it afterwards.
       - name: Set Apple signing env (macOS, signing only)
-        if: matrix.t.platform == 'mac' && !inputs.notarize
+        if: matrix.t.platform == 'mac' && inputs.sign-mode == 'inline' && !inputs.notarize
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -487,7 +548,7 @@ jobs:
         run: bash .release/bin-internal/setup-tauri-signing-env.sh
 
       - name: Set Apple signing + notarization env (macOS)
-        if: matrix.t.platform == 'mac' && inputs.notarize
+        if: matrix.t.platform == 'mac' && inputs.sign-mode == 'inline' && inputs.notarize
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -507,13 +568,40 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash .release/bin-internal/setup-cargo-git-auth.sh
 
+      # --- inline mode: compile + bundle + sign in one tauri invocation ---
+      # Byte-identical to the historical single Build step; the APPLE_* env set
+      # above makes tauri sign + notarize internally.
       - name: Build
+        if: inputs.sign-mode == 'inline'
         shell: bash
         env:
           BUNDLES: ${{ matrix.t.bundles }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash .release/bin-internal/build-tauri.sh
+
+      # --- post-hoc mode: compile and bundle as SEPARATE named steps, for
+      # per-phase visibility (a reader attributes time to deps / compile /
+      # bundle). No APPLE_* env → the bundle is UNSIGNED; the `sign` job signs
+      # it afterwards. Same two steps on every platform (only mac is signed
+      # post-hoc, but compile/bundle split is uniform).
+      - name: Compile (no bundle)
+        if: inputs.sign-mode == 'post-hoc'
+        shell: bash
+        env:
+          BUILD_PHASE: compile
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        run: bash .release/bin-internal/build-tauri.sh
+
+      - name: Bundle (unsigned)
+        if: inputs.sign-mode == 'post-hoc'
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.t.bundles }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          PLATFORM: ${{ matrix.t.platform }}
+        run: bash .release/bin-internal/bundle-tauri.sh
 
       - name: Collect bundles
         id: bundles
@@ -538,11 +626,49 @@ jobs:
           retention-days: 7
 
   # -------------------------------------------------------------------
+  # 2b. Post-hoc macOS signer (sign-mode: post-hoc only). Downloads the
+  #     UNSIGNED bundle-mac artifact, codesigns + reseals + notarizes via
+  #     the consumer-agnostic reusable workflow, uploads bundle-mac-signed.
+  #     LOCAL path ref → resolves at the SAME ref as this workflow (auto-
+  #     tracks the harness branch during validation, @v3 after merge; no
+  #     hard-coded @vN to drift, per release#689).
+  #     Skipped entirely in inline mode and when mac isn't built.
+  # -------------------------------------------------------------------
+  sign:
+    needs: build
+    if: ${{ inputs.sign-mode == 'post-hoc' && inputs.build-mac }}
+    uses: ./.github/workflows/sign-notarize-mac.yml
+    with:
+      artifact-name: bundle-mac
+      notarize: ${{ inputs.notarize }}
+    secrets:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      # phos passes Apple-ID notary auth (no ASC .p8 key); the signer picks
+      # whichever cred set is non-empty.
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+  # -------------------------------------------------------------------
   # 3. GH release. Gated on build (success) — single matrix job's
   #    failure fails the whole release (no partial bundles shipped).
+  #    NOTE: left on `[prepare, build]` (NOT `sign`) so the inline default
+  #    is untouched — a skipped `sign` dependency must not skip `release`.
+  #
+  #    INTERIM SKIP (post-hoc + build-mac): in post-hoc mode BOTH
+  #    `bundle-mac` (UNSIGNED, incl. the `.unsigned-app.tar.gz` reseal
+  #    payload) and `bundle-mac-signed` exist, and this job's
+  #    `pattern: bundle-*` + `merge-multiple: true` would publish the
+  #    UNSIGNED payloads / collide the signed-vs-unsigned `.dmg`. So skip
+  #    the GH release in that case until WS5 (#816) rewires this job to
+  #    consume ONLY `bundle-mac-signed`. The phos RC validates the signed
+  #    output from the `bundle-mac-signed` run artifact, not a GH release,
+  #    so this skip doesn't block RC validation.
   # -------------------------------------------------------------------
   release:
     needs: [prepare, build]
+    if: ${{ !(inputs.sign-mode == 'post-hoc' && inputs.build-mac) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6

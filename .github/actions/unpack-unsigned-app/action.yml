@@ -1,0 +1,27 @@
+name: 'Unpack unsigned macOS app'
+description: 'Extract the unsigned .app payload from a downloaded post-hoc build artifact, ahead of signing'
+
+inputs:
+  artifact-dir:
+    description: 'Dir holding the downloaded unsigned artifact'
+    required: true
+  work-dir:
+    description: 'Dir to extract the .app into (default: <artifact-dir>/signing)'
+    required: false
+    default: ''
+
+outputs:
+  app:
+    description: 'Path to the extracted .app bundle'
+    value: ${{ steps.unpack.outputs.app }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Unpack unsigned app
+      id: unpack
+      shell: bash
+      env:
+        ARTIFACT_DIR: ${{ inputs.artifact-dir }}
+        WORK_DIR: ${{ inputs.work-dir }}
+      run: bash "${{ github.action_path }}/../../../bin-internal/unpack-unsigned-app.sh"

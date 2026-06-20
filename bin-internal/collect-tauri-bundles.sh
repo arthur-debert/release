@@ -21,7 +21,9 @@ out="${GITHUB_WORKSPACE:-$(pwd)}/bundle-${PLATFORM:?PLATFORM required}"
 mkdir -p "${out}"
 
 # Distributable artifacts per platform:
-#   mac:     .dmg, .app.tar.gz (updater)
+#   mac:     .dmg, .app.tar.gz (updater), .unsigned-app.tar.gz (post-hoc
+#            reseal payload — present only on the post-hoc unsigned build,
+#            consumed by sign-notarize-mac, not shipped)
 #   linux:   .deb, .rpm, .AppImage
 #   windows: .msi, .exe (NSIS)
 while IFS= read -r f; do
@@ -29,6 +31,7 @@ while IFS= read -r f; do
 done < <(find "${bundle_root}" -type f \
            \( -name '*.dmg' \
               -o -name '*.app.tar.gz' \
+              -o -name '*.unsigned-app.tar.gz' \
               -o -name '*.deb' \
               -o -name '*.rpm' \
               -o -name '*.AppImage' \
