@@ -85,7 +85,7 @@ toolchain. Tens of MB cross-job, well inside artifact limits.
 ### Linux
 
 `tauri bundle --bundles deb,appimage` is the same decoupled entry point; deb /
-AppImage only build on Linux, so they were not exercised on this darwin box.
+AppImage only builds on Linux, so they were not exercised on this darwin box.
 Same shape applies: compile job uploads the Linux binary, a Linux package job
 runs `tauri bundle`.
 
@@ -161,8 +161,9 @@ re-derive these commands. Its env var names are the convention to follow
 `ASC_ISSUER_ID` → `--issuer`):
 
 ```sh
-# what notarize-mac/action.yml runs, distilled:
-echo "$ASC_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
+# what notarize-mac/action.yml runs, distilled (use `-D` on macOS; the
+# action runs on macOS runners where `base64 -D` decodes):
+echo "$ASC_KEY_BASE64" | base64 -D > "$RUNNER_TEMP/AuthKey.p8"
 xcrun notarytool submit "$out" \
   --key    "$RUNNER_TEMP/AuthKey.p8" \
   --key-id "$ASC_KEY_ID" \
