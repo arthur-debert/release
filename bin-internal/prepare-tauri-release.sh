@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Prepare a Tauri release: validate semver, detect resume case, run
-# optional prep-script, bump the three version files (package.json,
-# Cargo.toml, tauri.conf.json), roll changelog, run pre-commit gate,
-# commit + tag + push.
+# Prepare a Tauri release: validate semver, assert the base sha is CI-green
+# (WS2 #811 — don't re-gate, the work PR already gated this code), detect resume
+# case, run optional prep-script, bump the three version files (package.json,
+# Cargo.toml, tauri.conf.json), roll changelog, commit + tag + push.
 #
 # Env vars:
 #   NEW_VERSION   semver version to release (required)
@@ -79,12 +79,36 @@ done
 TAG="v${NEW_VERSION}"
 git fetch --tags origin >/dev/null 2>&1 || true
 
+# ── Assert the release base is CI-green ───────────────────────────
+# WS2 (#811): don't re-gate — the work PR that landed this code already ran the
+# full gate (lint/compile/tests) on exactly that sha. Assert the RELEASE BASE
+# (the pre-bump code being released) is CI-green, in seconds, instead of
+# recompiling src-tauri + re-linting here.
+#
+# The base differs by case:
+#   - fresh run: HEAD is the checked-out main tip, before the bump → base = HEAD.
+#   - resume case (the tag already exists from a Layer 0 / cascade primitive that
+#     bumped + tagged locally): the tag IS the bump commit, which was never CI'd;
+#     its PARENT (${TAG}^) is the pre-bump base that CI gated → base = ${TAG}^.
+# Skipped only for verification rcs (a `-release-rc` live-fire cut runs off an
+# arbitrary working sha that may have no CI round of its own).
+assert_base_green() {
+  local base_sha="$1"
+  if [ "${IS_VERIFY}" = "true" ]; then
+    echo "verification rc (${TAG}): skipping base-sha CI-green assertion (release#663)."
+    return 0
+  fi
+  BASE_SHA="${base_sha}" bash "${script_dir}/assert-base-sha-green.sh"
+}
+
 # ── Resume case ───────────────────────────────────────────────────
 if git rev-parse "${TAG}" >/dev/null 2>&1; then
   TAG_SHA=$(git rev-list -n 1 "${TAG}")
   TAG_VERSION="$(git show "${TAG}:${pkg}" 2>/dev/null | jq -r '.version // empty')"
   if [ "${TAG_VERSION}" = "${NEW_VERSION}" ]; then
     echo "tag ${TAG} already exists at ${TAG_SHA} (${pkg} matches) — resuming"
+    # The pre-bump base is the tag's parent (the tag commit is the bump itself).
+    assert_base_green "$(git rev-parse "${TAG}^")"
     emit "release-sha=${TAG_SHA}"
 
     if [ -z "${CHANGELOG}" ]; then
@@ -104,6 +128,9 @@ if git rev-parse "${TAG}" >/dev/null 2>&1; then
 fi
 
 # ── Fresh release path ────────────────────────────────────────────
+# HEAD is the checked-out main tip, before the bump → it IS the release base.
+assert_base_green "$(git rev-parse HEAD)"
+
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
@@ -215,6 +242,22 @@ for lock in pnpm-lock.yaml package-lock.json yarn.lock "${TAURI_DIR}/src-tauri/C
   fi
 done
 
+# ── Stage changelog artifacts ─────────────────────────────────────
+# The non-prerelease `roll` above rewrites CHANGELOG.md AND deletes the
+# CHANGELOG/unreleased-*.md fragments; stage both so the release commit/tag
+# carries them, matching all five sibling prepare flows (e.g.
+# prepare-release-npm). The prerelease path uses `extract` (read-only on
+# CHANGELOG.md) — nothing to stage there. Guarded on a configured + present
+# CHANGELOG. `git add "${CHANGELOG_DIR}/"` stages new fragment-routed files and
+# the fragment deletions alike.
+if [ "${IS_PRERELEASE}" != "true" ] && [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+  git add "${CHANGELOG}"
+  CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
+  if [ -d "${CHANGELOG_DIR}" ]; then
+    git add "${CHANGELOG_DIR}/"
+  fi
+fi
+
 version_files_changed=false
 for vf in "${pkg}" "${cargo}" "${tauri_conf}"; do
   if ! git diff --cached --quiet -- "${vf}" 2>/dev/null; then
@@ -227,10 +270,12 @@ if [ "${version_files_changed}" = "false" ]; then
   exit 1
 fi
 
-# ── Pre-commit gate ───────────────────────────────────────────────
-bash "${script_dir}/run-precommit-gate.sh"
-
 # ── Commit + tag + push ──────────────────────────────────────────
+# No pre-commit gate here: WS2 (#811) asserts the base sha is CI-green above
+# instead of re-running the gate. The bump commit only rewrites version strings
+# (no code), and a malformed bump still fails fast: each bump_json_version /
+# Cargo awk hard-errors when its version key is missing, and the
+# version_files_changed guard above refuses a no-op bump.
 git commit -m "chore: Release ${TAG}"
 if [ -s release-notes.md ]; then
   git tag -a "${TAG}" -F release-notes.md

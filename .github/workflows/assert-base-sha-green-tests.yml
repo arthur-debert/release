@@ -1,0 +1,35 @@
+name: assert-base-sha-green tests
+
+# BATS contract suite for bin-internal/assert-base-sha-green.sh — the WS2 (#811)
+# base-sha CI-green assertion that replaced the in-prepare re-gate. Fully
+# offline: a stub `gh` on PATH replays a canned check-runs response so the suite
+# asserts the pass / fail / absent-CI verdicts without hitting the API.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin-internal/assert-base-sha-green.sh"
+      - "tests/assert-base-sha-green/**"
+      - ".github/workflows/assert-base-sha-green-tests.yml"
+  pull_request:
+    paths:
+      - "bin-internal/assert-base-sha-green.sh"
+      - "tests/assert-base-sha-green/**"
+      - ".github/workflows/assert-base-sha-green-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats + jq
+        # jq: the suite's offline `gh` stub applies the script's --jq filter via
+        # jq, so the suite needs it explicitly rather than relying on whatever is
+        # preinstalled on ubuntu-latest.
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+      - name: Run BATS suite
+        run: bats tests/assert-base-sha-green/
