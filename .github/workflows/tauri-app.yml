@@ -236,7 +236,8 @@ jobs:
   # -------------------------------------------------------------------
   # 0. Preflight: fail fast before prepare bumps + tags. Cheapest
   #    checks first — an empty changelog (nothing to release) fails in
-  #    seconds, before any consumer checkout or dependency install.
+  #    seconds, needing only a bare checkout (no toolchain / deps /
+  #    release_core install), before the prepare job's full setup.
   #    Apple-secrets validation runs only when signing is requested.
   # -------------------------------------------------------------------
   preflight:

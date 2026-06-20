@@ -6,9 +6,14 @@
 # gate (the prepare job re-validates via check-changelog-fragments.sh,
 # but only after a full checkout + python + tauri-linux-deps setup).
 #
-# "Unreleased content" spans both supported changelog shapes:
+# "Unreleased content" spans both supported changelog shapes, and in
+# each case "content" means at least one non-whitespace character — a
+# present-but-empty fragment is NOT content. This matches what prepare
+# enforces downstream (bin-internal/roll-changelog.sh extracts the
+# notes and fails on `grep -q '[^[:space:]]'`), so an empty fragment
+# fails here in ~5s instead of after the build.
 #   - fragment-dir model (#201): one or more CHANGELOG/unreleased-*.md
-#     fragments beside the changelog file.
+#     fragments beside the changelog file with non-whitespace content.
 #   - literal Keep-a-Changelog: a `## [Unreleased]` section in the
 #     changelog file with at least one non-whitespace line before the
 #     next `## ` heading.
@@ -27,13 +32,18 @@ set -euo pipefail
 
 CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
 
-# 1. Fragment-dir model: any CHANGELOG/unreleased-*.md fragment is content.
+# 1. Fragment-dir model: a CHANGELOG/unreleased-*.md fragment with
+#    non-whitespace content. An empty fragment doesn't count (prepare
+#    would extract empty notes and fail).
 if [ -d "${CHANGELOG_DIR}" ]; then
   shopt -s nullglob
-  fragments=("${CHANGELOG_DIR}"/unreleased-*.md)
-  if [ "${#fragments[@]}" -gt 0 ]; then
-    echo "Found ${#fragments[@]} unreleased fragment(s):"
-    printf '  %s\n' "${fragments[@]}"
+  with_content=()
+  for frag in "${CHANGELOG_DIR}"/unreleased-*.md; do
+    grep -q '[^[:space:]]' "${frag}" && with_content+=("${frag}")
+  done
+  if [ "${#with_content[@]}" -gt 0 ]; then
+    echo "Found ${#with_content[@]} non-empty unreleased fragment(s):"
+    printf '  %s\n' "${with_content[@]}"
     exit 0
   fi
 fi

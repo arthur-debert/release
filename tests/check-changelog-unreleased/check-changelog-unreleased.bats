@@ -24,7 +24,7 @@ teardown() {
   echo "- a change" > CHANGELOG/unreleased-foo.md
   run env CHANGELOG="$TMP/CHANGELOG.md" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 unreleased fragment(s)"* ]]
+  [[ "$output" == *"1 non-empty unreleased fragment(s)"* ]]
 }
 
 @test "passes with multiple fragments" {
@@ -33,7 +33,32 @@ teardown() {
   echo "- two" > CHANGELOG/unreleased-b.md
   run env CHANGELOG="$TMP/CHANGELOG.md" bash "$SCRIPT"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"2 unreleased fragment(s)"* ]]
+  [[ "$output" == *"2 non-empty unreleased fragment(s)"* ]]
+}
+
+@test "counts only the non-empty fragments alongside an empty one" {
+  mkdir CHANGELOG
+  echo "- real" > CHANGELOG/unreleased-a.md
+  : > CHANGELOG/unreleased-empty.md
+  run env CHANGELOG="$TMP/CHANGELOG.md" bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 non-empty unreleased fragment(s)"* ]]
+}
+
+@test "fails when the only fragment is empty" {
+  mkdir CHANGELOG
+  : > CHANGELOG/unreleased-empty.md
+  run env CHANGELOG="$TMP/CHANGELOG.md" bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No unreleased changelog content"* ]]
+}
+
+@test "fails when the only fragment is whitespace-only" {
+  mkdir CHANGELOG
+  printf '\n  \n\t\n' > CHANGELOG/unreleased-blank.md
+  run env CHANGELOG="$TMP/CHANGELOG.md" bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No unreleased changelog content"* ]]
 }
 
 @test "fails when CHANGELOG/ exists but holds no unreleased fragment" {
