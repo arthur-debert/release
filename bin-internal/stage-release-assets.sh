@@ -19,7 +19,7 @@
 # Partial-release prevention: the job graph blocks this job on a failed
 # build/sign, AND this script HARD-FAILS if the expected mac bundle for the
 # mode is missing/empty (a missing-but-expected artifact must not silently ship
-# a mac-less release). See the require_nonempty check below.
+# a mac-less release). See the bundle_nonempty check below.
 #
 # Env vars:
 #   DOWNLOAD_DIR   dir holding the per-artifact subdirs (bundle-*/)
@@ -33,6 +33,19 @@ DOWNLOAD_DIR="${DOWNLOAD_DIR:?DOWNLOAD_DIR required}"
 ASSETS_DIR="${ASSETS_DIR:?ASSETS_DIR required}"
 SIGN_MODE="${SIGN_MODE:-inline}"
 BUILD_MAC="${BUILD_MAC:-true}"
+
+# Fail fast on a misconfigured mode/flag rather than silently doing the wrong
+# thing: an unknown SIGN_MODE (e.g. a `posthoc` typo) would otherwise fall
+# through to the inline path and stage the UNSIGNED mac bundle. Mirrors
+# build-tauri.sh erroring on an unknown BUILD_PHASE.
+case "${SIGN_MODE}" in
+  inline|post-hoc) ;;
+  *) echo "::error::unknown SIGN_MODE: '${SIGN_MODE}' (expected inline|post-hoc)" >&2; exit 1 ;;
+esac
+case "${BUILD_MAC}" in
+  true|false) ;;
+  *) echo "::error::unknown BUILD_MAC: '${BUILD_MAC}' (expected true|false)" >&2; exit 1 ;;
+esac
 
 # Idempotent output: clear any prior contents so a rerun / local reuse never
 # ships stale assets (and BATS can't pass through a regression on leftovers).

@@ -492,3 +492,22 @@ stage_fixture() {
   [ ! -e out/STALE_LEFTOVER.dmg ]
   [ "$(cat out/App_1.0.0.dmg)" = "signed-dmg" ]
 }
+
+@test "stage-release-assets fails fast on an unknown SIGN_MODE (typo guard)" {
+  # A `posthoc` typo must NOT fall through to inline and ship the unsigned mac.
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=posthoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'unknown SIGN_MODE'
+  # nothing was staged
+  [ ! -e out/App_1.0.0.dmg ]
+}
+
+@test "stage-release-assets fails fast on a non-bool BUILD_MAC" {
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=yes \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'unknown BUILD_MAC'
+}
