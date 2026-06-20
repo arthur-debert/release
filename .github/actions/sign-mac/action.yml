@@ -54,14 +54,36 @@ runs:
           exit 0
         fi
 
-        KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+        # UNIQUE keychain + cert paths per invocation. The post-hoc signer calls
+        # this action MORE THAN ONCE in a single job (Sign .app, then Sign .dmg),
+        # so a fixed `$RUNNER_TEMP/signing.keychain-db` made the 2nd
+        # `security create-keychain` collide ("A keychain with the same name
+        # already exists", exit 48). PID + a random hex make each call's names
+        # unique. (NOT `mktemp -u "...XXXXXX.keychain-db"` — BSD/macOS mktemp only
+        # substitutes a trailing XXXXXX, so a suffix after it stays literal.)
+        UNIQ="$$-$(openssl rand -hex 4)"
+        KEYCHAIN="$RUNNER_TEMP/signing-${UNIQ}.keychain-db"
+        CERT_P12="$RUNNER_TEMP/cert-${UNIQ}.p12"
         KEYCHAIN_PASS="$(openssl rand -hex 16)"
-        echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+
+        # Clean up THIS call's keychain + cert on exit (success or failure):
+        # delete-keychain removes it from the user search list AND deletes the
+        # file, so calls don't accumulate keychains (which could confuse a later
+        # `security find-identity`). Best-effort — never fail the step on cleanup.
+        cleanup() {
+          security delete-keychain "$KEYCHAIN" >/dev/null 2>&1 || true
+          rm -f "$CERT_P12" "$KEYCHAIN" >/dev/null 2>&1 || true
+        }
+        trap cleanup EXIT
+
+        echo "$CERT_P12_BASE64" | base64 --decode > "$CERT_P12"
         security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
         security set-keychain-settings -lut 3600 "$KEYCHAIN"
         security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
-        security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+        security import "$CERT_P12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
         security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN"
+        # Prepend this keychain to the user search list (keeping the existing
+        # ones) so codesign + find-identity in THIS call see the imported cert.
         security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
         IDENTITY=$(security find-identity -v -p codesigning "$KEYCHAIN" | head -1 | sed 's/.*"\(.*\)"/\1/')
 
@@ -94,6 +116,6 @@ runs:
           codesign --verify --strict "$path"
         done <<< "$PATHS"
 
-        rm "$RUNNER_TEMP/cert.p12"
+        # cert.p12 + keychain are removed by the EXIT trap (cleanup()).
         echo "signed=true" >> "$GITHUB_OUTPUT"
         echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"

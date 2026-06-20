@@ -337,3 +337,41 @@ sign_mac_decides() {
   echo "$cond" | grep -q 'CERT_P12_BASE64'
   ! echo "$cond" | grep -q 'CERT_PASSWORD'
 }
+
+# --- sign-mac keychain uniqueness + cleanup (repeated invocation) ----------
+# The post-hoc signer calls sign-mac twice in one job (Sign .app, Sign .dmg).
+# A fixed keychain name made the 2nd `security create-keychain` collide
+# (exit 48). These pin the format/decision contract (mac-only keychain ops
+# can't run hermetically).
+
+@test "sign-mac keychain name is parameterized, not a fixed literal (collision regression)" {
+  # The KEYCHAIN assignment must include a per-call unique token, never a bare
+  # constant path. Re-introducing a fixed `signing.keychain-db` would collide
+  # on the 2nd call in a job.
+  assign=$(grep -E '^\s*KEYCHAIN=' "$SIGN_MAC")
+  echo "KEYCHAIN assignment: $assign"
+  [ -n "$assign" ]
+  # references a uniqueness source ($$, $RANDOM, openssl rand, or mktemp)
+  echo "$assign" | grep -Eq '\$\$|\$RANDOM|openssl rand|mktemp|\$\{UNIQ\}|\$UNIQ'
+  # must NOT be the old fixed name
+  ! echo "$assign" | grep -q 'signing\.keychain-db"$'
+}
+
+@test "sign-mac unique token is computed once and reused for keychain + cert" {
+  # Both the keychain and the decoded cert use the same per-call token so a
+  # repeated invocation never clobbers either.
+  grep -Eq '^\s*UNIQ=' "$SIGN_MAC"
+  grep -Eq '^\s*KEYCHAIN=.*\$\{?UNIQ' "$SIGN_MAC"
+  grep -Eq '^\s*CERT_P12=.*\$\{?UNIQ' "$SIGN_MAC"
+}
+
+@test "sign-mac cleans up its keychain on exit (trap + delete-keychain)" {
+  grep -q 'trap cleanup EXIT' "$SIGN_MAC"
+  grep -q 'security delete-keychain' "$SIGN_MAC"
+}
+
+@test "sign-mac no longer writes the cert to a fixed cert.p12 path" {
+  # The decoded cert path must be per-call unique, not the old fixed
+  # $RUNNER_TEMP/cert.p12 that a concurrent/repeated call could clobber.
+  ! grep -q 'RUNNER_TEMP/cert\.p12"' "$SIGN_MAC"
+}
