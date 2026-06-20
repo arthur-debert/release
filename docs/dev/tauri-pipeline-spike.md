@@ -91,10 +91,13 @@ runs `tauri bundle`.
 
 ## (b) Post-hoc `.dmg` signing
 
-Local signing identity present on this Mac:
+A valid **Developer ID Application** identity was present on this Mac
+(`security find-identity -v -p codesigning` listed one), so the real-identity
+signing leg was exercised — not ad-hoc. Examples below use a placeholder
+identity / team id; substitute your own:
 
 ```
-Developer ID Application: Arthur Debert (284A74LACP)   (1 valid identity)
+Developer ID Application: <Your Name> (<TEAMID>)   (1 valid identity)
 ```
 
 A freshly bundled `.app` is **adhoc / linker-signed** (`TeamIdentifier=not
@@ -104,14 +107,14 @@ state explicit (the WS4 "bundle unsigned" entry point).
 ### Step 1 — sign the inner `.app` post-hoc (hardened runtime)
 
 ```sh
-ID="Developer ID Application: Arthur Debert (284A74LACP)"
+ID="Developer ID Application: <Your Name> (<TEAMID>)"
 APP=src-tauri/target/release/bundle/macos/spikeapp.app
 codesign --force --options runtime --timestamp --deep --sign "$ID" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"   # valid + satisfies Designated Requirement
 ```
 
 Result: `flags=0x10000(runtime)`, `Authority=Developer ID Application: …`,
-`TeamIdentifier=284A74LACP`, secure `Timestamp` present.
+`TeamIdentifier=<TEAMID>`, secure `Timestamp` present.
 
 ### Step 2 — build the `.dmg` from the SIGNED app (hdiutil, NOT tauri)
 
@@ -131,7 +134,7 @@ codesign --verify --verbose=2 "$out"                  # valid + satisfies Design
 ```
 
 Verified after: mounting the signed dmg shows the inner `.app` **still** has
-`Authority=Developer ID Application: …` and `TeamIdentifier=284A74LACP`
+`Authority=Developer ID Application: …` and `TeamIdentifier=<TEAMID>`
 (`codesign --verify --deep --strict` passes).
 
 > Note: `tauri bundle --bundles dmg` also **deletes** the standalone `.app`
@@ -144,19 +147,26 @@ Verified after: mounting the signed dmg shows the inner `.app` **still** has
 
 ```sh
 spctl -a -t open --context context:primary-signature -vvv "$out"
-# rejected — source=Unnotarized Developer ID — origin=Developer ID Application: Arthur Debert …
+# rejected — source=Unnotarized Developer ID — origin=Developer ID Application: <Your Name> …
 ```
 
 That rejection is the *correct* pre-notarization state — signature is valid,
 Gatekeeper just wants a notarization ticket. The remaining commands need
 App Store Connect API creds (CI secrets) and were **not** runnable locally
-(no stored notary profile; no API key / Apple-ID+team pairing in env):
+(no stored notary profile; no API key / Apple-ID+team pairing in env). This
+repo already ships the notary leg as a composite action,
+`.github/actions/notarize-mac/action.yml` — WS4 should reuse it rather than
+re-derive these commands. Its env var names are the convention to follow
+(`ASC_KEY_BASE64` → decoded `--key` path, `ASC_KEY_ID` → `--key-id`,
+`ASC_ISSUER_ID` → `--issuer`):
 
 ```sh
+# what notarize-mac/action.yml runs, distilled:
+echo "$ASC_KEY_BASE64" | base64 --decode > "$RUNNER_TEMP/AuthKey.p8"
 xcrun notarytool submit "$out" \
-  --key   "$APPLE_API_KEY_PATH" \
-  --key-id "$APPLE_API_KEY_ID" \
-  --issuer "$APPLE_API_ISSUER" \
+  --key    "$RUNNER_TEMP/AuthKey.p8" \
+  --key-id "$ASC_KEY_ID" \
+  --issuer "$ASC_ISSUER_ID" \
   --wait
 xcrun stapler staple "$out"
 codesign --verify --verbose=2 "$out"
@@ -177,12 +187,15 @@ cold-start app; not needed once the app has been notarized once.
   (WS4); pick per the `sign-mode` input:
   1. **Native (preferred when creds are present at bundle time):** let tauri
      sign + notarize inside the bundle job via env — it reads
-     `APPLE_CERTIFICATE` / `APPLE_SIGNING_IDENTITY` and the `APPLE_API_*`
-     notary vars, and infers the identity from `APPLE_CERTIFICATE` (no
-     `signingIdentity` config needed). Fewest moving parts.
+     `APPLE_CERTIFICATE` / `APPLE_SIGNING_IDENTITY` plus tauri's own
+     `APPLE_API_KEY` / `APPLE_API_ISSUER` / `APPLE_API_KEY_PATH` notary vars
+     (the names tauri's bundler expects), and infers the identity from
+     `APPLE_CERTIFICATE` (no `signingIdentity` config needed). Fewest moving
+     parts.
   2. **Post-hoc (this spike):** bundle `--no-sign`, then the reusable step
-     signs the `.app`, repackages the dmg via `hdiutil`, signs the dmg,
-     notarizes + staples. Use when bundling and signing must be different
+     signs the `.app`, repackages the dmg via `hdiutil`, signs the dmg, and
+     hands the dmg to the existing `notarize-mac` action (`ASC_*` inputs) to
+     notarize + staple. Use when bundling and signing must be different
      jobs/runners, or signing is conditionally gated. Honor the caveat: build
      the resealed dmg with `hdiutil`, never `tauri bundle --bundles dmg`.
 - **Gate Apple secrets on `sign-mode`** (WS1 #813): in `sign-mode: none` the
