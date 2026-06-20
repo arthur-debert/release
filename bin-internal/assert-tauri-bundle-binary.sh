@@ -51,10 +51,29 @@ if [ -f "${conf}" ]; then
   add_expected "$(jq -r '.productName // empty' "${conf}")"
 fi
 if [ -f "${cargo_toml}" ]; then
-  # [package] name = "..." — first such line is the package name (Cargo
-  # requires it before any [[bin]] table). Tolerant of quotes + spacing.
-  add_expected "$(grep -m1 -E '^[[:space:]]*name[[:space:]]*=' "${cargo_toml}" \
-                    | sed -E 's/^[^=]*=[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/')"
+  # The cargo package name — SCOPED to the [package] table only. A consumer
+  # (phos) adds [[bin]] tables that also carry `name = …`; an unscoped grep
+  # would pick whichever comes first. Track the current [table] and only take
+  # `name` while inside [package] (mirrors prepare-tauri-release.sh's awk).
+  add_expected "$(awk '
+    BEGIN { q = "[\042\047]" }
+    {
+      sub(/\r$/, "")
+      if ($0 ~ /^[[:space:]]*\[/) {
+        h = $0; sub(/#.*/, "", h); gsub(/[[:space:]]/, "", h)
+        in_pkg = (h == "[package]")
+        next
+      }
+      if (in_pkg && !done && $0 ~ ("^[[:space:]]*name[[:space:]]*=[[:space:]]*" q)) {
+        line = $0
+        sub(/^[^=]*=[[:space:]]*/, "", line)   # strip up to the value
+        sub(/[[:space:]]*#.*$/, "", line)       # strip trailing comment
+        gsub(q, "", line)                        # strip quotes
+        sub(/[[:space:]]*$/, "", line)
+        print line; done = 1
+      }
+    }
+  ' "${cargo_toml}")"
 fi
 
 if [ "${#expected_set[@]}" -eq 0 ]; then
@@ -131,7 +150,10 @@ case "${PLATFORM}" in
     # tauri unpacks these under bundle/<deb|appimage>/.../data/usr/bin/.
     matched=""
     for e in "${expected_set[@]}"; do
-      if find "${bundle_root}" -type f -name "${e}" | grep -q .; then
+      # Restrict to the executable payload path (.../usr/bin/<name>) — a bare
+      # -name match anywhere under bundle_root would false-pass on an unrelated
+      # same-basename file elsewhere in the tree.
+      if find "${bundle_root}" -type f -path '*/usr/bin/*' -name "${e}" | grep -q .; then
         matched="${e}"
         break
       fi

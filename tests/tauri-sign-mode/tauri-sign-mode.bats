@@ -591,7 +591,7 @@ compile_fixture() {
   run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
     bash "$BIN/stage-tauri-compile.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'outside the repo root'
+  echo "$output" | grep -q 'strictly inside the repo root'
   # nothing external leaked into the artifact
   [ ! -e "$TMP/compile-mac/outside" ]
   run sh -c "find '$TMP/compile-mac' -name leak.txt | wc -l"
@@ -619,6 +619,19 @@ compile_fixture() {
     bash "$BIN/stage-tauri-compile.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'missing path'
+}
+
+@test "stage-tauri-compile FAILS LOUD when frontendDist resolves to the repo root itself" {
+  # frontendDist '..' from src-tauri/ is the repo root — must be STRICTLY
+  # inside, never equal to the root (would cp -R the whole repo into the
+  # artifact). Fail loud.
+  compile_fixture '..'
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'strictly inside the repo root'
+  # nothing got staged outside src-tauri target/release
+  [ ! -e "$TMP/compile-mac/src-tauri/tauri.conf.json" ]
 }
 
 @test "restore-tauri-compile copies the staged tree back over a fresh checkout" {
@@ -817,6 +830,86 @@ EOF
   run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "no .app bundle found"
+}
+
+@test "assert-bundle-binary scopes the cargo name to [package] even with [[bin]] tables around it" {
+  # phos shape: [[bin]] tables (gen_fixtures, transport_bench) BEFORE and AFTER
+  # [package]. The cargo identity must be the PACKAGE name 'phos', never a
+  # [[bin]] name — otherwise the guard would 'expect' gen_fixtures and let the
+  # real bug through. No tauri.conf identities, so cargo name is the only one.
+  rm -rf proj
+  mkdir -p proj/src-tauri/target/release/bundle/macos/App.app/Contents/MacOS
+  printf '{}' > proj/src-tauri/tauri.conf.json
+  cat > proj/src-tauri/Cargo.toml <<'EOF'
+[[bin]]
+name = "gen_fixtures"
+path = "src/bin/gen_fixtures.rs"
+
+[package]
+name = "phos"
+version = "0.1.0"
+
+[[bin]]
+name = "transport_bench"
+path = "src/bin/transport_bench.rs"
+EOF
+  # bundle's main binary is the package name → must PASS
+  echo bin > proj/src-tauri/target/release/bundle/macos/App.app/Contents/MacOS/phos
+  cat > proj/src-tauri/target/release/bundle/macos/App.app/Contents/Info.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key>
+  <string>phos</string>
+</dict></plist>
+EOF
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "bundle integrity OK"
+}
+
+@test "assert-bundle-binary does NOT treat a [[bin]] name as an expected identity (gen_fixtures still fails)" {
+  # Same [[bin]] layout, but the bundle's main IS gen_fixtures (the real bug).
+  # Since the cargo identity is scoped to [package] (phos), gen_fixtures is in
+  # NONE of the set → fail loud.
+  rm -rf proj
+  mkdir -p proj/src-tauri/target/release/bundle/macos/App.app/Contents/MacOS
+  printf '{}' > proj/src-tauri/tauri.conf.json
+  cat > proj/src-tauri/Cargo.toml <<'EOF'
+[package]
+name = "phos"
+version = "0.1.0"
+
+[[bin]]
+name = "gen_fixtures"
+path = "src/bin/gen_fixtures.rs"
+EOF
+  echo bin > proj/src-tauri/target/release/bundle/macos/App.app/Contents/MacOS/gen_fixtures
+  cat > proj/src-tauri/target/release/bundle/macos/App.app/Contents/Info.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key>
+  <string>gen_fixtures</string>
+</dict></plist>
+EOF
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "wrong main binary"
+}
+
+@test "assert-bundle-binary linux match is scoped to usr/bin (no same-basename false-pass)" {
+  # A file named like the expected binary sitting OUTSIDE usr/bin (e.g. a
+  # resource) must NOT satisfy the guard — only the real usr/bin payload does.
+  rm -rf proj
+  mkdir -p proj/src-tauri/target/release/bundle/deb/App/data/usr/share/phos \
+           proj/src-tauri/target/release/bundle/deb/App/data/usr/bin
+  printf '{"mainBinaryName":"phos"}' > proj/src-tauri/tauri.conf.json
+  # decoy: a 'phos'-named file NOT under usr/bin
+  echo decoy > proj/src-tauri/target/release/bundle/deb/App/data/usr/share/phos/phos
+  # the actual usr/bin payload is the WRONG binary
+  echo bin > proj/src-tauri/target/release/bundle/deb/App/data/usr/bin/gen_fixtures
+  run env TAURI_DIR="$TMP/proj" PLATFORM=linux bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "no expected linux binary"
 }
 
 @test "assert-bundle-binary does not invoke mapfile/readarray (bash 3.2 runner)" {

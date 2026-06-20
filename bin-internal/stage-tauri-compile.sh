@@ -73,7 +73,14 @@ if [ -n "${frontend_dist}" ] && [[ "${frontend_dist}" != http://* ]] && [[ "${fr
   # otherwise drag arbitrary external data into the uploaded artifact; that is a
   # misconfig, so fail LOUD rather than silently staging it or the checkout.
   dist_raw="${src_tauri}/${frontend_dist}"
-  canon_root="$(cd "${REPO_ROOT}" && pwd -P)"
+
+  # Canonicalize the repo root (physical path, symlinks resolved). The cd is
+  # checked explicitly — a `||`-after-assignment never fires (the assignment
+  # itself succeeds), so capture-then-test the exit status.
+  if ! canon_root="$(cd "${REPO_ROOT}" && pwd -P)"; then
+    echo "::error::cannot resolve REPO_ROOT (${REPO_ROOT})"
+    exit 1
+  fi
 
   if [ ! -e "${dist_raw}" ]; then
     echo "::error::frontendDist '${frontend_dist}' resolves to a missing path (${dist_raw}); build it before staging"
@@ -86,15 +93,25 @@ if [ -n "${frontend_dist}" ] && [[ "${frontend_dist}" != http://* ]] && [[ "${fr
     exit 1
   fi
   # Canonical real path (resolves any symlinked parents too) for the containment
-  # check. For a dir, cd into it; for a file, canonicalize its parent.
+  # check. For a dir, cd into it; for a file, canonicalize its parent. Each cd
+  # is checked explicitly (see above) — never fall through to a bogus path.
   if [ -d "${dist_raw}" ]; then
-    dist_canon="$(cd "${dist_raw}" && pwd -P)"
+    if ! dist_canon="$(cd "${dist_raw}" && pwd -P)"; then
+      echo "::error::cannot resolve frontendDist '${frontend_dist}' (${dist_raw})"
+      exit 1
+    fi
   else
-    dist_canon="$(cd "$(dirname "${dist_raw}")" && pwd -P)/$(basename "${dist_raw}")"
+    if ! dist_parent="$(cd "$(dirname "${dist_raw}")" && pwd -P)"; then
+      echo "::error::cannot resolve frontendDist '${frontend_dist}' (${dist_raw})"
+      exit 1
+    fi
+    dist_canon="${dist_parent}/$(basename "${dist_raw}")"
   fi
-  # Must be the repo root itself or strictly under it.
-  if [ "${dist_canon}" != "${canon_root}" ] && [ "${dist_canon#"${canon_root}"/}" = "${dist_canon}" ]; then
-    echo "::error::frontendDist '${frontend_dist}' resolves outside the repo root (${dist_canon} not under ${canon_root}); refusing to stage external data"
+  # Must be STRICTLY INSIDE the repo root: not the root itself, and under it.
+  # A frontendDist at or above the root (`.`, `..`, `../../outside`) is a
+  # misconfig — fail loud, never cp -R a root/absolute path into the artifact.
+  if [ "${dist_canon}" = "${canon_root}" ] || [ "${dist_canon#"${canon_root}"/}" = "${dist_canon}" ]; then
+    echo "::error::frontendDist '${frontend_dist}' must resolve strictly inside the repo root (${dist_canon} vs ${canon_root}); refusing to stage external data"
     exit 1
   fi
   # Stage at the repo-root-relative path so restore lands it in place.
