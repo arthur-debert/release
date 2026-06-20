@@ -1,1 +1,0 @@
-- Document tauri build/bundle decoupling + post-hoc dmg signing spike verdict

@@ -1,1 +1,0 @@
-- Add a notify-downstreams input to rust-cli.yml and tree-sitter.yml so the reusable workflow fans repository_dispatch out to downstream repos itself; thin callers drop their hand-rolled notify jobs (release#804)

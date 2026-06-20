@@ -1,1 +1,0 @@
-- Fix canary run-resolver timing out on Kinds whose release commits a version bump (drop the head_sha==seed tie on the release run; release#810 follow-on)

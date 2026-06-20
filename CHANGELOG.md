@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## 3.8.0 - 2026-06-20
+
+- Fix canary run-resolver timing out on Kinds whose release commits a version bump (drop the head_sha==seed tie on the release run; release#810 follow-on)
+- Fix setup-sccache action failing to load: removed a live ${{ github.repository }} expression from the key-prefix description prose (the manifest validator evaluates expressions even in descriptions)
+- Add a notify-downstreams input to rust-cli.yml and tree-sitter.yml so the reusable workflow fans repository_dispatch out to downstream repos itself; thin callers drop their hand-rolled notify jobs (release#804)
+- Add sccache (shared GCS-backed) Rust compiler caching to the Rust and Tauri CI/release lanes for cross-branch cache reuse
+- Document tauri build/bundle decoupling + post-hoc dmg signing spike verdict
+- Preflight fails fast on empty changelog; Apple-secrets check gated on signing requested
+- Slim tauri prepare: drop in-prepare re-gate; assert release base sha is CI-green
+
 ## 3.7.0 - 2026-06-20
 
 - setup-rust + tauri-app install a repo-selected fast linker (mold/lld) so a committed .cargo linker config builds

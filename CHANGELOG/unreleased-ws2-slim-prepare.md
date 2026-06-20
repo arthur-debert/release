@@ -1,1 +1,0 @@
-- Slim tauri prepare: drop in-prepare re-gate; assert release base sha is CI-green
