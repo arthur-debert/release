@@ -66,18 +66,41 @@ done < <(find "${release_dir}" -maxdepth 1 -type f)
 #    (http(s)://…) — there is no built dir to carry in that case.
 frontend_dist=$(jq -r '.build.frontendDist // .build.distDir // empty' "${conf}")
 if [ -n "${frontend_dist}" ] && [[ "${frontend_dist}" != http://* ]] && [[ "${frontend_dist}" != https://* ]]; then
-  # Resolve relative to src-tauri/, then normalize to a repo-root-relative path.
-  dist_rel="${src_tauri}/${frontend_dist}"
-  # Collapse a leading "src-tauri/../" so the staged path matches the real tree.
-  dist_rel="$(cd "$(dirname "${dist_rel}")" 2>/dev/null && pwd)/$(basename "${dist_rel}")" || dist_rel=""
-  if [ -n "${dist_rel}" ] && [ -e "${dist_rel}" ]; then
-    # Re-relativize to REPO_ROOT for staging.
-    rel="${dist_rel#"${REPO_ROOT}"/}"
-    stage "${rel}"
-    echo "staged frontendDist: ${rel}"
-  else
-    echo "::warning::frontendDist '${frontend_dist}' resolved to a missing path; package job will rely on the checkout"
+  # frontendDist is resolved relative to src-tauri/. CANONICALIZE both the repo
+  # root and the resolved dist path (physical pwd, symlinks resolved) and stage
+  # it ONLY when it is a real path INSIDE the repo. A frontendDist that escapes
+  # the workspace — a `../../outside` value or a symlink pointing out — would
+  # otherwise drag arbitrary external data into the uploaded artifact; that is a
+  # misconfig, so fail LOUD rather than silently staging it or the checkout.
+  dist_raw="${src_tauri}/${frontend_dist}"
+  canon_root="$(cd "${REPO_ROOT}" && pwd -P)"
+
+  if [ ! -e "${dist_raw}" ]; then
+    echo "::error::frontendDist '${frontend_dist}' resolves to a missing path (${dist_raw}); build it before staging"
+    exit 1
   fi
+  # Reject a frontendDist that is itself a symlink — cp -R would dereference it
+  # and could pull in data from outside the workspace.
+  if [ -L "${dist_raw}" ]; then
+    echo "::error::frontendDist '${frontend_dist}' is a symlink (${dist_raw}); refusing to dereference it into the artifact"
+    exit 1
+  fi
+  # Canonical real path (resolves any symlinked parents too) for the containment
+  # check. For a dir, cd into it; for a file, canonicalize its parent.
+  if [ -d "${dist_raw}" ]; then
+    dist_canon="$(cd "${dist_raw}" && pwd -P)"
+  else
+    dist_canon="$(cd "$(dirname "${dist_raw}")" && pwd -P)/$(basename "${dist_raw}")"
+  fi
+  # Must be the repo root itself or strictly under it.
+  if [ "${dist_canon}" != "${canon_root}" ] && [ "${dist_canon#"${canon_root}"/}" = "${dist_canon}" ]; then
+    echo "::error::frontendDist '${frontend_dist}' resolves outside the repo root (${dist_canon} not under ${canon_root}); refusing to stage external data"
+    exit 1
+  fi
+  # Stage at the repo-root-relative path so restore lands it in place.
+  rel="${dist_canon#"${canon_root}"/}"
+  stage "${rel}"
+  echo "staged frontendDist: ${rel}"
 fi
 
 echo "Staged compile outputs into ${OUT_DIR}:"

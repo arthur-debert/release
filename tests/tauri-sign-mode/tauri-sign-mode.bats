@@ -582,6 +582,45 @@ compile_fixture() {
   [ ! -e "$TMP/compile-mac/dist" ]
 }
 
+@test "stage-tauri-compile FAILS LOUD and stages nothing external when frontendDist escapes the repo" {
+  # frontendDist resolving to ../../outside must NOT drag arbitrary external
+  # data into the artifact — fail hard instead (Copilot regression).
+  compile_fixture '../../outside'
+  # the "outside" dir lives above REPO_ROOT, with secret-looking content
+  mkdir -p outside; echo SECRET > outside/leak.txt
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'outside the repo root'
+  # nothing external leaked into the artifact
+  [ ! -e "$TMP/compile-mac/outside" ]
+  run sh -c "find '$TMP/compile-mac' -name leak.txt | wc -l"
+  [ "$(echo "$output" | tr -d ' ')" = "0" ]
+}
+
+@test "stage-tauri-compile FAILS LOUD when frontendDist is a symlink (no deref into the artifact)" {
+  compile_fixture '../dist'
+  # replace the real dist dir with a symlink pointing outside the repo
+  rm -rf repo/dist
+  mkdir -p outside-target; echo SECRET > outside-target/leak.txt
+  ln -s "$TMP/outside-target" repo/dist
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'is a symlink'
+  run sh -c "find '$TMP/compile-mac' -name leak.txt | wc -l"
+  [ "$(echo "$output" | tr -d ' ')" = "0" ]
+}
+
+@test "stage-tauri-compile FAILS LOUD when frontendDist resolves to a missing path" {
+  compile_fixture '../dist'
+  rm -rf repo/dist
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'missing path'
+}
+
 @test "restore-tauri-compile copies the staged tree back over a fresh checkout" {
   compile_fixture
   env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
