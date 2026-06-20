@@ -257,9 +257,10 @@ Three pieces. None is hard individually; the order matters.
      repository_dispatch:
        types: [upstream-released]
 
-   # REQUIRED: the cascade-handler bumps + opens + admin-merges the
-   # release PR, so it needs write. A reusable workflow cannot be granted
-   # more than the caller's token holds, and most repos default the
+   # REQUIRED: cascade-handler.yml declares `permissions: contents:
+   # write` + `pull-requests: write`. A reusable workflow cannot be
+   # granted more than the caller's token holds, so the caller must grant
+   # at least what the called workflow declares; most repos default the
    # workflow token to read-only — omit this block and the call is
    # rejected at startup (`startup_failure`, no logs). See release#805.
    permissions:
