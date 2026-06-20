@@ -1,0 +1,1 @@
+- Release job consumes signed artifacts mode-agnostically: post-hoc ships the signed mac dmg, inline ships the in-build-signed bundle; partial-release prevention preserved
