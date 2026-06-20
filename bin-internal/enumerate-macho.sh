@@ -29,7 +29,8 @@ APP_PATH="${APP_PATH:?APP_PATH required}"
 [ -d "${APP_PATH}" ] || { echo "::error::APP_PATH not a directory: ${APP_PATH}" >&2; exit 1; }
 APP_PATH="${APP_PATH%/}"   # strip trailing slash so the top-app compare is exact
 
-# rel-depth: number of path components below APP_PATH (for deepest-first sort).
+# rel-depth: count the '/' separators in the path below APP_PATH (a proxy for
+# nesting depth, for the deepest-first sort).
 rel_depth() {
   local rel="${1#"${APP_PATH}"/}"
   printf '%s' "${rel}" | tr -cd '/' | wc -c | tr -d ' '

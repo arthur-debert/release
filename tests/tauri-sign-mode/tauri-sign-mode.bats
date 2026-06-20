@@ -213,7 +213,7 @@ EOF
   ! echo "$output" | grep -q 'Info.plist$'
 }
 
-@test "enumerate-macho emits nothing for an .app with no nested code beyond the main exe" {
+@test "enumerate-macho emits only the main executable for an .app with no nested code" {
   app="$TMP/Plain.app"
   make_macho "$app/Contents/MacOS/Plain"
   mkdir -p "$app/Contents/Resources"; echo x > "$app/Contents/Resources/data.txt"
