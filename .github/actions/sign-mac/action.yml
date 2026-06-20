@@ -7,7 +7,7 @@ inputs:
     required: false
     default: ''
   cert-password:
-    description: 'Password for the .p12 cert'
+    description: 'Password for the .p12 cert. Optional — leave empty for passwordless .p12s (valid per PKCS#12; signing still runs).'
     required: false
     default: ''
   paths:
@@ -40,7 +40,14 @@ runs:
       run: |
         set -euo pipefail
 
-        if [ -z "$CERT_P12_BASE64" ] || [ -z "$CERT_PASSWORD" ]; then
+        # Skip ONLY when no certificate is supplied. An EMPTY password is
+        # valid — a passwordless .p12 is legal per PKCS#12, and `security
+        # import -P ""` imports it fine. Gating the skip on the password too
+        # (the old `|| [ -z "$CERT_PASSWORD" ]`) made this action silently skip
+        # codesign for passwordless-cert consumers (e.g. phos), leaving every
+        # binary ad-hoc-signed → notary rejection. The cert presence is the
+        # only real signal of "signing requested".
+        if [ -z "$CERT_P12_BASE64" ]; then
           echo "::warning::No signing certificate configured — skipping codesign."
           echo "signed=false" >> "$GITHUB_OUTPUT"
           echo "identity=" >> "$GITHUB_OUTPUT"

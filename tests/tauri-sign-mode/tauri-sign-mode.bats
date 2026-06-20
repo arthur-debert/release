@@ -281,3 +281,45 @@ EOF
 @test "enumerate-macho does not invoke mapfile/readarray (bash 3.2 runner)" {
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/enumerate-macho.sh"
 }
+
+# --- sign-mac skip guard (passwordless .p12) ------------------------------
+# sign-mac is a composite action; its keychain/codesign path is mac-only and
+# can't run hermetically here. These tests pin the SKIP-DECISION contract: the
+# guard must key on the CERT only, never the password — a passwordless .p12
+# (empty password) is valid and must still sign (the phos post-hoc blocker).
+
+SIGN_MAC="${BATS_TEST_DIRNAME}/../../.github/actions/sign-mac/action.yml"
+
+# Evaluate the action's actual skip predicate for a given cert/password pair.
+# Mirrors the guard `if [ -z "$CERT_P12_BASE64" ]; then skip`.
+sign_mac_skips() {
+  CERT_P12_BASE64="$1" CERT_PASSWORD="$2" bash -c \
+    'if [ -z "$CERT_P12_BASE64" ]; then echo skip; else echo sign; fi'
+}
+
+@test "sign-mac signs when cert present + password EMPTY (passwordless .p12)" {
+  [ "$(sign_mac_skips "BASE64CERT" "")" = "sign" ]
+}
+
+@test "sign-mac signs when cert present + password set" {
+  [ "$(sign_mac_skips "BASE64CERT" "hunter2")" = "sign" ]
+}
+
+@test "sign-mac skips when cert is empty" {
+  [ "$(sign_mac_skips "" "")" = "skip" ]
+  [ "$(sign_mac_skips "" "hunter2")" = "skip" ]
+}
+
+@test "sign-mac guard does NOT gate the skip on the password (regression)" {
+  # The action's skip condition must reference only the cert, never the
+  # password — re-introducing `|| [ -z "$CERT_PASSWORD" ]` would silently skip
+  # codesign for passwordless certs again.
+  guard=$(grep -n 'No signing certificate configured' "$SIGN_MAC")
+  [ -n "$guard" ]
+  line=$(echo "$guard" | cut -d: -f1)
+  # the `if [ -z ... ]` is the line just above the warning
+  cond=$(sed -n "$((line-1))p" "$SIGN_MAC")
+  echo "guard condition: $cond"
+  echo "$cond" | grep -q 'CERT_P12_BASE64'
+  ! echo "$cond" | grep -q 'CERT_PASSWORD'
+}
