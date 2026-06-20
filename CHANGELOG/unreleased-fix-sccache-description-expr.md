@@ -1,0 +1,1 @@
+- Fix setup-sccache action failing to load: removed a live ${{ github.repository }} expression from the key-prefix description prose (the manifest validator evaluates expressions even in descriptions)
