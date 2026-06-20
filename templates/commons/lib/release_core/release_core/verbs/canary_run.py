@@ -309,10 +309,16 @@ def _release_run_ids(repo: str) -> set[int]:
 def _dispatch(repo: str, dest: str, version: str) -> tuple[str, set[int]]:
     """Phase 3: FRESH events only (never `gh run rerun`) — push the seed commit
     (push event → CI) and dispatch the prerelease cut, in parallel. Returns
-    (seed_sha, pre-dispatch release-run ids — the skew-proof resolver seam)."""
-    before = _release_run_ids(repo)
+    (seed_sha, pre-dispatch release-run ids — the skew-proof resolver seam).
+
+    The release-run-id snapshot is taken AFTER the seed push and immediately
+    BEFORE the dispatch, so it is the tightest possible boundary: the resolver
+    keys solely on this id-set diff now (no head_sha tie — see _resolve_runs),
+    and the push triggers only a CI run (push event), never a Release
+    workflow_dispatch, so it cannot perturb this set."""
     gh.git(["-C", dest, "push", "--quiet", "origin", "main"])
     seed_sha = gh.git_rev_parse("HEAD", cwd=dest)
+    before = _release_run_ids(repo)
     _retry(
         lambda: gh.rest(
             f"repos/{repo}/actions/workflows/{RELEASE_WORKFLOW}/dispatches",
@@ -329,9 +335,17 @@ def _resolve_runs(
 ) -> dict[str, dict]:
     """Phase 4a: resolve the two fresh runs — CI by head_sha == seed sha (also
     excludes the noise run prepare's release commit triggers), the cut by
-    workflow + head_sha == seed sha + a run id NOT in the pre-dispatch
-    snapshot (id-set diff, immune to local-vs-GitHub clock skew; the head_sha
-    tie keeps a concurrent dispatch by someone else from mis-associating)."""
+    workflow + event == workflow_dispatch + a run id NOT in the pre-dispatch
+    snapshot (id-set diff, immune to local-vs-GitHub clock skew), taking the
+    earliest such run as ours.
+
+    The release run is NOT matched on head_sha: a Kind whose release pipeline
+    commits a version bump (e.g. vscode-ext) reports the run's head_sha as the
+    bump commit, not the seed — so a head_sha tie would never resolve and the
+    round would time out even though the release succeeded (release#810
+    follow-on). The id-set diff already uniquely identifies our dispatch in the
+    dedicated, serially-dispatched per-family canary repo, so the tie was both
+    redundant and wrong here."""
     runs: dict[str, dict] = {}
     while time.time() < deadline:
         if "ci" not in runs:
@@ -355,9 +369,7 @@ def _resolve_runs(
             fresh = [
                 run
                 for run in (data or {}).get("workflow_runs", [])
-                if run["id"] not in before_ids
-                and run.get("event") == "workflow_dispatch"
-                and run.get("head_sha") == seed_sha
+                if run["id"] not in before_ids and run.get("event") == "workflow_dispatch"
             ]
             if fresh:
                 runs["release"] = min(fresh, key=lambda run: run["id"])
