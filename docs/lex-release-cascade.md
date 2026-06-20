@@ -123,7 +123,7 @@ release-core admin release lex --status \
 
 ### Layer 2 — event-driven cascade (the default)
 
-Every repo's `release.yml` ends with a `notify-downstreams` step that fires `repository_dispatch` events to its direct consumers. Every downstream repo has a `.github/workflows/on-upstream-released.yml` handler that:
+Every repo's `release.yml` fans `repository_dispatch` events out to its direct consumers — by passing the `notify-downstreams` input to its reusable release workflow (`rust-cli.yml` / `tree-sitter.yml`), which fires the dispatches itself (no hand-rolled job in the thin caller). The input requires the caller pinned to **`@v3` or later** (the version that introduced it); on an older pin the input is unknown and no fan-out happens. Every downstream repo has a `.github/workflows/on-upstream-released.yml` handler that:
 
 1. Receives the dispatch
 2. Decides whether to release (commits since the last final release?) → if yes, dispatches `release.yml` with the derived version; CI does the bump + CHANGELOG roll + commit + tag + build + release
@@ -257,9 +257,19 @@ Three pieces. None is hard individually; the order matters.
      repository_dispatch:
        types: [upstream-released]
 
+   # REQUIRED: cascade-handler.yml declares `permissions: contents:
+   # write` + `pull-requests: write`. A reusable workflow cannot be
+   # granted more than the caller's token holds, so the caller must grant
+   # at least what the called workflow declares; most repos default the
+   # workflow token to read-only — omit this block and the call is
+   # rejected at startup (`startup_failure`, no logs). See release#805.
+   permissions:
+     contents: write
+     pull-requests: write
+
    jobs:
      cascade:
-       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v2
+       uses: arthur-debert/release/.github/workflows/cascade-handler.yml@v3
        secrets:
          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
    ```
@@ -285,7 +295,7 @@ Three pieces. None is hard individually; the order matters.
    The older copy-per-repo `on-upstream-released.yml` shape (~120 lines)
    still works during the Wave-3 migration sweep but is being phased
    out.
-3. **Add `notify-downstreams` step to `.github/workflows/release.yml`.** Fires `repository_dispatch upstream-released` to the new repo's direct consumers (if any).
+3. **Notify downstreams from `.github/workflows/release.yml`.** If the new repo has direct consumers, pass them to its reusable release workflow — e.g. `with: { notify-downstreams: "lex-fmt/vscode lex-fmt/nvim lex-fmt/lexed" }` (space/comma/newline separated). The reusable workflow fires `repository_dispatch upstream-released` to each on a successful release; the thin caller needs no hand-rolled job. **Requires the caller pinned to `@v3`+** (the version that added the input — an older pin silently won't fan out) and `RELEASE_TOKEN` in the caller's `secrets:` (the default `GITHUB_TOKEN` can't fire cross-repo dispatches).
 
 Then add the repo to the `release-core admin release lex` orchestrator's `ORDER` array and dep-chain validation. Done.
 
