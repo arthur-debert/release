@@ -33,11 +33,19 @@ fi
 
 # Paginate every check-run on the sha. --jq flattens to "<status> <conclusion>"
 # lines (one per run); --paginate concatenates pages, so a sha with >100 runs
-# (default page size) is fully covered.
-runs="$(gh api \
+# (default page size) is fully covered. Capture stderr separately so an auth /
+# permission failure (the Checks API needs `checks: read` on GITHUB_TOKEN) is
+# surfaced instead of being silently indistinguishable from "absent CI".
+gh_err="$(mktemp)"
+trap 'rm -f "${gh_err}"' EXIT
+if ! runs="$(gh api \
 	"repos/${GITHUB_REPOSITORY}/commits/${BASE_SHA}/check-runs" \
 	--paginate \
-	--jq '.check_runs[] | "\(.status) \(.conclusion // "")"' 2>/dev/null || true)"
+	--jq '.check_runs[] | "\(.status) \(.conclusion // "")"' 2>"${gh_err}")"; then
+	echo "::error::failed to query check-runs for ${BASE_SHA} (auth/permission? the Checks API needs \`checks: read\`):" >&2
+	sed 's/^/::error::  /' "${gh_err}" >&2
+	exit 1
+fi
 
 if [ -z "${runs}" ]; then
 	echo "::error::release base sha ${BASE_SHA} is not CI-green — no check-runs found on it." >&2

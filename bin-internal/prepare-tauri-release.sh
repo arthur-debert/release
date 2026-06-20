@@ -243,8 +243,9 @@ fi
 # ── Commit + tag + push ──────────────────────────────────────────
 # No pre-commit gate here: WS2 (#811) asserts the base sha is CI-green above
 # instead of re-running the gate. The bump commit only rewrites version strings
-# (no code), and the 3-file version-consistency check below the bump catches a
-# malformed bump.
+# (no code), and a malformed bump still fails fast: each bump_json_version /
+# Cargo awk hard-errors when its version key is missing, and the
+# version_files_changed guard above refuses a no-op bump.
 git commit -m "chore: Release ${TAG}"
 if [ -s release-notes.md ]; then
   git tag -a "${TAG}" -F release-notes.md

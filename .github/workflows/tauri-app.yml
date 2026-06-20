@@ -257,6 +257,12 @@ jobs:
   prepare:
     needs: preflight
     runs-on: ubuntu-latest
+    # contents: write for the bump commit + tag push; checks: read for the
+    # base-sha CI-green assertion's Checks API query (WS2 #811) when it runs on
+    # the default github.token.
+    permissions:
+      contents: write
+      checks: read
     outputs:
       version: ${{ steps.prep.outputs.version }}
       release-sha: ${{ steps.prep.outputs.release-sha }}

@@ -26,7 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Install bats
-        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Install bats + jq
+        # jq: the suite's offline `gh` stub applies the script's --jq filter via
+        # jq, so the suite needs it explicitly rather than relying on whatever is
+        # preinstalled on ubuntu-latest.
+        run: sudo apt-get update && sudo apt-get install -y bats jq
       - name: Run BATS suite
         run: bats tests/assert-base-sha-green/

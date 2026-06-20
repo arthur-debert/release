@@ -24,7 +24,7 @@ inputs:
     required: false
     default: ''
   gh-token:
-    description: 'Token for the `gh api` check-runs query that asserts the release base sha is CI-green (and reads private-repo check-runs). Falls back to the workflow token when empty.'
+    description: 'Token for the `gh api` check-runs query that asserts the release base sha is CI-green (and reads private-repo check-runs). Falls back to the workflow `github.token` when empty; that token needs `checks: read` to read the Checks API.'
     required: false
     default: ''
 
@@ -70,6 +70,9 @@ runs:
         PREP_SCRIPT: ${{ inputs.prep-script }}
         # Authenticates the `gh api` check-runs query in the base-sha CI-green
         # assertion (and reads private-repo check-runs). Falls back to the
-        # workflow token via gh's default when empty.
-        GH_TOKEN: ${{ inputs.gh-token }}
+        # workflow `github.token` when the caller omits gh-token, so `gh` is
+        # never left unauthenticated (an empty GH_TOKEN would make the
+        # assertion misread auth failure as "no check-runs"). The token needs
+        # `checks: read` to reach the Checks API.
+        GH_TOKEN: ${{ inputs.gh-token || github.token }}
       run: bash "${{ github.action_path }}/../../../bin-internal/prepare-tauri-release.sh"

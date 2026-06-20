@@ -89,11 +89,12 @@ teardown() {
   [[ "$output" == *"no check-runs found"* ]]
 }
 
-@test "gh api failure is treated as no-runs and refused" {
+@test "gh api failure surfaces the error and refuses (not misread as absent CI)" {
   export GH_FAIL=1
   run bash "$SCRIPT"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no check-runs found"* ]]
+  [[ "$output" == *"failed to query check-runs"* ]]
+  [[ "$output" != *"no check-runs found"* ]]
 }
 
 @test "missing BASE_SHA errors" {
