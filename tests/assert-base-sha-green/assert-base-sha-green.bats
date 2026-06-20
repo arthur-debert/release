@@ -14,10 +14,12 @@ setup() {
   TMP="$(mktemp -d)"
   cd "$TMP"
   mkdir -p bin-stub
-  # Stub `gh`: for `gh api … --jq <filter>`, feed $CHECK_RUNS_JSON to jq with
-  # that filter (matching `gh api --jq`'s behavior). $GH_FAIL=1 makes the API
-  # call itself error (network/auth failure) — the script tolerates that and
-  # treats it as "no runs".
+  # Stub `gh`: the script calls `gh api … --paginate --slurp --jq <filter>`, so
+  # jq sees an ARRAY of page-response objects. We mimic one page by slurping the
+  # canned $CHECK_RUNS_JSON object into a single-element array (`jq -s`) and
+  # applying the same filter. $GH_FAIL=1 makes the API call exit non-zero — the
+  # script surfaces that as an explicit "failed to query check-runs" error,
+  # distinct from the absent-CI (empty) path.
   cat > bin-stub/gh <<'EOF'
 #!/usr/bin/env bash
 [ "${GH_FAIL:-0}" = "1" ] && exit 1
@@ -27,7 +29,7 @@ for arg in "$@"; do
   [ "$prev" = "--jq" ] && filter="$arg"
   prev="$arg"
 done
-printf '%s' "${CHECK_RUNS_JSON:-}" | jq -r "$filter"
+printf '%s' "${CHECK_RUNS_JSON:-}" | jq -s -r "$filter"
 EOF
   chmod +x bin-stub/gh
   export PATH="$PWD/bin-stub:$PATH"
@@ -80,6 +82,29 @@ teardown() {
   run bash "$SCRIPT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"not finished"* ]]
+}
+
+@test "a re-run check: latest success wins over an earlier failure (same name)" {
+  # The Checks API returns EVERY historical run. An earlier 'gate' failure that
+  # was re-run green must NOT false-negative — we evaluate only the latest run
+  # per name.
+  export CHECK_RUNS_JSON='{"check_runs":[
+    {"name":"gate","status":"completed","conclusion":"failure","started_at":"2026-06-20T10:00:00Z"},
+    {"name":"gate","status":"completed","conclusion":"success","started_at":"2026-06-20T11:00:00Z"}]}'
+  run bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"is CI-green"* ]]
+}
+
+@test "a re-run check: latest failure loses to nothing — still fails (same name)" {
+  # Symmetric guard: if the LATEST run for a name failed (earlier was green), the
+  # sha is not green.
+  export CHECK_RUNS_JSON='{"check_runs":[
+    {"name":"gate","status":"completed","conclusion":"success","started_at":"2026-06-20T10:00:00Z"},
+    {"name":"gate","status":"completed","conclusion":"failure","started_at":"2026-06-20T11:00:00Z"}]}'
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"conclusion=failure"* ]]
 }
 
 @test "absent CI (zero check-runs) is refused" {

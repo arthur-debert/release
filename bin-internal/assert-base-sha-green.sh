@@ -31,17 +31,23 @@ if ! command -v gh >/dev/null 2>&1; then
 	exit 1
 fi
 
-# Paginate every check-run on the sha. --jq flattens to "<status> <conclusion>"
-# lines (one per run); --paginate concatenates pages, so a sha with >100 runs
-# (default page size) is fully covered. Capture stderr separately so an auth /
-# permission failure (the Checks API needs `checks: read` on GITHUB_TOKEN) is
-# surfaced instead of being silently indistinguishable from "absent CI".
+# Fetch every check-run on the sha. --slurp collects all pages into one array of
+# response objects (so a sha with >100 runs is fully covered) and lets jq reduce
+# across the WHOLE set at once — needed because the API returns EVERY historical
+# check-run, including stale ones from earlier re-runs of the same check name. We
+# collapse to the LATEST run per check name (max by started_at, completed_at as
+# tiebreak) so an earlier failed run that was re-run green doesn't false-negative.
+# Capture stderr separately so an auth/permission failure (the Checks API needs
+# `checks: read` on GITHUB_TOKEN) is surfaced, not misread as "absent CI".
 gh_err="$(mktemp)"
 trap 'rm -f "${gh_err}"' EXIT
 if ! runs="$(gh api \
 	"repos/${GITHUB_REPOSITORY}/commits/${BASE_SHA}/check-runs" \
-	--paginate \
-	--jq '.check_runs[] | "\(.status) \(.conclusion // "")"' 2>"${gh_err}")"; then
+	--paginate --slurp \
+	--jq '[.[].check_runs[]]
+	      | group_by(.name)
+	      | map(max_by(.started_at // "", .completed_at // ""))
+	      | .[] | "\(.status) \(.conclusion // "")"' 2>"${gh_err}")"; then
 	echo "::error::failed to query check-runs for ${BASE_SHA} (auth/permission? the Checks API needs \`checks: read\`):" >&2
 	sed 's/^/::error::  /' "${gh_err}" >&2
 	exit 1
