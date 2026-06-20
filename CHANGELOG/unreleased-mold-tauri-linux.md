@@ -1,0 +1,1 @@
+- Install mold in the Tauri Linux deps so a committed mold linker config builds in the release lane
