@@ -10,6 +10,13 @@ inputs:
     description: 'Extra Rust targets to install'
     required: false
     default: ''
+  sccache-gcs-key:
+    description: >
+      base64 GCS service-account key (the `SCCACHE_GCS_KEY` secret). When set,
+      enables the shared GCS-backed sccache compiler cache alongside the
+      Swatinem cache. Empty → Swatinem only (fork PRs / non-onboarded repos).
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -76,3 +83,8 @@ runs:
               brew install lld
             fi ;;
         esac
+
+    - name: Enable sccache (GCS, shared across branches)
+      uses: arthur-debert/release/.github/actions/setup-sccache@v3
+      with:
+        gcs-key: ${{ inputs.sccache-gcs-key }}

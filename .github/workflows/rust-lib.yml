@@ -55,6 +55,12 @@ on:
       CRATES_IO_KEY:
         description: 'crates.io API token. Required for publish.'
         required: true
+      sccache_gcs_key:
+        description: |
+          base64 GCS service-account key (the `SCCACHE_GCS_KEY` fleet
+          secret) enabling the shared GCS-backed sccache compiler cache.
+          Optional: when unset the build uses Swatinem caching only.
+        required: false
 
 permissions:
   contents: write
@@ -81,6 +87,8 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
+        with:
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - uses: arthur-debert/release/.github/actions/prepare-release@v3
         id: prep
@@ -109,6 +117,8 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
+        with:
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - uses: arthur-debert/release/.github/actions/publish-crate@v3
         with:

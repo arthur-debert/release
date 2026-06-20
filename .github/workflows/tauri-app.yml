@@ -221,6 +221,13 @@ on:
       APPLE_TEAM_ID:
         description: 'Apple Developer Team ID. Required when notarize is true.'
         required: false
+      sccache_gcs_key:
+        description: |
+          base64 GCS service-account key (the `SCCACHE_GCS_KEY` fleet
+          secret) enabling the shared GCS-backed sccache compiler cache
+          alongside the src-tauri release Swatinem cache. Optional: when
+          unset the build uses Swatinem caching only.
+        required: false
 
 permissions:
   contents: write
@@ -373,6 +380,11 @@ jobs:
           workspaces: ${{ inputs.tauri-dir }}/src-tauri
           shared-key: tauri-release
           save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Enable sccache (GCS, shared across branches)
+        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        with:
+          gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'

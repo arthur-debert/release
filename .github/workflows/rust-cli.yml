@@ -163,6 +163,12 @@ on:
       NPM_TOKEN:
         description: 'npm publish token. Optional; required only to publish wasm npm packages — wasm build/check run without it (publish-npm skips with a warning when unset).'
         required: false
+      sccache_gcs_key:
+        description: |
+          base64 GCS service-account key (the `SCCACHE_GCS_KEY` fleet
+          secret) enabling the shared GCS-backed sccache compiler cache.
+          Optional: when unset the build uses Swatinem caching only.
+        required: false
 
 permissions:
   contents: write
@@ -258,6 +264,8 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
+        with:
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       # prepare-release runs the consumer's lefthook pre-commit gate on the
       # release commit (version bump + changelog roll). The hardened gate
@@ -337,6 +345,7 @@ jobs:
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
         with:
           targets: ${{ matrix.target }}
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Build binaries
         shell: bash
@@ -533,6 +542,8 @@ jobs:
           submodules: ${{ inputs.submodules }}
 
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
+        with:
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - uses: arthur-debert/release/.github/actions/publish-crate@v3
         with:
@@ -569,6 +580,8 @@ jobs:
 
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
         if: steps.guard.outputs.skip != 'true'
+        with:
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Download tarballs
         if: steps.guard.outputs.skip != 'true'
@@ -711,6 +724,7 @@ jobs:
       - uses: arthur-debert/release/.github/actions/setup-rust@v3
         with:
           targets: wasm32-unknown-unknown
+          sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
       - name: Install wasm-pack
         uses: taiki-e/install-action@v2

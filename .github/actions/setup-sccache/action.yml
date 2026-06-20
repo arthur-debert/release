@@ -1,0 +1,84 @@
+name: 'Setup sccache (GCS)'
+description: >
+  Enable mozilla/sccache as the Rust compiler cache, backed by a shared
+  Google Cloud Storage bucket. Complements Swatinem/rust-cache: Swatinem
+  restores the whole target/ + registry (per-branch, via the GitHub Actions
+  cache), sccache adds per-compilation-unit hits from a GLOBAL store that is
+  shared across branches — which is what makes cold feature-branch builds
+  fast. The object key already hashes the compiler version, target triple and
+  flags, so one key-prefix per repo is enough and platforms never collide.
+
+  No-op when `gcs-key` is empty (fork PRs / repos that haven't onboarded the
+  secret): the build simply falls back to plain Swatinem caching. Never fails
+  the build on a cache problem — sccache treats write/throttle errors as
+  misses.
+
+inputs:
+  gcs-key:
+    description: >
+      base64-encoded GCS service-account JSON key (the `SCCACHE_GCS_KEY`
+      fleet secret). Empty disables sccache entirely.
+    required: false
+    default: ''
+  bucket:
+    description: 'GCS bucket that holds the shared cache.'
+    required: false
+    default: 'code-reviews-gh-sccache'
+  key-prefix:
+    description: >
+      Object-key namespace. Leave empty (the default) to fall back to the
+      repo slug (`github.repository`) so each repo gets its own partition
+      while still sharing across its branches. Do NOT put a branch or SHA
+      here — that would defeat cross-branch sharing. (Empty rather than a
+      `${{ github.repository }}` literal because composite-action input
+      defaults are NOT expression-evaluated — the fallback is applied in the
+      configure step instead.)
+    required: false
+    default: ''
+  version:
+    description: 'sccache version to install (>= 0.10.0 required).'
+    required: false
+    default: 'v0.10.0'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Note (sccache disabled)
+      if: inputs.gcs-key == ''
+      shell: bash
+      run: echo "::notice title=sccache::No SCCACHE_GCS_KEY provided — sccache disabled, using Swatinem cache only."
+
+    - name: Write GCS credentials
+      if: inputs.gcs-key != ''
+      shell: bash
+      env:
+        # Pass the secret via env (not a `${{ }}` interpolation into the
+        # script body) so it is never substituted into the command line.
+        SCCACHE_GCS_KEY_B64: ${{ inputs.gcs-key }}
+      run: |
+        set -euo pipefail
+        printf '%s' "$SCCACHE_GCS_KEY_B64" | base64 --decode > "${RUNNER_TEMP}/sccache-gcs.json"
+        chmod 600 "${RUNNER_TEMP}/sccache-gcs.json"
+
+    - name: Configure sccache environment
+      if: inputs.gcs-key != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        {
+          echo "RUSTC_WRAPPER=sccache"
+          # sccache cannot cache incrementally-compiled crates; without this
+          # the workspace's own crates silently skip the cache.
+          echo "CARGO_INCREMENTAL=0"
+          echo "SCCACHE_GCS_BUCKET=${{ inputs.bucket }}"
+          echo "SCCACHE_GCS_KEY_PREFIX=${{ inputs.key-prefix != '' && inputs.key-prefix || github.repository }}"
+          # Default is READ_ONLY — without READ_WRITE the cache never populates.
+          echo "SCCACHE_GCS_RW_MODE=READ_WRITE"
+          echo "SCCACHE_GCS_KEY_PATH=${RUNNER_TEMP}/sccache-gcs.json"
+        } >> "$GITHUB_ENV"
+
+    - name: Install sccache
+      if: inputs.gcs-key != ''
+      uses: mozilla-actions/sccache-action@v0.0.10
+      with:
+        version: ${{ inputs.version }}

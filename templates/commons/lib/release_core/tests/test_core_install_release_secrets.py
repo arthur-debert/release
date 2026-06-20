@@ -3,7 +3,8 @@
 Offline: the gh boundary (rest / secret_set) and the local `gh repo list`
 porcelain are monkeypatched; the Apple-auth sources are synthesized in a tmp
 auth dir. NEVER sets a real secret. Asserts the set-of-7 contract, the optional
-NPM 8th slot, the source-precedence errors, and the dry-run/summary lines.
+NPM + SCCACHE_GCS_KEY slots, the source-precedence errors, and the
+dry-run/summary lines.
 """
 
 from __future__ import annotations
@@ -102,6 +103,29 @@ def test_collect_secrets_empty_npm_is_skipped(auth_dir):
     assert len(secrets) == 7
 
 
+def test_collect_secrets_sccache_adds_optional_slot(auth_dir):
+    env = {**_full_env(), "SCCACHE_GCS_KEY": "b64-sa-key"}
+    secrets, npm = irs.collect_secrets(auth_dir, env)
+    assert npm is False
+    assert secrets[-1] == ("SCCACHE_GCS_KEY", "b64-sa-key")
+    assert len(secrets) == 8
+
+
+def test_collect_secrets_empty_sccache_is_skipped(auth_dir):
+    env = {**_full_env(), "SCCACHE_GCS_KEY": ""}
+    secrets, _ = irs.collect_secrets(auth_dir, env)
+    assert len(secrets) == 7
+
+
+def test_collect_secrets_npm_and_sccache_both_appended_in_order(auth_dir):
+    env = {**_full_env(), "NPM_TOKEN": "npm-tok", "SCCACHE_GCS_KEY": "b64-sa-key"}
+    secrets, npm = irs.collect_secrets(auth_dir, env)
+    assert npm is True
+    # NPM_TOKEN appended first, then SCCACHE_GCS_KEY.
+    assert [n for n, _ in secrets][-2:] == ["NPM_TOKEN", "SCCACHE_GCS_KEY"]
+    assert len(secrets) == 9
+
+
 def test_missing_p12_raises(auth_dir, tmp_path):
     import os
 
@@ -176,6 +200,7 @@ def _patch_full(monkeypatch, auth_dir, set_calls, *, fail_names=()):
     monkeypatch.setenv("CRATES_IO_KEY", "crates-tok")
     monkeypatch.setenv("HOMEBREW_TAP_TOKEN", "brew-tok")
     monkeypatch.delenv("NPM_TOKEN", raising=False)
+    monkeypatch.delenv("SCCACHE_GCS_KEY", raising=False)
 
     def fake_set(name, value, *, repo):
         if name in fail_names:
@@ -224,6 +249,25 @@ def test_main_npm_absent_prints_skip_notice(registry, monkeypatch, auth_dir, cap
     irs.main(["--auth-dir", auth_dir, "--repos", "o/a"])
     out = capsys.readouterr().out
     assert "NPM_TOKEN not in env" in out
+
+
+def test_main_sccache_present_reports_eight(registry, monkeypatch, auth_dir, capsys):
+    calls: list = []
+    _patch_full(monkeypatch, auth_dir, calls)
+    monkeypatch.setenv("SCCACHE_GCS_KEY", "b64-sa-key")
+    rc = irs.main(["--auth-dir", auth_dir, "--repos", "o/a"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "all 8 secrets set" in out
+    assert ("o/a", "SCCACHE_GCS_KEY") in calls
+
+
+def test_main_sccache_absent_prints_skip_notice(registry, monkeypatch, auth_dir, capsys):
+    calls: list = []
+    _patch_full(monkeypatch, auth_dir, calls)
+    irs.main(["--auth-dir", auth_dir, "--repos", "o/a"])
+    out = capsys.readouterr().out
+    assert "SCCACHE_GCS_KEY not in env" in out
 
 
 def test_main_failure_returns_1_and_reports(registry, monkeypatch, auth_dir, capsys):
