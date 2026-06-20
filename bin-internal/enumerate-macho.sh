@@ -2,22 +2,33 @@
 # Enumerate the nested signable code inside a macOS .app bundle, inner-first,
 # for post-hoc codesigning (WS4).
 #
-# WHY: `codesign --options runtime --timestamp App.app` signs ONLY the bundle's
-# MAIN executable. Any OTHER Mach-O code in the bundle — extra executables (e.g.
-# phos's Contents/MacOS/gen_fixtures), loose dylibs, and nested code bundles
-# (.framework/.app/.appex/.xpc helpers, as electron's Helper.app) — is left
-# unsigned/unhardened, and Apple's notary service REJECTS the archive
-# ("signature of the binary is invalid / no secure timestamp / hardened runtime
-# not enabled"). The inline `tauri build` path signs nested code internally; the
-# post-hoc signer must replicate that. We do NOT use `codesign --deep` (Apple
-# discourages it for distribution/notarization — it mis-applies entitlements);
-# instead we enumerate and sign inner-first, then the outer .app last (the
-# caller appends the .app).
+# WHY: `codesign --options runtime --timestamp App.app` signs ONLY that bundle's
+# MAIN executable. Every OTHER piece of Mach-O code must be signed explicitly,
+# inner-first, or Apple's notary service REJECTS the archive ("signature of the
+# binary is invalid / no secure timestamp / hardened runtime not enabled"):
+#   - extra executables beside the main one (e.g. phos's Contents/MacOS/
+#     gen_fixtures) and loose dylibs;
+#   - code bundles nested in the app — and, recursively, the EXTRA Mach-O inside
+#     THEM. Signing a nested `Helper.app` (electron's
+#     `*.app/Contents/Frameworks/*Helper*.app`) only signs that helper's main
+#     executable; its own extra executables / loose dylibs are still missed, so
+#     we must recurse INTO `.app`/`.appex`/`.xpc` bundles too.
+# The inline `tauri build` path signs all of this internally; the post-hoc
+# signer must replicate it. We do NOT use `codesign --deep` (Apple discourages
+# it for distribution/notarization — it mis-applies entitlements); instead we
+# enumerate and the caller signs each path with `--options runtime --timestamp`,
+# strictly inner-out.
 #
-# Prints the nested paths ONLY (one per line), EXCLUDING the top-level .app —
-# the workflow passes them to sign-mac ahead of the .app (sign-mac signs in
-# order, outer-last). Ordering: loose Mach-O files first, then nested code
-# bundles deepest-first; either way every nested item precedes the outer .app.
+# Bundle handling:
+#   - `.app` / `.appex` / `.xpc`  — RECURSE into: emit their inner extra Mach-O,
+#     then the bundle root. Signing the bundle root (re)signs its own main
+#     executable; because the root sorts SHALLOWER than its contents, it is
+#     signed AFTER them — the correct inner-out order, main-exe re-sign last.
+#   - `.framework`                — OPAQUE: sign the framework ROOT only, never
+#     individual Mach-O inside it (the framework is the signing unit).
+#
+# Prints the nested paths ONLY (one per line), inner-first (deepest first),
+# EXCLUDING the top-level .app — the caller appends the .app and signs it last.
 # Consumer-agnostic: Mach-O is detected by content (`file`), not by name.
 #
 # Env vars:
@@ -43,40 +54,37 @@ rel_depth() {
   printf '%s' "${rel}" | tr -cd '/' | wc -c | tr -d ' '
 }
 
-# (a) Nested CODE BUNDLES (framework / helper app / appex / xpc), excluding the
-#     top app. Signing a bundle codesigns its own main executable, so we sign
-#     each bundle once at its root — deepest-first so an inner helper is signed
-#     before an outer one that embeds it.
-bundles=()
-while IFS= read -r d; do
-  [ "${d}" = "${APP_PATH}" ] && continue
-  bundles+=("$(rel_depth "${d}")	${d}")
-done < <(find "${APP_PATH}" -type d \
-           \( -name '*.framework' -o -name '*.app' -o -name '*.appex' -o -name '*.xpc' \) 2>/dev/null)
+# Collect signable paths as "<depth>\t<path>" lines, then sort deepest-first so
+# every item precedes anything that encloses it (inner-out). A bundle root is
+# shallower than its own contents, so it is emitted AFTER them — exactly the
+# codesign ordering.
+collect() {
+  # (a) Nested CODE BUNDLE ROOTS (framework / app / appex / xpc), excluding the
+  #     top app. Each is signed once at its root; for .app/.appex/.xpc the root
+  #     sign covers only the MAIN executable — the extras come from (b).
+  while IFS= read -r d; do
+    [ "${d}" = "${APP_PATH}" ] && continue
+    printf '%s\t%s\n' "$(rel_depth "${d}")" "${d}"
+  done < <(find "${APP_PATH}" -type d \
+             \( -name '*.framework' -o -name '*.app' -o -name '*.appex' -o -name '*.xpc' \) 2>/dev/null)
 
-# (b) Loose Mach-O FILES not inside any nested code bundle (those are covered by
-#     signing the bundle in (a)). Detect Mach-O by content. A file is "loose" if
-#     its path below APP_PATH contains no nested bundle suffix before it.
-loose=()
-while IFS= read -r f; do
-  rel="${f#"${APP_PATH}"/}"
-  case "${rel}" in
-    *.framework/*|*.app/*|*.appex/*|*.xpc/*) continue ;;   # inside a nested bundle
-  esac
-  if file -b "${f}" 2>/dev/null | grep -q 'Mach-O'; then
-    loose+=("${f}")
-  fi
-done < <(find "${APP_PATH}" -type f 2>/dev/null)
+  # (b) Mach-O FILES, EXCLUDING anything inside a `.framework` (opaque — the
+  #     framework root in (a) is the signing unit). Files inside helper
+  #     `.app`/`.appex`/`.xpc` ARE included — that's the recursion: a helper's
+  #     extra executables/dylibs must be signed too. The main executable of a
+  #     code bundle is also matched here, but it sorts deeper than its bundle
+  #     root, so the root re-signs it last (harmless, correct order).
+  while IFS= read -r f; do
+    rel="${f#"${APP_PATH}"/}"
+    case "${rel}" in
+      *.framework/*) continue ;;   # opaque framework internals — skip
+    esac
+    if file -b "${f}" 2>/dev/null | grep -q 'Mach-O'; then
+      printf '%s\t%s\n' "$(rel_depth "${f}")" "${f}"
+    fi
+  done < <(find "${APP_PATH}" -type f 2>/dev/null)
+}
 
-# Emit: loose files first, then nested bundles deepest-first. Every line is a
-# nested item; the outer .app is appended by the caller (signed last).
-# Guard each emit on a non-empty count, then expand with FULL quotes so paths
-# containing spaces survive (app bundles legitimately have spaces); the count
-# guard also avoids bash 3.2's unbound-error on "${empty[@]}" under `set -u`.
-if [ "${#loose[@]}" -gt 0 ]; then
-  printf '%s\n' "${loose[@]}"
-fi
-
-if [ "${#bundles[@]}" -gt 0 ]; then
-  printf '%s\n' "${bundles[@]}" | sort -rn -k1,1 | cut -f2-
-fi
+# Deepest-first (inner-out); strip the depth key. A stable sort keeps the
+# emission deterministic among equal-depth siblings.
+collect | sort -s -rn -k1,1 | cut -f2-
