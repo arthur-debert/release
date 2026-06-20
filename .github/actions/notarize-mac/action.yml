@@ -1,12 +1,17 @@
 name: 'Notarize macOS artifact'
 description: 'Submit an artifact to Apple notary service, poll for status, optionally staple'
 
+# notarytool accepts two credential styles; this action supports both.
+# Pick exactly one cred set — App Store Connect API key (.p8) OR
+# Apple-ID + app-specific password + team id. ASC takes precedence
+# when both are supplied. Empty on both → skip (no-op for forks /
+# no-secret builds).
 inputs:
   artifact-path:
     description: 'Path to artifact (zip of binary, .dmg, .pkg, or .app). notarytool accepts these.'
     required: true
   asc-key-base64:
-    description: 'Base64-encoded App Store Connect API key (.p8 file). Empty → skip notarization.'
+    description: 'Base64-encoded App Store Connect API key (.p8 file). Empty → fall back to Apple-ID auth.'
     required: false
     default: ''
   asc-key-id:
@@ -15,6 +20,18 @@ inputs:
     default: ''
   asc-issuer-id:
     description: 'App Store Connect API issuer UUID'
+    required: false
+    default: ''
+  apple-id:
+    description: 'Apple ID email (Apple-ID auth). Used only when no ASC key is supplied.'
+    required: false
+    default: ''
+  apple-password:
+    description: 'App-specific password for the Apple ID (Apple-ID auth).'
+    required: false
+    default: ''
+  apple-team-id:
+    description: 'Apple Developer Team ID (Apple-ID auth).'
     required: false
     default: ''
   staple:
@@ -42,26 +59,42 @@ runs:
         ASC_KEY_BASE64: ${{ inputs.asc-key-base64 }}
         ASC_KEY_ID: ${{ inputs.asc-key-id }}
         ASC_ISSUER_ID: ${{ inputs.asc-issuer-id }}
+        APPLE_ID: ${{ inputs.apple-id }}
+        APPLE_PASSWORD: ${{ inputs.apple-password }}
+        APPLE_TEAM_ID: ${{ inputs.apple-team-id }}
         STAPLE: ${{ inputs.staple }}
         TIMEOUT_MIN: ${{ inputs.timeout-minutes }}
       run: |
         set -euo pipefail
 
-        if [ -z "$ASC_KEY_BASE64" ] || [ -z "$ASC_KEY_ID" ] || [ -z "$ASC_ISSUER_ID" ]; then
-          echo "::warning::No ASC API credentials configured — skipping notarization."
+        # Resolve the credential style. ASC API key wins when present;
+        # otherwise fall back to Apple-ID auth. notarytool's submit/info/log
+        # all accept either the `--key/--key-id/--issuer` trio or the
+        # `--apple-id/--password/--team-id` trio, so we build the shared flag
+        # array once and reuse it for every notarytool call.
+        KEY_PATH=""
+        AUTH=()
+        if [ -n "$ASC_KEY_BASE64" ] && [ -n "$ASC_KEY_ID" ] && [ -n "$ASC_ISSUER_ID" ]; then
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          echo "$ASC_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+          AUTH=(--key "$KEY_PATH" --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID")
+          echo "→ notarizing with App Store Connect API key auth"
+        elif [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]; then
+          AUTH=(--apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID")
+          echo "→ notarizing with Apple-ID auth"
+        else
+          echo "::warning::No notarization credentials configured (neither ASC API key nor Apple-ID) — skipping notarization."
           echo "notarized=false" >> "$GITHUB_OUTPUT"
           exit 0
         fi
+
         [ -e "$ARTIFACT" ] || { echo "::error::artifact-path not found: $ARTIFACT"; exit 1; }
 
-        KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
-        echo "$ASC_KEY_BASE64" | base64 --decode > "$KEY_PATH"
+        cleanup() { [ -n "$KEY_PATH" ] && rm -f "$KEY_PATH" || true; }
 
         echo "→ submitting $ARTIFACT to notary service"
         RESULT=$(xcrun notarytool submit "$ARTIFACT" \
-          --key "$KEY_PATH" \
-          --key-id "$ASC_KEY_ID" \
-          --issuer "$ASC_ISSUER_ID" \
+          "${AUTH[@]}" \
           --output-format json \
           --no-wait)
         ID=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
@@ -71,9 +104,7 @@ runs:
         MAX_POLLS=$((TIMEOUT_MIN * 2))
         for i in $(seq 1 "$MAX_POLLS"); do
           INFO=$(xcrun notarytool info "$ID" \
-            --key "$KEY_PATH" \
-            --key-id "$ASC_KEY_ID" \
-            --issuer "$ASC_ISSUER_ID" \
+            "${AUTH[@]}" \
             --output-format json 2>&1) || true
           STATUS=$(echo "$INFO" | python3 -c \
             "import sys,json; print(json.load(sys.stdin).get('status','Unknown'))" \
@@ -86,22 +117,20 @@ runs:
               xcrun stapler staple "$ARTIFACT" || \
                 echo "::warning::Staple failed (non-fatal — online Gatekeeper check still works)"
             fi
-            rm -f "$KEY_PATH"
+            cleanup
             echo "notarized=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           if [ "$STATUS" = "Invalid" ] || [ "$STATUS" = "Rejected" ]; then
             xcrun notarytool log "$ID" \
-              --key "$KEY_PATH" \
-              --key-id "$ASC_KEY_ID" \
-              --issuer "$ASC_ISSUER_ID" 2>&1 || true
-            rm -f "$KEY_PATH"
+              "${AUTH[@]}" 2>&1 || true
+            cleanup
             echo "::error::Notarization $STATUS"
             exit 1
           fi
           sleep 30
         done
 
-        rm -f "$KEY_PATH"
-        echo "::warning::Notarization timed out after $TIMEOUT_MIN min — submission $ID last status: $STATUS. Binary is signed but Apple has not confirmed yet. Check status with: xcrun notarytool info $ID --key <p8> --key-id <id> --issuer <id>."
+        cleanup
+        echo "::warning::Notarization timed out after $TIMEOUT_MIN min — submission $ID last status: $STATUS. Binary is signed but Apple has not confirmed yet. Check status with: xcrun notarytool info $ID ... ."
         echo "notarized=false" >> "$GITHUB_OUTPUT"

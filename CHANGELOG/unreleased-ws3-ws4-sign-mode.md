@@ -1,0 +1,1 @@
+- Add post-hoc macOS signing behind sign-mode input (reusable sign-notarize-mac workflow); default inline unchanged

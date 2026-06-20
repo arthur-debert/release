@@ -1,0 +1,170 @@
+name: sign + notarize macOS
+
+# Reusable, CONSUMER-AGNOSTIC post-hoc macOS signer (WS4, epic #811).
+#
+# Takes an UNSIGNED build artifact that carries the inner `.app` (packaged
+# as `<name>.unsigned-app.tar.gz`), codesigns the `.app` with a Developer ID
+# cert under the hardened runtime, reseals the `.dmg` from the SIGNED `.app`
+# with `hdiutil` (NOT a re-bundle — that strips the signature, per the WS0
+# spike), codesigns the `.dmg`, notarizes + staples, and re-uploads the
+# SIGNED artifact under `<artifact-name>-signed`.
+#
+# It makes no Tauri (or Electron) assumptions — it operates on a `.app` +
+# `.dmg` pair. The bundler that produced the unsigned artifact is the only
+# tauri-specific part, and lives in the caller (tauri-app.yml).
+#
+# Credentials — two notarization auth styles, pick whichever cred set is
+# non-empty (ASC API key wins when both present):
+#   - App Store Connect API key: ASC_KEY_BASE64 / ASC_KEY_ID / ASC_ISSUER_ID
+#   - Apple-ID:                   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID
+# Signing always uses the Developer ID .p12 cert (APPLE_CERTIFICATE).
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: 'Name of the unsigned build artifact to download (must carry a *.unsigned-app.tar.gz).'
+        type: string
+        required: true
+      notarize:
+        description: 'Submit the signed bundle for Apple notarization + staple. Default true.'
+        type: boolean
+        required: false
+        default: true
+      runs-on:
+        description: 'macOS runner label.'
+        type: string
+        required: false
+        default: 'macos-latest'
+      retention-days:
+        description: 'Artifact retention for the signed output.'
+        type: number
+        required: false
+        default: 7
+
+    secrets:
+      APPLE_CERTIFICATE:
+        description: 'Base64-encoded Developer ID Application .p12 certificate.'
+        required: true
+      APPLE_CERTIFICATE_PASSWORD:
+        description: 'Password for the .p12 certificate (optional — passwordless .p12s are valid).'
+        required: false
+      ASC_KEY_BASE64:
+        description: 'Base64-encoded App Store Connect API key (.p8). One of the two notary cred sets.'
+        required: false
+      ASC_KEY_ID:
+        description: 'App Store Connect API key ID.'
+        required: false
+      ASC_ISSUER_ID:
+        description: 'App Store Connect API issuer UUID.'
+        required: false
+      APPLE_ID:
+        description: 'Apple ID email (Apple-ID notary auth). Used when no ASC key is supplied.'
+        required: false
+      APPLE_PASSWORD:
+        description: 'App-specific password for the Apple ID.'
+        required: false
+      APPLE_TEAM_ID:
+        description: 'Apple Developer Team ID.'
+        required: false
+
+    outputs:
+      signed-artifact:
+        description: 'Name of the uploaded signed artifact.'
+        value: ${{ jobs.sign.outputs.signed-artifact }}
+
+jobs:
+  sign:
+    runs-on: ${{ inputs.runs-on }}
+    outputs:
+      signed-artifact: ${{ steps.names.outputs.signed }}
+    steps:
+      - name: Resolve artifact names
+        id: names
+        shell: bash
+        env:
+          ARTIFACT: ${{ inputs.artifact-name }}
+        run: echo "signed=${ARTIFACT}-signed" >> "$GITHUB_OUTPUT"
+
+      - name: Download unsigned artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: unsigned
+
+      - name: Unpack unsigned app
+        id: unpack
+        uses: ./.github/actions/unpack-unsigned-app
+        with:
+          artifact-dir: unsigned
+
+      # 1. Codesign the inner .app (hardened runtime + secure timestamp).
+      - name: Sign .app
+        uses: ./.github/actions/sign-mac
+        with:
+          cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          paths: ${{ steps.unpack.outputs.app }}
+
+      # 2. Reseal the .dmg from the SIGNED .app via hdiutil (never re-bundle).
+      - name: Reseal dmg
+        id: reseal
+        uses: ./.github/actions/reseal-mac-dmg
+        with:
+          app-path: ${{ steps.unpack.outputs.app }}
+          dmg-out: ${{ runner.temp }}/signed.dmg
+
+      # 3. Codesign the resealed .dmg.
+      - name: Sign .dmg
+        uses: ./.github/actions/sign-mac
+        with:
+          cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE }}
+          cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          paths: ${{ runner.temp }}/signed.dmg
+
+      # 4. Notarize + staple the signed .dmg (skipped when notarize=false).
+      - name: Notarize + staple
+        if: ${{ inputs.notarize }}
+        uses: ./.github/actions/notarize-mac
+        with:
+          artifact-path: ${{ runner.temp }}/signed.dmg
+          asc-key-base64: ${{ secrets.ASC_KEY_BASE64 }}
+          asc-key-id: ${{ secrets.ASC_KEY_ID }}
+          asc-issuer-id: ${{ secrets.ASC_ISSUER_ID }}
+          apple-id: ${{ secrets.APPLE_ID }}
+          apple-password: ${{ secrets.APPLE_PASSWORD }}
+          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+          staple: 'true'
+
+      # 5. Stage the signed .dmg under the original dmg's filename, then
+      #    upload the SIGNED artifact. The unsigned .app payload is dropped
+      #    (it was only the reseal input).
+      - name: Stage signed dmg
+        id: stage
+        shell: bash
+        env:
+          SIGNED_DMG: ${{ runner.temp }}/signed.dmg
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/signed-out"
+          mkdir -p "$out"
+          # Carry the consumer's original .dmg name if the unsigned artifact
+          # shipped one; otherwise fall back to the .app basename.
+          orig=$(find unsigned -maxdepth 2 -type f -name '*.dmg' | head -1 || true)
+          if [ -n "$orig" ]; then
+            name=$(basename "$orig")
+          else
+            app="${{ steps.unpack.outputs.app }}"
+            name="$(basename "$app" .app).dmg"
+          fi
+          cp "$SIGNED_DMG" "$out/$name"
+          echo "staged signed dmg as $name"
+          echo "dir=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload signed artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.names.outputs.signed }}
+          path: ${{ steps.stage.outputs.dir }}/*
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention-days }}
