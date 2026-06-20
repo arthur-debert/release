@@ -329,9 +329,17 @@ def _resolve_runs(
 ) -> dict[str, dict]:
     """Phase 4a: resolve the two fresh runs — CI by head_sha == seed sha (also
     excludes the noise run prepare's release commit triggers), the cut by
-    workflow + head_sha == seed sha + a run id NOT in the pre-dispatch
-    snapshot (id-set diff, immune to local-vs-GitHub clock skew; the head_sha
-    tie keeps a concurrent dispatch by someone else from mis-associating)."""
+    workflow + event == workflow_dispatch + a run id NOT in the pre-dispatch
+    snapshot (id-set diff, immune to local-vs-GitHub clock skew), taking the
+    earliest such run as ours.
+
+    The release run is NOT matched on head_sha: a Kind whose release pipeline
+    commits a version bump (e.g. vscode-ext) reports the run's head_sha as the
+    bump commit, not the seed — so a head_sha tie would never resolve and the
+    round would time out even though the release succeeded (release#810
+    follow-on). The id-set diff already uniquely identifies our dispatch in the
+    dedicated, serially-dispatched per-family canary repo, so the tie was both
+    redundant and wrong here."""
     runs: dict[str, dict] = {}
     while time.time() < deadline:
         if "ci" not in runs:
@@ -355,9 +363,7 @@ def _resolve_runs(
             fresh = [
                 run
                 for run in (data or {}).get("workflow_runs", [])
-                if run["id"] not in before_ids
-                and run.get("event") == "workflow_dispatch"
-                and run.get("head_sha") == seed_sha
+                if run["id"] not in before_ids and run.get("event") == "workflow_dispatch"
             ]
             if fresh:
                 runs["release"] = min(fresh, key=lambda run: run["id"])

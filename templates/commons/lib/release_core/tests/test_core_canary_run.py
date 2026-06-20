@@ -361,3 +361,59 @@ def test_admin_canary_run_registered():
 
     assert "canary" in admin.group.commands
     assert "run" in admin.canary.group.commands
+
+
+# ── run resolution ───────────────────────────────────────────────────────────
+
+
+def test_resolve_release_run_ignores_head_sha_for_bump_committing_kinds(monkeypatch):
+    # A Kind whose release pipeline commits a version bump (e.g. vscode-ext)
+    # reports the dispatch run's head_sha as the BUMP commit, not the seed.
+    # _resolve_runs must still resolve it via the id-set diff + workflow_dispatch
+    # (release#810 follow-on) — a head_sha==seed tie would time out forever even
+    # though the release ran green.
+    seed = "a" * 40
+    bump = "b" * 40
+
+    def fake_rest(url):
+        if "ci.yml" in url:
+            return {"workflow_runs": [{"id": 200, "head_sha": seed, "event": "push"}]}
+        if "release.yml" in url:
+            return {
+                "workflow_runs": [
+                    # pre-dispatch run — excluded by the id-set diff
+                    {"id": 100, "head_sha": seed, "event": "workflow_dispatch"},
+                    # OURS: fresh dispatch whose head_sha is the bump, not the seed
+                    {"id": 201, "head_sha": bump, "event": "workflow_dispatch"},
+                ]
+            }
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(canary_run.gh, "rest", fake_rest)
+    runs = canary_run._resolve_runs(
+        "o/r", seed, before_ids={100}, deadline=float("inf"), sleep=lambda *_: None
+    )
+    assert runs["release"]["id"] == 201
+    assert runs["ci"]["id"] == 200
+
+
+def test_resolve_release_run_picks_earliest_fresh_dispatch(monkeypatch):
+    # Two fresh dispatches → ours is the earliest (lowest id); a later foreign
+    # dispatch must not be mis-associated.
+    seed = "a" * 40
+
+    def fake_rest(url):
+        if "ci.yml" in url:
+            return {"workflow_runs": [{"id": 10, "head_sha": seed, "event": "push"}]}
+        return {
+            "workflow_runs": [
+                {"id": 22, "head_sha": "c" * 40, "event": "workflow_dispatch"},
+                {"id": 21, "head_sha": "b" * 40, "event": "workflow_dispatch"},
+            ]
+        }
+
+    monkeypatch.setattr(canary_run.gh, "rest", fake_rest)
+    runs = canary_run._resolve_runs(
+        "o/r", seed, before_ids=set(), deadline=float("inf"), sleep=lambda *_: None
+    )
+    assert runs["release"]["id"] == 21
