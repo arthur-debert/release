@@ -4,6 +4,10 @@
 
 ## Unreleased
 
+## 3.6.0 - 2026-06-20
+
+- Install mold in the Tauri Linux deps so a committed mold linker config builds in the release lane
+
 ## 3.5.0 - 2026-06-20
 
 - arm-gate composite caches release-core venv + gate toolset
