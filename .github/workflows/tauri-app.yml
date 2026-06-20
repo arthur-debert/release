@@ -234,7 +234,10 @@ permissions:
 
 jobs:
   # -------------------------------------------------------------------
-  # 0. Preflight: validate Apple secrets before prepare bumps + tags.
+  # 0. Preflight: fail fast before prepare bumps + tags. Cheapest
+  #    checks first — an empty changelog (nothing to release) fails in
+  #    seconds, before any consumer checkout or dependency install.
+  #    Apple-secrets validation runs only when signing is requested.
   # -------------------------------------------------------------------
   preflight:
     runs-on: ubuntu-latest
@@ -247,7 +250,29 @@ jobs:
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
     steps:
-      - uses: arthur-debert/release/.github/actions/validate-apple-secrets@v3
+      - uses: actions/checkout@v6
+
+      - uses: actions/checkout@v6
+        with:
+          repository: arthur-debert/release
+          ref: v3
+          path: .release
+          sparse-checkout: bin-internal
+
+      # Cheapest possible gate: no toolchain, no release_core install.
+      - name: Check unreleased changelog content
+        shell: bash
+        env:
+          CHANGELOG: ${{ inputs.changelog-path }}
+        run: bash .release/bin-internal/check-changelog-unreleased.sh
+
+      # Only gate on Apple secrets when signing is actually requested
+      # (build-mac AND notarization or an explicit signing identity).
+      # A no-sign mac build (notarize=false, no identity) must not fail
+      # for absent Apple secrets.
+      - name: Validate Apple secrets
+        if: ${{ inputs.build-mac && (inputs.notarize || env.APPLE_ID_PRESENT == 'yes') }}
+        uses: arthur-debert/release/.github/actions/validate-apple-secrets@v3
 
   # -------------------------------------------------------------------
   # 1. Prepare: bump all three version files (package.json,
