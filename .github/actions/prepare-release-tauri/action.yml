@@ -24,7 +24,15 @@ inputs:
     required: false
     default: ''
   gh-token:
-    description: 'Token for the `gh api` check-runs query that asserts the release base sha is CI-green (and reads private-repo check-runs). Falls back to the workflow `github.token` when empty; that token needs `checks: read` to read the Checks API.'
+    description: >-
+      Token for the `gh api` check-runs query that asserts the release base sha
+      is CI-green (and reads private-repo check-runs). Pass a PAT (the
+      RELEASE_TOKEN) — its repo scope covers checks:read and bypasses workflow
+      `permissions:`, so the assertion works regardless of the caller's grant.
+      Falls back to the workflow `github.token` when empty; that fallback needs
+      `checks: read` granted at the CALLER (a reusable job can't self-grant it,
+      and self-granting causes a startup_failure, #825), otherwise the assertion
+      surfaces an explicit "needs checks: read" error instead of running.
     required: false
     default: ''
 
@@ -69,10 +77,12 @@ runs:
         CHANGELOG: ${{ inputs.changelog-path }}
         PREP_SCRIPT: ${{ inputs.prep-script }}
         # Authenticates the `gh api` check-runs query in the base-sha CI-green
-        # assertion (and reads private-repo check-runs). Falls back to the
-        # workflow `github.token` when the caller omits gh-token, so `gh` is
-        # never left unauthenticated (an empty GH_TOKEN would make the
-        # assertion misread auth failure as "no check-runs"). The token needs
-        # `checks: read` to reach the Checks API.
+        # assertion (and reads private-repo check-runs). A PAT gh-token (the
+        # RELEASE_TOKEN) covers checks:read by repo scope and bypasses workflow
+        # `permissions:`. Falls back to the workflow `github.token` when the
+        # caller omits gh-token, so `gh` is never left unauthenticated (an empty
+        # GH_TOKEN would make the assertion misread auth failure as "no
+        # check-runs"); that fallback reaches the Checks API only if the caller
+        # granted `checks: read` (the reusable job can't self-grant it — #825).
         GH_TOKEN: ${{ inputs.gh-token || github.token }}
       run: bash "${{ github.action_path }}/../../../bin-internal/prepare-tauri-release.sh"

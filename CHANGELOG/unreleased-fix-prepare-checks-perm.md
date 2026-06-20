@@ -1,0 +1,1 @@
+- Remove checks:read from the tauri prepare job — a reusable job can't self-grant it (caller caps to none), which startup_failed every consumer; the base-sha assertion uses the RELEASE_TOKEN PAT instead

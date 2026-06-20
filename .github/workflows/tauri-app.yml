@@ -349,12 +349,21 @@ jobs:
   prepare:
     needs: preflight
     runs-on: ubuntu-latest
-    # contents: write for the bump commit + tag push; checks: read for the
-    # base-sha CI-green assertion's Checks API query (WS2 #811) when it runs on
-    # the default github.token.
+    # contents: write for the bump commit + tag push.
+    #
+    # NO `checks: read` here, deliberately: a reusable workflow's job permissions
+    # are CAPPED by the CALLER's grant, and once a caller sets ANY explicit
+    # permission (consumers set `contents: write`), every other scope defaults to
+    # `none`. A job requesting `checks: read` the caller only allows as `none` is
+    # a HARD validation error → startup_failure on EVERY consumer run (#825).
+    # The base-sha CI-green assertion (WS2 #811) instead reaches the Checks API
+    # via gh-token = the RELEASE_TOKEN PAT (repo scope ⊇ checks:read), which
+    # bypasses workflow `permissions:` entirely. A consumer with only the default
+    # github.token (no PAT) must grant `checks: read` at THEIR caller — the
+    # reusable job can't self-grant it; without it the assertion surfaces an
+    # explicit "needs checks: read" error rather than a fleet-wide startup_failure.
     permissions:
       contents: write
-      checks: read
     outputs:
       version: ${{ steps.prep.outputs.version }}
       release-sha: ${{ steps.prep.outputs.release-sha }}
