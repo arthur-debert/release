@@ -40,6 +40,14 @@ EOF
 
 teardown() { rm -rf "$TMP"; }
 
+# Write a synthetic Mach-O file at $1. Uses the 64-bit little-endian magic
+# (cf fa ed fe) + a minimal header so `file` reports "Mach-O" on ANY host —
+# the test runs on ubuntu CI where a real /bin/echo is ELF, not Mach-O.
+make_macho() {
+  mkdir -p "$(dirname "$1")"
+  printf '\xcf\xfa\xed\xfe\x07\x00\x00\x01\x03\x00\x00\x00\x02\x00\x00\x00' > "$1"
+}
+
 # --- build-tauri.sh -------------------------------------------------------
 
 @test "build-tauri compile phase runs tauri build --no-bundle" {
@@ -174,20 +182,18 @@ EOF
 }
 
 # --- enumerate-macho.sh ---------------------------------------------------
-# Real Mach-O files (copies of /bin/echo) so `file` detects them; a plist and
-# a text file stand in for non-code resources that must be skipped.
+# Synthetic Mach-O files (make_macho — valid magic so `file` detects them on
+# any host); a plist + a text file stand in for non-code resources to skip.
 
 @test "enumerate-macho lists nested executables, dylibs, and helper bundles, excluding the top .app" {
   app="$TMP/Phos.app"
   mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks"
-  cp /bin/echo "$app/Contents/MacOS/Phos"            # main executable
-  cp /bin/echo "$app/Contents/MacOS/gen_fixtures"    # the bug: extra executable
-  cp /bin/echo "$app/Contents/Frameworks/libfoo.dylib"
-  echo "<plist/>" > "$app/Contents/Info.plist"       # non-Mach-O, skipped
-  mkdir -p "$app/Contents/Frameworks/Helper.app/Contents/MacOS"
-  cp /bin/echo "$app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper"
-  mkdir -p "$app/Contents/Frameworks/Bar.framework/Versions/A"
-  cp /bin/echo "$app/Contents/Frameworks/Bar.framework/Versions/A/Bar"
+  make_macho "$app/Contents/MacOS/Phos"            # main executable
+  make_macho "$app/Contents/MacOS/gen_fixtures"    # the bug: extra executable
+  make_macho "$app/Contents/Frameworks/libfoo.dylib"
+  echo "<plist/>" > "$app/Contents/Info.plist"     # non-Mach-O, skipped
+  make_macho "$app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper"
+  make_macho "$app/Contents/Frameworks/Bar.framework/Versions/A/Bar"
 
   run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
   [ "$status" -eq 0 ]
@@ -209,9 +215,8 @@ EOF
 
 @test "enumerate-macho emits nothing for an .app with no nested code beyond the main exe" {
   app="$TMP/Plain.app"
-  mkdir -p "$app/Contents/MacOS"
-  cp /bin/echo "$app/Contents/MacOS/Plain"
-  echo "x" > "$app/Contents/Resources/data.txt" 2>/dev/null || { mkdir -p "$app/Contents/Resources"; echo x > "$app/Contents/Resources/data.txt"; }
+  make_macho "$app/Contents/MacOS/Plain"
+  mkdir -p "$app/Contents/Resources"; echo x > "$app/Contents/Resources/data.txt"
 
   run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
   [ "$status" -eq 0 ]
