@@ -1,0 +1,1 @@
+- Post-hoc signer now signs nested Mach-O (extra executables, dylibs, helper bundles) inner-first before the .app, so notarization no longer rejects unsigned nested code

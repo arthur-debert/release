@@ -7,8 +7,9 @@
 #                      `app` into the mac targets)
 #   - reseal-mac-dmg.sh  volname derivation + hdiutil invocation (stubbed)
 #   - unpack-unsigned-app.sh  one-app extraction + zero/multi errors
+#   - enumerate-macho.sh  nested signable Mach-O enumeration (inner-first)
 #
-# Hermetic: stubs `npx` / `hdiutil` on PATH; `tar` / `find` are real.
+# Hermetic: stubs `npx` / `hdiutil` on PATH; `tar` / `find` / `file` are real.
 
 BIN="${BATS_TEST_DIRNAME}/../../bin-internal"
 
@@ -170,4 +171,60 @@ EOF
   # readarray (bash 4+). Match a command invocation (start of a line, after
   # optional indent), not a mention in a comment.
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/unpack-unsigned-app.sh"
+}
+
+# --- enumerate-macho.sh ---------------------------------------------------
+# Real Mach-O files (copies of /bin/echo) so `file` detects them; a plist and
+# a text file stand in for non-code resources that must be skipped.
+
+@test "enumerate-macho lists nested executables, dylibs, and helper bundles, excluding the top .app" {
+  app="$TMP/Phos.app"
+  mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks"
+  cp /bin/echo "$app/Contents/MacOS/Phos"            # main executable
+  cp /bin/echo "$app/Contents/MacOS/gen_fixtures"    # the bug: extra executable
+  cp /bin/echo "$app/Contents/Frameworks/libfoo.dylib"
+  echo "<plist/>" > "$app/Contents/Info.plist"       # non-Mach-O, skipped
+  mkdir -p "$app/Contents/Frameworks/Helper.app/Contents/MacOS"
+  cp /bin/echo "$app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper"
+  mkdir -p "$app/Contents/Frameworks/Bar.framework/Versions/A"
+  cp /bin/echo "$app/Contents/Frameworks/Bar.framework/Versions/A/Bar"
+
+  run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -eq 0 ]
+  # the extra executable that the flat sign missed
+  echo "$output" | grep -q 'Contents/MacOS/gen_fixtures$'
+  echo "$output" | grep -q 'Contents/MacOS/Phos$'
+  echo "$output" | grep -q 'Contents/Frameworks/libfoo.dylib$'
+  # nested code bundles signed at their root
+  echo "$output" | grep -q 'Frameworks/Helper.app$'
+  echo "$output" | grep -q 'Frameworks/Bar.framework$'
+  # the top .app is EXCLUDED (caller appends it last)
+  ! echo "$output" | grep -qx "$app"
+  # Mach-O INSIDE nested bundles is NOT listed separately (covered by the bundle)
+  ! echo "$output" | grep -q 'Helper.app/Contents/MacOS/Helper$'
+  ! echo "$output" | grep -q 'Bar.framework/Versions/A/Bar$'
+  # the non-Mach-O resource is skipped
+  ! echo "$output" | grep -q 'Info.plist$'
+}
+
+@test "enumerate-macho emits nothing for an .app with no nested code beyond the main exe" {
+  app="$TMP/Plain.app"
+  mkdir -p "$app/Contents/MacOS"
+  cp /bin/echo "$app/Contents/MacOS/Plain"
+  echo "x" > "$app/Contents/Resources/data.txt" 2>/dev/null || { mkdir -p "$app/Contents/Resources"; echo x > "$app/Contents/Resources/data.txt"; }
+
+  run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -eq 0 ]
+  # only the main executable; no bundles, no resources
+  [ "$(echo "$output" | grep -c .)" -eq 1 ]
+  echo "$output" | grep -q 'Contents/MacOS/Plain$'
+}
+
+@test "enumerate-macho fails when APP_PATH is missing" {
+  run env APP_PATH="$TMP/nope.app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "enumerate-macho does not invoke mapfile/readarray (bash 3.2 runner)" {
+  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/enumerate-macho.sh"
 }
