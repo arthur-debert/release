@@ -225,6 +225,26 @@ EOF
   echo "$output" | grep -q 'Contents/MacOS/Plain$'
 }
 
+@test "enumerate-macho preserves paths containing spaces" {
+  # App bundles legitimately have spaces; an unquoted array expansion would
+  # split "gen fixtures" into two lines / two bogus paths.
+  app="$TMP/Spaced Dir/My App.app"
+  make_macho "$app/Contents/MacOS/My App"
+  make_macho "$app/Contents/MacOS/gen fixtures"
+  make_macho "$app/Contents/Frameworks/Some Helper.app/Contents/MacOS/Some Helper"
+
+  run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -eq 0 ]
+  # each emitted line is an existing path (no split-induced bogus entries)
+  while IFS= read -r line; do
+    [ -e "$line" ] || { echo "non-existent (split?) path: $line"; false; }
+  done <<< "$output"
+  echo "$output" | grep -qF 'Contents/MacOS/gen fixtures'
+  echo "$output" | grep -qF 'Frameworks/Some Helper.app'
+  # the nested helper's inner binary is still excluded
+  ! echo "$output" | grep -qF 'Some Helper.app/Contents/MacOS/Some Helper'
+}
+
 @test "enumerate-macho fails when APP_PATH is missing" {
   run env APP_PATH="$TMP/nope.app" bash "$BIN/enumerate-macho.sh"
   [ "$status" -ne 0 ]

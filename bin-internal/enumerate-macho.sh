@@ -62,9 +62,12 @@ done < <(find "${APP_PATH}" -type f 2>/dev/null)
 
 # Emit: loose files first, then nested bundles deepest-first. Every line is a
 # nested item; the outer .app is appended by the caller (signed last).
-for f in ${loose[@]+"${loose[@]}"}; do
-  printf '%s\n' "${f}"
-done
+# Guard each emit on a non-empty count, then expand with FULL quotes so paths
+# containing spaces survive (app bundles legitimately have spaces); the count
+# guard also avoids bash 3.2's unbound-error on "${empty[@]}" under `set -u`.
+if [ "${#loose[@]}" -gt 0 ]; then
+  printf '%s\n' "${loose[@]}"
+fi
 
 if [ "${#bundles[@]}" -gt 0 ]; then
   printf '%s\n' "${bundles[@]}" | sort -rn -k1,1 | cut -f2-
