@@ -16,8 +16,10 @@
 #   - linux / windows: always shipped from their own `bundle-<platform>/`
 #     dirs (one signing mode, no signed variant).
 #
-# Partial-release prevention lives in the job graph (a failed build/sign
-# blocks this job); this script just selects assets.
+# Partial-release prevention: the job graph blocks this job on a failed
+# build/sign, AND this script HARD-FAILS if the expected mac bundle for the
+# mode is missing/empty (a missing-but-expected artifact must not silently ship
+# a mac-less release). See the require_nonempty check below.
 #
 # Env vars:
 #   DOWNLOAD_DIR   dir holding the per-artifact subdirs (bundle-*/)
@@ -32,11 +34,36 @@ ASSETS_DIR="${ASSETS_DIR:?ASSETS_DIR required}"
 SIGN_MODE="${SIGN_MODE:-inline}"
 BUILD_MAC="${BUILD_MAC:-true}"
 
+# Idempotent output: clear any prior contents so a rerun / local reuse never
+# ships stale assets (and BATS can't pass through a regression on leftovers).
+rm -rf "${ASSETS_DIR}"
 mkdir -p "${ASSETS_DIR}"
 
 post_hoc_mac=false
 if [ "${SIGN_MODE}" = "post-hoc" ] && [ "${BUILD_MAC}" = "true" ]; then
   post_hoc_mac=true
+fi
+
+# True if a bundle subdir exists and holds at least one file.
+bundle_nonempty() {
+  local d="${DOWNLOAD_DIR}/$1"
+  [ -d "${d}" ] && [ -n "$(find "${d}" -type f -print -quit 2>/dev/null)" ]
+}
+
+# Partial-release guard: when mac is built, the mode's expected mac bundle MUST
+# be present and non-empty, else hard-error rather than ship a mac-less release.
+if [ "${BUILD_MAC}" = "true" ]; then
+  if [ "${post_hoc_mac}" = "true" ]; then
+    bundle_nonempty bundle-mac-signed || {
+      echo "::error::post-hoc + build-mac: signed mac bundle (bundle-mac-signed) is missing or empty — refusing a partial (mac-less) release"
+      exit 1
+    }
+  else
+    bundle_nonempty bundle-mac || {
+      echo "::error::inline + build-mac: mac bundle (bundle-mac) is missing or empty — refusing a partial (mac-less) release"
+      exit 1
+    }
+  fi
 fi
 
 shipped=0

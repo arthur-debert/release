@@ -383,9 +383,10 @@ sign_mac_decides() {
 # bundle-mac + its reseal payload); inline ships bundle-mac; both ship
 # linux/win. `find`/`cp` are real, no stubs.
 
-# Build a downloads/ tree with one subdir per artifact.
+# Build a downloads/ tree with one subdir per artifact. Also clears out/ so a
+# prior test's staged assets can't leak into this one (test independence).
 stage_fixture() {
-  rm -rf downloads
+  rm -rf downloads out
   mkdir -p downloads/bundle-mac downloads/bundle-mac-signed \
            downloads/bundle-linux downloads/bundle-windows
   echo unsigned-dmg   > downloads/bundle-mac/App_1.0.0.dmg
@@ -432,7 +433,7 @@ stage_fixture() {
 }
 
 @test "stage-release-assets ships linux/win only when mac isn't built" {
-  rm -rf downloads; mkdir -p downloads/bundle-linux downloads/bundle-windows
+  rm -rf downloads out; mkdir -p downloads/bundle-linux downloads/bundle-windows
   echo deb > downloads/bundle-linux/App.deb
   echo msi > downloads/bundle-windows/App.msi
   run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=false \
@@ -443,8 +444,51 @@ stage_fixture() {
 }
 
 @test "stage-release-assets fails when nothing was staged" {
-  rm -rf downloads; mkdir -p downloads
+  rm -rf downloads out; mkdir -p downloads
   run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
+}
+
+@test "stage-release-assets post-hoc HARD-FAILS when the signed mac bundle is missing" {
+  # Only the unsigned bundle-mac present (sign job produced nothing) + linux —
+  # must refuse rather than silently ship a mac-less release.
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac downloads/bundle-linux
+  echo unsigned-dmg > downloads/bundle-mac/App.dmg
+  echo deb          > downloads/bundle-linux/App.deb
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'bundle-mac-signed'
+}
+
+@test "stage-release-assets post-hoc HARD-FAILS when the signed mac bundle is empty" {
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac-signed downloads/bundle-linux
+  echo deb > downloads/bundle-linux/App.deb   # signed dir exists but is EMPTY
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "stage-release-assets inline HARD-FAILS when the mac bundle is missing" {
+  rm -rf downloads out
+  mkdir -p downloads/bundle-linux
+  echo deb > downloads/bundle-linux/App.deb
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'bundle-mac'
+}
+
+@test "stage-release-assets clears stale assets in the output dir (idempotent)" {
+  stage_fixture
+  mkdir -p out; echo stale > out/STALE_LEFTOVER.dmg
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  # the stale asset from a prior run must not survive into the release
+  [ ! -e out/STALE_LEFTOVER.dmg ]
+  [ "$(cat out/App_1.0.0.dmg)" = "signed-dmg" ]
 }
