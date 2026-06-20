@@ -348,7 +348,7 @@ sign_mac_decides() {
   # The KEYCHAIN assignment must include a per-call unique token, never a bare
   # constant path. Re-introducing a fixed `signing.keychain-db` would collide
   # on the 2nd call in a job.
-  assign=$(grep -E '^\s*KEYCHAIN=' "$SIGN_MAC")
+  assign=$(grep -E '^[[:space:]]*KEYCHAIN=' "$SIGN_MAC")
   echo "KEYCHAIN assignment: $assign"
   [ -n "$assign" ]
   # references a uniqueness source ($$, $RANDOM, openssl rand, or mktemp)
@@ -360,9 +360,9 @@ sign_mac_decides() {
 @test "sign-mac unique token is computed once and reused for keychain + cert" {
   # Both the keychain and the decoded cert use the same per-call token so a
   # repeated invocation never clobbers either.
-  grep -Eq '^\s*UNIQ=' "$SIGN_MAC"
-  grep -Eq '^\s*KEYCHAIN=.*\$\{?UNIQ' "$SIGN_MAC"
-  grep -Eq '^\s*CERT_P12=.*\$\{?UNIQ' "$SIGN_MAC"
+  grep -Eq '^[[:space:]]*UNIQ=' "$SIGN_MAC"
+  grep -Eq '^[[:space:]]*KEYCHAIN=.*\$\{?UNIQ' "$SIGN_MAC"
+  grep -Eq '^[[:space:]]*CERT_P12=.*\$\{?UNIQ' "$SIGN_MAC"
 }
 
 @test "sign-mac cleans up its keychain on exit (trap + delete-keychain)" {
