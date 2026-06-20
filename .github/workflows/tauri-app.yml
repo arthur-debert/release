@@ -743,6 +743,20 @@ jobs:
           PLATFORM: ${{ matrix.t.platform }}
         run: bash .release/bin-internal/collect-tauri-bundles.sh
 
+      # Integrity guard (#817): a src-tauri crate with multiple [[bin]] targets
+      # and no declared main makes `tauri bundle` pick the alphabetically-first
+      # binary — phos shipped a `.app`/`.deb` whose main executable was a dev
+      # tool (gen_fixtures), and it signed + notarized cleanly (signing ≠
+      # integrity). Assert the bundled main binary == the expected name
+      # (mainBinaryName → productName → cargo package name) BEFORE upload, so a
+      # wrong-binary bundle fails the package job instead of shipping silently.
+      - name: Assert bundle main binary
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          PLATFORM: ${{ matrix.t.platform }}
+        run: bash .release/bin-internal/assert-tauri-bundle-binary.sh
+
       - name: Upload platform bundle
         uses: actions/upload-artifact@v6
         with:

@@ -644,3 +644,133 @@ compile_fixture() {
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/stage-tauri-compile.sh"
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/restore-tauri-compile.sh"
 }
+
+# --- assert-tauri-bundle-binary.sh (integrity guard, #817) -----------------
+# Guards against `tauri bundle` packaging the wrong main binary (the phos
+# gen_fixtures incident: a multi-[[bin]] crate with no declared main → the
+# alphabetically-first binary becomes CFBundleExecutable, signed + shipped
+# silently). Hermetic on a Linux host: the mac plist CFBundleExecutable is read
+# via an XML-grep fallback (no PlistBuddy/plutil needed). `jq`/`find` real.
+
+# Build a tauri project tree with a bundled .app whose main binary is $main.
+#   $1 = the main executable name actually in the bundle (the "produced" one)
+#   $2..$N = key=value config: mainBinaryName=, productName=, cargoName=
+# A config key left out is omitted from tauri.conf / Cargo.toml so resolution
+# precedence (mainBinaryName → productName → cargo name) can be exercised.
+guard_mac_fixture() {
+  local main="$1"; shift
+  local mbn="" pn="" cn=""
+  local kv
+  for kv in "$@"; do
+    case "$kv" in
+      mainBinaryName=*) mbn="${kv#*=}" ;;
+      productName=*)    pn="${kv#*=}" ;;
+      cargoName=*)      cn="${kv#*=}" ;;
+    esac
+  done
+  rm -rf proj
+  mkdir -p proj/src-tauri
+  # tauri.conf.json with only the requested keys
+  {
+    printf '{'
+    local first=1
+    if [ -n "$mbn" ]; then printf '"mainBinaryName":"%s"' "$mbn"; first=0; fi
+    if [ -n "$pn" ]; then [ "$first" -eq 0 ] && printf ','; printf '"productName":"%s"' "$pn"; first=0; fi
+    printf '}'
+  } > proj/src-tauri/tauri.conf.json
+  if [ -n "$cn" ]; then
+    printf '[package]\nname = "%s"\nversion = "0.1.0"\n' "$cn" > proj/src-tauri/Cargo.toml
+  fi
+  # the bundled .app — its main executable is $main (maybe the WRONG one)
+  local appdir="proj/src-tauri/target/release/bundle/macos/App.app/Contents"
+  mkdir -p "$appdir/MacOS"
+  echo bin > "$appdir/MacOS/$main"
+  cat > "$appdir/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key>
+  <string>$main</string>
+</dict></plist>
+EOF
+}
+
+@test "assert-bundle-binary passes when mac main binary matches mainBinaryName" {
+  guard_mac_fixture phos mainBinaryName=phos productName=Phos cargoName=phos-app
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "expected main binary: 'phos'"
+}
+
+@test "assert-bundle-binary FAILS loud when mac main binary is the wrong one (gen_fixtures)" {
+  # produced binary = gen_fixtures, but expected (mainBinaryName) = phos
+  guard_mac_fixture gen_fixtures mainBinaryName=phos
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "wrong main binary"
+  echo "$output" | grep -q "gen_fixtures"
+}
+
+@test "assert-bundle-binary resolves productName when mainBinaryName absent" {
+  guard_mac_fixture Phosphor productName=Phosphor cargoName=phos-app
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "expected main binary: 'Phosphor'"
+}
+
+@test "assert-bundle-binary falls back to the cargo package name" {
+  guard_mac_fixture phos-app cargoName=phos-app
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "expected main binary: 'phos-app'"
+}
+
+@test "assert-bundle-binary FAILS when the expected name cannot be resolved" {
+  # no mainBinaryName/productName, no Cargo.toml → unresolvable
+  guard_mac_fixture whatever
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "could not resolve the expected main binary"
+}
+
+@test "assert-bundle-binary FAILS when CFBundleExecutable is right but the file is the wrong name" {
+  # Plist says phos, but the actual executable on disk is gen_fixtures.
+  guard_mac_fixture phos mainBinaryName=phos
+  d="proj/src-tauri/target/release/bundle/macos/App.app/Contents/MacOS"
+  mv "$d/phos" "$d/gen_fixtures"
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "Contents/MacOS/phos missing"
+}
+
+@test "assert-bundle-binary passes for a correct linux payload" {
+  rm -rf proj
+  mkdir -p proj/src-tauri/target/release/bundle/deb/App/data/usr/bin
+  printf '{"mainBinaryName":"phos"}' > proj/src-tauri/tauri.conf.json
+  echo bin > proj/src-tauri/target/release/bundle/deb/App/data/usr/bin/phos
+  run env TAURI_DIR="$TMP/proj" PLATFORM=linux bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "found expected linux binary 'phos'"
+}
+
+@test "assert-bundle-binary FAILS for a wrong linux payload (gen_fixtures)" {
+  rm -rf proj
+  mkdir -p proj/src-tauri/target/release/bundle/deb/App/data/usr/bin
+  printf '{"mainBinaryName":"phos"}' > proj/src-tauri/tauri.conf.json
+  echo bin > proj/src-tauri/target/release/bundle/deb/App/data/usr/bin/gen_fixtures
+  run env TAURI_DIR="$TMP/proj" PLATFORM=linux bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "expected linux binary 'phos' not found"
+}
+
+@test "assert-bundle-binary FAILS when no .app is present to verify (mac)" {
+  rm -rf proj
+  mkdir -p proj/src-tauri/target/release/bundle/macos
+  printf '{"mainBinaryName":"phos"}' > proj/src-tauri/tauri.conf.json
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "no .app bundle found"
+}
+
+@test "assert-bundle-binary does not invoke mapfile/readarray (bash 3.2 runner)" {
+  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/assert-tauri-bundle-binary.sh"
+}
