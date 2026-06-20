@@ -13,7 +13,7 @@ design:
 
 Verified locally on darwin (arm64), tauri-cli 2.10.0, cargo 1.94.1, against
 a minimal `npm create tauri-app@latest` vanilla app. Notarization (the one
-leg needing Apple Connect creds) is deferred to CI — see "Notarization".
+leg needing App Store Connect creds) is deferred to CI — see "Notarization".
 
 ## Verdict
 
@@ -36,7 +36,7 @@ leg needing Apple Connect creds) is deferred to CI — see "Notarization".
   re-run `tauri bundle --bundles dmg` to re-seal — that regenerates the
   `.app` from the binary and **strips your signature**. Build the dmg from
   the signed `.app` with `hdiutil` instead (commands below). The notarize +
-  staple leg needs Apple Connect creds (CI secrets) and is the only part not
+  staple leg needs App Store Connect creds (CI secrets) and is the only part not
   confirmed locally.
 
 ## (a) Build/bundle decoupling
