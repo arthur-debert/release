@@ -8,6 +8,7 @@
 #   - reseal-mac-dmg.sh  volname derivation + hdiutil invocation (stubbed)
 #   - unpack-unsigned-app.sh  one-app extraction + zero/multi errors
 #   - enumerate-macho.sh  nested signable Mach-O enumeration (inner-first)
+#   - stage-release-assets.sh  sign-mode-agnostic release asset selection (WS5)
 #
 # Hermetic: stubs `npx` / `hdiutil` on PATH; `tar` / `find` / `file` are real.
 
@@ -374,4 +375,139 @@ sign_mac_decides() {
   # The decoded cert path must be per-call unique, not the old fixed
   # $RUNNER_TEMP/cert.p12 that a concurrent/repeated call could clobber.
   ! grep -q 'RUNNER_TEMP/cert\.p12"' "$SIGN_MAC"
+}
+
+# --- stage-release-assets.sh (WS5 #816) -----------------------------------
+# Flattens per-platform bundle subdirs into the release asset dir,
+# sign-mode-agnostically: post-hoc ships the SIGNED mac dmg (drops the unsigned
+# bundle-mac + its reseal payload); inline ships bundle-mac; both ship
+# linux/win. `find`/`cp` are real, no stubs.
+
+# Build a downloads/ tree with one subdir per artifact. Also clears out/ so a
+# prior test's staged assets can't leak into this one (test independence).
+stage_fixture() {
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac downloads/bundle-mac-signed \
+           downloads/bundle-linux downloads/bundle-windows
+  echo unsigned-dmg   > downloads/bundle-mac/App_1.0.0.dmg
+  echo updater        > downloads/bundle-mac/App.app.tar.gz
+  echo reseal-payload > downloads/bundle-mac/App.unsigned-app.tar.gz
+  echo signed-dmg     > downloads/bundle-mac-signed/App_1.0.0.dmg
+  echo deb            > downloads/bundle-linux/App_1.0.0_amd64.deb
+  echo msi            > downloads/bundle-windows/App_1.0.0.msi
+}
+
+@test "stage-release-assets post-hoc ships the SIGNED mac dmg + linux/win, not the unsigned mac" {
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  # the shipped dmg is the SIGNED one
+  [ "$(cat out/App_1.0.0.dmg)" = "signed-dmg" ]
+  # the unsigned reseal payload + updater bundle are NOT shipped
+  [ ! -e out/App.unsigned-app.tar.gz ]
+  [ ! -e out/App.app.tar.gz ]
+  # linux + windows ship
+  [ -e out/App_1.0.0_amd64.deb ]
+  [ -e out/App_1.0.0.msi ]
+}
+
+@test "stage-release-assets inline ships bundle-mac (inline-signed) + linux/win, skips -signed" {
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  # inline ships the in-build-signed mac dmg (the bundle-mac one)
+  [ "$(cat out/App_1.0.0.dmg)" = "unsigned-dmg" ]
+  [ -e out/App_1.0.0_amd64.deb ]
+  [ -e out/App_1.0.0.msi ]
+}
+
+@test "stage-release-assets post-hoc never emits two dmgs with the same name (collision)" {
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  # exactly one App_1.0.0.dmg in the asset dir
+  [ "$(find out -name 'App_1.0.0.dmg' | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "stage-release-assets ships linux/win only when mac isn't built" {
+  rm -rf downloads out; mkdir -p downloads/bundle-linux downloads/bundle-windows
+  echo deb > downloads/bundle-linux/App.deb
+  echo msi > downloads/bundle-windows/App.msi
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=false \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  [ -e out/App.deb ]
+  [ -e out/App.msi ]
+}
+
+@test "stage-release-assets fails when nothing was staged" {
+  rm -rf downloads out; mkdir -p downloads
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "stage-release-assets post-hoc HARD-FAILS when the signed mac bundle is missing" {
+  # Only the unsigned bundle-mac present (sign job produced nothing) + linux —
+  # must refuse rather than silently ship a mac-less release.
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac downloads/bundle-linux
+  echo unsigned-dmg > downloads/bundle-mac/App.dmg
+  echo deb          > downloads/bundle-linux/App.deb
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'bundle-mac-signed'
+}
+
+@test "stage-release-assets post-hoc HARD-FAILS when the signed mac bundle is empty" {
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac-signed downloads/bundle-linux
+  echo deb > downloads/bundle-linux/App.deb   # signed dir exists but is EMPTY
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "stage-release-assets inline HARD-FAILS when the mac bundle is missing" {
+  rm -rf downloads out
+  mkdir -p downloads/bundle-linux
+  echo deb > downloads/bundle-linux/App.deb
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'bundle-mac'
+}
+
+@test "stage-release-assets clears stale assets in the output dir (idempotent)" {
+  stage_fixture
+  mkdir -p out; echo stale > out/STALE_LEFTOVER.dmg
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  # the stale asset from a prior run must not survive into the release
+  [ ! -e out/STALE_LEFTOVER.dmg ]
+  [ "$(cat out/App_1.0.0.dmg)" = "signed-dmg" ]
+}
+
+@test "stage-release-assets fails fast on an unknown SIGN_MODE (typo guard)" {
+  # A `posthoc` typo must NOT fall through to inline and ship the unsigned mac.
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=posthoc BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'unknown SIGN_MODE'
+  # nothing was staged
+  [ ! -e out/App_1.0.0.dmg ]
+}
+
+@test "stage-release-assets fails fast on a non-bool BUILD_MAC" {
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=yes \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'unknown BUILD_MAC'
 }
