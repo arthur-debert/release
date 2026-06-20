@@ -84,6 +84,18 @@ on:
         type: boolean
         required: false
         default: false
+      notify-downstreams:
+        description: >
+          Space/comma/newline-separated list of downstream repos
+          (`owner/name`) to notify after a successful release. Each gets a
+          `repository_dispatch` of type `upstream-released` with a
+          `client_payload` of {source, version, ts, run_url}, which their
+          `on-upstream-released.yml` cascade handler reacts to. Empty (the
+          default) fires nothing. Requires the RELEASE_TOKEN secret — the
+          default GITHUB_TOKEN cannot fire cross-repo dispatches.
+        type: string
+        required: false
+        default: ''
 
     secrets:
       RELEASE_TOKEN:
@@ -460,3 +472,46 @@ jobs:
               --notes-file release-notes.md \
               tree-sitter.tar.gz
           fi
+
+  # -------------------------------------------------------------------
+  # 6. Notify downstreams. A tree-sitter grammar IS an upstream (the
+  #    editor extensions consume it), so fan `upstream-released` out to
+  #    the repos the caller names. Empty list (default) → job skips.
+  # -------------------------------------------------------------------
+  notify-downstreams:
+    needs: [prepare, release]
+    if: needs.release.result == 'success' && inputs.notify-downstreams != ''
+    runs-on: ubuntu-latest
+    # The dispatch authenticates via the RELEASE_TOKEN PAT (GH_TOKEN below),
+    # so this job's automatic GITHUB_TOKEN needs no scopes.
+    permissions: {}
+    steps:
+      - name: Notify downstream consumers
+        env:
+          # The default GITHUB_TOKEN cannot fire cross-repo dispatches
+          # (silent 403) — authenticate with the RELEASE_TOKEN PAT instead.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # Pass payload-bearing values via env (never interpolated into the
+          # script body) so a downstream name can't smuggle a command.
+          DOWNSTREAMS: ${{ inputs.notify-downstreams }}
+          SOURCE: ${{ github.event.repository.name }}
+          VERSION: v${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=notify-downstreams::notify-downstreams is set but RELEASE_TOKEN is empty — the default GITHUB_TOKEN cannot fire cross-repo dispatches. Pass RELEASE_TOKEN in the caller's secrets." >&2
+            exit 1
+          fi
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # Accept comma / whitespace / newline separated lists.
+          for repo in $(printf '%s' "$DOWNSTREAMS" | tr ',' ' '); do
+            [ -n "$repo" ] || continue
+            echo "Notifying ${repo} of ${SOURCE}@${VERSION}"
+            gh api "repos/${repo}/dispatches" --method POST \
+              -f event_type=upstream-released \
+              -F "client_payload[source]=${SOURCE}" \
+              -F "client_payload[version]=${VERSION}" \
+              -F "client_payload[ts]=${ts}" \
+              -F "client_payload[run_url]=${run_url}"
+          done

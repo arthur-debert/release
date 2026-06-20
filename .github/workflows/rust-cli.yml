@@ -142,6 +142,19 @@ on:
         required: false
         default: ''
 
+      notify-downstreams:
+        description: >
+          Space/comma/newline-separated list of downstream repos
+          (`owner/name`) to notify after a successful release. Each gets a
+          `repository_dispatch` of type `upstream-released` with a
+          `client_payload` of {source, version, ts, run_url}, which their
+          `on-upstream-released.yml` cascade handler reacts to. Empty (the
+          default) fires nothing. Requires the RELEASE_TOKEN secret — the
+          default GITHUB_TOKEN cannot fire cross-repo dispatches.
+        type: string
+        required: false
+        default: ''
+
     secrets:
       RELEASE_TOKEN:
         description: 'PAT with repo scope for default-branch push (bypasses ruleset).'
@@ -845,21 +858,48 @@ jobs:
   # -------------------------------------------------------------------
   # Notify downstreams. A binary CLI CAN have dependents (e.g. lex-lsp →
   # the lex editors; simple-gal → simple-gal-ui), so rust-cli is NOT a
-  # fan-out dead-end — it carries the same notify-downstreams placeholder
-  # as the other Kinds (electron-app/tree-sitter/…), for consistency.
-  # (release#426 P3.)
+  # fan-out dead-end — it fires `upstream-released` to the repos the caller
+  # names via the `notify-downstreams` input. Empty list (default) → the job
+  # skips. This replaces the old per-consumer hand-rolled notify job (the
+  # fan-out list now rides as one `with:` line). (release#426 P3, #804.)
   # -------------------------------------------------------------------
   notify-downstreams:
     needs: [prepare, create-release]
-    if: needs.create-release.result == 'success'
+    # Fire only on a successful release AND when the caller named downstreams.
+    # Empty list (the default) → the job skips, so a consumer with no
+    # dependents pays nothing and needs no `with:` line.
+    if: needs.create-release.result == 'success' && inputs.notify-downstreams != ''
     runs-on: ubuntu-latest
+    # The dispatch authenticates via the RELEASE_TOKEN PAT (GH_TOKEN below),
+    # so this job's automatic GITHUB_TOKEN needs no scopes.
+    permissions: {}
     steps:
-      - name: No-op placeholder
-        # Per-consumer downstream lists are repo-specific: each consumer's
-        # own release.yml fires its `notify-downstreams` step (which knows
-        # its direct dependents) AFTER it calls this reusable workflow. The
-        # reusable workflow does NOT emit dispatches itself. Kept as a
-        # placeholder for a future centralized notify mechanism, and so a
-        # rust-cli consumer with dependents has the same shape to hang its
-        # notify step on as every other Kind.
-        run: echo "Release ${{ needs.prepare.outputs.version }} complete. Caller's own release.yml fires its notify-downstreams step (if any) after this workflow returns."
+      - name: Notify downstream consumers
+        env:
+          # The default GITHUB_TOKEN cannot fire cross-repo dispatches
+          # (silent 403) — authenticate with the RELEASE_TOKEN PAT instead.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # Pass payload-bearing values via env (never interpolated into the
+          # script body) so a downstream name can't smuggle a command.
+          DOWNSTREAMS: ${{ inputs.notify-downstreams }}
+          SOURCE: ${{ github.event.repository.name }}
+          VERSION: v${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=notify-downstreams::notify-downstreams is set but RELEASE_TOKEN is empty — the default GITHUB_TOKEN cannot fire cross-repo dispatches. Pass RELEASE_TOKEN in the caller's secrets." >&2
+            exit 1
+          fi
+          ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          # Accept comma / whitespace / newline separated lists.
+          for repo in $(printf '%s' "$DOWNSTREAMS" | tr ',' ' '); do
+            [ -n "$repo" ] || continue
+            echo "Notifying ${repo} of ${SOURCE}@${VERSION}"
+            gh api "repos/${repo}/dispatches" --method POST \
+              -f event_type=upstream-released \
+              -F "client_payload[source]=${SOURCE}" \
+              -F "client_payload[version]=${VERSION}" \
+              -F "client_payload[ts]=${ts}" \
+              -F "client_payload[run_url]=${run_url}"
+          done
