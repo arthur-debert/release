@@ -250,6 +250,19 @@ EOF
   [ "$status" -ne 0 ]
 }
 
+@test "enumerate-macho fails loudly when file(1) is absent (not silently empty)" {
+  app="$TMP/Phos.app"
+  make_macho "$app/Contents/MacOS/gen_fixtures"
+  # PATH with the tools the script needs, but NOT `file` — symlink each.
+  bindir="$TMP/nofilebin"; mkdir -p "$bindir"
+  for t in bash find tr wc sort cut grep basename dirname env printf; do
+    p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$bindir/$t"
+  done
+  run env -i PATH="$bindir" APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'file(1) is required'
+}
+
 @test "enumerate-macho does not invoke mapfile/readarray (bash 3.2 runner)" {
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/enumerate-macho.sh"
 }

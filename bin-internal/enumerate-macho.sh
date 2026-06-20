@@ -29,6 +29,13 @@ APP_PATH="${APP_PATH:?APP_PATH required}"
 [ -d "${APP_PATH}" ] || { echo "::error::APP_PATH not a directory: ${APP_PATH}" >&2; exit 1; }
 APP_PATH="${APP_PATH%/}"   # strip trailing slash so the top-app compare is exact
 
+# Fail loud if `file` is absent. Mach-O detection runs through `file ... | grep`,
+# whose pipeline evaluates FALSE when `file` is missing — which would silently
+# skip ALL nested code and reproduce the very bug this script fixes (nested
+# Mach-O reaching the notary unsigned), only without a diagnostic. Hard-require
+# the tool instead.
+command -v file >/dev/null 2>&1 || { echo "::error::file(1) is required to detect Mach-O binaries but was not found on PATH" >&2; exit 1; }
+
 # rel-depth: count the '/' separators in the path below APP_PATH (a proxy for
 # nesting depth, for the deepest-first sort).
 rel_depth() {
