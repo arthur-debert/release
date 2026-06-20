@@ -251,7 +251,15 @@ jobs:
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
     steps:
+      # Pin `ref: main` (matching the prepare job's checkout) so preflight
+      # validates the exact changelog prepare will bump + tag, even when the
+      # reusable workflow runs from a non-main ref (e.g. a harness branch).
+      # Shallow: preflight only reads the changelog, no tag/push history.
       - uses: actions/checkout@v6
+        with:
+          ref: main
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - uses: actions/checkout@v6
         with:
