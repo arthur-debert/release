@@ -81,16 +81,25 @@ git fetch --tags origin >/dev/null 2>&1 || true
 
 # ── Assert the release base is CI-green ───────────────────────────
 # WS2 (#811): don't re-gate — the work PR that landed this code already ran the
-# full gate (lint/compile/tests) on exactly this sha. Assert that HEAD (the code
-# being released, BEFORE the version-file bump) is CI-green, in seconds, instead
-# of recompiling src-tauri + re-linting here. Skipped only for verification rcs
-# (a `-release-rc` live-fire cut runs off an arbitrary working sha that may not
-# have its own CI round).
-if [ "${IS_VERIFY}" = "true" ]; then
-  echo "verification rc (${TAG}): skipping base-sha CI-green assertion (release#663)."
-else
-  BASE_SHA="$(git rev-parse HEAD)" bash "${script_dir}/assert-base-sha-green.sh"
-fi
+# full gate (lint/compile/tests) on exactly that sha. Assert the RELEASE BASE
+# (the pre-bump code being released) is CI-green, in seconds, instead of
+# recompiling src-tauri + re-linting here.
+#
+# The base differs by case:
+#   - fresh run: HEAD is the checked-out main tip, before the bump → base = HEAD.
+#   - resume case (the tag already exists from a Layer 0 / cascade primitive that
+#     bumped + tagged locally): the tag IS the bump commit, which was never CI'd;
+#     its PARENT (${TAG}^) is the pre-bump base that CI gated → base = ${TAG}^.
+# Skipped only for verification rcs (a `-release-rc` live-fire cut runs off an
+# arbitrary working sha that may have no CI round of its own).
+assert_base_green() {
+  local base_sha="$1"
+  if [ "${IS_VERIFY}" = "true" ]; then
+    echo "verification rc (${TAG}): skipping base-sha CI-green assertion (release#663)."
+    return 0
+  fi
+  BASE_SHA="${base_sha}" bash "${script_dir}/assert-base-sha-green.sh"
+}
 
 # ── Resume case ───────────────────────────────────────────────────
 if git rev-parse "${TAG}" >/dev/null 2>&1; then
@@ -98,6 +107,8 @@ if git rev-parse "${TAG}" >/dev/null 2>&1; then
   TAG_VERSION="$(git show "${TAG}:${pkg}" 2>/dev/null | jq -r '.version // empty')"
   if [ "${TAG_VERSION}" = "${NEW_VERSION}" ]; then
     echo "tag ${TAG} already exists at ${TAG_SHA} (${pkg} matches) — resuming"
+    # The pre-bump base is the tag's parent (the tag commit is the bump itself).
+    assert_base_green "$(git rev-parse "${TAG}^")"
     emit "release-sha=${TAG_SHA}"
 
     if [ -z "${CHANGELOG}" ]; then
@@ -117,6 +128,9 @@ if git rev-parse "${TAG}" >/dev/null 2>&1; then
 fi
 
 # ── Fresh release path ────────────────────────────────────────────
+# HEAD is the checked-out main tip, before the bump → it IS the release base.
+assert_base_green "$(git rev-parse HEAD)"
+
 git config user.name "github-actions[bot]"
 git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
