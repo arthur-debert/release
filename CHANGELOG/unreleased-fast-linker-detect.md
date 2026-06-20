@@ -1,0 +1,1 @@
+- setup-rust + tauri-app install a repo-selected fast linker (mold/lld) so a committed .cargo linker config builds

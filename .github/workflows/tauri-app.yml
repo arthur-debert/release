@@ -378,6 +378,27 @@ jobs:
         if: matrix.t.platform == 'linux'
         run: bash .release/bin-internal/install-tauri-linux-deps.sh
 
+      - name: Install macOS fast linker (lld) if selected
+        # This build job uses dtolnay/rust-toolchain directly, not the
+        # setup-rust composite, so it installs its own mac linker. Detection-
+        # based + idempotent: only when the repo's .cargo/config.toml selects
+        # `-fuse-ld=lld` and lld isn't already present. The Linux side gets mold
+        # from install-tauri-linux-deps.sh above. (Robustness for a committed
+        # linker config, not speed — phos-editor/app#318.)
+        if: matrix.t.platform == 'mac'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Detect in TRACKED .cargo/config.toml only (git ls-files), never the
+          # restored target/ tree, so this stays cheap.
+          sel_lld=""
+          while IFS= read -r f; do
+            grep -q 'fuse-ld=lld' "$f" 2>/dev/null && { sel_lld=1; break; }
+          done < <(git ls-files 2>/dev/null | grep -E '(^|/)\.cargo/config\.toml$')
+          if [ -n "$sel_lld" ] && ! command -v ld64.lld >/dev/null 2>&1; then
+            brew install lld
+          fi
+
       - name: Install JS deps
         shell: bash
         env:
