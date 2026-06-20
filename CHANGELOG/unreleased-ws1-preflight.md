@@ -1,0 +1,1 @@
+- Preflight fails fast on empty changelog; Apple-secrets check gated on signing requested

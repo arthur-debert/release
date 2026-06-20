@@ -1,0 +1,32 @@
+name: check-changelog-unreleased tests
+
+# BATS contract suite for bin-internal/check-changelog-unreleased.sh — the
+# cheap preflight guard that fails a release when there is no unreleased
+# changelog content (no CHANGELOG/unreleased-*.md fragment AND no non-empty
+# `## [Unreleased]` section). Pure bash, no release_core.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin-internal/check-changelog-unreleased.sh"
+      - "tests/check-changelog-unreleased/**"
+      - ".github/workflows/check-changelog-unreleased-tests.yml"
+  pull_request:
+    paths:
+      - "bin-internal/check-changelog-unreleased.sh"
+      - "tests/check-changelog-unreleased/**"
+      - ".github/workflows/check-changelog-unreleased-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/check-changelog-unreleased/
