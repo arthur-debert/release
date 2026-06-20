@@ -4,6 +4,14 @@
 
 ## Unreleased
 
+## 3.5.0 - 2026-06-20
+
+- arm-gate composite caches release-core venv + gate toolset
+- tauri-app.yml: release leg reuses compiled release-profile deps (own tauri-release key), ~2x faster warm releases
+- tauri-app.yml: @v3 ref fix + Linux-leg warm-cache reuse
+- tauri-ci.yml: wasm/Playwright caching, wasm-pack provisioning, check-command input
+- tauri-e2e.yml: Swatinem cache, @v3 ref fix, build-once binary scaffold
+
 ## 3.4.1 - 2026-06-18
 
 - Add a github-action kind canary fixture + register the gh-action family so gh-action.yml's cut path is exercised pre-cut
