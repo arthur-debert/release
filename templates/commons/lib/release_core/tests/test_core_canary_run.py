@@ -12,6 +12,7 @@ rounds, not here.
 from __future__ import annotations
 
 import os
+import time
 
 import pytest
 from release_core.verbs import canary_run, managed_repos
@@ -391,7 +392,7 @@ def test_resolve_release_run_ignores_head_sha_for_bump_committing_kinds(monkeypa
 
     monkeypatch.setattr(canary_run.gh, "rest", fake_rest)
     runs = canary_run._resolve_runs(
-        "o/r", seed, before_ids={100}, deadline=float("inf"), sleep=lambda *_: None
+        "o/r", seed, before_ids={100}, deadline=time.time() + 5, sleep=lambda *_: None
     )
     assert runs["release"]["id"] == 201
     assert runs["ci"]["id"] == 200
@@ -414,6 +415,6 @@ def test_resolve_release_run_picks_earliest_fresh_dispatch(monkeypatch):
 
     monkeypatch.setattr(canary_run.gh, "rest", fake_rest)
     runs = canary_run._resolve_runs(
-        "o/r", seed, before_ids=set(), deadline=float("inf"), sleep=lambda *_: None
+        "o/r", seed, before_ids=set(), deadline=time.time() + 5, sleep=lambda *_: None
     )
     assert runs["release"]["id"] == 21

@@ -309,10 +309,16 @@ def _release_run_ids(repo: str) -> set[int]:
 def _dispatch(repo: str, dest: str, version: str) -> tuple[str, set[int]]:
     """Phase 3: FRESH events only (never `gh run rerun`) — push the seed commit
     (push event → CI) and dispatch the prerelease cut, in parallel. Returns
-    (seed_sha, pre-dispatch release-run ids — the skew-proof resolver seam)."""
-    before = _release_run_ids(repo)
+    (seed_sha, pre-dispatch release-run ids — the skew-proof resolver seam).
+
+    The release-run-id snapshot is taken AFTER the seed push and immediately
+    BEFORE the dispatch, so it is the tightest possible boundary: the resolver
+    keys solely on this id-set diff now (no head_sha tie — see _resolve_runs),
+    and the push triggers only a CI run (push event), never a Release
+    workflow_dispatch, so it cannot perturb this set."""
     gh.git(["-C", dest, "push", "--quiet", "origin", "main"])
     seed_sha = gh.git_rev_parse("HEAD", cwd=dest)
+    before = _release_run_ids(repo)
     _retry(
         lambda: gh.rest(
             f"repos/{repo}/actions/workflows/{RELEASE_WORKFLOW}/dispatches",
