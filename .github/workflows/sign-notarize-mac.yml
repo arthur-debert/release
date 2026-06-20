@@ -79,10 +79,15 @@ on:
 # which does not carry release's composites — so a local ref would fail
 # "action.yml not found" at runtime. The remote `@v3` ref makes GitHub fetch the
 # action (with its sibling bin-internal/ scripts) independently of the
-# workspace, and satisfies the workflow-action-major @v3 guard. (The CALLER
-# still reaches THIS workflow via a local `./.github/workflows/...` ref — a
-# workflow self-ref auto-tracks the caller's repo+ref, which an action `uses:`
-# does not.)
+# workspace, and satisfies the workflow-action-major @v3 guard.
+#
+# The CALLER (tauri-app.yml's `sign` job) ALSO reaches this workflow with a full
+# `@v3` ref, NOT a local `./` one. A `./` reusable-workflow path resolves against
+# the TOP-LEVEL caller's repo (the CONSUMER, e.g. phos-editor/app), not
+# arthur-debert/release — across repos GitHub can't find it and the graph
+# startup_fails. (An earlier revision used a local self-ref on the wrong premise
+# that it auto-tracks the release repo; the phos RC proved it tracks the
+# consumer repo instead — release#823 follow-up.)
 jobs:
   sign:
     runs-on: ${{ inputs.runs-on }}

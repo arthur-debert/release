@@ -629,15 +629,24 @@ jobs:
   # 2b. Post-hoc macOS signer (sign-mode: post-hoc only). Downloads the
   #     UNSIGNED bundle-mac artifact, codesigns + reseals + notarizes via
   #     the consumer-agnostic reusable workflow, uploads bundle-mac-signed.
-  #     LOCAL path ref → resolves at the SAME ref as this workflow (auto-
-  #     tracks the harness branch during validation, @v3 after merge; no
-  #     hard-coded @vN to drift, per release#689).
   #     Skipped entirely in inline mode and when mac isn't built.
+  #
+  #     FULL `@v3` ref, NOT a local `./` ref. A nested reusable-workflow's
+  #     local `./` path resolves against the TOP-LEVEL caller's repo
+  #     (the consumer, e.g. phos-editor/app) — NOT arthur-debert/release —
+  #     so GitHub can't find it and the whole workflow graph fails to
+  #     compile at startup (startup_failure, 0 jobs). Local reusable-workflow
+  #     refs only work when caller and callee live in the SAME repo; a
+  #     cross-repo consumer needs the full `owner/repo/.github/workflows/
+  #     <file>@<ref>` form. `@v3` is production-correct (v3 carries this
+  #     workflow) and matches the composite `@v3` refs inside it.
+  #     (actionlint + the workflow-action-major guard both PASSED the local
+  #     ref — only a live cross-repo dispatch surfaced it; release RC #823.)
   # -------------------------------------------------------------------
   sign:
     needs: build
     if: ${{ inputs.sign-mode == 'post-hoc' && inputs.build-mac }}
-    uses: ./.github/workflows/sign-notarize-mac.yml
+    uses: arthur-debert/release/.github/workflows/sign-notarize-mac.yml@v3
     with:
       artifact-name: bundle-mac
       notarize: ${{ inputs.notarize }}
