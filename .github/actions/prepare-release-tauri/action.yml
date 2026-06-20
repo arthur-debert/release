@@ -1,9 +1,10 @@
 name: 'Prepare Tauri release'
 description: |
-  Validate semver, bump the three Tauri version files (package.json,
-  Cargo.toml, tauri.conf.json), roll changelog, run pre-commit gate,
-  commit + tag + push. Resume-on-failure: if the tag already exists
-  with matching package.json version, skip the bump and emit the
+  Validate semver, assert the release base sha is CI-green (WS2 #811 —
+  don't re-gate, the work PR already gated this code), bump the three
+  Tauri version files (package.json, Cargo.toml, tauri.conf.json), roll
+  changelog, commit + tag + push. Resume-on-failure: if the tag already
+  exists with matching package.json version, skip the bump and emit the
   tag's SHA so downstream jobs can re-run cleanly.
 
 inputs:
@@ -23,7 +24,7 @@ inputs:
     required: false
     default: ''
   gh-token:
-    description: 'Token for authenticating cargo fetches of PRIVATE git dependencies (e.g. a private engine crate the src-tauri/ build pins). No-op when empty.'
+    description: 'Token for the `gh api` check-runs query that asserts the release base sha is CI-green (and reads private-repo check-runs). Falls back to the workflow token when empty.'
     required: false
     default: ''
 
@@ -49,35 +50,15 @@ runs:
       shell: bash
       run: bash "${{ github.action_path }}/../../../bin-internal/install-release-core-pkg.sh"
 
-    - name: Install Tauri Linux build dependencies
-      shell: bash
-      run: bash "${{ github.action_path }}/../../../bin-internal/install-tauri-linux-deps.sh"
-
-    # The prep script below runs the consumer's HARD gate (#412) on the bump
-    # commit; a missing linter FAILS the release (it never skips). Arm the
-    # toolset first. #437 (P2) armed the rust/npm/go/python composites but
-    # missed nvim + tauri; this closes that gap.
-    - name: Set up Node.js (gate linters markdownlint/prettier)
-      if: env.SKIP_PRECOMMIT_GATE != 'true'
-      uses: actions/setup-node@v6
-      with:
-        node-version: '20'
-    # Python is already set up above (for the release_core console-scripts).
-    - name: Arm the gate toolset (release#437)
-      if: env.SKIP_PRECOMMIT_GATE != 'true'
-      shell: bash
-      run: release-core gate --provision
-
-    # The HARD gate (below) fires cargo over src-tauri/. When the project pins a
-    # PRIVATE git dependency (a private engine crate), cargo can't clone it
-    # without auth — so set up git-CLI fetch auth here, as its own step, so the
-    # CARGO_NET_GIT_FETCH_WITH_CLI it writes to $GITHUB_ENV persists into the
-    # gate step below. No-op when gh-token is empty.
-    - name: Authenticate cargo for private git deps
-      shell: bash
-      env:
-        GH_TOKEN: ${{ inputs.gh-token }}
-      run: bash "${{ github.action_path }}/../../../bin-internal/setup-cargo-git-auth.sh"
+    # WS2 (#811): prepare no longer installs Tauri Linux deps, sets up Node, arms
+    # the gate toolset, or re-runs the HARD pre-commit gate over src-tauri/. The
+    # work PR that landed the release base sha already ran the full gate
+    # (lint/compile/tests) on exactly this code; prepare ASSERTS that base sha is
+    # CI-green (in prepare-tauri-release.sh, via the check-runs API) instead of
+    # recompiling. No cargo runs in prepare anymore, so the cargo-git-auth step
+    # (which only existed to let the old gate's cargo clone a PRIVATE git dep)
+    # is gone too. prepare now does: bump → assert base green → roll changelog →
+    # tag → push, in seconds.
 
     - name: Prepare Tauri release
       id: prep
@@ -87,4 +68,8 @@ runs:
         TAURI_DIR: ${{ inputs.tauri-dir }}
         CHANGELOG: ${{ inputs.changelog-path }}
         PREP_SCRIPT: ${{ inputs.prep-script }}
+        # Authenticates the `gh api` check-runs query in the base-sha CI-green
+        # assertion (and reads private-repo check-runs). Falls back to the
+        # workflow token via gh's default when empty.
+        GH_TOKEN: ${{ inputs.gh-token }}
       run: bash "${{ github.action_path }}/../../../bin-internal/prepare-tauri-release.sh"

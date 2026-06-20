@@ -276,8 +276,8 @@ jobs:
           changelog-path: ${{ inputs.changelog-path }}
           tauri-dir: ${{ inputs.tauri-dir }}
           prep-script: ${{ inputs.prep-script }}
-          # Lets the prepare gate's cargo authenticate a PRIVATE src-tauri/ git
-          # dep (no-op when the project has none / no token).
+          # Authenticates the base-sha CI-green assertion's `gh api` check-runs
+          # query (WS2 #811). Reads private-repo check-runs too.
           gh-token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
       - name: Upload release notes

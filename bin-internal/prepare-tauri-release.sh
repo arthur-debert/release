@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Prepare a Tauri release: validate semver, detect resume case, run
-# optional prep-script, bump the three version files (package.json,
-# Cargo.toml, tauri.conf.json), roll changelog, run pre-commit gate,
-# commit + tag + push.
+# Prepare a Tauri release: validate semver, assert the base sha is CI-green
+# (WS2 #811 — don't re-gate, the work PR already gated this code), detect resume
+# case, run optional prep-script, bump the three version files (package.json,
+# Cargo.toml, tauri.conf.json), roll changelog, commit + tag + push.
 #
 # Env vars:
 #   NEW_VERSION   semver version to release (required)
@@ -78,6 +78,19 @@ done
 
 TAG="v${NEW_VERSION}"
 git fetch --tags origin >/dev/null 2>&1 || true
+
+# ── Assert the release base is CI-green ───────────────────────────
+# WS2 (#811): don't re-gate — the work PR that landed this code already ran the
+# full gate (lint/compile/tests) on exactly this sha. Assert that HEAD (the code
+# being released, BEFORE the version-file bump) is CI-green, in seconds, instead
+# of recompiling src-tauri + re-linting here. Skipped only for verification rcs
+# (a `-release-rc` live-fire cut runs off an arbitrary working sha that may not
+# have its own CI round).
+if [ "${IS_VERIFY}" = "true" ]; then
+  echo "verification rc (${TAG}): skipping base-sha CI-green assertion (release#663)."
+else
+  BASE_SHA="$(git rev-parse HEAD)" bash "${script_dir}/assert-base-sha-green.sh"
+fi
 
 # ── Resume case ───────────────────────────────────────────────────
 if git rev-parse "${TAG}" >/dev/null 2>&1; then
@@ -227,10 +240,11 @@ if [ "${version_files_changed}" = "false" ]; then
   exit 1
 fi
 
-# ── Pre-commit gate ───────────────────────────────────────────────
-bash "${script_dir}/run-precommit-gate.sh"
-
 # ── Commit + tag + push ──────────────────────────────────────────
+# No pre-commit gate here: WS2 (#811) asserts the base sha is CI-green above
+# instead of re-running the gate. The bump commit only rewrites version strings
+# (no code), and the 3-file version-consistency check below the bump catches a
+# malformed bump.
 git commit -m "chore: Release ${TAG}"
 if [ -s release-notes.md ]; then
   git tag -a "${TAG}" -F release-notes.md
