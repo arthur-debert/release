@@ -1,0 +1,1 @@
+- Hoist Tauri bundling into a dedicated package job (post-hoc path)

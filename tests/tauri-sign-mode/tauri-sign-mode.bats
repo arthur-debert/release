@@ -511,3 +511,136 @@ stage_fixture() {
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'unknown BUILD_MAC'
 }
+
+# --- stage-tauri-compile.sh / restore-tauri-compile.sh (WS6a #817) ---------
+# The compile job stages the pre-built binary + built frontendDist into a flat
+# artifact that mirrors repo-root-relative paths; the package job restores it
+# over a fresh checkout so `tauri bundle` packages with no recompile. `jq`,
+# `cp`, `find` are real; no stubs.
+
+# Build a synthetic compiled tree: a tauri.conf.json pointing frontendDist at
+# `../dist`, a compiled binary + heavy intermediate dirs under target/release,
+# and a built frontend dir. $1 = frontendDist value (default ../dist).
+compile_fixture() {
+  local fd="${1:-../dist}"
+  rm -rf repo
+  mkdir -p repo/src-tauri/target/release/deps \
+           repo/src-tauri/target/release/build \
+           repo/src-tauri/target/release/incremental \
+           repo/src-tauri/icons
+  printf '{"build":{"frontendDist":"%s"}}' "$fd" > repo/src-tauri/tauri.conf.json
+  # compiled binary at the TOP LEVEL of target/release
+  printf '#!/bin/sh\necho hi\n' > repo/src-tauri/target/release/myapp
+  chmod +x repo/src-tauri/target/release/myapp
+  # heavy intermediates that must NOT be staged
+  echo junk > repo/src-tauri/target/release/deps/libfoo.rlib
+  echo junk > repo/src-tauri/target/release/build/marker
+  echo junk > repo/src-tauri/target/release/incremental/x
+  # the built frontend dir (frontendDist resolves relative to src-tauri/)
+  mkdir -p repo/dist
+  echo '<html>' > repo/dist/index.html
+}
+
+@test "stage-tauri-compile stages the binary + frontendDist, excludes heavy dirs" {
+  compile_fixture
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -eq 0 ]
+  # the compiled binary is staged at its repo-root-relative path
+  [ -f "$TMP/compile-mac/src-tauri/target/release/myapp" ]
+  # the built frontendDist is staged
+  [ -f "$TMP/compile-mac/dist/index.html" ]
+  # heavy intermediates are NOT staged
+  [ ! -e "$TMP/compile-mac/src-tauri/target/release/deps" ]
+  [ ! -e "$TMP/compile-mac/src-tauri/target/release/build" ]
+  [ ! -e "$TMP/compile-mac/src-tauri/target/release/incremental" ]
+}
+
+@test "stage-tauri-compile fails when there is no compiled binary" {
+  compile_fixture
+  rm -f repo/src-tauri/target/release/myapp
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "stage-tauri-compile fails when the release dir is missing" {
+  compile_fixture
+  rm -rf repo/src-tauri/target
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "stage-tauri-compile skips a dev-server frontendDist (URL) without failing" {
+  compile_fixture 'http://localhost:1420'
+  run env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ "$status" -eq 0 ]
+  # binary still staged, no bogus URL path
+  [ -f "$TMP/compile-mac/src-tauri/target/release/myapp" ]
+  [ ! -e "$TMP/compile-mac/dist" ]
+}
+
+@test "restore-tauri-compile copies the staged tree back over a fresh checkout" {
+  compile_fixture
+  env REPO_ROOT="$TMP/repo" TAURI_DIR=. PLATFORM=mac OUT_DIR="$TMP/compile-mac" \
+    bash "$BIN/stage-tauri-compile.sh"
+  # fresh checkout: source only, no build outputs
+  rm -rf fresh
+  mkdir -p fresh/src-tauri/icons
+  cp repo/src-tauri/tauri.conf.json fresh/src-tauri/tauri.conf.json
+
+  run env ARTIFACT_DIR="$TMP/compile-mac" REPO_ROOT="$TMP/fresh" TAURI_DIR=. \
+    bash "$BIN/restore-tauri-compile.sh"
+  [ "$status" -eq 0 ]
+  # binary restored at the expected bundle-input path, and executable
+  [ -f "$TMP/fresh/src-tauri/target/release/myapp" ]
+  [ -x "$TMP/fresh/src-tauri/target/release/myapp" ]
+  # frontendDist restored
+  [ -f "$TMP/fresh/dist/index.html" ]
+}
+
+@test "restore-tauri-compile fails on a missing artifact dir" {
+  run env ARTIFACT_DIR="$TMP/nope" REPO_ROOT="$TMP/fresh" TAURI_DIR=. \
+    bash "$BIN/restore-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "restore-tauri-compile fails on an empty artifact dir" {
+  mkdir -p "$TMP/empty-art" "$TMP/fresh"
+  run env ARTIFACT_DIR="$TMP/empty-art" REPO_ROOT="$TMP/fresh" TAURI_DIR=. \
+    bash "$BIN/restore-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "stage+restore round-trips a monorepo tauri-dir (tauri-dir != '.')" {
+  # frontendDist is relative to <tauri-dir>/src-tauri; verify the staged
+  # relative paths and restore land under the same tauri-dir on the other side.
+  rm -rf repo
+  mkdir -p repo/app/src-tauri/target/release/deps repo/app/dist
+  printf '{"build":{"frontendDist":"../dist"}}' > repo/app/src-tauri/tauri.conf.json
+  printf 'bin\n' > repo/app/src-tauri/target/release/myapp
+  chmod +x repo/app/src-tauri/target/release/myapp
+  echo junk > repo/app/src-tauri/target/release/deps/x.rlib
+  echo '<html>' > repo/app/dist/index.html
+
+  env REPO_ROOT="$TMP/repo" TAURI_DIR=app PLATFORM=linux OUT_DIR="$TMP/compile-linux" \
+    bash "$BIN/stage-tauri-compile.sh"
+  [ -f "$TMP/compile-linux/app/src-tauri/target/release/myapp" ]
+  [ -f "$TMP/compile-linux/app/dist/index.html" ]
+  [ ! -e "$TMP/compile-linux/app/src-tauri/target/release/deps" ]
+
+  rm -rf fresh; mkdir -p fresh/app/src-tauri
+  cp repo/app/src-tauri/tauri.conf.json fresh/app/src-tauri/tauri.conf.json
+  run env ARTIFACT_DIR="$TMP/compile-linux" REPO_ROOT="$TMP/fresh" TAURI_DIR=app \
+    bash "$BIN/restore-tauri-compile.sh"
+  [ "$status" -eq 0 ]
+  [ -x "$TMP/fresh/app/src-tauri/target/release/myapp" ]
+  [ -f "$TMP/fresh/app/dist/index.html" ]
+}
+
+@test "stage/restore scripts do not invoke mapfile/readarray (bash 3.2 runner)" {
+  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/stage-tauri-compile.sh"
+  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/restore-tauri-compile.sh"
+}

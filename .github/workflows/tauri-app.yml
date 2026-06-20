@@ -589,11 +589,40 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash .release/bin-internal/build-tauri.sh
 
-      # --- post-hoc mode: compile and bundle as SEPARATE named steps, for
-      # per-phase visibility (a reader attributes time to deps / compile /
-      # bundle). No APPLE_* env → the bundle is UNSIGNED; the `sign` job signs
-      # it afterwards. Same two steps on every platform (only mac is signed
-      # post-hoc, but compile/bundle split is uniform).
+      # --- inline mode only: collect + upload the bundle produced by the Build
+      # step above. In post-hoc mode the bundling moves to the dedicated
+      # `package` job, so the build job there only COMPILES (below).
+      - name: Collect bundles
+        id: bundles
+        if: inputs.sign-mode == 'inline'
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          PLATFORM: ${{ matrix.t.platform }}
+        run: bash .release/bin-internal/collect-tauri-bundles.sh
+
+      # NOTE: the packaged-binary smoke step (app-bin/smoke-hook.sh) was
+      # removed as dead code: post-WS7 the hook is an untracked ephemeral
+      # mirror, absent on a plain checkout, so its existence guard never
+      # fired (release#588). Restoring packaged smoke testing (install
+      # bin/check first) vs retiring the hook templates is tracked in release#590.
+
+      - name: Upload platform bundle
+        if: inputs.sign-mode == 'inline'
+        uses: actions/upload-artifact@v6
+        with:
+          name: bundle-${{ matrix.t.platform }}
+          path: ${{ steps.bundles.outputs.dir }}/*
+          if-no-files-found: error
+          retention-days: 7
+
+      # --- post-hoc mode: COMPILE ONLY here (no bundle). Bundling runs on a
+      # separate runner in the `package` job so the cross-job artifact is the
+      # ~tens-of-MB binary + built frontendDist, not the multi-GB target/ tree
+      # (epic #811 WS6a / the WS0 spike GO verdict). No APPLE_* env → nothing is
+      # signed in the build job; the bundle is signed post-hoc in the `sign`
+      # job. The frontend is built here (tauri's beforeBuildCommand runs during
+      # compile) and carried over, because `tauri bundle` does NOT re-run it.
       - name: Compile (no bundle)
         if: inputs.sign-mode == 'post-hoc'
         shell: bash
@@ -603,8 +632,102 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash .release/bin-internal/build-tauri.sh
 
-      - name: Bundle (unsigned)
+      - name: Stage compile outputs
+        id: compile
         if: inputs.sign-mode == 'post-hoc'
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+          PLATFORM: ${{ matrix.t.platform }}
+        run: bash .release/bin-internal/stage-tauri-compile.sh
+
+      - name: Upload compile artifact
+        if: inputs.sign-mode == 'post-hoc'
+        uses: actions/upload-artifact@v6
+        with:
+          name: compile-${{ matrix.t.platform }}
+          path: compile-${{ matrix.t.platform }}/**
+          if-no-files-found: error
+          retention-days: 7
+
+  # -------------------------------------------------------------------
+  # 2a. Package (sign-mode: post-hoc only). A DEDICATED bundling job on a
+  #     separate runner per platform (epic #811 WS6a). It downloads the
+  #     `compile-<platform>` artifact (the ~tens-of-MB compiled binary + built
+  #     frontendDist — NOT the multi-GB target/ tree), restores it into a fresh
+  #     consumer checkout, and runs `tauri bundle` with NO Rust toolchain and NO
+  #     rust-cache — bundling a pre-built binary needs neither (the WS0 spike's
+  #     cross-runner proof). Node + the JS deps ARE set up: `npx tauri bundle`
+  #     needs the @tauri-apps/cli on PATH. Uploads `bundle-<platform>` — the
+  #     SAME artifact name the build job produced in inline mode, so `sign` /
+  #     `release` consume it unchanged.
+  #
+  #     The matrix OS must match the target (mac bundling needs macOS, linux
+  #     needs ubuntu), so it reuses build-matrix's `runs-on: ${{ matrix.t.os }}`.
+  #     Skipped entirely in inline mode (the build job bundles there).
+  # -------------------------------------------------------------------
+  package:
+    needs: [prepare, build-matrix, build]
+    if: ${{ inputs.sign-mode == 'post-hoc' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        t: ${{ fromJSON(needs.build-matrix.outputs.targets) }}
+    runs-on: ${{ matrix.t.os }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.release-sha }}
+          submodules: ${{ inputs.submodules && 'recursive' || '' }}
+
+      - uses: actions/checkout@v6
+        with:
+          repository: arthur-debert/release
+          ref: v3
+          path: .release
+          sparse-checkout: bin-internal
+
+      # corepack before setup-node (same reason as the build job: setup-node's
+      # `cache: pnpm|yarn` calls the package manager at setup time).
+      - name: Enable corepack (when pnpm/yarn lockfile present)
+        if: hashFiles('pnpm-lock.yaml') != '' || hashFiles('yarn.lock') != ''
+        run: corepack enable
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json') != '' && 'npm' || (hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || (hashFiles('yarn.lock') != '' && 'yarn' || '')) }}
+
+      # `npx tauri bundle` resolves the @tauri-apps/cli from the consumer's JS
+      # deps, so they must be installed. No Rust toolchain / rust-cache: the
+      # whole point of the split is that bundling needs neither.
+      - name: Install JS deps
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/install-js-deps.sh
+
+      # Linux bundling (.deb / .AppImage) shells out to packaging tools
+      # (patchelf, librsvg) the same system-deps install provides; harmless
+      # no-op on the inputs the bundler doesn't use.
+      - name: Install Linux Tauri deps
+        if: matrix.t.platform == 'linux'
+        run: bash .release/bin-internal/install-tauri-linux-deps.sh
+
+      - name: Download compile artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: compile-${{ matrix.t.platform }}
+          path: compile-${{ matrix.t.platform }}
+
+      - name: Restore compile outputs
+        shell: bash
+        env:
+          ARTIFACT_DIR: compile-${{ matrix.t.platform }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/restore-tauri-compile.sh
+
+      - name: Bundle (unsigned)
         shell: bash
         env:
           BUNDLES: ${{ matrix.t.bundles }}
@@ -619,12 +742,6 @@ jobs:
           TAURI_DIR: ${{ inputs.tauri-dir }}
           PLATFORM: ${{ matrix.t.platform }}
         run: bash .release/bin-internal/collect-tauri-bundles.sh
-
-      # NOTE: the packaged-binary smoke step (app-bin/smoke-hook.sh) was
-      # removed as dead code: post-WS7 the hook is an untracked ephemeral
-      # mirror, absent on a plain checkout, so its existence guard never
-      # fired (release#588). Restoring packaged smoke testing (install
-      # bin/check first) vs retiring the hook templates is tracked in release#590.
 
       - name: Upload platform bundle
         uses: actions/upload-artifact@v6
@@ -653,7 +770,7 @@ jobs:
   #     ref — only a live cross-repo dispatch surfaced it; release RC #823.)
   # -------------------------------------------------------------------
   sign:
-    needs: build
+    needs: package
     if: ${{ inputs.sign-mode == 'post-hoc' && inputs.build-mac }}
     uses: arthur-debert/release/.github/workflows/sign-notarize-mac.yml@v3
     with:
@@ -672,13 +789,14 @@ jobs:
   # 3. GH release — sign-mode-agnostic (WS5, #816). Attaches the SIGNED mac
   #    bundle + linux/win in either mode.
   #
-  #    Dependency + partial-release prevention: needs [prepare, build, sign].
-  #    `sign` is SKIPPED in inline mode, so the `if:` below must accept a
-  #    skipped sign while still BLOCKING on a failed one — any failed
-  #    build/sign blocks the release (no partial ship). The default
-  #    skipped-dependency rule (a skipped need skips the dependent) is the
-  #    reason a plain `needs: [...,sign]` would wrongly skip release in
-  #    inline mode; the explicit result gate fixes that.
+  #    Dependency + partial-release prevention: needs [prepare, build,
+  #    package, sign]. Both `package` and `sign` are SKIPPED in inline mode
+  #    (the build job bundles + nothing is post-hoc signed), so the `if:` below
+  #    must accept each as skipped-OR-success while still BLOCKING on a failed
+  #    one — any failed build/package/sign blocks the release (no partial
+  #    ship). The default skipped-dependency rule (a skipped need skips the
+  #    dependent) is the reason a plain `needs: [...,package,sign]` would
+  #    wrongly skip release in inline mode; the explicit result gate fixes that.
   #
   #    Asset selection (stage-release-assets.sh): artifacts are downloaded
   #    each into their OWN subdir (no merge-multiple) so the signed and
@@ -688,16 +806,18 @@ jobs:
   #    `bundle-mac` in inline mode, plus linux/win.
   # -------------------------------------------------------------------
   release:
-    needs: [prepare, build, sign]
-    # Run when prepare + build succeeded and sign either succeeded (post-hoc)
-    # or was skipped (inline). A FAILED sign blocks the release. `!cancelled()`
-    # (not `always()`) so a cancelled run never publishes; the explicit result
-    # checks override the default "a skipped need skips the dependent" so the
-    # inline path (sign skipped) still releases.
+    needs: [prepare, build, package, sign]
+    # Run when prepare + build succeeded and BOTH package + sign each either
+    # succeeded (post-hoc) or were skipped (inline). A FAILED package or sign
+    # blocks the release. `!cancelled()` (not `always()`) so a cancelled run
+    # never publishes; the explicit result checks override the default "a
+    # skipped need skips the dependent" so the inline path (package + sign
+    # skipped) still releases.
     if: >-
       ${{ !cancelled()
           && needs.prepare.result == 'success'
           && needs.build.result == 'success'
+          && (needs.package.result == 'success' || needs.package.result == 'skipped')
           && (needs.sign.result == 'success' || needs.sign.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
