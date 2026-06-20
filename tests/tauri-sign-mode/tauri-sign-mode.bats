@@ -281,3 +281,59 @@ EOF
 @test "enumerate-macho does not invoke mapfile/readarray (bash 3.2 runner)" {
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/enumerate-macho.sh"
 }
+
+# --- sign-mac skip guard (passwordless .p12) ------------------------------
+# sign-mac is a composite action; its keychain/codesign path is mac-only and
+# can't run hermetically here. These tests pin the SKIP-DECISION contract: the
+# guard must key on the CERT only, never the password — a passwordless .p12
+# (empty password) is valid and must still sign (the phos post-hoc blocker).
+
+SIGN_MAC="${BATS_TEST_DIRNAME}/../../.github/actions/sign-mac/action.yml"
+
+# Extract the action's ACTUAL skip-guard line (the `if [ -z ... ]; then` just
+# above the skip warning) and run it against a given cert/password pair, so the
+# behavioral tests exercise the real predicate rather than a copy of it. The
+# warning text is unique in the file, but be robust to more than one match:
+# take the FIRST, and parse the line number with parameter expansion (not
+# `cut`, which on a multi-line grep would feed several numbers to the
+# arithmetic below).
+sign_mac_guard_line() {
+  local hit line
+  hit=$(grep -n 'No signing certificate configured' "$SIGN_MAC" | head -n 1)
+  line=${hit%%:*}                              # leading line number only
+  sed -n "$((line - 1))p" "$SIGN_MAC"          # the `if [ -z ... ]; then`
+}
+
+# Decide skip/sign by evaluating the EXTRACTED guard with the given env. We
+# eval the real condition between `if` and `; then` — a copy here would defeat
+# the point (the regression test below separately pins what the guard names).
+sign_mac_decides() {
+  local guard cond
+  guard=$(sign_mac_guard_line)
+  cond=${guard#*if }; cond=${cond%%; then*}    # strip `if ` ... `; then`
+  CERT_P12_BASE64="$1" CERT_PASSWORD="$2" \
+    bash -c "if $cond; then echo skip; else echo sign; fi"
+}
+
+@test "sign-mac signs when cert present + password EMPTY (passwordless .p12)" {
+  [ "$(sign_mac_decides "BASE64CERT" "")" = "sign" ]
+}
+
+@test "sign-mac signs when cert present + password set" {
+  [ "$(sign_mac_decides "BASE64CERT" "hunter2")" = "sign" ]
+}
+
+@test "sign-mac skips when cert is empty" {
+  [ "$(sign_mac_decides "" "")" = "skip" ]
+  [ "$(sign_mac_decides "" "hunter2")" = "skip" ]
+}
+
+@test "sign-mac skip guard names the cert but NOT the password (regression)" {
+  # Re-introducing `|| [ -z "$CERT_PASSWORD" ]` would silently skip codesign
+  # for passwordless certs again — assert the guard references the cert var and
+  # does not reference the password var.
+  cond=$(sign_mac_guard_line)
+  echo "guard condition: $cond"
+  echo "$cond" | grep -q 'CERT_P12_BASE64'
+  ! echo "$cond" | grep -q 'CERT_PASSWORD'
+}

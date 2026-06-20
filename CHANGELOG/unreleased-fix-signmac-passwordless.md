@@ -1,0 +1,1 @@
+- sign-mac no longer skips codesign for a passwordless .p12 (empty cert-password); skip is now gated on the cert alone
