@@ -56,7 +56,16 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        sel() { find . -maxdepth 4 -path '*/.cargo/config.toml' -exec grep -l "fuse-ld=$1" {} + 2>/dev/null | grep -q .; }
+        # Detect the selected linker in TRACKED .cargo/config.toml files only
+        # (git ls-files) — never walk target/, which Swatinem/rust-cache has
+        # just restored, so detection stays cheap for repos that select nothing.
+        sel() {
+          local f
+          while IFS= read -r f; do
+            grep -q "fuse-ld=$1" "$f" 2>/dev/null && return 0
+          done < <(git ls-files 2>/dev/null | grep -E '(^|/)\.cargo/config\.toml$')
+          return 1
+        }
         case "$(uname -s)" in
           Linux)
             if sel mold && ! command -v mold >/dev/null 2>&1; then
