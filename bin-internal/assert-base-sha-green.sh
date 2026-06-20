@@ -45,7 +45,6 @@ if ! runs="$(gh api \
 	"repos/${GITHUB_REPOSITORY}/commits/${BASE_SHA}/check-runs" \
 	--paginate --slurp \
 	--jq '[.[].check_runs[]]
-	      | sort_by(.name)
 	      | group_by(.name)
 	      | map(max_by(.started_at // "", .completed_at // ""))
 	      | .[] | "\(.status) \(.conclusion // "")"' 2>"${gh_err}")"; then
