@@ -309,13 +309,37 @@ jobs:
           CHANGELOG: ${{ inputs.changelog-path }}
         run: bash .release/bin-internal/check-changelog-unreleased.sh
 
-      # Only gate on Apple secrets when signing is actually requested
-      # (build-mac AND notarization or an explicit signing identity).
-      # A no-sign mac build (notarize=false, no identity) must not fail
-      # for absent Apple secrets.
-      - name: Validate Apple secrets
-        if: ${{ inputs.build-mac && (inputs.notarize || env.APPLE_ID_PRESENT == 'yes') }}
+      # INLINE mode only. Gate on Apple secrets when signing is requested
+      # (build-mac AND notarization or an explicit signing identity). A
+      # no-sign mac build (notarize=false, no identity) must not fail for
+      # absent Apple secrets. The inline path passes APPLE_SIGNING_IDENTITY
+      # into `tauri build`, so the existing action (which requires it) is
+      # correct here.
+      - name: Validate Apple secrets (inline)
+        if: ${{ inputs.sign-mode == 'inline' && inputs.build-mac && (inputs.notarize || env.APPLE_ID_PRESENT == 'yes') }}
         uses: arthur-debert/release/.github/actions/validate-apple-secrets@v3
+
+      # POST-HOC mode. The `sign` job's sign-mac composite derives the
+      # identity from the imported cert via `security find-identity`, so
+      # APPLE_SIGNING_IDENTITY is NOT needed — only the cert (always) and the
+      # notary trio (when notarize). Validate exactly those here so missing
+      # creds fail fast in preflight instead of deep in the sign job (or
+      # silently skipping notarization).
+      - name: Validate Apple secrets (post-hoc)
+        if: ${{ inputs.sign-mode == 'post-hoc' && inputs.build-mac }}
+        shell: bash
+        run: |
+          fail=0
+          if [ "${APPLE_CERT_PRESENT}" != "yes" ]; then
+            echo "::error::sign-mode=post-hoc with build-mac=true requires APPLE_CERTIFICATE (the Developer ID .p12)"
+            fail=1
+          fi
+          if [ "${NOTARIZE}" = "true" ]; then
+            [ "${NOTARY_ID_PRESENT}" = "yes" ]   || { echo "::error::notarize=true requires APPLE_ID"; fail=1; }
+            [ "${NOTARY_PASS_PRESENT}" = "yes" ] || { echo "::error::notarize=true requires APPLE_PASSWORD"; fail=1; }
+            [ "${NOTARY_TEAM_PRESENT}" = "yes" ] || { echo "::error::notarize=true requires APPLE_TEAM_ID"; fail=1; }
+          fi
+          exit "${fail}"
 
   # -------------------------------------------------------------------
   # 1. Prepare: bump all three version files (package.json,
@@ -629,14 +653,22 @@ jobs:
   # -------------------------------------------------------------------
   # 3. GH release. Gated on build (success) — single matrix job's
   #    failure fails the whole release (no partial bundles shipped).
-  #    NOTE: in post-hoc mode the `sign` job emits a separate
-  #    `bundle-mac-signed` artifact; wiring `release` to CONSUME it
-  #    (instead of the unsigned bundle-mac) is WS5 (#816). This job is
-  #    deliberately left on `[prepare, build]` so the inline default is
-  #    untouched — a skipped `sign` dependency must not skip `release`.
+  #    NOTE: left on `[prepare, build]` (NOT `sign`) so the inline default
+  #    is untouched — a skipped `sign` dependency must not skip `release`.
+  #
+  #    INTERIM SKIP (post-hoc + build-mac): in post-hoc mode BOTH
+  #    `bundle-mac` (UNSIGNED, incl. the `.unsigned-app.tar.gz` reseal
+  #    payload) and `bundle-mac-signed` exist, and this job's
+  #    `pattern: bundle-*` + `merge-multiple: true` would publish the
+  #    UNSIGNED payloads / collide the signed-vs-unsigned `.dmg`. So skip
+  #    the GH release in that case until WS5 (#816) rewires this job to
+  #    consume ONLY `bundle-mac-signed`. The phos RC validates the signed
+  #    output from the `bundle-mac-signed` run artifact, not a GH release,
+  #    so this skip doesn't block RC validation.
   # -------------------------------------------------------------------
   release:
     needs: [prepare, build]
+    if: ${{ !(inputs.sign-mode == 'post-hoc' && inputs.build-mac) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
