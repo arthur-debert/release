@@ -242,6 +242,22 @@ for lock in pnpm-lock.yaml package-lock.json yarn.lock "${TAURI_DIR}/src-tauri/C
   fi
 done
 
+# ── Stage changelog artifacts ─────────────────────────────────────
+# The non-prerelease `roll` above rewrites CHANGELOG.md AND deletes the
+# CHANGELOG/unreleased-*.md fragments; stage both so the release commit/tag
+# carries them, matching all five sibling prepare flows (e.g.
+# prepare-release-npm). The prerelease path uses `extract` (read-only on
+# CHANGELOG.md) — nothing to stage there. Guarded on a configured + present
+# CHANGELOG. `git add "${CHANGELOG_DIR}/"` stages new fragment-routed files and
+# the fragment deletions alike.
+if [ "${IS_PRERELEASE}" != "true" ] && [ -n "${CHANGELOG}" ] && [ -f "${CHANGELOG}" ]; then
+  git add "${CHANGELOG}"
+  CHANGELOG_DIR="$(dirname "${CHANGELOG}")/CHANGELOG"
+  if [ -d "${CHANGELOG_DIR}" ]; then
+    git add "${CHANGELOG_DIR}/"
+  fi
+fi
+
 version_files_changed=false
 for vf in "${pkg}" "${cargo}" "${tauri_conf}"; do
   if ! git diff --cached --quiet -- "${vf}" 2>/dev/null; then
