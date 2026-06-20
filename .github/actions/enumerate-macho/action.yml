@@ -1,0 +1,34 @@
+name: 'Enumerate nested Mach-O'
+description: 'List the nested signable Mach-O code inside a .app (inner-first), for post-hoc codesigning'
+
+inputs:
+  app-path:
+    description: 'Path to the unsigned .app bundle'
+    required: true
+
+outputs:
+  paths:
+    description: |
+      Newline-separated nested signable paths (inner-first), EXCLUDING the
+      top-level .app. Pass these to sign-mac ahead of the .app (sign-mac signs
+      in order, outer-last).
+    value: ${{ steps.enumerate.outputs.paths }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Enumerate nested Mach-O
+      id: enumerate
+      shell: bash
+      env:
+        APP_PATH: ${{ inputs.app-path }}
+      run: |
+        set -euo pipefail
+        nested="$(bash "${{ github.action_path }}/../../../bin-internal/enumerate-macho.sh")"
+        echo "nested signable code (inner-first):"
+        echo "${nested:-<none>}"
+        {
+          echo "paths<<__MACHO_EOF__"
+          echo "${nested}"
+          echo "__MACHO_EOF__"
+        } >> "$GITHUB_OUTPUT"

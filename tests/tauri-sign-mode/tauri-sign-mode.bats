@@ -7,8 +7,9 @@
 #                      `app` into the mac targets)
 #   - reseal-mac-dmg.sh  volname derivation + hdiutil invocation (stubbed)
 #   - unpack-unsigned-app.sh  one-app extraction + zero/multi errors
+#   - enumerate-macho.sh  nested signable Mach-O enumeration (inner-first)
 #
-# Hermetic: stubs `npx` / `hdiutil` on PATH; `tar` / `find` are real.
+# Hermetic: stubs `npx` / `hdiutil` on PATH; `tar` / `find` / `file` are real.
 
 BIN="${BATS_TEST_DIRNAME}/../../bin-internal"
 
@@ -38,6 +39,14 @@ EOF
 }
 
 teardown() { rm -rf "$TMP"; }
+
+# Write a synthetic Mach-O file at $1. Uses the 64-bit little-endian magic
+# (cf fa ed fe) + a minimal header so `file` reports "Mach-O" on ANY host —
+# the test runs on ubuntu CI where a real /bin/echo is ELF, not Mach-O.
+make_macho() {
+  mkdir -p "$(dirname "$1")"
+  printf '\xcf\xfa\xed\xfe\x07\x00\x00\x01\x03\x00\x00\x00\x02\x00\x00\x00' > "$1"
+}
 
 # --- build-tauri.sh -------------------------------------------------------
 
@@ -170,4 +179,105 @@ EOF
   # readarray (bash 4+). Match a command invocation (start of a line, after
   # optional indent), not a mention in a comment.
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/unpack-unsigned-app.sh"
+}
+
+# --- enumerate-macho.sh ---------------------------------------------------
+# Synthetic Mach-O files (make_macho — valid magic so `file` detects them on
+# any host); a plist + a text file stand in for non-code resources to skip.
+# Covers: top-level extras, RECURSION into helper .app/.appex/.xpc (their extra
+# Mach-O), .framework treated as opaque (root only), inner-out ordering.
+
+@test "enumerate-macho lists top extras, recurses into helper bundles, treats frameworks as opaque, excludes the top .app" {
+  app="$TMP/Phos.app"
+  mkdir -p "$app/Contents/MacOS" "$app/Contents/Frameworks"
+  make_macho "$app/Contents/MacOS/Phos"            # top main executable
+  make_macho "$app/Contents/MacOS/gen_fixtures"    # top extra executable (phos bug)
+  make_macho "$app/Contents/Frameworks/libfoo.dylib"
+  echo "<plist/>" > "$app/Contents/Info.plist"     # non-Mach-O, skipped
+  # helper .app WITH an extra executable + loose dylib inside it (electron shape)
+  make_macho "$app/Contents/Frameworks/Helper.app/Contents/MacOS/Helper"        # helper main
+  make_macho "$app/Contents/Frameworks/Helper.app/Contents/MacOS/helper_tool"   # helper EXTRA
+  make_macho "$app/Contents/Frameworks/Helper.app/Contents/Frameworks/libhelp.dylib"
+  # framework with internal Mach-O — opaque: root only
+  make_macho "$app/Contents/Frameworks/Bar.framework/Versions/A/Bar"
+  make_macho "$app/Contents/Frameworks/Bar.framework/Versions/A/Libraries/libbar.dylib"
+
+  run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -eq 0 ]
+  # top-level extras
+  echo "$output" | grep -q 'Contents/MacOS/gen_fixtures$'
+  echo "$output" | grep -q 'Contents/MacOS/Phos$'
+  echo "$output" | grep -q 'Contents/Frameworks/libfoo.dylib$'
+  # nested code bundle ROOTS are signed
+  echo "$output" | grep -q 'Frameworks/Helper.app$'
+  echo "$output" | grep -q 'Frameworks/Bar.framework$'
+  # RECURSION (the fix): the helper's EXTRA Mach-O is enumerated too
+  echo "$output" | grep -q 'Helper.app/Contents/MacOS/helper_tool$'
+  echo "$output" | grep -q 'Helper.app/Contents/MacOS/Helper$'
+  echo "$output" | grep -q 'Helper.app/Contents/Frameworks/libhelp.dylib$'
+  # FRAMEWORK stays opaque: its internals are NOT listed (only the root)
+  ! echo "$output" | grep -q 'Bar.framework/Versions/A/Bar$'
+  ! echo "$output" | grep -q 'Bar.framework/Versions/A/Libraries/libbar.dylib$'
+  # inner-out ordering: the helper's inner code precedes the Helper.app root
+  inner_line=$(echo "$output" | grep -n 'Helper.app/Contents/MacOS/helper_tool$' | cut -d: -f1)
+  root_line=$(echo "$output" | grep -n 'Frameworks/Helper.app$' | cut -d: -f1)
+  [ "$inner_line" -lt "$root_line" ]
+  # the top .app is EXCLUDED (caller appends it last)
+  ! echo "$output" | grep -qx "$app"
+  # the non-Mach-O resource is skipped
+  ! echo "$output" | grep -q 'Info.plist$'
+}
+
+@test "enumerate-macho emits only the main executable for an .app with no nested code" {
+  app="$TMP/Plain.app"
+  make_macho "$app/Contents/MacOS/Plain"
+  mkdir -p "$app/Contents/Resources"; echo x > "$app/Contents/Resources/data.txt"
+
+  run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -eq 0 ]
+  # only the main executable; no bundles, no resources
+  [ "$(echo "$output" | grep -c .)" -eq 1 ]
+  echo "$output" | grep -q 'Contents/MacOS/Plain$'
+}
+
+@test "enumerate-macho preserves paths containing spaces" {
+  # App bundles legitimately have spaces; an unquoted array expansion would
+  # split "gen fixtures" into two lines / two bogus paths.
+  app="$TMP/Spaced Dir/My App.app"
+  make_macho "$app/Contents/MacOS/My App"
+  make_macho "$app/Contents/MacOS/gen fixtures"
+  make_macho "$app/Contents/Frameworks/Some Helper.app/Contents/MacOS/Some Helper"
+
+  run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -eq 0 ]
+  # each emitted line is an existing path (no split-induced bogus entries)
+  while IFS= read -r line; do
+    [ -e "$line" ] || { echo "non-existent (split?) path: $line"; false; }
+  done <<< "$output"
+  echo "$output" | grep -qF 'Contents/MacOS/gen fixtures'
+  echo "$output" | grep -qF 'Frameworks/Some Helper.app'
+  # the nested helper's inner binary IS listed (recursion), spaces intact
+  echo "$output" | grep -qF 'Some Helper.app/Contents/MacOS/Some Helper'
+}
+
+@test "enumerate-macho fails when APP_PATH is missing" {
+  run env APP_PATH="$TMP/nope.app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -ne 0 ]
+}
+
+@test "enumerate-macho fails loudly when file(1) is absent (not silently empty)" {
+  app="$TMP/Phos.app"
+  make_macho "$app/Contents/MacOS/gen_fixtures"
+  # PATH with the tools the script needs, but NOT `file` — symlink each.
+  bindir="$TMP/nofilebin"; mkdir -p "$bindir"
+  for t in bash find tr wc sort cut grep basename dirname env printf; do
+    p="$(command -v "$t" 2>/dev/null)" && ln -sf "$p" "$bindir/$t"
+  done
+  run env -i PATH="$bindir" APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'file(1) is required'
+}
+
+@test "enumerate-macho does not invoke mapfile/readarray (bash 3.2 runner)" {
+  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/enumerate-macho.sh"
 }
