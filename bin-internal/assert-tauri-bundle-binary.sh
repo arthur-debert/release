@@ -10,16 +10,21 @@
 # notarized + stapled cleanly (signing ≠ integrity), so it shipped silently for
 # a whole epic. This guard turns that into a hard, early bundle-job failure.
 #
-# Expected-name resolution (first non-empty wins):
+# Expected-name resolution — the EXPECTED SET is ALL the declared identities
+# (empties dropped), and the bundle PASSES if its main binary matches ANY of:
 #   1. tauri.conf.json  .mainBinaryName
 #   2. tauri.conf.json  .productName
 #   3. the cargo package name (src-tauri/Cargo.toml  [package] name)
+# It FAILS only when the bundled main matches NONE of them (e.g. gen_fixtures).
+# Tauri names the bundled executable after mainBinaryName when set, else after
+# productName/package name; consumers also differ on casing (Phos vs phos), so
+# accepting any declared identity is robust while still catching the real bug.
 #
 # Checks (fail-loud, mac + linux):
-#   mac    — the bundled <App>.app's Contents/MacOS/<exe> AND its
-#            Info.plist CFBundleExecutable equal the expected name.
-#   linux  — a binary named <expected> exists among the collected payload
-#            (the .deb/.AppImage carry the executable under that name).
+#   mac    — the bundled <App>.app's Info.plist CFBundleExecutable is in the
+#            expected set AND a Contents/MacOS/<that-name> file exists.
+#   linux  — some binary named like a member of the expected set exists among
+#            the collected payload (the .deb/.AppImage carry it under that name).
 #
 # Env vars:
 #   TAURI_DIR   path to Tauri project root (default: ".")
@@ -35,24 +40,39 @@ cd "${TAURI_DIR}"
 conf="src-tauri/tauri.conf.json"
 cargo_toml="src-tauri/Cargo.toml"
 
-# --- resolve the expected main binary name --------------------------------
-expected=""
+# --- resolve the expected-name SET ----------------------------------------
+# Collect every declared identity; drop empties. The bundle's main binary need
+# only match ONE of these to pass.
+expected_set=()
+add_expected() { [ -n "$1" ] && expected_set+=("$1") || true; }
+
 if [ -f "${conf}" ]; then
-  expected=$(jq -r '.mainBinaryName // .productName // empty' "${conf}")
+  add_expected "$(jq -r '.mainBinaryName // empty' "${conf}")"
+  add_expected "$(jq -r '.productName // empty' "${conf}")"
 fi
-if [ -z "${expected}" ] && [ -f "${cargo_toml}" ]; then
-  # [package] name = "..." — first such line under any table is the package
-  # name (Cargo requires it before any [[bin]] table). Tolerant of quotes +
-  # spacing; stop at the first match.
-  expected=$(grep -m1 -E '^[[:space:]]*name[[:space:]]*=' "${cargo_toml}" \
-               | sed -E 's/^[^=]*=[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/')
+if [ -f "${cargo_toml}" ]; then
+  # [package] name = "..." — first such line is the package name (Cargo
+  # requires it before any [[bin]] table). Tolerant of quotes + spacing.
+  add_expected "$(grep -m1 -E '^[[:space:]]*name[[:space:]]*=' "${cargo_toml}" \
+                    | sed -E 's/^[^=]*=[[:space:]]*"?([^"]*)"?[[:space:]]*$/\1/')"
 fi
 
-if [ -z "${expected}" ]; then
-  echo "::error::could not resolve the expected main binary name (no mainBinaryName/productName in ${conf}, no package name in ${cargo_toml})"
+if [ "${#expected_set[@]}" -eq 0 ]; then
+  echo "::error::could not resolve any expected main binary name (no mainBinaryName/productName in ${conf}, no package name in ${cargo_toml})"
   exit 1
 fi
-echo "expected main binary: '${expected}'"
+
+# True if $1 is a member of the expected set.
+in_expected_set() {
+  local cand="$1" e
+  for e in "${expected_set[@]}"; do
+    [ "${cand}" = "${e}" ] && return 0
+  done
+  return 1
+}
+
+expected_list="${expected_set[*]}"
+echo "expected main binary ∈ { ${expected_list// /, } }"
 
 bundle_root="src-tauri/target/release/bundle"
 [ -d "${bundle_root}" ] || { echo "::error::bundle root not found: ${bundle_root}"; exit 1; }
@@ -61,8 +81,8 @@ fail=0
 
 case "${PLATFORM}" in
   mac)
-    # Each bundled .app must carry the expected main executable, both as the
-    # file under Contents/MacOS/ and as CFBundleExecutable in Info.plist.
+    # Each bundled .app's main executable must be one of the expected set, both
+    # as CFBundleExecutable in Info.plist and as a real file under MacOS/.
     found_app=0
     while IFS= read -r app; do
       found_app=1
@@ -87,15 +107,14 @@ case "${PLATFORM}" in
       if [ -z "${cfexe}" ]; then
         echo "::error::could not read CFBundleExecutable from ${plist}"
         fail=1
-      elif [ "${cfexe}" != "${expected}" ]; then
-        echo "::error::wrong main binary in ${app}: CFBundleExecutable='${cfexe}', expected '${expected}'"
+      elif ! in_expected_set "${cfexe}"; then
+        echo "::error::wrong main binary in ${app}: CFBundleExecutable='${cfexe}', expected one of { ${expected_list// /, } }"
         fail=1
-      fi
-
-      # The actual executable file under Contents/MacOS/.
-      if [ ! -f "${app}/Contents/MacOS/${expected}" ]; then
+      # CFBundleExecutable is a valid identity — the matching executable file
+      # must exist under Contents/MacOS/.
+      elif [ ! -f "${app}/Contents/MacOS/${cfexe}" ]; then
         present=$(find "${app}/Contents/MacOS" -maxdepth 1 -type f -exec basename {} \; 2>/dev/null | paste -sd, - || true)
-        echo "::error::wrong main binary in ${app}: Contents/MacOS/${expected} missing; present: [${present}]"
+        echo "::error::main binary mismatch in ${app}: Contents/MacOS/${cfexe} missing; present: [${present}]"
         fail=1
       fi
     done < <(find "${bundle_root}/macos" -maxdepth 1 -type d -name '*.app' 2>/dev/null)
@@ -107,14 +126,21 @@ case "${PLATFORM}" in
     ;;
 
   linux)
-    # The expected binary must appear among the collected Linux payload — the
-    # .deb stages it at usr/bin/<expected>, the AppImage at usr/bin/<expected>.
+    # Some binary named like a member of the expected set must appear among the
+    # collected Linux payload — the .deb/.AppImage stage it at usr/bin/<name>.
     # tauri unpacks these under bundle/<deb|appimage>/.../data/usr/bin/.
-    if find "${bundle_root}" -type f -name "${expected}" | grep -q .; then
-      echo "found expected linux binary '${expected}'"
+    matched=""
+    for e in "${expected_set[@]}"; do
+      if find "${bundle_root}" -type f -name "${e}" | grep -q .; then
+        matched="${e}"
+        break
+      fi
+    done
+    if [ -n "${matched}" ]; then
+      echo "found expected linux binary '${matched}'"
     else
       present=$(find "${bundle_root}" -type f -path '*/usr/bin/*' -exec basename {} \; 2>/dev/null | sort -u | paste -sd, - || true)
-      echo "::error::expected linux binary '${expected}' not found in ${bundle_root}; usr/bin payload: [${present}]"
+      echo "::error::no expected linux binary { ${expected_list// /, } } found in ${bundle_root}; usr/bin payload: [${present}]"
       fail=1
     fi
     ;;
@@ -130,7 +156,7 @@ case "${PLATFORM}" in
 esac
 
 if [ "${fail}" -ne 0 ]; then
-  echo "::error::bundle integrity check FAILED — the packaged app does not carry the expected main binary '${expected}'."
+  echo "::error::bundle integrity check FAILED — the packaged app's main binary is not one of the expected names { ${expected_list// /, } }."
   exit 1
 fi
-echo "bundle integrity OK: main binary is '${expected}'"
+echo "bundle integrity OK: main binary ∈ { ${expected_list// /, } }"

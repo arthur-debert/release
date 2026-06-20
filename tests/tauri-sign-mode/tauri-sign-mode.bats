@@ -688,14 +688,18 @@ compile_fixture() {
 # Guards against `tauri bundle` packaging the wrong main binary (the phos
 # gen_fixtures incident: a multi-[[bin]] crate with no declared main → the
 # alphabetically-first binary becomes CFBundleExecutable, signed + shipped
-# silently). Hermetic on a Linux host: the mac plist CFBundleExecutable is read
-# via an XML-grep fallback (no PlistBuddy/plutil needed). `jq`/`find` real.
+# silently). The guard builds the EXPECTED SET from all declared identities
+# (mainBinaryName, productName, cargo package name) and passes if the bundled
+# main binary matches ANY of them — robust to the Phos/phos casing question —
+# failing only when it matches none (gen_fixtures). Hermetic on a Linux host:
+# the mac plist CFBundleExecutable is read via an XML-grep fallback (no
+# PlistBuddy/plutil needed). `jq`/`find` real.
 
 # Build a tauri project tree with a bundled .app whose main binary is $main.
 #   $1 = the main executable name actually in the bundle (the "produced" one)
 #   $2..$N = key=value config: mainBinaryName=, productName=, cargoName=
-# A config key left out is omitted from tauri.conf / Cargo.toml so resolution
-# precedence (mainBinaryName → productName → cargo name) can be exercised.
+# A config key left out is omitted from tauri.conf / Cargo.toml so the
+# expected-set membership (any-of) can be exercised.
 guard_mac_fixture() {
   local main="$1"; shift
   local mbn="" pn="" cn=""
@@ -737,42 +741,45 @@ EOF
   guard_mac_fixture phos mainBinaryName=phos productName=Phos cargoName=phos-app
   run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -q "expected main binary: 'phos'"
+  echo "$output" | grep -q "bundle integrity OK"
 }
 
-@test "assert-bundle-binary FAILS loud when mac main binary is the wrong one (gen_fixtures)" {
-  # produced binary = gen_fixtures, but expected (mainBinaryName) = phos
-  guard_mac_fixture gen_fixtures mainBinaryName=phos
+@test "assert-bundle-binary passes when mac main binary matches productName, not mainBinaryName (Phos casing)" {
+  # The Phos/phos question: tauri named the bundled exe after productName 'Phos'
+  # while mainBinaryName is 'phos'. Any-of-set must accept it (not false-fail).
+  guard_mac_fixture Phos mainBinaryName=phos productName=Phos cargoName=phos-app
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "bundle integrity OK"
+}
+
+@test "assert-bundle-binary passes when mac main binary matches only the cargo package name" {
+  # neither mainBinaryName nor productName declared; bundle named after cargo pkg
+  guard_mac_fixture phos-app cargoName=phos-app
+  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q "bundle integrity OK"
+}
+
+@test "assert-bundle-binary FAILS loud when mac main binary is in NONE of the set (gen_fixtures)" {
+  # produced binary = gen_fixtures, which is none of {phos, Phos, phos-app}
+  guard_mac_fixture gen_fixtures mainBinaryName=phos productName=Phos cargoName=phos-app
   run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q "wrong main binary"
   echo "$output" | grep -q "gen_fixtures"
 }
 
-@test "assert-bundle-binary resolves productName when mainBinaryName absent" {
-  guard_mac_fixture Phosphor productName=Phosphor cargoName=phos-app
-  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "expected main binary: 'Phosphor'"
-}
-
-@test "assert-bundle-binary falls back to the cargo package name" {
-  guard_mac_fixture phos-app cargoName=phos-app
-  run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
-  [ "$status" -eq 0 ]
-  echo "$output" | grep -q "expected main binary: 'phos-app'"
-}
-
-@test "assert-bundle-binary FAILS when the expected name cannot be resolved" {
-  # no mainBinaryName/productName, no Cargo.toml → unresolvable
+@test "assert-bundle-binary FAILS when the expected set is empty (no identities declared)" {
+  # no mainBinaryName/productName, no Cargo.toml → empty set
   guard_mac_fixture whatever
   run env TAURI_DIR="$TMP/proj" PLATFORM=mac bash "$BIN/assert-tauri-bundle-binary.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "could not resolve the expected main binary"
+  echo "$output" | grep -q "could not resolve any expected main binary"
 }
 
-@test "assert-bundle-binary FAILS when CFBundleExecutable is right but the file is the wrong name" {
-  # Plist says phos, but the actual executable on disk is gen_fixtures.
+@test "assert-bundle-binary FAILS when CFBundleExecutable is in the set but the file is the wrong name" {
+  # Plist says phos (in the set), but the actual executable on disk is gen_fixtures.
   guard_mac_fixture phos mainBinaryName=phos
   d="proj/src-tauri/target/release/bundle/macos/App.app/Contents/MacOS"
   mv "$d/phos" "$d/gen_fixtures"
@@ -781,24 +788,26 @@ EOF
   echo "$output" | grep -q "Contents/MacOS/phos missing"
 }
 
-@test "assert-bundle-binary passes for a correct linux payload" {
+@test "assert-bundle-binary passes for a correct linux payload (matches the cargo name)" {
   rm -rf proj
   mkdir -p proj/src-tauri/target/release/bundle/deb/App/data/usr/bin
-  printf '{"mainBinaryName":"phos"}' > proj/src-tauri/tauri.conf.json
+  printf '{"productName":"Phos"}' > proj/src-tauri/tauri.conf.json
+  printf '[package]\nname = "phos"\nversion = "0.1.0"\n' > proj/src-tauri/Cargo.toml
+  # bundled binary named after the cargo package name, not productName
   echo bin > proj/src-tauri/target/release/bundle/deb/App/data/usr/bin/phos
   run env TAURI_DIR="$TMP/proj" PLATFORM=linux bash "$BIN/assert-tauri-bundle-binary.sh"
   [ "$status" -eq 0 ]
   echo "$output" | grep -q "found expected linux binary 'phos'"
 }
 
-@test "assert-bundle-binary FAILS for a wrong linux payload (gen_fixtures)" {
+@test "assert-bundle-binary FAILS for a wrong linux payload in NONE of the set (gen_fixtures)" {
   rm -rf proj
   mkdir -p proj/src-tauri/target/release/bundle/deb/App/data/usr/bin
   printf '{"mainBinaryName":"phos"}' > proj/src-tauri/tauri.conf.json
   echo bin > proj/src-tauri/target/release/bundle/deb/App/data/usr/bin/gen_fixtures
   run env TAURI_DIR="$TMP/proj" PLATFORM=linux bash "$BIN/assert-tauri-bundle-binary.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q "expected linux binary 'phos' not found"
+  echo "$output" | grep -q "no expected linux binary"
 }
 
 @test "assert-bundle-binary FAILS when no .app is present to verify (mac)" {
