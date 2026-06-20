@@ -43,3 +43,27 @@ runs:
 
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
+
+    - name: Install repo-selected fast linker
+      # Install the fast linker a repo opts into via .cargo/config.toml
+      # (`-fuse-ld=mold` on Linux, `-fuse-ld=lld` on macOS), so the link step
+      # doesn't fail on a missing linker. Detection-based: a repo that selects
+      # no custom linker pays nothing (the grep finds nothing → no install), so
+      # this is free for the rest of the fleet. Idempotent — skipped when the
+      # linker is already present. Used by rust-ci / rust-cli / rust-lib /
+      # tauri-ci via this composite; tauri-app.yml installs its own (it doesn't
+      # use setup-rust). Robustness, not speed (see phos-editor/app#318).
+      shell: bash
+      run: |
+        set -euo pipefail
+        sel() { find . -maxdepth 4 -path '*/.cargo/config.toml' -exec grep -l "fuse-ld=$1" {} + 2>/dev/null | grep -q .; }
+        case "$(uname -s)" in
+          Linux)
+            if sel mold && ! command -v mold >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y mold
+            fi ;;
+          Darwin)
+            if sel lld && ! command -v ld64.lld >/dev/null 2>&1; then
+              brew install lld
+            fi ;;
+        esac
