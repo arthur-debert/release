@@ -1,0 +1,1 @@
+- sign-mac uses a unique per-invocation keychain (+ EXIT cleanup) so repeated calls in one job (post-hoc Sign .app then Sign .dmg) no longer collide on the keychain name
