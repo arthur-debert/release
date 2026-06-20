@@ -27,12 +27,13 @@ inputs:
   key-prefix:
     description: >
       Object-key namespace. Leave empty (the default) to fall back to the
-      repo slug (`github.repository`) so each repo gets its own partition
-      while still sharing across its branches. Do NOT put a branch or SHA
-      here — that would defeat cross-branch sharing. (Empty rather than a
-      `${{ github.repository }}` literal because composite-action input
-      defaults are NOT expression-evaluated — the fallback is applied in the
-      configure step instead.)
+      repo slug (the github.repository context) so each repo gets its own
+      partition while still sharing across its branches. Do NOT put a branch
+      or SHA here — that would defeat cross-branch sharing. Empty rather than
+      a github.repository default because composite-action input defaults are
+      NOT expression-evaluated (the manifest validator also rejects an
+      expression in this description) — the fallback is applied in the
+      configure step instead.
     required: false
     default: ''
   version:
@@ -52,7 +53,7 @@ runs:
       if: inputs.gcs-key != ''
       shell: bash
       env:
-        # Pass the secret via env (not a `${{ }}` interpolation into the
+        # Pass the secret via env (not a templated interpolation into the
         # script body) so it is never substituted into the command line.
         SCCACHE_GCS_KEY_B64: ${{ inputs.gcs-key }}
       run: |
