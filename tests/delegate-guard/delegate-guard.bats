@@ -123,6 +123,50 @@ PY
     [ -z "$output" ]
 }
 
+@test "main loop: target OUTSIDE any repo while cwd IS a repo is allowed" {
+    # The decision keys off the TARGET's repo, not cwd. A loose file outside any
+    # git work tree is not a project edit, even when cwd is a project repo.
+    local loose="$BATS_TEST_TMPDIR/loose-outside.txt"
+    guard "$loose" "$REPO"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "main loop: a NEW (non-existent) file inside the repo is denied" {
+    # Creating a project file is a project edit. The target doesn't exist yet,
+    # so detection resolves via its nearest existing ancestor dir (the repo).
+    guard "$REPO/src/brand-new.rs"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+    [[ "$output" == *"$GD/delegate-armed"* ]]
+}
+
+@test "main loop: a relative target resolved against a repo cwd is denied" {
+    # Relative file_path → joined with the event cwd; lands inside the repo.
+    guard "src/rel.rs" "$REPO"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+    [[ "$output" == *"$GD/delegate-armed"* ]]
+}
+
+@test "main loop: a relative target resolved OUTSIDE any repo is allowed" {
+    # Relative file_path joined with a non-repo cwd stays outside any work tree.
+    guard "scratch.txt" "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "armed: sentinel at the TARGET's git-dir is honored across cwd" {
+    # Arm at the target repo's git-dir, run from an unrelated non-repo cwd. The
+    # sentinel is consumed and the edit allowed — sentinel keying follows the
+    # target, not cwd.
+    touch "$GD/delegate-armed"
+    guard "$REPO/src/main.rs" "$BATS_TEST_TMPDIR"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$GD/delegate-armed" ]
+}
+
 @test "missing tool_input fails open (allowed, never crashes)" {
     # No file_path → a real Edit/Write/NotebookEdit always carries an absolute
     # file_path, so its absence is a malformed event; the guard's contract says

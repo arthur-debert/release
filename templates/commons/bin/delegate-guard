@@ -20,13 +20,19 @@ Contract (Claude Code PreToolUse, matcher: Edit|Write|NotebookEdit):
   allow  = exit 0, no stdout
   deny   = exit 0, stdout = {"hookSpecificOutput": {permissionDecision: "deny", ...}}
 
+"Is this a project edit?" is keyed off the TARGET FILE's git repo, not the
+cwd: a main-loop edit to a file OUTSIDE any git work tree (e.g. /tmp/scratch)
+is not a project edit and fails open, even when cwd is a project repo. Only an
+edit whose target lands inside a git work tree is gated.
+
 Allow/deny matrix (Edit/Write/NotebookEdit only):
   * subagent (agent_id present)          → ALLOW (subagents do the impl)
   * main loop, missing/empty file_path   → ALLOW (malformed event, fail open)
   * main loop, target under ~/.claude/   → ALLOW (coordinator curates its own
                                             memory/config surface)
+  * main loop, target outside any repo   → ALLOW (not a project file, fail open)
   * main loop, sentinel armed            → ALLOW, consume the sentinel (one-shot)
-  * main loop, project file              → DENY (delegate it, or arm a one-off)
+  * main loop, target inside a git repo  → DENY (delegate it, or arm a one-off)
 
 Bash is intentionally NOT guarded in v1: classifying a mutating Bash command
 (`sed -i`, `>`, `tee`, `python -c open(...,'w')`, …) is fragile and would either
@@ -76,11 +82,13 @@ def deny(reason):
     sys.exit(0)
 
 
-def git_dir(cwd):
+def git_dir(directory):
+    """The absolute path to the git-dir of the repo containing `directory`, or
+    None when `directory` is not inside a git work tree (or git is unavailable)."""
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--git-dir"],
-            cwd=cwd,
+            cwd=directory,
             capture_output=True,
             text=True,
             check=True,
@@ -89,7 +97,39 @@ def git_dir(cwd):
         return None
     if not out:
         return None
-    return out if os.path.isabs(out) else os.path.join(cwd, out)
+    return out if os.path.isabs(out) else os.path.join(directory, out)
+
+
+def nearest_existing_dir(path):
+    """The nearest EXISTING ancestor directory of `path`. For a not-yet-created
+    Write target this walks up to its parent dir (which does exist), so the
+    target still resolves to its prospective repo. Returns None if nothing on
+    the chain exists (can't happen for an absolute path — '/' always exists)."""
+    current = path if os.path.isdir(path) else os.path.dirname(path)
+    while current:
+        if os.path.isdir(current):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def target_git_dir(file_path, cwd):
+    """The absolute git-dir of the repo containing `file_path`, or None when the
+    target is not inside any git work tree. Keys the project-edit decision off
+    the TARGET path (relative paths resolved against the event's cwd), NOT off
+    cwd itself — so a main-loop edit to a loose file outside any repo fails open
+    even when cwd is a project repo."""
+    target = os.path.expanduser(file_path)
+    if not os.path.isabs(target):
+        target = os.path.join(cwd, target)
+    target = os.path.normpath(target)
+    anchor = nearest_existing_dir(target)
+    if anchor is None:
+        return None
+    return git_dir(anchor)
 
 
 def under_claude_home(file_path):
@@ -141,9 +181,12 @@ def main():
     if not isinstance(cwd, str) or not cwd:
         cwd = os.getcwd()
 
-    gd = git_dir(cwd)
+    # Key the project-edit decision off the TARGET file's repo, not cwd: a
+    # main-loop edit to a file outside any git work tree (e.g. /tmp) is not a
+    # project edit and fails open, even when cwd is a project repo.
+    gd = target_git_dir(file_path, cwd)
     if gd is None:
-        allow()  # no git repo — fail open (not a project edit we guard)
+        allow()  # target outside any git repo — fail open (not a project edit)
 
     sentinel = os.path.join(gd, SENTINEL_NAME)
     if os.path.exists(sentinel):
