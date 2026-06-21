@@ -1221,6 +1221,8 @@ EOF
     patchelf \
     libwebkit2gtk-4.1-0 \
     libgtk-3-0 \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
     librsvg2-2 \
     libayatana-appindicator3-1; do
     run grep -q -- "$pkg" "$slim"
