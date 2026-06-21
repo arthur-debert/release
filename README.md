@@ -56,7 +56,7 @@ never needs a coordinated edit across 20 repos. A consumer tracks only:
 - `.github/**` — **thin callers** pinned at `@vN` + GitHub-forced policy files
   (CODEOWNERS, dependabot, copilot-review).
 - The **bootstrap quartet** (real tracked files): `.claude/settings.json`,
-  `bin/install-release-core`, `bin/setup-dev-env.sh`, `bin/pr-loop-guard` — enough
+  `bin/install-release-core`, `bin/pr-loop-guard`, `bin/delegate-guard` — enough
   for a fresh clone to boot itself.
 - Optionally `.release-sync.yaml`, the one per-repo knob.
 

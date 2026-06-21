@@ -46,6 +46,6 @@ until the SessionStart init runs — which is the first thing a session does.
 
 `.github/**` (thin callers + policy files + workflow copies), the bootstrap
 quartet (`.claude/settings.json`, `bin/install-release-core`,
-`bin/setup-dev-env.sh`, `bin/pr-loop-guard`), and optionally
+`bin/pr-loop-guard`, `bin/delegate-guard`), and optionally
 `.release-sync.yaml`. Everything else is the binary's output: `.release/`
 (gitignored), mirrors (excluded), guidance (`release-core how-to`).

@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""PreToolUse guard: the MAIN agent loop must DELEGATE implementation to
+subagents — it does not edit project/code files by hand (the coordinator holds
+the big picture; subagents do the impl, keeping the coordinator's context light).
+
+This mirrors `pr-loop-guard`: that gates `gh pr create` on the review-loop
+discipline; this gates main-loop file edits on the delegation discipline. The
+rule existed only as honor-system guidance until now — and optional discipline
+loses to task momentum — so this is the forcing function.
+
+The discriminator is the PreToolUse payload's `agent_id`: it is present ONLY
+when the hook fires inside a subagent call. Canonical doc
+(https://code.claude.com/docs/en/hooks.md): "Present only when the hook fires
+inside a subagent call. Use this to distinguish subagent hook calls from
+main-thread calls." Subagents DO execute the project settings.json PreToolUse
+hooks, so they reach this guard too — and are allowed through by `agent_id`.
+
+Contract (Claude Code PreToolUse, matcher: Edit|Write|NotebookEdit):
+  stdin  = JSON with tool_name, tool_input (+ agent_id when in a subagent, + cwd)
+  allow  = exit 0, no stdout
+  deny   = exit 0, stdout = {"hookSpecificOutput": {permissionDecision: "deny", ...}}
+
+"Is this a project edit?" is keyed off the TARGET FILE's git repo, not the
+cwd: a main-loop edit to a file OUTSIDE any git work tree (e.g. /tmp/scratch)
+is not a project edit and fails open, even when cwd is a project repo. Only an
+edit whose target lands inside a git work tree is gated.
+
+Allow/deny matrix (Edit/Write/NotebookEdit only):
+  * subagent (agent_id present)          → ALLOW (subagents do the impl)
+  * main loop, missing/empty file_path   → ALLOW (malformed event, fail open)
+  * main loop, target under ~/.claude/   → ALLOW (coordinator curates its own
+                                            memory/config surface)
+  * main loop, target outside any repo   → ALLOW (not a project file, fail open)
+  * main loop, sentinel armed            → ALLOW, consume the sentinel (one-shot)
+  * main loop, target inside a git repo  → DENY (delegate it, or arm a one-off)
+
+Bash is intentionally NOT guarded in v1: classifying a mutating Bash command
+(`sed -i`, `>`, `tee`, `python -c open(...,'w')`, …) is fragile and would either
+leak or over-block. Edit/Write/NotebookEdit are the unambiguous file-mutation
+surface. Guarding mutating-Bash is possible future work.
+
+Design guarantees (same as pr-loop-guard):
+  * Self-service deny — the reason gives the exact `touch` to arm manually, so a
+    main loop that legitimately needs to make one edit is never deadlocked.
+  * Fail-OPEN — any malformed stdin / unrecognised shape / non-git cwd / parse
+    error / unexpected exception allows the edit. A guard bug must never
+    hard-block work.
+  * One-shot — arming is consumed on allow, so the sentinel can't silently
+    whitelist every subsequent hand-edit in the clone.
+"""
+
+import contextlib
+import json
+import os
+import subprocess
+import sys
+
+SENTINEL_NAME = "delegate-armed"
+
+# Tools this guard governs — the unambiguous file-mutation surface. Bash is
+# deliberately excluded (see module docstring): mutating-Bash classification is
+# fragile and out of scope for v1.
+GUARDED_TOOLS = {"Edit", "Write", "NotebookEdit"}
+
+
+def allow():
+    sys.exit(0)
+
+
+def deny(reason):
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
+    sys.exit(0)
+
+
+def git_dir(directory):
+    """The absolute path to the git-dir of the repo containing `directory`, or
+    None when `directory` is not inside a git work tree (or git is unavailable)."""
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=directory,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    if not out:
+        return None
+    return out if os.path.isabs(out) else os.path.join(directory, out)
+
+
+def nearest_existing_dir(path):
+    """The nearest EXISTING ancestor directory of `path`. For a not-yet-created
+    Write target this walks up to its parent dir (which does exist), so the
+    target still resolves to its prospective repo. Returns None if nothing on
+    the chain exists (can't happen for an absolute path — '/' always exists)."""
+    current = path if os.path.isdir(path) else os.path.dirname(path)
+    while current:
+        if os.path.isdir(current):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def target_git_dir(file_path, cwd):
+    """The absolute git-dir of the repo containing `file_path`, or None when the
+    target is not inside any git work tree. Keys the project-edit decision off
+    the TARGET path (relative paths resolved against the event's cwd), NOT off
+    cwd itself — so a main-loop edit to a loose file outside any repo fails open
+    even when cwd is a project repo."""
+    target = os.path.expanduser(file_path)
+    if not os.path.isabs(target):
+        target = os.path.join(cwd, target)
+    target = os.path.normpath(target)
+    anchor = nearest_existing_dir(target)
+    if anchor is None:
+        return None
+    return git_dir(anchor)
+
+
+def under_claude_home(file_path):
+    """True when the edit targets the coordinator's own ~/.claude/ surface, which
+    must stay editable from the main loop (memory/config curation). Edit/Write/
+    NotebookEdit file_paths are absolute, so a plain prefix check is enough; we
+    normpath both sides defensively."""
+    if not isinstance(file_path, str) or not file_path:
+        return False
+    home = os.path.expanduser("~")
+    if not home or home == "~":
+        return False
+    claude_home = os.path.normpath(os.path.join(home, ".claude"))
+    target = os.path.normpath(os.path.expanduser(file_path))
+    return target == claude_home or target.startswith(claude_home + os.sep)
+
+
+def main():
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError, OSError):
+        allow()  # fail-open: malformed input is never a deliberate main-loop edit
+
+    # Defensive type checks: a genuine main-loop edit event is always
+    # well-formed, so any shape we don't recognise fails open rather than
+    # risking a crash (which would exit non-zero, violating fail-OPEN).
+    if not isinstance(data, dict) or data.get("tool_name") not in GUARDED_TOOLS:
+        allow()
+
+    # THE discriminator: agent_id is present only inside a subagent call.
+    # Subagents do the impl, so they edit freely — no sentinel required.
+    if data.get("agent_id"):
+        allow()
+
+    tool_input = data.get("tool_input")
+    file_path = tool_input.get("file_path", "") if isinstance(tool_input, dict) else ""
+
+    # Fail-OPEN on a missing/empty file_path: a real Edit/Write/NotebookEdit
+    # always carries an absolute file_path, so its absence is a malformed event,
+    # which the guard's contract says must allow (never hard-block), not deny.
+    if not file_path:
+        allow()
+
+    # The coordinator's own ~/.claude/ memory/config surface stays editable.
+    if under_claude_home(file_path):
+        allow()
+
+    cwd = data.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        cwd = os.getcwd()
+
+    # Key the project-edit decision off the TARGET file's repo, not cwd: a
+    # main-loop edit to a file outside any git work tree (e.g. /tmp) is not a
+    # project edit and fails open, even when cwd is a project repo.
+    gd = target_git_dir(file_path, cwd)
+    if gd is None:
+        allow()  # target outside any git repo — fail open (not a project edit)
+
+    sentinel = os.path.join(gd, SENTINEL_NAME)
+    if os.path.exists(sentinel):
+        with contextlib.suppress(OSError):
+            os.unlink(sentinel)  # one-shot: consume the arm
+        allow()
+
+    deny(
+        "This is the MAIN agent loop editing a project file. The coordinator "
+        "DELEGATES implementation to subagents (it holds the big picture; "
+        "subagents do the impl, keeping the coordinator's context light) — spawn "
+        "a subagent with the Agent tool to make this change instead of editing "
+        "it here.\n\n"
+        "If you genuinely need to make this ONE edit from the main loop, arm a "
+        "one-off exception (a SEPARATE step, before the edit) and retry — it is "
+        "consumed on use, so it covers exactly one edit:\n"
+        f"    touch {sentinel}"
+    )
+
+
+if __name__ == "__main__":
+    # Last-resort fail-OPEN: any unexpected exception allows the edit rather than
+    # crashing the hook. allow()/deny() raise SystemExit (not Exception), so
+    # normal control flow is never swallowed here.
+    try:
+        main()
+    except Exception:
+        allow()

@@ -193,6 +193,20 @@ lex-fmt/lex v0.9.1.
   `touch "$(git rev-parse --git-dir)/pr-loop-armed"`. Per release#495 (epic
   #348) — the forcing function exists because optional discipline loses to task
   momentum (caught when an agent hand-rolled #494's loop).
+- **The MAIN loop DELEGATES implementation to subagents — it does not hand-edit
+  project files.** The coordinator holds the big picture and spawns subagents to
+  do the impl, keeping its own context light ([[feedback_gatekeeper_orchestration]]).
+  This is *enforced* the same way as the PR loop: a PreToolUse guard
+  (`bin/delegate-guard`, wired in `.claude/settings.json` on the
+  `Edit|Write|NotebookEdit` matcher, synced to consumers via
+  `templates/commons/` and carried as a bootstrap real-file) blocks a main-loop
+  edit of a project file. The discriminator is the hook payload's `agent_id`,
+  present ONLY inside a subagent call — so subagents edit freely; the main loop
+  is gated. Edits under `$HOME/.claude/` (the coordinator's own memory/config
+  curation surface) are always allowed. If you are the main loop and genuinely
+  need to make one edit yourself, arm a one-shot exception (consumed on use) and
+  retry: `touch "$(git rev-parse --git-dir)/delegate-armed"`. Bash is NOT guarded
+  (mutating-Bash classification is fragile — out of scope for v1).
 - **The gate is ONE definition, run everywhere — never reimplemented.**
   `lefthook.yml` IS the gate (the WHAT: the set of checks). Every environment
   (the WHERE) *invokes* it: session start arms it (`setup-dev-env.sh` /

@@ -35,6 +35,7 @@ contract_schema: 1
 tracked_real_files:
   bootstrap:
     - ".claude/settings.json"
+    - "bin/delegate-guard"
     - "bin/install-release-core"
     - "bin/pr-loop-guard"
   workflow_copies:

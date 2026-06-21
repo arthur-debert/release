@@ -1,0 +1,36 @@
+name: delegate-guard tests
+
+# BATS suite for bin/delegate-guard — the PreToolUse forcing function that keeps
+# the MAIN agent loop delegating implementation to subagents (it does not
+# hand-edit project files). Locks the allow/deny contract: a main-loop project
+# edit denies, a subagent edit (agent_id present) allows, an edit under
+# ~/.claude/ allows, an armed sentinel allows + is consumed (one-shot), and
+# malformed/non-git/non-guarded input fails open. No network/auth.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "templates/commons/bin/delegate-guard"
+      - "bin/delegate-guard"
+      - "tests/delegate-guard/**"
+      - ".github/workflows/delegate-guard-tests.yml"
+  pull_request:
+    paths:
+      - "templates/commons/bin/delegate-guard"
+      - "bin/delegate-guard"
+      - "tests/delegate-guard/**"
+      - ".github/workflows/delegate-guard-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/delegate-guard/

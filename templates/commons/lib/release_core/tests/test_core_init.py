@@ -793,7 +793,7 @@ def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monk
     ephemeral (never tracked), so the force-add applies only to real-file managed
     copies — the bootstrap quartet and workflow copies."""
     src = _full_source_tree(tmp_path / "src")
-    # Give the synthetic source a bootstrap real-file dest (trio member).
+    # Give the synthetic source a bootstrap real-file dest (quartet member).
     boot = os.path.join(src, "templates", "commons", "bin", "install-release-core")
     with open(boot, "w") as fh:
         fh.write("#!/usr/bin/env bash\necho install-release-core\n")
@@ -1074,14 +1074,15 @@ def test_git_source_labels_with_the_resolved_sha(tmp_path, monkeypatch, capsys):
 
 
 def _ws5_source_tree(root) -> str:
-    """_full_source_tree + the bootstrap trio, so a full install exercises the
+    """_full_source_tree + the bootstrap files, so a full install exercises the
     real-copy path for the SessionStart chain. (WS8 #765: setup-dev-env.sh removed
-    — the trio is .claude/settings.json + install-release-core + pr-loop-guard.)"""
+    — the set is .claude/settings.json + install-release-core + pr-loop-guard +
+    delegate-guard.)"""
     src = _full_source_tree(root)
     tpl = root / "templates" / "commons"
     (tpl / ".claude").mkdir(parents=True)
     (tpl / ".claude" / "settings.json").write_text('{"hooks": {}}\n')
-    for name in ("install-release-core", "pr-loop-guard"):
+    for name in ("install-release-core", "pr-loop-guard", "delegate-guard"):
         f = tpl / "bin" / name
         f.write_text(f"#!/usr/bin/env bash\necho {name}\n")
         os.chmod(f, 0o755)
@@ -1090,7 +1091,7 @@ def _ws5_source_tree(root) -> str:
 
 @_needs_yq
 @_needs_git
-def test_full_init_writes_bootstrap_trio_as_real_executable_files(tmp_path, monkeypatch, capsys):
+def test_full_init_writes_bootstrap_quartet_as_real_executable_files(tmp_path, monkeypatch, capsys):
     src = _ws5_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 
@@ -1100,13 +1101,14 @@ def test_full_init_writes_bootstrap_trio_as_real_executable_files(tmp_path, monk
         ".claude/settings.json",
         "bin/install-release-core",
         "bin/pr-loop-guard",
+        "bin/delegate-guard",
     ):
         p = repo / dest
         assert p.is_file(), dest
         assert not p.is_symlink(), f"{dest} must be a REAL file (fresh-clone boot), not a symlink"
         assert dest in _git(repo, "ls-files"), f"{dest} must be tracked"
     # The executables carry their bit; the JSON does not.
-    for dest in ("bin/install-release-core", "bin/pr-loop-guard"):
+    for dest in ("bin/install-release-core", "bin/pr-loop-guard", "bin/delegate-guard"):
         assert os.access(repo / dest, os.X_OK), dest
     # No managed-marker header on a shebang script (would break the shebang) or
     # on JSON (no comment syntax).

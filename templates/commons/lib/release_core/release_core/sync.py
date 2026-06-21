@@ -402,7 +402,7 @@ def should_skip_source(rel: str) -> bool:
 # SessionStart chain must be readable/executable on a FRESH CLONE, i.e. BEFORE
 # the ephemeral `.release/` exists — a symlink into `.release/` dangles there, so
 # Claude Code could not even read the hooks config, and the boot could not start
-# itself (the chicken-and-egg). These three are therefore written as REAL tracked
+# itself (the chicken-and-egg). These four are therefore written as REAL tracked
 # copies (auto-refreshed by init exactly like the workflow copies); everything
 # else stays an ephemeral-targeted symlink. (WS8 removed bin/setup-dev-env.sh —
 # its provisioning dissolved into `release-core init`, so SessionStart calls
@@ -412,6 +412,7 @@ BOOTSTRAP_REAL_FILES: frozenset[str] = frozenset(
         ".claude/settings.json",
         "bin/install-release-core",
         "bin/pr-loop-guard",
+        "bin/delegate-guard",
     }
 )
 

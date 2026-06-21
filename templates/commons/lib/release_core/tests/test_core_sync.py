@@ -1003,14 +1003,15 @@ def test_bootstrap_files_are_classified_real_copies():
     """The SessionStart chain must be readable/executable on a FRESH CLONE —
     before the ephemeral .release/ temp dir exists — so it must never be a
     symlink into it. Lock the exact set: the hooks config + the boot resolver +
-    the PreToolUse guard. (WS8 #765 removed bin/setup-dev-env.sh — provisioning
-    dissolved into `release-core init`.)"""
+    the two PreToolUse guards (pr-loop + delegate). (WS8 #765 removed
+    bin/setup-dev-env.sh — provisioning dissolved into `release-core init`.)"""
     assert (
         frozenset(
             {
                 ".claude/settings.json",
                 "bin/install-release-core",
                 "bin/pr-loop-guard",
+                "bin/delegate-guard",
             }
         )
         == sync.BOOTSTRAP_REAL_FILES
