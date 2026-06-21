@@ -1,0 +1,80 @@
+name: bundle smoke tests
+
+# Real-bundle integration GATE (#841): run the actual package-job `tauri bundle`
+# path against a PRE-BUILT consumer artifact and assert each format produces a
+# valid bundle. The tests/tauri-pipeline BATS suite stubs npx/hdiutil, so it
+# never exercises a real bundle — this is the gate that catches bundling/dep-set
+# regressions (e.g. the slim-deps AppImage break) BEFORE a ~15-min RC, instead of
+# after. Fixture is on-demand: it pulls the latest non-expired consumer
+# compile-linux artifact (no committed fixture).
+#
+# Gates PRs touching the bundle scripts / install-deps / the tauri workflow / the
+# harness itself. The ubuntu runner is linux + ships file(1) + has FUSE, so no
+# Docker is needed here (that's only for the mac dev box — see
+# bin-internal/bundle-smoke-local.sh).
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin-internal/*tauri*"
+      - "bin-internal/install-tauri-linux-deps*.sh"
+      - "bin-internal/bundle-smoke*.sh"
+      - "bin-internal/resolve-compile-artifact.sh"
+      - ".github/workflows/tauri-app.yml"
+      - ".github/workflows/bundle-smoke-tests.yml"
+  pull_request:
+    paths:
+      - "bin-internal/*tauri*"
+      - "bin-internal/install-tauri-linux-deps*.sh"
+      - "bin-internal/bundle-smoke*.sh"
+      - "bin-internal/resolve-compile-artifact.sh"
+      - ".github/workflows/tauri-app.yml"
+      - ".github/workflows/bundle-smoke-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  linux-bundle-smoke:
+    runs-on: ubuntu-latest
+    env:
+      # RELEASE_TOKEN pulls the consumer (cross-repo) artifact; falls back to the
+      # workflow token for same-repo runs (where there is nothing to pull — the
+      # resolver then fails loud, which is the intended "no artifact" signal).
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+      CONSUMER_REPO: phos-editor/app
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Clone the consumer project tree
+        run: gh repo clone "${CONSUMER_REPO}" consumer -- --depth 1
+
+      - name: Install the package-job Linux deps (the set under test)
+        run: bash bin-internal/install-tauri-linux-deps-package.sh
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Resolve + restore the latest consumer compile-linux artifact
+        run: |
+          CHECKOUT_DIR="${GITHUB_WORKSPACE}/consumer" PLATFORM=linux \
+            bash bin-internal/resolve-compile-artifact.sh
+
+      - name: Install consumer JS deps (for the tauri CLI)
+        run: |
+          corepack enable
+          cd consumer
+          pnpm install --frozen-lockfile --ignore-scripts \
+            || pnpm install --ignore-scripts
+
+      - name: Bundle smoke — deb + appimage
+        env:
+          # linuxdeploy AppImages need FUSE; the runner has it, but extract-and-run
+          # is harmless + keeps parity with the local Docker path.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          CHECKOUT_DIR="${GITHUB_WORKSPACE}/consumer" PLATFORM=linux \
+            FORMATS="deb appimage" \
+            bash bin-internal/bundle-smoke.sh
