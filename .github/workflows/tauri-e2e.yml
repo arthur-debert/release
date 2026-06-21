@@ -191,7 +191,7 @@ jobs:
           key: ${{ inputs.cache-key-prefix }}
 
       - name: Enable sccache (GCS, shared across branches)
-        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        uses: arthur-debert/release/.github/actions/setup-sccache@canary/169ba88068aa
         with:
           gcs-key: ${{ secrets.sccache_gcs_key }}
 
@@ -244,7 +244,7 @@ jobs:
           key: ${{ inputs.cache-key-prefix }}
 
       - name: Enable sccache (GCS, shared across branches)
-        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        uses: arthur-debert/release/.github/actions/setup-sccache@canary/169ba88068aa
         with:
           gcs-key: ${{ secrets.sccache_gcs_key }}
 

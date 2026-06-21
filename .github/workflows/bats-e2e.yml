@@ -104,7 +104,7 @@ jobs:
         # the default runner `bin/check-e2e` is an untracked ephemeral
         # mirror post-WS7 (release#528) — it does not exist on a fresh
         # checkout until `release-core init` writes it.
-        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        uses: arthur-debert/release/.github/actions/arm-gate@canary/169ba88068aa
 
       - name: Install bats-core
         # Modern standard install. Replaces the per-consumer `git clone` +

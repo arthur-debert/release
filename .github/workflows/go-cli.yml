@@ -240,11 +240,11 @@ jobs:
           submodules: ${{ inputs.submodules }}
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - uses: arthur-debert/release/.github/actions/setup-go@v3
+      - uses: arthur-debert/release/.github/actions/setup-go@canary/169ba88068aa
         with:
           go-version: ${{ inputs.go-version }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-go@v3
+      - uses: arthur-debert/release/.github/actions/prepare-release-go@canary/169ba88068aa
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -284,7 +284,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-go@v3
+      - uses: arthur-debert/release/.github/actions/setup-go@canary/169ba88068aa
         with:
           go-version: ${{ inputs.go-version }}
 
@@ -346,7 +346,7 @@ jobs:
       - name: Sign macOS binaries
         id: sign
         if: matrix.sign
-        uses: arthur-debert/release/.github/actions/sign-mac@v3
+        uses: arthur-debert/release/.github/actions/sign-mac@canary/169ba88068aa
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -588,7 +588,7 @@ jobs:
           echo "urls<<EOF" >> "$GITHUB_OUTPUT"; echo "$urls" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
           echo "shas<<EOF" >> "$GITHUB_OUTPUT"; echo "$shas" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - uses: arthur-debert/release/.github/actions/render-brew-formula@v3
+      - uses: arthur-debert/release/.github/actions/render-brew-formula@canary/169ba88068aa
         if: steps.guard.outputs.skip != 'true'
         with:
           bin-name: ${{ inputs.bin-name }}
@@ -601,7 +601,7 @@ jobs:
           output-path: out/${{ inputs.bin-name }}.rb
           private-repo: ${{ inputs.brew-private-repo }}
 
-      - uses: arthur-debert/release/.github/actions/push-brew-tap@v3
+      - uses: arthur-debert/release/.github/actions/push-brew-tap@canary/169ba88068aa
         if: steps.guard.outputs.skip != 'true'
         with:
           tap-repo: ${{ inputs.brew-tap }}

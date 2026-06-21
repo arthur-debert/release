@@ -161,7 +161,7 @@ jobs:
         # itself has a real root lefthook.yml + no detectable Kind) while the
         # toolset step still arms the pinned tools via `release-core gate
         # --provision` (release-core is already on PATH from the prior step).
-        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        uses: arthur-debert/release/.github/actions/arm-gate@canary/169ba88068aa
         with:
           install_tree: 'false'
 

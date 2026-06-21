@@ -371,7 +371,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-tauri@v3
+      - uses: arthur-debert/release/.github/actions/prepare-release-tauri@canary/169ba88068aa
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -402,7 +402,7 @@ jobs:
     outputs:
       targets: ${{ steps.matrix.outputs.targets }}
     steps:
-      - uses: arthur-debert/release/.github/actions/compute-tauri-matrix@v3
+      - uses: arthur-debert/release/.github/actions/compute-tauri-matrix@canary/169ba88068aa
         id: matrix
         with:
           build-mac: ${{ inputs.build-mac }}
@@ -484,7 +484,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Enable sccache (GCS, shared across branches)
-        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        uses: arthur-debert/release/.github/actions/setup-sccache@canary/169ba88068aa
         with:
           gcs-key: ${{ secrets.sccache_gcs_key }}
 
@@ -805,7 +805,7 @@ jobs:
   sign:
     needs: [preflight, package]
     if: ${{ needs.preflight.outputs.should-sign == 'true' }}
-    uses: arthur-debert/release/.github/workflows/sign-notarize-mac.yml@v3
+    uses: arthur-debert/release/.github/workflows/sign-notarize-mac.yml@canary/169ba88068aa
     with:
       artifact-name: bundle-mac
       notarize: ${{ inputs.notarize }}
