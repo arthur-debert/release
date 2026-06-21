@@ -31,6 +31,11 @@ if ! command -v gh >/dev/null 2>&1; then
 	exit 1
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+	echo "::error::jq is not on PATH — needed to reduce the check-runs response (gh --slurp is piped to jq)." >&2
+	exit 1
+fi
+
 # Fetch every check-run on the sha. --slurp collects all pages into one array of
 # response objects (so a sha with >100 runs is fully covered) and lets jq reduce
 # across the WHOLE set at once — needed because the API returns EVERY historical
@@ -39,17 +44,25 @@ fi
 # tiebreak) so an earlier failed run that was re-run green doesn't false-negative.
 # Capture stderr separately so an auth/permission failure (the Checks API needs
 # `checks: read` on GITHUB_TOKEN) is surfaced, not misread as "absent CI".
-gh_err="$(mktemp)"
-trap 'rm -f "${gh_err}"' EXIT
+#
+# --slurp can't combine with --jq, so pipe the slurped pages to external jq. The
+# slurped shape is an array of page objects ({total_count, check_runs:[...]}), so
+# `[.[].check_runs[]]` flattens the runs across all pages. pipefail (set above)
+# makes EITHER stage failing (gh OR jq) trip the `if !`. Capture BOTH stages'
+# stderr into the same file (append — they run concurrently in the pipe) so a jq
+# failure (missing jq, unexpected JSON shape) surfaces its message too, not an
+# empty/misleading report.
+err_log="$(mktemp)"
+trap 'rm -f "${err_log}"' EXIT
 if ! runs="$(gh api \
 	"repos/${GITHUB_REPOSITORY}/commits/${BASE_SHA}/check-runs" \
-	--paginate --slurp \
-	--jq '[.[].check_runs[]]
+	--paginate --slurp 2>>"${err_log}" \
+	| jq -r '[.[].check_runs[]]
 	      | group_by(.name)
 	      | map(max_by(.started_at // "", .completed_at // ""))
-	      | .[] | "\(.status) \(.conclusion // "")"' 2>"${gh_err}")"; then
-	echo "::error::failed to query check-runs for ${BASE_SHA} (auth/permission? the Checks API needs \`checks: read\`):" >&2
-	sed 's/^/::error::  /' "${gh_err}" >&2
+	      | .[] | "\(.status) \(.conclusion // "")"' 2>>"${err_log}")"; then
+	echo "::error::failed to query check-runs for ${BASE_SHA} (auth/permission? the Checks API needs \`checks: read\`; or a jq/JSON-shape error — see below):" >&2
+	sed 's/^/::error::  /' "${err_log}" >&2
 	exit 1
 fi
 

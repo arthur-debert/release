@@ -138,6 +138,56 @@ pre-commit:
         done
         exit $fail
 
+    gh-slurp-jq-combo:
+      # `gh api --slurp` CANNOT be combined with `--jq` or `--template` — gh
+      # rejects it ("the --slurp option is not supported with --jq or
+      # --template"). The base-sha CI-green guard (assert-base-sha-green.sh) hit
+      # exactly this and FAILED at `prepare` — but only on REAL cuts (RCs are
+      # IS_VERIFY and skip the guard), so every RC passed and the first real
+      # release was the first to fail. The fix is always: drop the flag and pipe
+      # the slurped pages to EXTERNAL jq (`gh api … --slurp | jq -r '<expr>'`).
+      # A stub test can't reproduce gh's rejection; this static guard can't be
+      # fooled, so it's the real defense for this regression class.
+      #
+      # Scans tracked shell tooling + the embedded `run:` shell in workflow /
+      # action YAML. Line-continuations are joined first so a `gh api` whose
+      # `--slurp` and `--jq` sit on different continued lines is still caught;
+      # comments are stripped so prose mentioning the combo (e.g. this guard's
+      # own rationale) never false-positives.
+      glob:
+        - "bin/*"
+        - "bin-internal/*.sh"
+        - "bin-internal/*.bash"
+        - "templates/**/bin/*"
+        - ".github/workflows/*.yml"
+        - ".github/workflows/*.yaml"
+        - ".github/actions/*/action.yml"
+      run: |
+        fail=0
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          # Strip `#` comments, then join `\`-continued lines into one logical
+          # line so multi-line `gh api` invocations are inspected as a unit
+          # (awk, not sed, for identical BSD/GNU behavior). The join inserts a
+          # SPACE separator (`printf "%s "`) so a token split across a
+          # continuation (`gh \`<newline>`api`) does NOT merge into `ghapi` and
+          # slip past the `gh[[:space:]].*api` matcher. A logical line is
+          # flagged when it has `gh`, `api`, `--slurp`, AND (`--jq` or
+          # `--template`) — the unsupported combination.
+          bad=$(sed 's/#.*//' "$f" \
+            | awk '{ if (sub(/\\$/,"")) { printf "%s ", $0 } else { print } }' \
+            | grep -nE 'gh[[:space:]].*api.*--slurp' \
+            | grep -E -- '--jq|--template') || true
+          if [ -n "$bad" ]; then
+            echo "ERROR: $f combines \`gh api --slurp\` with --jq/--template (unsupported by gh)." >&2
+            echo "Fix: drop the flag and pipe the slurped pages to external jq, e.g.:" >&2
+            echo "  gh api … --paginate --slurp | jq -r '<expr>'" >&2
+            echo "$bad" >&2
+            fail=1
+          fi
+        done
+        exit $fail
+
     ruff:
       # Lint + format-check the Python workspace (release_core + orchestrator)
       # PLUS the extensionless Python shims under bin/ and templates/commons/bin/
