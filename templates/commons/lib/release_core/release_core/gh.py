@@ -584,6 +584,18 @@ def pr_close(pr: str, *, repo: str, delete_branch: bool = False, comment: str | 
     return _gh_raw(args)
 
 
+def pr_view(pr: str, *, repo: str | None = None, json_fields: list[str]) -> str:
+    """`gh pr view <pr> [--repo …] --json <fields>` → stripped stdout (the JSON).
+
+    Raises :class:`GhError` if gh fails (e.g. the PR can't be resolved). The
+    caller parses the returned JSON object."""
+    args = ["pr", "view", pr]
+    if repo is not None:
+        args += ["--repo", repo]
+    args += ["--json", ",".join(json_fields)]
+    return _gh(args).strip()
+
+
 def run_list(
     *,
     repo: str | None = None,
