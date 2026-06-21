@@ -554,10 +554,17 @@ jobs:
       # in the run UI separately from the rust compile (#835). The Cache WASM
       # step above runs first, so a cache hit still lets wasm-pack short-circuit
       # inside beforeBuildCommand. No-op for a consumer with no beforeBuildCommand.
+      #
+      # GH_TOKEN: the frontend build may itself fetch PRIVATE deps (phos's
+      # `pnpm build` clones phos-editor/core for the wasm bundle). Before the
+      # #835 split this ran inside the fused compile step and inherited its
+      # token; as its own step it needs the token directly. Mirrors the
+      # Compile (rust) step below.
       - name: Build frontend
         shell: bash
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash .release/bin-internal/build-frontend-tauri.sh
 
       # RUST COMPILE ONLY — no bundle, no sign, no APPLE_* env, and
