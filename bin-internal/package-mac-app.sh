@@ -27,15 +27,26 @@ if [ ! -d "${macos_dir}" ]; then
   exit 1
 fi
 
-packaged=0
+# Enforce EXACTLY ONE .app. The reusable signer's unpack-unsigned-app.sh expects
+# exactly one *.unsigned-app.tar.gz payload (one .app per build); producing zero
+# or multiple here would only surface as a confusing failure later in the sign
+# workflow. Count first, fail loud on 0 or >1, then package the single app.
+apps=()
 while IFS= read -r app; do
-  name=$(basename "${app}" .app)
-  tar -C "${macos_dir}" -czf "${macos_dir}/${name}.unsigned-app.tar.gz" "$(basename "${app}")"
-  echo "packaged ${app} -> ${macos_dir}/${name}.unsigned-app.tar.gz"
-  packaged=$((packaged + 1))
+  apps+=("${app}")
 done < <(find "${macos_dir}" -maxdepth 1 -type d -name '*.app')
 
-if [ "${packaged}" -eq 0 ]; then
+if [ "${#apps[@]}" -eq 0 ]; then
   echo "::error::no .app found under ${macos_dir} to package for reseal"
   exit 1
 fi
+if [ "${#apps[@]}" -gt 1 ]; then
+  names=$(printf '%s\n' "${apps[@]}" | xargs -n1 basename | paste -sd, -)
+  echo "::error::expected exactly one .app under ${macos_dir}, found ${#apps[@]}: [${names}]; the signer expects a single .app per build"
+  exit 1
+fi
+
+app="${apps[0]}"
+name=$(basename "${app}" .app)
+tar -C "${macos_dir}" -czf "${macos_dir}/${name}.unsigned-app.tar.gz" "$(basename "${app}")"
+echo "packaged ${app} -> ${macos_dir}/${name}.unsigned-app.tar.gz"

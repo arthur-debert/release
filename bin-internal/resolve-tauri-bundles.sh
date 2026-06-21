@@ -10,7 +10,8 @@
 #   2. else tauri.conf.json `.bundle.targets` — a JSON string ("all" | "deb") or
 #      array (["deb","appimage"]).
 #   3. else empty → "all" for the platform (tauri's own default is everything).
-# "all" expands per platform: linux → deb,rpm,appimage ; mac → app,dmg.
+# "all" expands per platform: linux → deb,rpm,appimage ; mac → app,dmg ;
+# windows → nsis,msi.
 #
 # mac app-forcing rule (load-bearing — guards a real shipped bug): `app` MUST be
 # in the mac target list even when a consumer asked only for `dmg`. A dmg-only
@@ -22,6 +23,7 @@
 # gates each bundle step on:
 #   deb, rpm, appimage   (linux)
 #   app, dmg             (mac)
+#   nsis, msi            (windows)
 #
 # Env vars:
 #   BUNDLES    bundle targets (matrix.t.bundles); empty = tauri.conf default
@@ -57,9 +59,10 @@ raw="${raw:-all}"
 
 # Expand "all" per platform.
 case "${PLATFORM}" in
-  linux) all_targets="deb rpm appimage" ;;
-  mac)   all_targets="app dmg" ;;
-  *)     all_targets="" ;;
+  linux)   all_targets="deb rpm appimage" ;;
+  mac)     all_targets="app dmg" ;;
+  windows) all_targets="nsis msi" ;;
+  *)       all_targets="" ;;
 esac
 
 # Build the requested set (space-separated), expanding "all".
@@ -95,7 +98,7 @@ emit() {
   fi
 }
 
-for fmt in deb rpm appimage app dmg; do
+for fmt in deb rpm appimage app dmg nsis msi; do
   if has "${fmt}"; then emit "${fmt}" "true"; else emit "${fmt}" "false"; fi
 done
 

@@ -36,6 +36,20 @@ if [ -z "${cmd}" ]; then
 fi
 
 echo "running frontend build (beforeBuildCommand): ${cmd}"
-# Run through the shell so a consumer's compound command (e.g. "pnpm build &&
-# wasm-pack build") works exactly as tauri would invoke it.
-sh -c "${cmd}"
+# Run through the SAME shell tauri uses for beforeBuildCommand so a consumer's
+# command works exactly as `tauri build` would invoke it: cmd.exe on Windows,
+# sh elsewhere. A consumer whose beforeBuildCommand uses cmd/batch syntax (or
+# cmd-specific quoting/PATH) would break under sh even though tauri would have
+# succeeded. Detect Windows via the Actions $RUNNER_OS, falling back to $OSTYPE
+# for a non-Actions host.
+case "${RUNNER_OS:-}" in
+  Windows) is_windows=1 ;;
+  ?*)      is_windows=0 ;;
+  *)       case "${OSTYPE:-}" in msys* | cygwin* | win32) is_windows=1 ;; *) is_windows=0 ;; esac ;;
+esac
+
+if [ "${is_windows}" -eq 1 ]; then
+  cmd.exe /c "${cmd}"
+else
+  sh -c "${cmd}"
+fi

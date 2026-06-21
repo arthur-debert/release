@@ -82,6 +82,20 @@ write_conf() {
   echo "$output" | grep -q 'skipping frontend build'
 }
 
+@test "build-frontend runs the hook via cmd.exe on Windows (RUNNER_OS)" {
+  # Tauri runs beforeBuildCommand through cmd.exe on Windows; stub it on PATH
+  # and assert this script dispatches to it (not sh) when RUNNER_OS=Windows.
+  write_conf '"beforeBuildCommand":"whatever build"'
+  cat > stub/cmd.exe <<'EOF'
+#!/usr/bin/env bash
+echo "CMD-RAN $*" >> "$NPX_LOG"
+EOF
+  chmod +x stub/cmd.exe
+  run env RUNNER_OS=Windows bash "$BIN/build-frontend-tauri.sh"
+  [ "$status" -eq 0 ]
+  grep -q 'CMD-RAN /c whatever build' "$NPX_LOG"
+}
+
 @test "build-frontend is a no-op when beforeBuildCommand is absent" {
   write_conf '"frontendDist":"../build"'
   run bash "$BIN/build-frontend-tauri.sh"
@@ -177,6 +191,32 @@ resolve_out() {
   [ "$(resolve_out rpm)" = false ]
 }
 
+@test "resolve windows nsis,msi from BUNDLES=all" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=windows BUNDLES=all bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out nsis)" = true ]
+  [ "$(resolve_out msi)" = true ]
+  [ "$(resolve_out deb)" = false ]
+}
+
+@test "resolve windows defaults to nsis,msi when BUNDLES empty (tauri.conf default)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  mkdir -p src-tauri; echo '{"build":{}}' > src-tauri/tauri.conf.json
+  run env PLATFORM=windows bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out nsis)" = true ]
+  [ "$(resolve_out msi)" = true ]
+}
+
+@test "resolve honors an explicit single windows format" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=windows BUNDLES=msi bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out msi)" = true ]
+  [ "$(resolve_out nsis)" = false ]
+}
+
 # --- bundle-tauri.sh (single-format unsigned bundle) ----------------------
 
 @test "bundle-tauri bundles the requested single format unsigned" {
@@ -209,6 +249,27 @@ resolve_out() {
   run bash "$BIN/package-mac-app.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'no macOS bundle dir'
+}
+
+@test "package-mac-app fails loud when the dir has zero .app bundles" {
+  # dir exists (e.g. an empty bundle output) but no .app — the signer needs one.
+  mkdir -p src-tauri/target/release/bundle/macos
+  run bash "$BIN/package-mac-app.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'no .app found'
+}
+
+@test "package-mac-app fails loud when there is MORE than one .app (signer expects exactly one)" {
+  d=src-tauri/target/release/bundle/macos
+  mkdir -p "$d/A.app/Contents" "$d/B.app/Contents"
+  echo bin > "$d/A.app/Contents/exe"
+  echo bin > "$d/B.app/Contents/exe"
+  run bash "$BIN/package-mac-app.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'expected exactly one .app'
+  # and it must NOT have produced any payload
+  [ ! -f "$d/A.unsigned-app.tar.gz" ]
+  [ ! -f "$d/B.unsigned-app.tar.gz" ]
 }
 
 # --- reseal-mac-dmg.sh ----------------------------------------------------
@@ -1065,6 +1126,8 @@ EOF
   grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle \.rpm' "$WORKFLOW"
   grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle macOS' "$WORKFLOW"
   grep -q 'package-mac-app.sh' "$WORKFLOW"
+  # windows leg still bundles (.msi + nsis), gated on its platform
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle Windows' "$WORKFLOW"
   # the old fused single step name is gone
   ! grep -q 'Bundle (unsigned)' "$WORKFLOW"
 }

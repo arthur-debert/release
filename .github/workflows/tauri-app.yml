@@ -730,6 +730,17 @@ jobs:
           TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/bin-internal/package-mac-app.sh
 
+      # Windows: nsis + msi kept COUPLED in one step (windows isn't a long pole;
+      # mirror the mac coupling). Gated on either resolved windows format; the
+      # resolved list (nsis / msi / both) is passed verbatim.
+      - name: Bundle Windows (.msi + nsis)
+        if: matrix.t.platform == 'windows' && (steps.targets.outputs.nsis == 'true' || steps.targets.outputs.msi == 'true')
+        shell: bash
+        env:
+          BUNDLES: ${{ format('{0}{1}{2}', steps.targets.outputs.nsis == 'true' && 'nsis' || '', (steps.targets.outputs.nsis == 'true' && steps.targets.outputs.msi == 'true') && ',' || '', steps.targets.outputs.msi == 'true' && 'msi' || '') }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/bundle-tauri.sh
+
       - name: Collect bundles
         id: bundles
         shell: bash
