@@ -819,8 +819,18 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
   # -------------------------------------------------------------------
-  # 3. GH release — sign-agnostic (WS5, #816). Attaches the mac bundle
-  #    (signed when signing ran, else unsigned) + linux/win.
+  # 3. DISTRIBUTE — stage 1: publish the GitHub release (#837).
+  #
+  #    Distribute is its own pipe; its first stage publishes the GH release
+  #    from the three things the cycle already produced: the release NOTES
+  #    (the `release-notes` artifact from prepare), the git TAG (from prepare),
+  #    and the ARTIFACTS — deb / dmg / appimage (from package, post-#835/#836;
+  #    signed where applicable). This GH release is the foundation that future
+  #    distribute stages (brew / nix / app store) consume as their starting
+  #    point — they read these published assets, never re-plumb the build.
+  #
+  #    Sign-agnostic (WS5, #816): attaches the mac bundle (signed when signing
+  #    ran, else unsigned) + linux/win, and keeps partial-release prevention.
   #
   #    Dependency + partial-release prevention: needs [preflight, prepare,
   #    build, package, sign]. `package` ALWAYS runs (one pipeline), so it must

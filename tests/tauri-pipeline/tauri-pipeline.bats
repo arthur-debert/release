@@ -715,6 +715,79 @@ stage_fixture() {
   echo "$output" | grep -q 'unknown BUILD_MAC'
 }
 
+# --- distribute stage 1: clean mac deliverable (#837) ----------------------
+# The release assets must never carry the signer's `*.unsigned-app.tar.gz`
+# reseal payload (it's the signer's input, never a deliverable), and — when
+# mac is built — must contain exactly one dmg. The tauri-updater bundle
+# (`*.app.tar.gz` + `.sig`) IS a legitimate deliverable and must still ship.
+
+@test "stage-release-assets UNSIGNED excludes the *.unsigned-app.tar.gz reseal payload, keeps the updater bundle" {
+  # The unsigned path ships bundle-mac directly, which contains the dmg, the
+  # tauri-updater bundle (*.app.tar.gz) AND the signer reseal payload
+  # (*.unsigned-app.tar.gz). The reseal payload is the signer's input — never a
+  # deliverable — so it must be dropped; the dmg + updater bundle ARE
+  # deliverables and must ship.
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  # the reseal payload was present in bundle-mac but must NOT be staged
+  [ ! -e out/App.unsigned-app.tar.gz ]
+  [ -z "$(find out -name '*.unsigned-app.tar.gz' -print -quit)" ]
+  # the tauri-updater bundle IS a deliverable — it must still ship (NOT excluded)
+  [ "$(cat out/App.app.tar.gz)" = "updater" ]
+  # the deliverable dmg still ships
+  [ "$(cat out/App_1.0.0.dmg)" = "unsigned-dmg" ]
+}
+
+@test "stage-release-assets asserts exactly one dmg when mac is built (passes with one)" {
+  stage_fixture
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  [ "$(find out -maxdepth 1 -name '*.dmg' | wc -l | tr -d ' ')" -eq 1 ]
+}
+
+@test "stage-release-assets FAILS the one-dmg assertion when ZERO dmgs are staged" {
+  # mac built, but the (only) mac bundle carries no dmg — e.g. a malformed
+  # package output. The deliverable invariant must catch it.
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac downloads/bundle-linux
+  echo updater > downloads/bundle-mac/App.app.tar.gz
+  echo deb     > downloads/bundle-linux/App_1.0.0_amd64.deb
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'expected exactly one .dmg'
+  echo "$output" | grep -q 'found 0'
+}
+
+@test "stage-release-assets FAILS the one-dmg assertion when TWO dmgs are staged" {
+  # Two differently-named dmgs in the same shipped bundle dir — must refuse.
+  rm -rf downloads out
+  mkdir -p downloads/bundle-mac downloads/bundle-linux
+  echo dmg1 > downloads/bundle-mac/App_1.0.0.dmg
+  echo dmg2 > downloads/bundle-mac/App_1.0.0_extra.dmg
+  echo deb  > downloads/bundle-linux/App_1.0.0_amd64.deb
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'expected exactly one .dmg'
+  echo "$output" | grep -q 'found 2'
+}
+
+@test "stage-release-assets one-dmg assertion does not apply when mac isn't built" {
+  # No mac → no dmg is correct; the invariant is mac-only and must not fire.
+  rm -rf downloads out
+  mkdir -p downloads/bundle-linux downloads/bundle-windows
+  echo deb > downloads/bundle-linux/App.deb
+  echo msi > downloads/bundle-windows/App.msi
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=false \
+    bash "$BIN/stage-release-assets.sh"
+  [ "$status" -eq 0 ]
+  [ -e out/App.deb ]
+}
+
 # --- stage-tauri-compile.sh / restore-tauri-compile.sh (WS6a #817) ---------
 # The compile job stages the pre-built binary + built frontendDist into a flat
 # artifact that mirrors repo-root-relative paths; the package job restores it
