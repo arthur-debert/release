@@ -153,6 +153,51 @@ def test_installation_id_non_404_propagates(app_meta, monkeypatch):
     assert "HTTP 500" in str(exc.value)
 
 
+# --- _api_request timeout -----------------------------------------------------
+
+
+def test_api_request_timeout_raises_review_auth_error(monkeypatch):
+    """A urlopen timeout becomes a ReviewAuthError, not a bare TimeoutError."""
+
+    def _timeout(*a, **k):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(ghauth.urllib.request, "urlopen", _timeout)
+    with pytest.raises(ghauth.ReviewAuthError) as exc:
+        ghauth._api_get("/repos/x/y/installation", "JWT")
+    msg = str(exc.value)
+    assert "timed out" in msg
+    assert str(ghauth._HTTP_TIMEOUT) in msg
+
+
+def test_api_request_post_timeout_raises_review_auth_error(monkeypatch):
+    """The POST seam (step 3) normalizes a timeout the same way as GET."""
+
+    def _timeout(*a, **k):
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(ghauth.urllib.request, "urlopen", _timeout)
+    with pytest.raises(ghauth.ReviewAuthError) as exc:
+        ghauth._api_post("/app/installations/1/access_tokens", "JWT")
+    assert "timed out" in str(exc.value)
+
+
+def test_api_request_urlerror_wrapping_timeout_normalized(monkeypatch):
+    """A timeout surfacing as URLError(reason=TimeoutError) is normalized too.
+
+    socket.timeout is an alias of TimeoutError since Py3.10, so a urllib timeout
+    that arrives wrapped in URLError still maps to the timeout message.
+    """
+
+    def _urlerror(*a, **k):
+        raise ghauth.urllib.error.URLError(TimeoutError("timed out"))
+
+    monkeypatch.setattr(ghauth.urllib.request, "urlopen", _urlerror)
+    with pytest.raises(ghauth.ReviewAuthError) as exc:
+        ghauth._api_get("/repos/x/y/installation", "JWT")
+    assert "timed out" in str(exc.value)
+
+
 # --- installation_token -------------------------------------------------------
 
 

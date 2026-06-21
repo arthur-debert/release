@@ -35,6 +35,11 @@ import urllib.request
 
 from . import ghapp
 
+#: Per-request timeout (seconds) for the bearer-JWT urllib calls. Without it a
+#: network stall would hang ``review post --as-app`` indefinitely; on expiry we
+#: raise :class:`ReviewAuthError` rather than leaking a bare timeout.
+_HTTP_TIMEOUT = 30
+
 #: GitHub REST API base for the bearer-JWT calls (steps 2–3). The final review
 #: POST goes through `gh`, which targets api.github.com itself.
 _API_BASE = "https://api.github.com"
@@ -124,14 +129,28 @@ def _api_request(path: str, jwt_token: str, *, method: str) -> object:
         req.data = b"{}"
         req.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(req) as resp:  # noqa: S310 - fixed https host
+        with urllib.request.urlopen(  # noqa: S310 - fixed https host
+            req, timeout=_HTTP_TIMEOUT
+        ) as resp:
             raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", "replace")
         raise ReviewAuthError(
             f"GitHub API {method} {path} failed (HTTP {exc.code}): {body.strip()}"
         ) from exc
+    except TimeoutError as exc:
+        # socket.timeout is an alias of TimeoutError since Py3.10, so this single
+        # clause covers both the direct-timeout and the socket-timeout shapes.
+        raise ReviewAuthError(
+            f"GitHub API {method} {path} timed out after {_HTTP_TIMEOUT}s"
+        ) from exc
     except urllib.error.URLError as exc:
+        # A urllib timeout surfaces as URLError wrapping a socket.timeout — treat
+        # it the same as the direct TimeoutError case above.
+        if isinstance(exc.reason, TimeoutError):
+            raise ReviewAuthError(
+                f"GitHub API {method} {path} timed out after {_HTTP_TIMEOUT}s"
+            ) from exc
         raise ReviewAuthError(f"GitHub API {method} {path} failed: {exc}") from exc
     return json.loads(raw) if raw.strip() else None
 

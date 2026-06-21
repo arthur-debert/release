@@ -182,3 +182,12 @@ def test_schema_has_no_repository_field():
     comment_props = REVIEW_SCHEMA["properties"]["comments"]["items"]["properties"]
     assert "repository" not in comment_props
     assert set(REVIEW_SCHEMA["properties"]) == {"summary", "comments"}
+
+
+def test_default_instructions_wording():
+    from release_core.review import instructions
+
+    text = instructions.default_instructions()
+    # The measurement section says we are UPHOLDING quality (not withholding).
+    assert "upholding the quality" in text
+    assert "withholding the quality" not in text

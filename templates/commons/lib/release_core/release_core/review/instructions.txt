@@ -52,7 +52,7 @@ How to Measure
     implementation. Adjust for the context (i.e. five nines availability on a hyper
     scaler for kernel code is different than a personal / small scale project), where
     performance and security, reliability are disproportionately larger, but still
-    withholding the quality, design, clarity (and non punitive performance).
+    upholding the quality, design, clarity (and non-punitive performance).
 
     Take note of the issues that do not match such a world class implementation, and
     then, after your initial high-level assessment on the axis above, list the issues,

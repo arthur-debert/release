@@ -17,6 +17,7 @@ with ``wrap_verb`` exactly like every other ``release-core`` verb.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from . import ghapp
@@ -110,7 +111,7 @@ def register_main(argv: list[str]) -> int:
     try:
         meta = ghapp.register_from_code(args.agent, args.code)
     except Exception as exc:  # noqa: BLE001 — surface any failure as a clean nonzero
-        print(f"Could not register app for {args.agent!r}: {exc}")
+        print(f"Could not register app for {args.agent!r}: {exc}", file=sys.stderr)
         return 1
 
     print(f"Saved GitHub App for agent {meta['agent']!r}:")
