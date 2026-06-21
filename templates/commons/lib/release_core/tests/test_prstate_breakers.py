@@ -1,13 +1,20 @@
-"""Circuit-breaker heuristics + their fold-in to the state machine."""
+"""The review-round stopping rule + its fold-in to the state machine.
+
+The rule: address every comment each round EXCEPT stop when 6 rounds have
+happened, or when the latest round is all nitpicks. A stop on an otherwise-ready
+PR routes to READY (the leftover threads no longer gate); a real CI/merge
+problem still blocks on its own terms.
+"""
 
 from __future__ import annotations
 
 from itertools import count
 
 from release_core.prstate.breakers import (
-    build_cycles,
-    divergent_cycle_count,
+    ROUND_CAP,
+    build_rounds,
     evaluate_breakers,
+    is_all_nitpick_round,
 )
 from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
 from release_core.prstate.reviewers import by_name
@@ -21,16 +28,17 @@ def review(rid: int, sha: str, author: str = "Copilot") -> Review:
 _FID = count(9000)  # unique comment/thread ids for synthetic findings
 
 
-def finding(rid: int, path: str, line: int) -> Thread:
+def finding(rid: int, path: str, line: int, body: str = "substantive bug here") -> Thread:
     """A review thread holding one finding submitted with review `rid`.
 
-    Resolved on purpose: a resolved finding was still a finding of that cycle,
-    so the breakers must count it (resolution clears the *open*-thread gate,
-    not the cycle history).
+    Resolved on purpose: a resolved finding was still a finding of that round,
+    so the round builder must count it (resolution clears the *open*-thread gate,
+    not the round history). `body` defaults to a substantive comment; pass a
+    nitpick-marked body to model a cosmetic finding.
     """
     cid = next(_FID)
     comment = ReviewComment(
-        comment_id=cid, path=path, line=line, body="x", author="Copilot", review_id=rid
+        comment_id=cid, path=path, line=line, body=body, author="Copilot", review_id=rid
     )
     return Thread(thread_id=f"PRT_f{cid}", is_resolved=True, comments=(comment,))
 
@@ -58,335 +66,264 @@ def ctx(
     )
 
 
-def open_copilot_thread(path="a.py", line=1):
-    comment = ReviewComment(comment_id=1, path=path, line=line, body="x", author="Copilot")
+def open_copilot_thread(path="a.py", line=1, body="substantive open issue"):
+    comment = ReviewComment(comment_id=1, path=path, line=line, body=body, author="Copilot")
     return Thread(thread_id="PRT_1", is_resolved=False, comments=(comment,))
 
 
-# --- cycle counting -------------------------------------------------------
+# --- round counting -------------------------------------------------------
 
 
-def test_build_cycles_one_per_copilot_review_chronological():
+def test_build_rounds_one_per_copilot_review_chronological():
     reviews = [review(10, "a"), review(20, "b"), review(5, "c", author="gemini-bot")]
-    cycles = build_cycles(ctx(reviews))
-    assert [c.index for c in cycles] == [1, 2]
-    assert [c.commit_id for c in cycles] == ["a", "b"]  # gemini excluded, id-ordered
+    rounds = build_rounds(ctx(reviews))
+    assert [r.index for r in rounds] == [1, 2]
+    assert [r.commit_id for r in rounds] == ["a", "b"]  # gemini excluded, id-ordered
 
 
-def test_build_cycles_matches_both_copilot_login_variants():
+def test_build_rounds_matches_both_copilot_login_variants():
     # The review login is `copilot-pull-request-reviewer[bot]` but the comment
-    # author renders as `Copilot` — both must group into cycles (release#455).
+    # author renders as `Copilot` — both must group into rounds (release#455).
     reviews = [review(10, "a", author="copilot-pull-request-reviewer[bot]")]
-    cycles = build_cycles(ctx(reviews, findings=[finding(10, "a.py", 1)]))
-    assert len(cycles) == 1
-    assert cycles[0].comment_keys == frozenset({("a.py", 1)})
+    rounds = build_rounds(ctx(reviews, findings=[finding(10, "a.py", 1)]))
+    assert len(rounds) == 1
+    assert rounds[0].bodies == ("substantive bug here",)
 
 
-def test_build_cycles_findings_come_from_threads_even_when_resolved():
+def test_build_rounds_findings_come_from_threads_even_when_resolved():
     # Findings derive from review threads (the GraphQL source of truth) keyed
-    # by review_id; a RESOLVED thread still counts toward its cycle's findings.
+    # by review_id; a RESOLVED thread still counts toward its round's findings.
     reviews = [review(1, "c1"), review(2, "c2")]
-    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
-    cycles = build_cycles(ctx(reviews, findings=findings))
-    assert cycles[0].comment_keys == frozenset({("a.py", 1)})
-    assert cycles[1].comment_keys == frozenset({("b.py", 2)})
+    findings = [finding(1, "a.py", 1, "fix A"), finding(2, "b.py", 2, "fix B")]
+    rounds = build_rounds(ctx(reviews, findings=findings))
+    assert rounds[0].bodies == ("fix A",)
+    assert rounds[1].bodies == ("fix B",)
 
 
-def test_cycle_cap_fires_on_fourth():
-    # Four DIVERGENT cycles — each round introduces a NEW finding location, so
-    # the divergence counter advances every round and the cap (3) trips on the
-    # fourth (release#738: the cap fires on divergent rounds, not raw count).
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
-    v = evaluate_breakers(ctx(reviews, findings=findings))
-    assert v.stop and v.breaker == "cycle-cap" and v.cycles == 4
-
-
-def test_three_cycles_under_cap_no_stop():
-    reviews = [review(i, f"c{i}") for i in range(1, 4)]
-    # disjoint findings each cycle -> no other breaker fires either
-    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2), finding(3, "c.py", 3)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings)).stop
-
-
-def test_two_required_reviewers_across_two_heads_is_two_cycles_not_four():
-    # The release#622 double-count bug: with TWO required reviewers, two human
+def test_two_required_reviewers_across_two_heads_is_two_rounds_not_four():
+    # The release#622 double-count shape: with TWO required reviewers, two
     # iteration rounds (heads h1, h2) get four review objects (each reviewer
-    # reviews each head). Cycles are ROUNDS, not reviews — so this is 2 cycles,
-    # well under the cap of 3, and the cycle-cap breaker must NOT fire.
+    # reviews each head). Rounds are iterations, not reviews — so this is 2
+    # rounds, well under the cap of 6, and nothing stops.
     reviews = [
         review(1, "h1", author="Copilot"),
         review(2, "h1", author="coderabbitai[bot]"),
         review(3, "h2", author="Copilot"),
         review(4, "h2", author="coderabbitai[bot]"),
     ]
-    cycles = build_cycles(ctx(reviews))
-    assert [c.commit_id for c in cycles] == ["h1", "h2"]  # one per head, not per review
-    assert len(cycles) == 2
+    rounds = build_rounds(ctx(reviews))
+    assert [r.commit_id for r in rounds] == ["h1", "h2"]  # one per head, not per review
+    assert len(rounds) == 2
     v = evaluate_breakers(ctx(reviews))
     assert v.cycles == 2
     assert not v.stop
 
 
-def test_a_cycle_unions_both_reviewers_findings_on_the_same_head():
-    # Both required reviewers flag the same head: the cycle's findings are the
-    # UNION of their thread comments, not one reviewer's. The dual set is the
-    # opt-in (phos pilot) config, not the default, so pass it explicitly.
+def test_a_round_unions_both_reviewers_findings_on_the_same_head():
+    # Both required reviewers flag the same head: the round's findings are the
+    # UNION of their thread comments. The dual set is the opt-in (phos pilot)
+    # config, not the default, so pass it explicitly.
     both = [by_name("copilot"), by_name("coderabbit")]
     reviews = [review(1, "h1", author="Copilot"), review(2, "h1", author="coderabbitai[bot]")]
-    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
-    cycles = build_cycles(ctx(reviews, findings=findings), required=both)
-    assert len(cycles) == 1
-    assert cycles[0].comment_keys == frozenset({("a.py", 1), ("b.py", 2)})
+    findings = [finding(1, "a.py", 1, "fix A"), finding(2, "b.py", 2, "fix B")]
+    rounds = build_rounds(ctx(reviews, findings=findings), required=both)
+    assert len(rounds) == 1
+    assert set(rounds[0].bodies) == {"fix A", "fix B"}
 
 
-# --- divergent-cycle counting (the cap's real metric, release#738) --------
+# --- the 6-round hard cap -------------------------------------------------
 
 
-def test_divergent_count_advances_on_each_new_location():
-    # Four rounds, each introducing a brand-new finding location -> divergent=4.
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
-    cycles = build_cycles(ctx(reviews, findings=findings))
-    assert divergent_cycle_count(cycles) == 4
+def test_cap_is_six():
+    assert ROUND_CAP == 6
 
 
-def test_findingless_rounds_do_not_advance_divergence():
-    # A round that left NO finding (a clean/approving pass) adds no divergence
-    # signal -> it never counts toward the cap.
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    cycles = build_cycles(ctx(reviews))  # no findings at all
-    assert divergent_cycle_count(cycles) == 0
-
-
-def test_cosmetic_repeat_round_does_not_advance_divergence():
-    # Rounds 2..4 only RE-flag a location already seen in round 1 (a stubborn
-    # nit re-raised, or a cosmetic re-comment): only round 1 introduced a new
-    # location, so divergent=1 even though there are 4 raw rounds.
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    findings = [
-        finding(1, "a.py", 1),
-        finding(2, "a.py", 1),
-        finding(3, "a.py", 1),
-        finding(4, "a.py", 1),
-    ]
-    cycles = build_cycles(ctx(reviews, findings=findings))
-    assert divergent_cycle_count(cycles) == 1
-
-
-def test_cap_does_not_fire_when_final_round_is_a_false_positive():
-    # The #735 shape: 3 substantive rounds (each a new location), then a 4th
-    # round whose finding is a false positive on an ALREADY-flagged location.
-    # Raw count is 4 (> cap) but divergent count is 3, so the cap does NOT fire.
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    findings = [
-        finding(1, "a.py", 1),
-        finding(2, "b.py", 2),
-        finding(3, "c.py", 3),
-        finding(4, "a.py", 1),  # re-flag of round 1's location -> no new divergence
-    ]
-    v = evaluate_breakers(ctx(reviews, findings=findings))
-    assert not v.stop
-    assert v.cycles == 4  # the human still sees the true round count
-
-
-def test_cap_still_fires_on_a_genuinely_diverging_loop():
-    # Five rounds, each a new location -> divergent=5 > cap -> the cap fires.
+def test_five_rounds_under_cap_no_stop():
     reviews = [review(i, f"c{i}") for i in range(1, 6)]
     findings = [finding(i, f"f{i}.py", i) for i in range(1, 6)]
     v = evaluate_breakers(ctx(reviews, findings=findings))
-    assert v.stop and v.breaker == "cycle-cap"
-    assert "divergent" in v.reason
+    assert not v.stop
+    assert v.cycles == 5
 
 
-# --- diff trajectory ------------------------------------------------------
-
-
-def test_diff_trajectory_growing_stops():
-    reviews = [review(1, "c1"), review(2, "c2"), review(3, "c3")]
-    sizes = {"c1": 100, "c2": 200, "c3": 410}
-    findings = [finding(1, "a", 1), finding(2, "b", 2), finding(3, "c", 3)]  # disjoint
-    v = evaluate_breakers(ctx(reviews, findings=findings), diff_sizer=sizes.get)
-    assert v.stop and v.breaker == "diff-trajectory"
-
-
-def test_diff_trajectory_shrinking_no_stop():
-    reviews = [review(1, "c1"), review(2, "c2"), review(3, "c3")]
-    sizes = {"c1": 410, "c2": 200, "c3": 100}
-    findings = [finding(1, "a", 1), finding(2, "b", 2), finding(3, "c", 3)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings), diff_sizer=sizes.get).stop
-
-
-def test_diff_trajectory_skipped_without_sizer():
-    # No diff_sizer -> diff breaker can't run; only 2 cycles so nothing else fires.
-    reviews = [review(1, "c1"), review(2, "c2")]
-    findings = [finding(1, "a", 1), finding(2, "b", 2)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings)).stop
-
-
-def test_diff_trajectory_below_floor_no_stop():
-    # Growing but tiny (1 -> 2 -> 3 lines) is below MIN_DIFF_LINES -> no false stop.
-    reviews = [review(1, "c1"), review(2, "c2"), review(3, "c3")]
-    sizes = {"c1": 1, "c2": 2, "c3": 3}
-    findings = [finding(1, "a", 1), finding(2, "b", 2), finding(3, "c", 3)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings), diff_sizer=sizes.get).stop
-
-
-# --- comment-set / repeat -------------------------------------------------
-
-
-def test_comment_fixed_point_identical_stops():
-    # Exact same findings two cycles running -> true fixed point.
-    reviews = [review(1, "c1"), review(2, "c2")]
-    findings = [
-        finding(1, "a.py", 1),
-        finding(1, "b.py", 2),
-        finding(2, "a.py", 1),
-        finding(2, "b.py", 2),
-    ]
+def test_sixth_round_hits_the_cap():
+    # The 6th round is the last; the cap fires once 6 rounds have happened.
+    reviews = [review(i, f"c{i}") for i in range(1, 7)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 7)]
     v = evaluate_breakers(ctx(reviews, findings=findings))
-    assert v.stop and v.breaker == "comment-set"
+    assert v.stop and v.breaker == "round-cap" and v.cycles == 6
 
 
-def test_comment_fixed_point_strict_subset_is_progress_no_stop():
-    # cycle2 is a STRICT subset (b.py:2 got resolved) -> progress, not a fixed point.
-    reviews = [review(1, "c1"), review(2, "c2")]
-    findings = [finding(1, "a.py", 1), finding(1, "b.py", 2), finding(2, "a.py", 1)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings)).stop
+def test_cap_fires_regardless_of_finding_content():
+    # Six rounds of plainly substantive findings still trip the raw count cap —
+    # the cap is mechanical, not content-aware.
+    reviews = [review(i, f"c{i}") for i in range(1, 7)]
+    findings = [finding(i, f"f{i}.py", i, "real correctness bug") for i in range(1, 7)]
+    v = evaluate_breakers(ctx(reviews, findings=findings))
+    assert v.stop and v.breaker == "round-cap"
 
 
-def test_repeat_finding_three_consecutive_cycles_stops():
-    # a.py:1 persists across all 3 cycles (each cycle's set differs, so it's not a
-    # fixed point) -> repeat-finding after two failed fix attempts.
+# --- the all-nitpick early stop -------------------------------------------
+
+
+def test_nitpick_round_detected():
+    rnd = build_rounds(
+        ctx(
+            [review(1, "c1")],
+            findings=[
+                finding(1, "a.py", 1, "nitpick: rename this var"),
+                finding(1, "b.py", 2, "typo in the docstring"),
+            ],
+        )
+    )[0]
+    assert is_all_nitpick_round(rnd)
+
+
+def test_mixed_round_is_not_all_nitpick():
+    rnd = build_rounds(
+        ctx(
+            [review(1, "c1")],
+            findings=[
+                finding(1, "a.py", 1, "nitpick: rename this var"),
+                finding(1, "b.py", 2, "this is an actual logic bug"),
+            ],
+        )
+    )[0]
+    assert not is_all_nitpick_round(rnd)
+
+
+def test_empty_round_is_not_all_nitpick():
+    # A clean/approving pass leaves no findings — not "all nitpicks".
+    rnd = build_rounds(ctx([review(1, "c1")]))[0]
+    assert not is_all_nitpick_round(rnd)
+
+
+def test_all_nitpick_latest_round_stops_early():
+    # Two substantive rounds, then a 3rd round that is purely cosmetic -> stop
+    # early (no 4th round) even though we're far under the 6-round cap.
     reviews = [review(1, "c1"), review(2, "c2"), review(3, "c3")]
     findings = [
-        finding(1, "a.py", 1),
-        finding(1, "x.py", 1),
-        finding(2, "a.py", 1),
-        finding(2, "y.py", 2),
-        finding(3, "a.py", 1),
-        finding(3, "z.py", 3),
+        finding(1, "a.py", 1, "real bug"),
+        finding(2, "b.py", 2, "another real bug"),
+        finding(3, "c.py", 3, "nit: tweak the wording here"),
     ]
     v = evaluate_breakers(ctx(reviews, findings=findings))
-    assert v.stop and v.breaker == "repeat-finding"
+    assert v.stop and v.breaker == "all-nitpick" and v.cycles == 3
 
 
-def test_repeat_finding_two_cycles_allows_second_attempt():
-    # Same location flagged twice is allowed (a 2nd attempt is normal) -> no stop.
+def test_substantive_latest_round_does_not_stop():
     reviews = [review(1, "c1"), review(2, "c2")]
-    findings = [finding(1, "a.py", 1), finding(2, "a.py", 1), finding(2, "c.py", 3)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings)).stop
+    findings = [
+        finding(1, "a.py", 1, "nit: cosmetic"),
+        finding(2, "b.py", 2, "a real correctness problem"),
+    ]
+    v = evaluate_breakers(ctx(reviews, findings=findings))
+    assert not v.stop
 
 
-def test_disjoint_consecutive_findings_no_stop():
+def test_earlier_nitpick_round_does_not_stop_when_latest_is_substantive():
+    # Only the LATEST round's content matters for the all-nitpick stop.
     reviews = [review(1, "c1"), review(2, "c2")]
-    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
-    assert not evaluate_breakers(ctx(reviews, findings=findings)).stop
+    findings = [
+        finding(1, "a.py", 1, "nit: rename"),
+        finding(2, "b.py", 2, "fix the off-by-one"),
+    ]
+    v = evaluate_breakers(ctx(reviews, findings=findings))
+    assert not v.stop
 
 
 # --- fold-in to state -----------------------------------------------------
 
 
-# These scenarios model Copilot review CYCLES (the breaker subject); the second
-# required reviewer is irrelevant here, so they pin the required set to Copilot.
+# These scenarios model Copilot review rounds; the second required reviewer is
+# irrelevant here, so they pin the required set to Copilot.
 _COPILOT_ONLY = [by_name("copilot")]
 
 
-def test_breaker_overrides_addressing_with_blocked():
-    # 4 divergent cycles -> cap fires; an open thread means the PR is NOT
-    # otherwise ready, so the verdict is the STOP-and-surface form.
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
-    c = ctx(reviews, findings=findings, threads=[open_copilot_thread()], head="c4")
+def test_open_thread_under_cap_routes_to_addressing():
+    reviews = [review(i, f"c{i}") for i in range(1, 3)]
+    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
+    c = ctx(reviews, findings=findings, threads=[open_copilot_thread()], head="c2")
     status = evaluate(c, required=_COPILOT_ONLY)
-    assert status.state is TaskState.BLOCKED
-    assert status.breaker == "cycle-cap"
-    assert "STOP" in status.next_action
-
-
-def test_converged_pr_not_stopped_despite_many_cycles():
-    # 4 cycles but every thread resolved + green + mergeable -> READY, not BLOCKED.
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
-    status = evaluate(ctx(reviews, threads=[], head="c4", checks=rollup), required=_COPILOT_ONLY)
-    assert status.state is TaskState.READY
-    assert status.cycles == 4
+    assert status.state is TaskState.ADDRESSING
     assert status.breaker is None
 
 
-# --- the cycle-cap escape (release#738) ----------------------------------
-
-
-def _diverging_capped_ctx(*, threads, merge_state="CLEAN"):
-    """4 DIVERGENT rounds (cap fired) on an otherwise-ready PR shape."""
-    reviews = [review(i, f"c{i}") for i in range(1, 5)]
-    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
+def test_cap_with_open_threads_routes_to_ready_when_otherwise_ready():
+    # 6 rounds reached + an open thread, but CI green + CLEAN merge -> the
+    # stopping rule means no 7th round: flip to READY, recording the breaker.
+    reviews = [review(i, f"c{i}") for i in range(1, 7)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 7)]
     rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
-    return ctx(
+    c = ctx(
         reviews,
         findings=findings,
-        threads=threads,
-        head="c4",
+        threads=[open_copilot_thread()],
+        head="c6",
         checks=rollup,
-        merge_state=merge_state,
     )
-
-
-def test_converged_but_capped_routes_to_the_ack_command():
-    # Cap fired, 0 open threads, CI green, CLEAN merge -> BLOCKED, but the next
-    # action hands the human the one-command software path, not "surface to the
-    # human" / a raw gh pr ready.
-    c = _diverging_capped_ctx(threads=[])
     status = evaluate(c, required=_COPILOT_ONLY)
-    assert status.state is TaskState.BLOCKED
-    assert status.breaker == "cycle-cap"
-    assert "--ack-cycle-cap" in status.next_action
-    assert "converged but cycle-capped" in status.next_action
-    assert "STOP" not in status.next_action
-
-
-def test_ack_cycle_cap_flips_an_otherwise_ready_capped_pr_to_ready():
-    c = _diverging_capped_ctx(threads=[])
-    status = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
     assert status.state is TaskState.READY
-    assert status.cycles == 4
+    assert status.breaker == "round-cap"
+    assert status.cycles == 6
 
 
-def test_capped_with_open_threads_keeps_the_stop_advice():
-    # Not otherwise ready (an open thread): the ack route is NOT offered yet —
-    # the human must still resolve the thread; keep STOP-and-surface.
-    c = _diverging_capped_ctx(threads=[open_copilot_thread()])
+def test_all_nitpick_with_open_threads_routes_to_ready():
+    # Latest round is all nitpicks + an open nitpick thread, CI green + CLEAN ->
+    # READY, recording the all-nitpick stop.
+    reviews = [review(1, "c1"), review(2, "c2")]
+    findings = [finding(1, "a.py", 1, "real bug"), finding(2, "b.py", 2, "nit: wording")]
+    rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
+    c = ctx(
+        reviews,
+        findings=findings,
+        threads=[open_copilot_thread(body="nit: trailing whitespace")],
+        head="c2",
+        checks=rollup,
+    )
+    status = evaluate(c, required=_COPILOT_ONLY)
+    assert status.state is TaskState.READY
+    assert status.breaker == "all-nitpick"
+
+
+def test_stop_does_not_override_a_real_ci_failure():
+    # 6 rounds reached, but CI is failing: the real blocker wins, not READY.
+    reviews = [review(i, f"c{i}") for i in range(1, 7)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 7)]
+    rollup = [{"status": "COMPLETED", "conclusion": "FAILURE"}]
+    c = ctx(reviews, findings=findings, threads=[open_copilot_thread()], head="c6", checks=rollup)
     status = evaluate(c, required=_COPILOT_ONLY)
     assert status.state is TaskState.BLOCKED
-    assert status.breaker == "cycle-cap"
-    assert "STOP" in status.next_action
-    assert "--ack-cycle-cap" not in status.next_action
+    assert "CI" in status.next_action
 
 
-def test_ack_does_not_flip_a_capped_pr_that_is_not_otherwise_ready():
-    # Ack waives ONLY the cap; an open thread still holds the PR. So acking a
-    # PR with an open thread does NOT reach READY (it returns to ADDRESSING).
-    c = _diverging_capped_ctx(threads=[open_copilot_thread()])
-    status = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
-    assert status.state is TaskState.ADDRESSING
-
-
-def test_ack_does_not_flip_a_capped_pr_with_a_dirty_merge_state():
-    # Cap fired, 0 open threads, but a real conflict (DIRTY). Acking the cap
-    # must NOT bypass the merge-state guard -> still BLOCKED on the conflict.
-    c = _diverging_capped_ctx(threads=[], merge_state="DIRTY")
-    status = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
+def test_stop_does_not_override_a_merge_conflict():
+    reviews = [review(i, f"c{i}") for i in range(1, 7)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 7)]
+    rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
+    c = ctx(
+        reviews,
+        findings=findings,
+        threads=[open_copilot_thread()],
+        head="c6",
+        checks=rollup,
+        merge_state="DIRTY",
+    )
+    status = evaluate(c, required=_COPILOT_ONLY)
     assert status.state is TaskState.BLOCKED
     assert "conflict" in status.next_action
 
 
-def test_ack_is_a_noop_when_the_cap_did_not_fire():
-    # A normal, uncapped converged PR: --ack-cycle-cap changes nothing.
-    reviews = [review(i, f"c{i}") for i in range(1, 3)]
-    findings = [finding(1, "a.py", 1), finding(2, "b.py", 2)]
+def test_converged_pr_not_stopped_under_cap():
+    # 4 rounds, every thread resolved + green + mergeable -> READY (normal path,
+    # no stop fired).
+    reviews = [review(i, f"c{i}") for i in range(1, 5)]
+    findings = [finding(i, f"f{i}.py", i) for i in range(1, 5)]
     rollup = [{"status": "COMPLETED", "conclusion": "SUCCESS"}]
-    c = ctx(reviews, findings=findings, threads=[], head="c2", checks=rollup)
-    plain = evaluate(c, required=_COPILOT_ONLY)
-    acked = evaluate(c, required=_COPILOT_ONLY, ack_cycle_cap=True)
-    assert plain.state is TaskState.READY
-    assert acked.state is TaskState.READY
+    status = evaluate(
+        ctx(reviews, findings=findings, threads=[], head="c4", checks=rollup),
+        required=_COPILOT_ONLY,
+    )
+    assert status.state is TaskState.READY
+    assert status.cycles == 4
+    assert status.breaker is None

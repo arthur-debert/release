@@ -27,7 +27,7 @@ def test_ready_flips_and_pages_not_auto_mergeable():
 
 
 def test_breaker_always_pages_never_acts():
-    s = status(TaskState.BLOCKED, breaker="cycle-cap")
+    s = status(TaskState.BLOCKED, breaker="round-cap")
     assert decide(s, auto=True) is Action.PAGE_BREAKER
     assert decide(s, auto=False) is Action.PAGE_BREAKER
 
@@ -121,7 +121,7 @@ def test_poll_survives_status_error_and_keeps_going():
 
 def test_poll_handles_several_prs():
     sink = RecordingSink()
-    feed = {1: status(TaskState.READY), 2: status(TaskState.BLOCKED, breaker="diff-trajectory")}
+    feed = {1: status(TaskState.READY), 2: status(TaskState.BLOCKED, breaker="all-nitpick")}
     poll_once([1, 2], get_status=feed.get, last_states={}, sink=sink, auto=True)
     kinds = {(k, p) for k, p in sink.calls}
     assert ("flip_ready", 1) in kinds

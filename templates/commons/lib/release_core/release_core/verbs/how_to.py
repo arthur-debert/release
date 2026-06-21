@@ -14,14 +14,15 @@ annotated with what each resolves to — so it can't assert a command the repo
 doesn't have (release#507). The ``how-to <kind>`` arg path is the abstract
 "explain this Kind" documentation mode (no specific repo to read).
 
-The dev-cycle section is the runtime-rendered statement of the draft-first
-lifecycle — the §1 single-PR cycle (kept in lockstep with the `gh-pr-review-loop`
-skill) plus the §2 coordinator discipline for a complex / multi-PR feature
-(condensed from `dev-cycle.lex` §2). `dev-cycle.lex` is the model; this renders
-the operational form, and the CLAUDE.md stub points here. Keep all three in
-lockstep — there is deliberately NO second distributed skill for §2; coordination
-is taught here, on the reliable orient-time channel, not via a spotty skill
-trigger.
+The dev-cycle section is the runtime-rendered statement of the draft-first,
+always-delegated lifecycle — the §1 single-task cycle (kept in lockstep with the
+`gh-pr-review-loop` skill) plus the §2 epic topology for a multi-PR feature
+(condensed from `dev-cycle.lex`). The agent is ALWAYS a coordinator that never
+implements; single-PR vs epic differ only in branch/merge topology.
+`dev-cycle.lex` is the model; this renders the operational form, and the
+CLAUDE.md stub points here. Keep all three in lockstep — there is deliberately NO
+second distributed skill for the coordinator role; it is taught here, on the
+reliable orient-time channel, not via a spotty skill trigger.
 
 Usage:
   release-core how-to            (playbook for the current repo — real commands)
@@ -267,46 +268,66 @@ def _ci_jobs_section() -> list[str]:
 
 def _dev_cycle_section() -> list[str]:
     lines: list[str] = []
-    lines.append("The dev cycle (the ONE flow — draft-first)")
+    lines.append("The dev cycle (the ONE flow — draft-first, ALWAYS delegated)")
     lines.append(
-        "  1. Branch off origin/<default-branch> BEFORE you commit anything "
-        "(`git fetch origin && git switch -c <branch> origin/<default-branch>`), "
-        "NOT the local default branch. WHY (don't skip this): the SessionStart "
-        "boot runs `release-core init`, which can AUTO-COMMIT a managed sync "
-        "onto your local default branch. Branch (or commit) off that local tip "
-        "and the auto-commit rides along as an `alien commit` in your PR diff — "
-        "noise the reviewer flags and you can't easily drop. Always re-base your "
-        "branch point on the FETCHED origin tip so the PR diff is only your "
-        "change."
+        "  The agent the human addresses is a COORDINATOR: it never implements, "
+        "regardless of task size. It delegates the work to subagents and the "
+        "single-task cycle is SPLIT across roles so no one context carries all "
+        "of it (an author who also shepherds its own reviews balloons past ~700k "
+        "tokens and judges comments by defending past choices). A single-PR task "
+        "and a multi-PR epic differ ONLY in branch/merge topology, never in "
+        "whether delegation happens."
     )
-    lines.append("  2. Make the change.")
     lines.append(
-        "  3. Add a changelog fragment (required, same PR): "
+        "  1. (Coordinator) Gather context, then spawn an IMPLEMENTER subagent. "
+        "It branches off origin/<default-branch> BEFORE committing anything "
+        "(`git fetch origin && git switch -c <branch> origin/<default-branch>`), "
+        "NOT the local default branch. WHY (don't skip this): SessionStart runs "
+        "`release-core init`, which can AUTO-COMMIT a managed sync onto your "
+        "local default branch; branch off that local tip and the auto-commit "
+        "rides along as an alien commit in your PR diff. Re-base the branch point "
+        "on the FETCHED origin tip so the diff is only your change."
+    )
+    lines.append("  2. (Implementer) Make the change, writing/improving tests.")
+    lines.append(
+        "  3. (Implementer) Add a changelog fragment (required, same PR): "
         'release-core changelog add <slug> "<one-line summary>"'
     )
     lines.append(
         "       <slug> is kebab-case; it writes CHANGELOG/unreleased-<slug>.md. "
         "A release refuses to cut without one. Never hand-edit CHANGELOG.md."
     )
-    lines.append("  4. Run `release-core gate` until green.")
-    lines.append("  5. Open the PR as a DRAFT: gh pr create --draft")
+    lines.append("  4. (Implementer) Run `release-core gate` until green.")
     lines.append(
-        "  6. Drive the review loop via the `gh-pr-review-loop` skill, off the "
-        "state machine: `release-core pr status` reports one lifecycle state "
-        "plus the single next action — do it (request the required reviews "
-        "via `release-core pr review request` — reviewer-agnostic, human or "
-        "bot alike — triage threads, fix CI), then re-read. Wait by blocking "
-        "in-turn on `release-core pr wait` (never a detached background "
-        "wait). The skill arms the PR-loop guard; a bare `gh pr create` may "
-        "be blocked until it does — that's expected."
+        "  5. (Implementer) Open the PR as a DRAFT (gh pr create --draft) with a "
+        "`## Context` handoff note (why this approach, what's out of scope, what "
+        "NOT to 'fix') written for a stranger, then report back and TERMINATE — "
+        "the implementer stops at PR-open and never sees a review round."
     )
     lines.append(
-        "  7. The flip to READY is automatic: when the engine reaches READY, "
-        "`release-core pr wait` performs the guarded draft->ready flip itself "
-        "(reviews done + threads resolved + CI green + a CLEAN merge) and "
-        "stops there — it hands the PR to a human and never auto-merges. "
-        "`release-core pr ready` is still the explicit verb (and "
-        "`--undo` flips back for re-work); never raw `gh pr ready`."
+        "  6. (Coordinator) Drive the review loop via the `gh-pr-review-loop` "
+        "skill, off the state machine: `release-core pr status` reports one "
+        "lifecycle state plus the single next action. Block in-turn on "
+        "`release-core pr wait` (never a detached background wait). When the wait "
+        "returns ADDRESSING, spawn a FRESH SHEPHERD subagent (brief: PR number + "
+        "the Context note) to triage threads, fix-or-reply, resolve, push, "
+        "re-request the review, hand the wait back, and terminate. One fresh "
+        "shepherd per round. The skill arms the PR-loop guard; a bare "
+        "`gh pr create` may be blocked until it does — that's expected."
+    )
+    lines.append(
+        "       Stopping rule: address every comment each round EXCEPT stop when "
+        "6 rounds have happened, or the latest round is all nitpicks. On an "
+        "otherwise-ready PR the engine then routes to READY (no acknowledgement "
+        "flag)."
+    )
+    lines.append(
+        "  7. (Coordinator) The flip to READY is automatic: when the engine "
+        "reaches READY, `release-core pr wait` performs the guarded draft->ready "
+        "flip itself and stops there — it hands the PR to a human and never "
+        "auto-merges. The HUMAN merges the single PR to `main`. "
+        "`release-core pr ready` is the explicit verb (and `--undo` flips back "
+        "for re-work); never raw `gh pr ready`."
     )
     lines.append("")
     lines.append("When infra itself is broken (the gate/build/release tooling)")
@@ -318,29 +339,28 @@ def _dev_cycle_section() -> list[str]:
 
 
 def _complex_cycle_section() -> list[str]:
-    """The §2 coordinator discipline — a larger feature is a composition of the
-    single-PR cycle under ONE coordinating agent. Condensed operational form of
-    `dev-cycle.lex` §2; keep the two in lockstep."""
+    """The §2 epic topology — a multi-PR feature is the SAME coordinator +
+    role-split model, differing only in branch/merge topology. Condensed
+    operational form of `dev-cycle.lex` §2; keep the two in lockstep."""
     lines: list[str] = []
-    lines.append("When the task spans multiple PRs (coordinating an epic)")
+    lines.append("When the task spans multiple PRs (an epic — same model, epic topology)")
     lines.append(
-        "  A larger feature is a composition of the single-PR cycle above under "
-        "ONE coordinating agent. The coordinator does NOT implement — it "
-        "delegates, integrates, and keeps the whole on track (implementing "
-        "itself burns its context and forces compaction)."
+        "  An epic is the SAME always-delegated coordinator + role-split as the "
+        "single-task cycle above; it differs ONLY in branch/merge topology — "
+        "workstream PRs target an epic branch instead of `main`, under one "
+        "umbrella PR. Delegation, implementer-stops-at-open, and "
+        "fresh-shepherd-per-round are not epic-specific; they are the standing "
+        "rule, applied here per workstream."
     )
     lines.append("  1. Cut ONE epic branch; the feature lands via an umbrella PR at the end.")
     lines.append(
         "  2. Delegate one IMPLEMENTER subagent per workstream — ideally each "
-        "scoped by its own issue. The implementer STOPS AT PR-OPEN: implement → "
-        "gate → draft PR targeting the EPIC branch, with a `## Context` note in "
-        "the PR body carrying the non-obvious reasoning (why this approach, "
-        "what's out of scope, what NOT to 'fix') written for a stranger — then "
-        "it reports back and terminates. It never shepherds its own review "
-        "rounds: an author-shepherd drags the whole implementation context "
-        "through every round (expensive — single agents have hit ~700k tokens) "
-        "and judges review comments by defending its past choices instead of "
-        "on the diff's merits."
+        "scoped by its own issue. Same role split as the single-task cycle, with "
+        "ONE topology change: the implementer's draft PR targets the EPIC branch "
+        "(not `main`). It still stops at PR-open with a `## Context` note and "
+        "terminates; the coordinator owns the wait + flip; a fresh shepherd "
+        "handles each addressing round (one per round). The 6/nitpick stopping "
+        "rule applies to every workstream PR."
     )
     lines.append(
         "  3. The coordinator owns every wait and every flip: block in-turn on "
@@ -354,8 +374,9 @@ def _complex_cycle_section() -> list[str]:
     )
     lines.append(
         "  4. Integrate: the coordinator drives the go/no-go merge of each "
-        "workstream PR into the epic branch — no user approval for these "
-        "intra-epic merges (the user's gate is the umbrella PR, step 7)."
+        "workstream PR INTO the epic branch — no user approval for these "
+        "intra-epic merges (the user's gate is the umbrella PR, step 7). The "
+        "coordinator never merges the epic branch into `main`."
     )
     lines.append(
         "  5. Converge: once the planned workstreams land, open ONE final "
@@ -368,10 +389,11 @@ def _complex_cycle_section() -> list[str]:
         "the feature changed (dev/user/reference + module-level design notes)."
     )
     lines.append(
-        "  7. Umbrella PR: verify which issues it actually closes, write the "
-        "epic-level summary linking the related issues, drive it through the "
-        "same split (coordinator waits + flips; fresh shepherd per round), and "
-        "flip to READY for the user's final merge."
+        "  7. Umbrella PR (epic branch -> `main`): verify which issues it "
+        "actually closes, write the epic-level summary linking the related "
+        "issues, drive it through the same split (coordinator waits + flips; "
+        "fresh shepherd per round), flip to READY and STOP. The HUMAN merges the "
+        "umbrella PR to `main`; the coordinator does not auto-merge it."
     )
     lines.append(
         "  8. Release: after the user merges, cut the release — MINOR or PATCH "

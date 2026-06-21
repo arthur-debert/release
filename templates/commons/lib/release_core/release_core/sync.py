@@ -344,7 +344,7 @@ CLAUDE_IMPORT_BODY = (
 # one thin delegating skill", the WS2 exit). release-issue-relay was dropped from
 # distribution: the escalation contract lives in the CLAUDE.md header block + `release-core
 # how-to`, and the mechanism (`gh-release-issue`) is a console-script on PATH. The
-# 15 general dev-cycle skills (tdd, review, diagnose, …), pr-review-respond, and
+# 15 general dev-cycle skills (tdd, review, diagnose, …) and
 # now release-issue-relay are no longer pushed; on a consumer's next `init` their
 # committed symlinks are swept by the broken-symlink cleanup (WS4) — automatic
 # de-vendoring. A consumer owns ONLY its own application-domain skills. Two
@@ -428,7 +428,7 @@ def is_distributed_skill_dest(dest: str) -> bool:
     """True for a managed skill discovery path (.claude/skills/<name>/…). These
     are release-owned: a pre-existing REAL file/dir at such a dest is a stale
     hand-copy and is replaced by the managed symlink unconditionally (no
-    --migrate needed). This is the load-bearing fix for the lex pr-review-respond
+    --migrate needed). This is the load-bearing fix for the hand-copied-skill
     regression — a consumer shipping a stale real .claude/skills/<name>/SKILL.md
     must be upgraded to release's official copy, not left as a conflict."""
     return dest.startswith(".claude/skills/")

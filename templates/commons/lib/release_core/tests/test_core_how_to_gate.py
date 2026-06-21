@@ -78,19 +78,37 @@ def test_how_to_always_states_the_one_gate_and_draft_first_cycle():
         assert "changelog add" in body
 
 
-def test_how_to_coordinator_section_teaches_the_shepherd_split():
-    # The §2 coordinator discipline splits the per-PR loop across roles so no
-    # one context carries it all: the implementer STOPS at PR-open, the
-    # coordinator owns `pr wait` + the `pr ready` flip, and a FRESH shepherd
-    # subagent handles each ADDRESSING round (an author-shepherd balloons
-    # context and defends its own choices). Pin those invariants.
+def test_how_to_teaches_always_delegate_and_the_shepherd_split():
+    # The dev cycle is always delegated: the agent is a COORDINATOR that never
+    # implements, and the per-PR loop is split across roles so no one context
+    # carries it all — the implementer stops at PR-open, the coordinator owns
+    # `pr wait` + the `pr ready` flip, and a fresh shepherd subagent handles
+    # each ADDRESSING round. Pin those invariants on the single-task section.
     body = how_to._render("rust-cli")
-    assert "coordinating an epic" in body
-    assert "STOPS AT PR-OPEN" in body
+    assert "COORDINATOR" in body
+    assert "never implements" in body
+    assert "stops at PR-open" in body
     assert "## Context" in body
-    assert "FRESH shepherd" in body
+    assert "FRESH SHEPHERD" in body
     assert "release-core pr wait" in body
     assert "release-core pr ready" in body
+
+
+def test_how_to_states_the_six_nitpick_stopping_rule():
+    # The review loop bounds itself: 6 rounds, or an all-nitpick latest round,
+    # routes an otherwise-ready PR to READY.
+    body = how_to._render("rust-cli")
+    assert "6 rounds" in body
+    assert "all nitpicks" in body
+
+
+def test_how_to_epic_section_is_topology_only():
+    # An epic is the SAME model, differing only in branch/merge topology.
+    body = how_to._render("rust-cli")
+    assert "an epic" in body
+    assert "epic branch" in body
+    # the human merges the umbrella PR to main
+    assert "HUMAN merges the umbrella PR" in body
 
 
 def test_how_to_dev_cycle_branches_from_origin_not_local_main():
@@ -98,7 +116,7 @@ def test_how_to_dev_cycle_branches_from_origin_not_local_main():
     # clone's LOCAL default branch; branching there carries that alien commit
     # into the feature PR diff. Step 1 must say branch off origin/<default>.
     body = how_to._render("rust-cli")
-    assert "Branch off origin/<default-branch>" in body
+    assert "origin/<default-branch>" in body
     # The example ref uses the same placeholder — never a hard-coded
     # `origin/main` that misleads repos whose default branch differs.
     assert "origin/main" not in body

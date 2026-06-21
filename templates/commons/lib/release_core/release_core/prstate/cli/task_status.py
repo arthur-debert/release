@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import sys
 
-from .. import ghapi, gitstat
+from .. import ghapi
 from ..fetch import gather
 from ..reviewers import required_reviewers
 from ..state import TaskState, TaskStatus, evaluate, no_pr
@@ -62,9 +62,7 @@ def main(argv: list[str]) -> int:
         emit(no_pr(), as_json=as_json)
         return 0
     ctx = gather(pr)
-    status = evaluate(
-        ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required_reviewers()
-    )
+    status = evaluate(ctx, required=required_reviewers())
     emit(status, as_json=as_json)
     return 0
 

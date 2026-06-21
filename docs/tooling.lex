@@ -120,6 +120,13 @@ release-core, the gate, distribution, and workflows
     registry behind `pr review`. The done-signal for a review round is zero
     unresolved review threads, never a per-bot comment count.
 
+    The stopping rule bounds the loop (replacing the old divergent-cycle
+    breaker): address every comment each round EXCEPT stop when 6 rounds have
+    happened, or when the latest round is all nitpicks. On an otherwise-ready PR
+    (CI green, mergeable) either stop routes straight to READY — the engine
+    records the stopping condition (`round-cap` / `all-nitpick`) on the READY
+    status; there is no acknowledgement flag.
+
     The states:
         - NO_PR — no PR for this branch; open a draft to start.
         - REVIEWS_PENDING — required reviewer(s) not done; request or wait.
@@ -128,10 +135,11 @@ release-core, the gate, distribution, and workflows
         - REVIEWED — reviews + threads done; mergeability still computing,
           re-check shortly.
         - VALIDATING — reviewed + mergeable; CI checks running, wait.
-        - READY — reviewed + CI green + mergeable; flip draft→ready
-          (`release-core pr ready`) and page the human.
-        - BLOCKED — merge conflict, failing CI, or the loop's circuit breaker
-          fired; stop and surface to the human.
+        - READY — reviewed + CI green + mergeable (or the stopping rule fired on
+          an otherwise-ready PR); flip draft→ready (`release-core pr ready`) and
+          page the human.
+        - BLOCKED — merge conflict, failing CI, or a behind/blocked merge state;
+          fix and re-read.
 
     The happy-path command sequence for one PR:
         - `release-core pr status` — where am I?

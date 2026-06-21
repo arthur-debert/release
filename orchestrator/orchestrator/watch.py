@@ -18,7 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from release_core.prstate import gitstat
 from release_core.prstate.fetch import gather
 from release_core.prstate.state import TaskState, TaskStatus, evaluate
 
@@ -140,9 +139,9 @@ def build_fixer_prompt(pr: int) -> str:
 
 
 def _status_for(pr: int) -> TaskStatus:
-    """Live status for a PR: gather + evaluate with the git-backed diff sizer."""
+    """Live status for a PR: gather + evaluate."""
     ctx = gather(pr)
-    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+    return evaluate(ctx)
 
 
 def run(

@@ -99,10 +99,10 @@ def test_apply_skip_symlink_leaves_claude_untouched(tmp_path, monkeypatch):
 
 
 def test_apply_replaces_real_skill_file_with_symlink(tmp_path, monkeypatch):
-    """The lex pr-review-respond regression: a pre-existing REAL skill file at a
+    """The hand-copied-skill regression: a pre-existing REAL skill file at a
     managed dest is removed and replaced by the managed symlink (apply phase)."""
     monkeypatch.chdir(tmp_path)
-    dest = ".claude/skills/pr-review-respond/SKILL.md"
+    dest = ".claude/skills/gh-pr-review-loop/SKILL.md"
     real = tmp_path / dest
     real.parent.mkdir(parents=True)
     real.write_text("# stale 157-line hand-copy\n")

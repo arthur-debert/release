@@ -26,9 +26,15 @@ reviewer does not hold the PR in REVIEWS_PENDING. The *skip-after-timeout*
 decision is the polling caller's, not the snapshot's — the snapshot is
 stateless and has no clock.
 
-Review cycles repeat until done: a review counts only against the current
+Review rounds repeat until done: a review counts only against the current
 head, so any push stales the prior review and the snapshot advises RE-REQUEST
 (the engine is the arbiter — no minor-round exception, #565).
+
+The stopping rule (breakers.py) caps that repetition: address every comment
+each round EXCEPT stop when 6 rounds have happened, or when the latest round is
+all nitpicks. A stop on an otherwise-ready PR (CI green, merge state CLEAN)
+routes straight to READY — the open nitpick threads no longer hold it; when the
+PR is not otherwise ready, the real reason (failing CI / conflict) blocks it.
 """
 
 from __future__ import annotations
@@ -36,7 +42,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from .breakers import DiffSizer, evaluate_breakers
+from .breakers import evaluate_breakers
 from .model import PullContext, ReviewLifecycle
 from .reviewers import REGISTRY, ReviewerAdapter, required_reviewers
 
@@ -76,8 +82,8 @@ class TaskStatus:
     open_threads: int = 0
     checks: ChecksState = ChecksState.NONE
     mergeable: str | None = None
-    cycles: int = 0  # completed required-reviewer review cycles
-    breaker: str | None = None  # which circuit breaker fired, if any
+    cycles: int = 0  # completed required-reviewer review rounds (raw count)
+    breaker: str | None = None  # which stopping condition fired, if any
 
     def to_dict(self) -> dict:
         return {
@@ -104,17 +110,14 @@ def no_pr() -> TaskStatus:
 def evaluate(
     ctx: PullContext,
     registry: list[ReviewerAdapter] | None = None,
-    diff_sizer: DiffSizer | None = None,
     required: list[ReviewerAdapter] | None = None,
-    ack_cycle_cap: bool = False,
 ) -> TaskStatus:
     """Compute the PR's lifecycle state from a snapshot.
 
     Pure when `required` is supplied: a function of `ctx` + the given reviewer
-    set, modulo `diff_sizer` (an optional git-backed callable for the
-    diff-trajectory breaker; without it that one breaker is skipped). The CLI
-    entrypoints resolve the required set once and pass it in, so the production
-    paths stay pure — config resolution lives at the edge, not in the engine.
+    set. The CLI entrypoints resolve the required set once and pass it in, so
+    the production paths stay pure — config resolution lives at the edge, not in
+    the engine.
 
     `required` is the gating reviewer SET; every reviewer in it gates Ready
     (parallel-required, release#622), reviewers outside it are best-effort and
@@ -124,15 +127,13 @@ def evaluate(
     set (`reviewers.required_reviewers()`, which reads `.release-sync.yaml`),
     the one impurity, which is why the CLI never relies on it.
 
-    `ack_cycle_cap` is the human's explicit acknowledgement of the cycle-cap
-    breaker (release#738): when True, a fired cycle-cap is suppressed so an
-    OTHERWISE-ready PR (0 open threads + CI green + a CLEAN merge, or a transient
-    UNSTABLE while the rollup is green) flips to READY.
-    It suppresses ONLY the cycle-cap — every other breaker and every other
-    readiness gate (merge-state / CI / open threads) still applies, so the ack
-    can never flip a PR that isn't genuinely converged. `release-core pr ready
-    --ack-cycle-cap` is its only caller; `pr status` never sets it (it reports
-    the cap, and routes to this command).
+    The stopping rule (breakers.py) decides when the review loop has run its
+    course: 6 rounds reached, or the latest round is all nitpicks. When it fires
+    on an otherwise-ready PR (0 substantive blockers + CI green + a CLEAN merge,
+    or a transient UNSTABLE while the rollup is green) the engine routes to
+    READY — the leftover nitpick threads no longer hold it. When the PR is not
+    otherwise ready (failing CI / conflict), the real reason blocks it; the
+    stopping rule never invents a block of its own.
     """
     registry = registry if registry is not None else REGISTRY
     required = required if required is not None else required_reviewers()
@@ -143,15 +144,13 @@ def evaluate(
     reviewers = {name: lc.value for name, lc in lifecycles.items()}
     open_threads = len(ctx.open_threads())
     checks = classify_checks(ctx.checks)
-    # Breakers count cycles against the SAME required set the engine gates on —
-    # passed through so an override repo's breaker math matches its reviewers.
-    breaker = evaluate_breakers(ctx, diff_sizer, required=required)
-    # The cycle-cap is the one breaker the human can explicitly acknowledge to
-    # land an otherwise-converged PR (release#738): `--ack-cycle-cap` suppresses
-    # its STOP so the engine falls through to the normal readiness gates. Every
-    # OTHER breaker (and every readiness gate) is untouched by the ack.
-    cap_acked = ack_cycle_cap and breaker.breaker == "cycle-cap"
-    breaker_stops = breaker.stop and not cap_acked
+    # The stopping rule counts rounds against the SAME required set the engine
+    # gates on — passed through so an override repo's round math matches its
+    # reviewers. When it has fired, the loop must NOT open another round: an
+    # otherwise-ready PR flips to READY (the leftover threads are stale or
+    # nitpicks), not back to ADDRESSING.
+    breaker = evaluate_breakers(ctx, required=required)
+    breaker_stops = breaker.stop
 
     status = TaskStatus(
         state=TaskState.REVIEWS_PENDING,  # provisional; set below
@@ -174,26 +173,16 @@ def evaluate(
         status.next_action = _reviews_pending_action(ctx, pending_required, lifecycles)
         return status
 
-    # 2. Required reviews in; any open thread (from any reviewer) must be addressed
-    #    — UNLESS a circuit breaker says the loop is diverging: then STOP, don't
-    #    open another cycle. A converged PR (no open threads) is normally handed
-    #    off — except when the cycle-cap fired: it is then BLOCKED and routed to
-    #    `release-core pr ready --ack-cycle-cap` (the converged-but-capped branch
-    #    below), not flipped silently.
-    if open_threads:
-        if breaker_stops:
-            status.state = TaskState.BLOCKED
-            status.breaker = breaker.breaker
-            # With open threads the PR is NOT otherwise ready, so even a fired
-            # cycle-cap has no software path forward yet (acking it can't flip a
-            # PR with unresolved threads). Keep the STOP-and-surface advice; the
-            # `--ack-cycle-cap` route is offered only once the PR is converged
-            # (handled in the readiness section below).
-            status.next_action = (
-                f"STOP — circuit breaker '{breaker.breaker}' fired: {breaker.reason}. "
-                "Do not iterate; surface to the human."
-            )
-            return status
+    # 2. Required reviews in; any open thread (from any reviewer) must be
+    #    addressed — UNLESS the stopping rule has fired (6 rounds, or the latest
+    #    round is all nitpicks): then do NOT open another round. The leftover
+    #    threads no longer gate, so fall through to the readiness gates below —
+    #    an otherwise-ready PR flips to READY (it records the breaker name so the
+    #    stop is visible), and a real CI/merge problem still blocks it on its own
+    #    terms. Record the breaker either way.
+    if breaker_stops:
+        status.breaker = breaker.breaker
+    if open_threads and not breaker_stops:
         status.state = TaskState.ADDRESSING
         status.next_action = (
             f"triage {open_threads} open thread(s): read them with "
@@ -263,38 +252,13 @@ def evaluate(
         status.next_action = "reviews done; CI check(s) running — wait for checks"
         return status
 
-    # The PR is now otherwise-converged: required reviews in, 0 open threads, no
-    # conflict, not behind, CI not failing/pending. The ONLY states left lead to
-    # READY (UNSTABLE-green / CLEAN). If the cycle-cap fired here, the loop ran
-    # too many divergent rounds even though it landed — but it IS genuinely
-    # ready, so this is no longer a dead-end "surface to the human": hand the
-    # human the one-command software path, `release-core pr ready
-    # --ack-cycle-cap`, which re-evaluates with the cap acked and flips only if
-    # every OTHER readiness gate still passes (release#738). The ack itself
-    # (cap_acked) suppresses this branch so the flip proceeds to READY below.
-    if (
-        breaker_stops
-        and breaker.breaker == "cycle-cap"
-        and ctx.merge_state
-        in (
-            "UNSTABLE",
-            "CLEAN",
-        )
-    ):
-        is_ready_merge = ctx.merge_state == "CLEAN" or (
-            ctx.merge_state == "UNSTABLE" and checks == ChecksState.GREEN
-        )
-        if is_ready_merge:
-            status.state = TaskState.BLOCKED
-            status.breaker = breaker.breaker
-            status.next_action = (
-                f"converged but cycle-capped: {breaker.reason} — the PR is otherwise "
-                "ready (reviews in, 0 open threads, CI green, merge state CLEAN — or "
-                "a transient UNSTABLE while the rollup is green). "
-                "Flip it with `release-core pr ready --ack-cycle-cap` (it re-checks "
-                "every other readiness gate); do NOT open another review round."
-            )
-            return status
+    # The PR is now otherwise-ready: required reviews in, no conflict, not
+    # behind, CI not failing/pending, and either no open threads or only leftover
+    # ones the stopping rule chose not to open another round for. The ONLY merge
+    # states left lead to READY (UNSTABLE-green / CLEAN). If the stopping rule
+    # fired, `status.breaker` already carries its name (set above) so the stop
+    # stays visible on the READY status — the flip itself proceeds normally; the
+    # human gets a ready PR, not a dead-end.
 
     # UNSTABLE is GitHub's "a non-required check is failing/pending" state — but
     # the engine ALREADY inspects every check via the rollup (the FAILING/PENDING
