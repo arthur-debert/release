@@ -26,6 +26,11 @@ per-format existence + non-trivial-size + name assertions (`bundle-smoke.sh`).
 uploaded) via `gh`, and restores it with the package job's own
 `restore-tauri-compile.sh`.
 
+The resolver walks **all** artifact pages (`gh api --paginate`) so a busy
+consumer can't push the newest artifact off page 1, and **pins the consumer
+checkout to the artifact run's `head_sha`** (best-effort; `fetch --depth 1` for
+shallow clones) so the source tree matches the pre-built binary.
+
 **Limitation:** GitHub artifacts retain ~7 days. If the consumer hasn't built
 recently there is no artifact, and the resolver **fails loud** (exit 3) — never a
 silent skip (that would be false confidence). Re-run after the consumer cuts or
