@@ -1,1 +1,1 @@
-- Fix: assert-base-sha-green used gh api --slurp with --jq (unsupported); pipe slurped pages to jq so real releases don't fail at prepare
+- Fix: assert-base-sha-green used gh api --slurp with --jq (unsupported); pipe slurped pages to jq so real releases don't fail at prepare. Adds a `gh-slurp-jq-combo` gate guard that statically rejects any `gh api --slurp` combined with --jq/--template across tracked shell + workflow YAML, so the regression class can't return.
