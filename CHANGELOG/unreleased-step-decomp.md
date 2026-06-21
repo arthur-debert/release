@@ -1,0 +1,1 @@
+- Decompose the tauri build/package jobs into per-phase steps (frontend, rust compile, per-format bundle) for run-UI timing (#835)

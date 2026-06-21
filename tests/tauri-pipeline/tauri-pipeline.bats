@@ -1,10 +1,13 @@
 #!/usr/bin/env bats
 
-# Unit suite for the decomposed Tauri pipeline shell logic (#811/#815/#817):
-#   - build-tauri.sh   compile-only entry (`tauri build --no-bundle`)
-#   - bundle-tauri.sh  unsigned bundle + mac .app packaging (no collision
-#                      with tauri's own .app.tar.gz updater bundle; forces
-#                      `app` into the mac targets)
+# Unit suite for the decomposed Tauri pipeline shell logic (#811/#815/#817/#835):
+#   - build-frontend-tauri.sh  frontend half: runs beforeBuildCommand (#835)
+#   - build-tauri.sh   rust-compile half (`tauri build --no-bundle`, with
+#                      beforeBuildCommand disabled so the frontend isn't re-run)
+#   - resolve-tauri-bundles.sh  per-format target resolution + mac app-forcing
+#   - bundle-tauri.sh  single-format unsigned bundle
+#   - package-mac-app.sh  mac .app → *.unsigned-app.tar.gz reseal payload (no
+#                      collision with tauri's own .app.tar.gz updater bundle)
 #   - reseal-mac-dmg.sh  volname derivation + hdiutil invocation (stubbed)
 #   - unpack-unsigned-app.sh  one-app extraction + zero/multi errors
 #   - enumerate-macho.sh  nested signable Mach-O enumeration (inner-first)
@@ -52,10 +55,59 @@ make_macho() {
   printf '\xcf\xfa\xed\xfe\x07\x00\x00\x01\x03\x00\x00\x00\x02\x00\x00\x00' > "$1"
 }
 
-# --- build-tauri.sh (compile-only) ----------------------------------------
+# --- build-frontend-tauri.sh (frontend half) ------------------------------
+# The frontend build (tauri's beforeBuildCommand) is its own step (#835) so its
+# time is attributed separately from the rust compile. It reads
+# build.beforeBuildCommand from tauri.conf.json and runs it verbatim; absent /
+# empty = no-op.
+
+write_conf() {
+  # write_conf <beforeBuildCommand-json> — writes a minimal tauri.conf.json.
+  mkdir -p src-tauri
+  printf '%s\n' "{\"build\":{$1}}" > src-tauri/tauri.conf.json
+}
+
+@test "build-frontend runs the consumer's beforeBuildCommand" {
+  write_conf '"beforeBuildCommand":"echo FE-RAN > fe.marker"'
+  run bash "$BIN/build-frontend-tauri.sh"
+  [ "$status" -eq 0 ]
+  [ -f fe.marker ]
+  grep -q FE-RAN fe.marker
+}
+
+@test "build-frontend is a no-op when beforeBuildCommand is empty" {
+  write_conf '"beforeBuildCommand":""'
+  run bash "$BIN/build-frontend-tauri.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'skipping frontend build'
+}
+
+@test "build-frontend runs the hook via cmd.exe on Windows (RUNNER_OS)" {
+  # Tauri runs beforeBuildCommand through cmd.exe on Windows; stub it on PATH
+  # and assert this script dispatches to it (not sh) when RUNNER_OS=Windows.
+  write_conf '"beforeBuildCommand":"whatever build"'
+  cat > stub/cmd.exe <<'EOF'
+#!/usr/bin/env bash
+echo "CMD-RAN $*" >> "$NPX_LOG"
+EOF
+  chmod +x stub/cmd.exe
+  run env RUNNER_OS=Windows bash "$BIN/build-frontend-tauri.sh"
+  [ "$status" -eq 0 ]
+  grep -q 'CMD-RAN /c whatever build' "$NPX_LOG"
+}
+
+@test "build-frontend is a no-op when beforeBuildCommand is absent" {
+  write_conf '"frontendDist":"../build"'
+  run bash "$BIN/build-frontend-tauri.sh"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q 'skipping frontend build'
+}
+
+# --- build-tauri.sh (rust-compile half) -----------------------------------
 # The build job only ever COMPILES — the fused compile+bundle+sign `tauri
-# build` (old inline sign-mode) was removed. build-tauri.sh always runs
-# `tauri build --no-bundle`; bundling is a separate job (bundle-tauri.sh).
+# build` (old inline sign-mode) was removed. build-tauri.sh runs `tauri build
+# --no-bundle` with beforeBuildCommand DISABLED (the frontend ran in its own
+# prior step, #835) so it isn't re-run; bundling is a separate job.
 
 @test "build-tauri runs tauri build --no-bundle (compile only)" {
   run bash "$BIN/build-tauri.sh"
@@ -63,6 +115,13 @@ make_macho() {
   grep -q 'tauri build --no-bundle' "$NPX_LOG"
   # never bundles in the build job
   ! grep -q 'tauri bundle' "$NPX_LOG"
+}
+
+@test "build-tauri disables beforeBuildCommand so the frontend isn't re-run" {
+  run bash "$BIN/build-tauri.sh"
+  [ "$status" -eq 0 ]
+  # the config override blanks beforeBuildCommand for the rust compile
+  grep -q -- '-c {"build":{"beforeBuildCommand":""}}' "$NPX_LOG"
 }
 
 @test "build-tauri never produces a bundle (no fused inline path)" {
@@ -75,43 +134,167 @@ make_macho() {
   ! grep -q -- '--bundles' "$NPX_LOG"
 }
 
-# --- bundle-tauri.sh ------------------------------------------------------
+# --- resolve-tauri-bundles.sh (per-format target resolution) --------------
+# Resolves the effective format list + emits per-format booleans (#835).
+# Centralizes the mac app-forcing rule.
 
-@test "bundle-tauri bundles unsigned and packages the .app for mac" {
-  run env PLATFORM=mac BUNDLES=dmg bash "$BIN/bundle-tauri.sh"
+resolve_out() {
+  # resolve_out <format> — value of the named output after running resolve.
+  grep -E "^$1=" "$GITHUB_OUTPUT" | tail -n1 | cut -d= -f2
+}
+
+@test "resolve linux deb,appimage,rpm from BUNDLES=all" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=linux BUNDLES=all bash "$BIN/resolve-tauri-bundles.sh"
   [ "$status" -eq 0 ]
-  # --no-sign keeps the bundle unsigned; `app` forced in so the .app exists.
+  [ "$(resolve_out deb)" = true ]
+  [ "$(resolve_out appimage)" = true ]
+  [ "$(resolve_out rpm)" = true ]
+  [ "$(resolve_out dmg)" = false ]
+}
+
+@test "resolve honors an explicit single linux format" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=linux BUNDLES=deb bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out deb)" = true ]
+  [ "$(resolve_out appimage)" = false ]
+  [ "$(resolve_out rpm)" = false ]
+}
+
+@test "resolve forces app on mac even for a dmg-only request" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=mac BUNDLES=dmg bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out app)" = true ]
+  [ "$(resolve_out dmg)" = true ]
+}
+
+@test "resolve forces app on mac when BUNDLES is empty (tauri.conf default)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  # no tauri.conf .bundle.targets → falls through to "all" → app,dmg
+  mkdir -p src-tauri; echo '{"build":{}}' > src-tauri/tauri.conf.json
+  run env PLATFORM=mac bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out app)" = true ]
+  [ "$(resolve_out dmg)" = true ]
+}
+
+@test "resolve reads tauri.conf .bundle.targets array when BUNDLES empty" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  mkdir -p src-tauri
+  echo '{"bundle":{"targets":["deb","appimage"]}}' > src-tauri/tauri.conf.json
+  run env PLATFORM=linux bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out deb)" = true ]
+  [ "$(resolve_out appimage)" = true ]
+  [ "$(resolve_out rpm)" = false ]
+}
+
+@test "resolve windows nsis,msi from BUNDLES=all" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=windows BUNDLES=all bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out nsis)" = true ]
+  [ "$(resolve_out msi)" = true ]
+  [ "$(resolve_out deb)" = false ]
+}
+
+@test "resolve windows defaults to nsis,msi when BUNDLES empty (tauri.conf default)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  mkdir -p src-tauri; echo '{"build":{}}' > src-tauri/tauri.conf.json
+  run env PLATFORM=windows bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out nsis)" = true ]
+  [ "$(resolve_out msi)" = true ]
+}
+
+@test "resolve honors an explicit single windows format" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=windows BUNDLES=msi bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -eq 0 ]
+  [ "$(resolve_out msi)" = true ]
+  [ "$(resolve_out nsis)" = false ]
+}
+
+@test "resolve FAILS LOUD on an unknown PLATFORM (no silent empty resolution)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=solaris BUNDLES=all bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'unknown PLATFORM'
+}
+
+@test "resolve FAILS LOUD on an unknown bundle target (no silent drop)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=linux BUNDLES=foo bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "unknown bundle target 'foo'"
+}
+
+@test "resolve rejects a target valid for another platform (dmg on linux)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=linux BUNDLES=dmg bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "unknown bundle target 'dmg'"
+}
+
+# --- bundle-tauri.sh (single-format unsigned bundle) ----------------------
+
+@test "bundle-tauri bundles the requested single format unsigned" {
+  run env BUNDLES=deb bash "$BIN/bundle-tauri.sh"
+  [ "$status" -eq 0 ]
+  grep -q 'tauri bundle --no-sign --bundles deb' "$NPX_LOG"
+}
+
+@test "bundle-tauri requests app,dmg verbatim for the coupled mac step" {
+  run env BUNDLES=app,dmg bash "$BIN/bundle-tauri.sh"
+  [ "$status" -eq 0 ]
+  # no forcing in this script anymore — it bundles exactly what it's given.
   grep -q 'tauri bundle --no-sign --bundles app,dmg' "$NPX_LOG"
-  # the .app is tarred as *.unsigned-app.tar.gz ...
+}
+
+# --- package-mac-app.sh (reseal payload tarball) --------------------------
+
+@test "package-mac-app tars the .app as *.unsigned-app.tar.gz, leaving the updater bundle" {
+  # the npx stub produces MyApp.app + the MyApp.app.tar.gz updater bundle.
+  env BUNDLES=app,dmg bash "$BIN/bundle-tauri.sh"
+  run bash "$BIN/package-mac-app.sh"
+  [ "$status" -eq 0 ]
   [ -f src-tauri/target/release/bundle/macos/MyApp.unsigned-app.tar.gz ]
-  # ... and tauri's own updater bundle is left untouched (no collision).
+  # tauri's own updater bundle is untouched (no collision).
   run cat src-tauri/target/release/bundle/macos/MyApp.app.tar.gz
   [ "$output" = "updater" ]
 }
 
-@test "bundle-tauri does not double-add app when already requested" {
-  run env PLATFORM=mac BUNDLES=app,dmg bash "$BIN/bundle-tauri.sh"
-  [ "$status" -eq 0 ]
-  grep -q 'tauri bundle --no-sign --bundles app,dmg' "$NPX_LOG"
-  ! grep -q 'app,app' "$NPX_LOG"
+@test "package-mac-app fails loud when no macos bundle dir exists" {
+  run bash "$BIN/package-mac-app.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'no macOS bundle dir'
 }
 
-@test "bundle-tauri forces app even when BUNDLES is empty (tauri.conf default)" {
-  # Empty BUNDLES → tauri.conf picks targets (maybe dmg-only, which deletes the
-  # .app). The mac path must still request `app` explicitly so the reseal
-  # payload exists.
-  run env PLATFORM=mac bash "$BIN/bundle-tauri.sh"
-  [ "$status" -eq 0 ]
-  grep -q 'tauri bundle --no-sign --bundles app,dmg' "$NPX_LOG"
-  [ -f src-tauri/target/release/bundle/macos/MyApp.unsigned-app.tar.gz ]
+@test "package-mac-app fails loud when the dir has zero .app bundles" {
+  # dir exists (e.g. an empty bundle output) but no .app — the signer needs one.
+  mkdir -p src-tauri/target/release/bundle/macos
+  run bash "$BIN/package-mac-app.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'no .app found'
 }
 
-@test "bundle-tauri does not package .app on linux" {
-  # linux: no macos dir, no packaging, no forced `app` target.
-  run env PLATFORM=linux BUNDLES=deb bash "$BIN/bundle-tauri.sh"
-  [ "$status" -eq 0 ]
-  grep -q 'tauri bundle --no-sign --bundles deb' "$NPX_LOG"
-  ! grep -q 'app,deb' "$NPX_LOG"
+@test "package-mac-app fails loud when there is MORE than one .app (signer expects exactly one)" {
+  d=src-tauri/target/release/bundle/macos
+  # Use a name WITH A SPACE to assert the error list preserves it (not garbled
+  # by whitespace-splitting).
+  mkdir -p "$d/My App.app/Contents" "$d/B.app/Contents"
+  echo bin > "$d/My App.app/Contents/exe"
+  echo bin > "$d/B.app/Contents/exe"
+  run bash "$BIN/package-mac-app.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'expected exactly one .app'
+  # the space-containing name is reported intact (not split into "My"/"App.app")
+  echo "$output" | grep -q 'My App.app'
+  # and it must NOT have produced any payload
+  [ ! -f "$d/My App.unsigned-app.tar.gz" ]
+  [ ! -f "$d/B.unsigned-app.tar.gz" ]
 }
 
 # --- reseal-mac-dmg.sh ----------------------------------------------------
@@ -951,6 +1134,27 @@ EOF
   echo "$block" | grep -q 'bundle-tauri.sh'
   # no job-level if: (4-space-indented `if:`) in the package job
   ! echo "$block" | grep -Eq '^    if:'
+}
+
+@test "tauri-app.yml build job splits frontend and rust into separate steps (#835)" {
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Build frontend' "$WORKFLOW"
+  grep -q 'build-frontend-tauri.sh' "$WORKFLOW"
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Compile \(rust\)' "$WORKFLOW"
+  # the old fused step name is gone
+  ! grep -q 'Compile (no bundle)' "$WORKFLOW"
+}
+
+@test "tauri-app.yml package job has per-format bundle steps (#835)" {
+  grep -q 'resolve-tauri-bundles.sh' "$WORKFLOW"
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle \.deb' "$WORKFLOW"
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle \.appimage' "$WORKFLOW"
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle \.rpm' "$WORKFLOW"
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle macOS' "$WORKFLOW"
+  grep -q 'package-mac-app.sh' "$WORKFLOW"
+  # windows leg still bundles (.msi + nsis), gated on its platform
+  grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle Windows' "$WORKFLOW"
+  # the old fused single step name is gone
+  ! grep -q 'Bundle (unsigned)' "$WORKFLOW"
 }
 
 @test "tauri-app.yml sign job is gated on should-sign (optional signing)" {
