@@ -106,10 +106,11 @@ def resolve_pr(
     * ``workdir`` is the checkout the agent reads files from; defaults to the
       current directory (the consumer reviewing their own PR).
 
-    Fetches (never switches branches) the base ref and, if absent, the PR head,
-    then computes ``base_sha = merge-base(origin/<base_ref>, <head>)`` and the
-    three-dot diff. Raises :class:`ReviewError` if ``workdir`` is not a git
-    checkout or the PR can't be resolved.
+    Fetches (never switches branches) the base ref and, if absent, the PR head
+    (``headRefOid`` — the ONLY head-point; never FETCH_HEAD/HEAD), then computes
+    ``base_sha = merge-base(origin/<base_ref>, <head_sha>)`` and the three-dot
+    diff. Raises :class:`ReviewError` if ``workdir`` is not a git checkout, the
+    PR can't be resolved, or the head commit can't be fetched into ``workdir``.
     """
     workdir = workdir or os.getcwd()
     if not _is_git_checkout(workdir):
@@ -142,23 +143,35 @@ def resolve_pr(
     # Make the base available (fetch only — never checkout-switch).
     _git(workdir, ["fetch", "--quiet", "origin", base_ref], check=False)
 
-    # Make the head available if it isn't already a local object.
-    if head_sha and not _sha_present(workdir, head_sha):
-        # Try the PR head ref namespace first (works without the branch being
-        # local), then fall back to fetching the named head branch.
+    # The head endpoint of the diff is ALWAYS the resolved head sha
+    # (``headRefOid`` from ``gh pr view``). We never fall back to FETCH_HEAD or
+    # HEAD: FETCH_HEAD may point at the base ref we just fetched (silently
+    # diffing the wrong thing), and HEAD is the user's unrelated working tree.
+    if not head_sha:
+        raise ReviewError(
+            f"PR #{pr} returned no head sha (headRefOid) from `gh pr view` — "
+            f"cannot resolve the PR head to review."
+        )
+
+    # Make the head commit object available locally (fetch only — never a
+    # checkout-switch). Try the PR head ref namespace first (works without the
+    # branch being local), then the named head branch, then the sha directly.
+    if not _sha_present(workdir, head_sha):
         _git(workdir, ["fetch", "--quiet", "origin", f"pull/{pr}/head"], check=False)
         if not _sha_present(workdir, head_sha) and head_ref:
             _git(workdir, ["fetch", "--quiet", "origin", head_ref], check=False)
+        if not _sha_present(workdir, head_sha):
+            _git(workdir, ["fetch", "--quiet", "origin", head_sha], check=False)
 
-    # The head endpoint of the diff: the resolved sha if we have it locally,
-    # else the just-fetched remote-tracking ref / FETCH_HEAD, else HEAD.
-    if head_sha and _sha_present(workdir, head_sha):
-        head_point = head_sha
-    elif _sha_present(workdir, "FETCH_HEAD"):
-        head_point = "FETCH_HEAD"
-    else:
-        head_point = "HEAD"
-        head_sha = head_sha or _git(workdir, ["rev-parse", "HEAD"]).stdout.strip()
+    if not _sha_present(workdir, head_sha):
+        raise ReviewError(
+            f"Can't resolve PR #{pr} head {head_sha} — the commit isn't available "
+            f"after fetching pull/{pr}/head, the head branch, and the sha directly. "
+            f"The PR may be from a fork (its head isn't on origin) or the head is "
+            f"otherwise unavailable; fetch it into this checkout and re-run."
+        )
+
+    head_point = head_sha
 
     base_point = f"origin/{base_ref}"
     if not _sha_present(workdir, base_point):

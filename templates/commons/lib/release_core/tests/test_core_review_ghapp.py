@@ -143,8 +143,16 @@ def test_register_from_code_saves_pem_and_metadata(config_home, monkeypatch):
     assert saved["slug"] == "codex-review"
     assert saved["pem_path"] == str(pem_path)
 
-    # Returned metadata never carries the pem BODY.
+    # ONLY the fields auth actually uses are persisted — no inert secrets land on
+    # disk (client_id / webhook_secret are unused: default_events is []).
+    assert set(saved) == {"agent", "app_id", "slug", "name", "pem_path"}
+    assert "webhook_secret" not in saved
+    assert "client_id" not in saved
+
+    # Returned metadata mirrors the saved set: never the pem BODY, never secrets.
     assert "pem" not in meta
+    assert "webhook_secret" not in meta
+    assert "client_id" not in meta
     assert meta["app_id"] == 424242
     assert meta["pem_path"] == str(pem_path)
 

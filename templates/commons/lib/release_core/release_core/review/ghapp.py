@@ -163,13 +163,16 @@ def register_from_code(agent: str, code: str) -> dict:
     pem_path.write_text(pem, encoding="utf-8")
     pem_path.chmod(0o600)
 
+    # Persist ONLY the fields later auth actually uses: installation auth signs
+    # an app JWT from app_id + the pem, and the slug/name are for the install
+    # URL + display. ``client_id`` / ``webhook_secret`` are unused (manifest sets
+    # ``default_events: []`` so no webhook is ever delivered), so they are not
+    # written — no point persisting an inert secret to disk.
     metadata = {
         "agent": agent,
         "app_id": resp.get("id"),
         "slug": resp.get("slug"),
         "name": resp.get("name"),
-        "client_id": resp.get("client_id"),
-        "webhook_secret": resp.get("webhook_secret"),
         "pem_path": str(pem_path),
     }
     meta_path = _metadata_path(agent, config)

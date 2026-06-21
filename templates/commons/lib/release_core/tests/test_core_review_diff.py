@@ -117,6 +117,25 @@ def test_resolve_pr_fetches_head_when_absent(monkeypatch, fake_pr_view):
     assert not any(c[3:4] in (["checkout"], ["switch"]) for c in fake.calls)
 
 
+def test_resolve_pr_raises_when_head_unfetchable(monkeypatch, fake_pr_view):
+    """Fail loud when headRefOid can't be made present locally.
+
+    The head sha is the ONLY head-point — if every fetch (pull/<n>/head, the head
+    branch, the sha) leaves it absent (e.g. a fork PR whose head isn't on
+    origin), resolve_pr raises ReviewError rather than silently diffing
+    FETCH_HEAD / HEAD (which could be the base ref or the user's working tree).
+    """
+    # head sha never becomes present, no matter how many fetches run.
+    fake = _FakeGit(present={"origin/main"})
+    monkeypatch.setattr(diffmod.proc, "run", fake)
+
+    with pytest.raises(ReviewError, match="Can't resolve PR #365 head"):
+        resolve_pr(365, workdir="/work")
+
+    # It must NOT fall back to FETCH_HEAD/HEAD — no diff is ever attempted.
+    assert not any(c[3:4] == ["diff"] for c in fake.calls)
+
+
 def test_resolve_pr_not_a_git_checkout(monkeypatch, fake_pr_view):
     def _not_repo(cmd, **kwargs):
         if cmd[3:4] == ["rev-parse"] and "--is-inside-work-tree" in cmd:

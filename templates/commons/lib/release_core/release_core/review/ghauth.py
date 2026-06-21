@@ -72,8 +72,10 @@ def make_app_jwt(agent: str) -> str:
     meta = ghapp.load_app(agent)
     if not meta:
         raise ReviewAuthError(
-            f"No GitHub App configured for agent {agent!r}. Register one first "
-            f"(release-core review app create/register {agent})."
+            f"No GitHub App configured for agent {agent!r}. Create one first: "
+            f"`release-core review app manifest {agent} --name <name>` (opens the "
+            f"app-manifest flow), then `release-core review app register {agent} "
+            f"--code <code>`."
         )
     app_id = meta.get("app_id")
     if not app_id:
