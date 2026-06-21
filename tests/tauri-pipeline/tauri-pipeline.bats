@@ -224,6 +224,20 @@ resolve_out() {
   echo "$output" | grep -q 'unknown PLATFORM'
 }
 
+@test "resolve FAILS LOUD on an unknown bundle target (no silent drop)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=linux BUNDLES=foo bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "unknown bundle target 'foo'"
+}
+
+@test "resolve rejects a target valid for another platform (dmg on linux)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=linux BUNDLES=dmg bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q "unknown bundle target 'dmg'"
+}
+
 # --- bundle-tauri.sh (single-format unsigned bundle) ----------------------
 
 @test "bundle-tauri bundles the requested single format unsigned" {

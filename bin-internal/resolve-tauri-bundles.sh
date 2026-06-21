@@ -68,12 +68,24 @@ case "${PLATFORM}" in
   *)       echo "::error::unknown PLATFORM: ${PLATFORM} (expected mac | linux | windows)"; exit 1 ;;
 esac
 
-# Build the requested set (space-separated), expanding "all".
+# Build the requested set (space-separated), expanding "all". An unknown token
+# is a hard error (fail-loud, same principle as the unknown-PLATFORM case one
+# level deeper): silently dropping it would resolve to fewer/no formats and skip
+# the matching bundle step, failing later with a confusing message. `all_targets`
+# is the platform's known set.
 requested=""
 for tok in ${raw//,/ }; do
   if [ "${tok}" = "all" ]; then
     requested="${requested} ${all_targets}"
   else
+    known=0
+    for k in ${all_targets}; do
+      [ "${tok}" = "${k}" ] && { known=1; break; }
+    done
+    if [ "${known}" -eq 0 ]; then
+      echo "::error::unknown bundle target '${tok}' for ${PLATFORM} (known: ${all_targets// /, })"
+      exit 1
+    fi
     requested="${requested} ${tok}"
   fi
 done
