@@ -51,13 +51,15 @@ orc watch 350 --auto              # full auto-fix: spawn a fresh agent on ADDRES
 orc watch 350 --repo ~/h/dodot --interval 60
 ```
 
-Two human gates are never automated: the **merge** (READY flips draft→ready and
-pages you) and a fired **circuit breaker** (always pages, never acts).
+One human gate is never automated: the **merge** (READY flips draft→ready and
+pages you). Under the stopping rule (6 rounds / all-nitpick) an otherwise-ready
+PR routes to READY on its own, so a `BLOCKED` status is always a real, fixable
+blocker (failing CI, merge conflict, behind base) — never a "stop everything"
+breaker. The watcher fixes it like any other block.
 
 | Transition | notify-only | `--auto` |
 |---|---|---|
 | `ADDRESSING` / `BLOCKED` (check/conflict) | ping you to drive | spawn a fresh fixer agent |
-| `BLOCKED` (breaker) | page — never act | page — never act |
 | `READY` | flip draft→ready, page | flip draft→ready, page |
 | pending / validating | quiet | quiet |
 

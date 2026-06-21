@@ -198,6 +198,19 @@ def test_empty_round_is_not_all_nitpick():
     assert not is_all_nitpick_round(rnd)
 
 
+def test_nit_marker_is_word_bounded_not_substring():
+    # `nit:` must NOT fire inside an unrelated word like "unit:" — otherwise a
+    # substantive round ("unit: add a test for X") would read as all-nitpick and
+    # stop the loop early.
+    rnd = build_rounds(
+        ctx(
+            [review(1, "c1")],
+            findings=[finding(1, "a.py", 1, "unit: add a test for the new path")],
+        )
+    )[0]
+    assert not is_all_nitpick_round(rnd)
+
+
 def test_all_nitpick_latest_round_stops_early():
     # Two substantive rounds, then a 3rd round that is purely cosmetic -> stop
     # early (no 4th round) even though we're far under the 6-round cap.

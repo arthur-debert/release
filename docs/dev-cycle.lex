@@ -61,8 +61,12 @@ The Development Life Cycle
         next release. Never hand-edit `CHANGELOG.md`.
 
         The implementer runs `release-core gate` until green before opening the
-        PR. The gate is lint/format/static only — it runs the repo's `test` verb
-        too, since CI runs tests as a separate required check (tooling.lex §2).
+        PR. The gate is lint/format/static only — it deliberately does NOT run
+        the test suite, so a green gate is necessary but not sufficient for "CI
+        will be green". The implementer also runs the Kind's tests separately
+        (`release-core test*` / `cargo test` / `npm test` / `pytest`; see
+        `release-core how-to`), since CI runs them as a separate required check
+        (tooling.lex §2).
 
         Gate fidelity: a local check that reads ambient local state — a sibling
         `../repo` checkout, a tool only your machine has, an env var CI doesn't

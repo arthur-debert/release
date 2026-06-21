@@ -178,9 +178,6 @@ class _WatchSink(watch.Sink):
     def notify(self, pr, status) -> None:
         self._desktop(f"PR #{pr}: {status.state.value}", status.next_action)
 
-    def page(self, pr, status, *, reason) -> None:
-        self._desktop(f"PR #{pr} needs you — {reason}", status.next_action)
-
     def flip_ready(self, pr, status) -> None:
         # Idempotent enough: `gh pr ready` on a non-draft PR just errors out.
         subprocess.run(
@@ -199,8 +196,8 @@ class _WatchSink(watch.Sink):
     def _desktop(self, title: str, body: str) -> None:
         print(f">>> {title} — {body}")
         if sys.platform == "darwin":
-            # Escape quotes in BOTH fields, else a breaker name / reason with a
-            # quote breaks the osascript string and the notification silently fails.
+            # Escape quotes in BOTH fields, else a title/body with a quote breaks
+            # the osascript string and the notification silently fails.
             safe_body = body.replace('"', "'")
             safe_title = title.replace('"', "'")
             subprocess.run(

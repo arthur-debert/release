@@ -26,10 +26,14 @@ def test_ready_flips_and_pages_not_auto_mergeable():
     assert decide(status(TaskState.READY), auto=False) is Action.FLIP_READY
 
 
-def test_breaker_always_pages_never_acts():
+def test_blocked_with_breaker_is_still_a_fixable_block():
+    # Under the stopping rule a `breaker` on a BLOCKED status is only recorded
+    # metadata (state.evaluate stamps it before the CI/merge gates). It is NOT a
+    # halt signal — the block is a real, fixable CI/conflict, so --auto spawns a
+    # fixer and pager mode notifies, exactly like a breaker-less BLOCKED.
     s = status(TaskState.BLOCKED, breaker="round-cap")
-    assert decide(s, auto=True) is Action.PAGE_BREAKER
-    assert decide(s, auto=False) is Action.PAGE_BREAKER
+    assert decide(s, auto=True) is Action.SPAWN_FIXER
+    assert decide(s, auto=False) is Action.NOTIFY
 
 
 def test_addressing_spawns_in_auto_notifies_otherwise():
@@ -60,9 +64,6 @@ class RecordingSink(Sink):
 
     def notify(self, pr, status):
         self.calls.append(("notify", pr))
-
-    def page(self, pr, status, *, reason):
-        self.calls.append(("page", pr))
 
     def flip_ready(self, pr, status):
         self.calls.append(("flip_ready", pr))
@@ -120,12 +121,14 @@ def test_poll_survives_status_error_and_keeps_going():
 
 
 def test_poll_handles_several_prs():
+    # PR 1 is READY (flip); PR 2 is a fixable BLOCKED that happens to carry a
+    # stale `breaker` — under --auto it spawns a fixer, NOT a page.
     sink = RecordingSink()
     feed = {1: status(TaskState.READY), 2: status(TaskState.BLOCKED, breaker="all-nitpick")}
     poll_once([1, 2], get_status=feed.get, last_states={}, sink=sink, auto=True)
     kinds = {(k, p) for k, p in sink.calls}
     assert ("flip_ready", 1) in kinds
-    assert ("page", 2) in kinds
+    assert ("spawn_fixer", 2) in kinds
 
 
 # --- fixer prompt ---------------------------------------------------------
@@ -139,10 +142,12 @@ def test_run_is_bounded_and_dedups_across_passes():
     assert sink.calls == [("log", 1)]
 
 
-def test_fixer_prompt_is_fresh_and_breaker_aware():
+def test_fixer_prompt_is_fresh_and_fixes_blocked():
     p = build_fixer_prompt(42)
     assert "PR #42" in p
     assert "gh-task-status 42" in p
-    assert "breaker" in p.lower() and "STOP" in p
+    # The prompt orients the fixer: BLOCKED is a real, fixable blocker, not a
+    # stop signal — fix it rather than halting.
+    assert "BLOCKED" in p and "fixable" in p.lower()
     assert "handoff" in p.lower()
     assert "do not merge" in p.lower()

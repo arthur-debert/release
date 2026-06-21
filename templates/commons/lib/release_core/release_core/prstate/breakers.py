@@ -26,6 +26,7 @@ real reason BLOCKS it; the stopping rule never invents a block of its own.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from .model import PullContext
@@ -33,13 +34,18 @@ from .reviewers import ReviewerAdapter, required_reviewers
 
 ROUND_CAP = 6  # the 6th round is the last; there is no 7th
 
-# Substrings that mark a finding as a nitpick — matched case-insensitively
-# against the comment body. A round whose findings are ALL nitpicks stops the
-# loop early (the agent flips to READY rather than opening another round for
-# cosmetic-only feedback). Reviewers (Copilot, CodeRabbit, …) tag low-stakes
-# comments with these markers; a plain comment with none of them is treated as
-# substantive, so the rule only ever stops EARLY when the round is unambiguously
-# cosmetic.
+# Markers that tag a finding as a nitpick — matched case-insensitively against
+# the comment body. A round whose findings are ALL nitpicks stops the loop early
+# (the agent flips to READY rather than opening another round for cosmetic-only
+# feedback). Reviewers (Copilot, CodeRabbit, …) tag low-stakes comments with
+# these markers; a plain comment with none of them is treated as substantive, so
+# the rule only ever stops EARLY when the round is unambiguously cosmetic.
+#
+# Each marker is matched on a LEFT word boundary (`\b`) so a short token like
+# `nit:` cannot fire on a substring of an unrelated word — e.g. "unit: add a
+# test" must NOT read as a nitpick. The right side is left open because several
+# markers end in punctuation (`nit:`, `(nit)`, `optional:`) that already
+# delimits them.
 _NITPICK_MARKERS = (
     "nitpick",
     "nit:",
@@ -54,6 +60,20 @@ _NITPICK_MARKERS = (
     "style suggestion",
     "optional:",
     "(optional)",
+)
+
+
+def _marker_pattern(marker: str) -> str:
+    # Anchor a left word boundary only when the marker starts with a word
+    # character (so `nit:` won't fire inside "unit:"). Markers that open with
+    # punctuation (`(nit)`, `(optional)`) are already delimited by that punctuation.
+    escaped = re.escape(marker)
+    return (r"\b" + escaped) if marker[:1].isalnum() else escaped
+
+
+_NITPICK_RE = re.compile(
+    "|".join(_marker_pattern(marker) for marker in _NITPICK_MARKERS),
+    re.IGNORECASE,
 )
 
 
@@ -113,9 +133,12 @@ def build_rounds(
 
 
 def _is_nitpick(body: str) -> bool:
-    """True iff a comment body carries a nitpick marker (case-insensitive)."""
-    low = body.lower()
-    return any(marker in low for marker in _NITPICK_MARKERS)
+    """True iff a comment body carries a nitpick marker (case-insensitive).
+
+    Markers match on a left word boundary, so `nit:` fires on "nit: rename"
+    but NOT on "unit: add a test".
+    """
+    return _NITPICK_RE.search(body) is not None
 
 
 def is_all_nitpick_round(rnd: Round) -> bool:
