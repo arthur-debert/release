@@ -1215,11 +1215,17 @@ EOF
   [ "$status" -ne 0 ]   # no `-dev` package present
   run grep -Eq -- '(^|[[:space:]])mold([[:space:]]|\\|$)' <<<"$code"
   [ "$status" -ne 0 ]   # no `mold` package present
-  # the packaging/runtime deps it DOES need
-  grep -q 'patchelf' "$slim"
-  grep -q 'libwebkit2gtk-4.1-0' "$slim"
-  grep -q 'libgtk-3-0' "$slim"
-  grep -q 'librsvg2-2' "$slim"
+  # the packaging/runtime deps it DOES need. Each is a hard presence assertion
+  # (`run grep …; [ "$status" -eq 0 ]`) so a future edit can't silently drop one.
+  for pkg in \
+    patchelf \
+    libwebkit2gtk-4.1-0 \
+    libgtk-3-0 \
+    librsvg2-2 \
+    libayatana-appindicator3-1; do
+    run grep -q -- "$pkg" "$slim"
+    [ "$status" -eq 0 ]   # required runtime/packaging dep "$pkg" present
+  done
 }
 
 @test "tauri-app.yml sign job is gated on should-sign (optional signing)" {

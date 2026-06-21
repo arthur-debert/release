@@ -13,7 +13,13 @@
 #   .deb       -> `dpkg-deb` (preinstalled on the ubuntu runner) + `patchelf`.
 #   .AppImage  -> `patchelf` + the RUNTIME GUI libraries linuxdeploy copies into
 #                 the image: the webkit2gtk + gtk runtime, the gstreamer runtime
-#                 (webkit pulls it in), and librsvg2 for icon rasterization.
+#                 (webkit pulls it in), librsvg2 for icon rasterization, and the
+#                 ayatana appindicator RUNTIME lib. A tray-enabled tauri binary
+#                 links appindicator; linuxdeploy must find the runtime .so
+#                 PRESENT to discover/copy it, else the AppImage ships a subtly
+#                 broken tray — and may still build green, so an RC wouldn't
+#                 catch it. (Runtime `-1`, not the `-dev` header — still no
+#                 compile toolchain.)
 #                 The appimage tooling itself is downloaded by tauri at bundle
 #                 time, so it is not installed here.
 #
@@ -32,4 +38,5 @@ sudo apt-get install -y \
   libgstreamer1.0-0 \
   libgstreamer-plugins-base1.0-0 \
   librsvg2-2 \
+  libayatana-appindicator3-1 \
   patchelf
