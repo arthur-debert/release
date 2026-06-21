@@ -12,15 +12,37 @@
 # the version-file bump (the bump only rewrites version strings; it ships no code
 # that wasn't already on the base sha and CI-checked there).
 #
+# SCOPED TO THE CODE GATE. The assertion targets the CODE gate (ci/check, ci/e2e,
+# native-e2e/*, request/*, …) — NOT the RELEASE pipeline's own check-runs. The
+# release runs ON the base sha, so its own check-runs land on that same sha:
+#   - the CURRENT cut's in-progress `release / prepare` (still running when this
+#     guard executes) would otherwise read as "not finished" → never green; and
+#   - a PRIOR failed release attempt leaves a `release / prepare = failure` on the
+#     sha permanently, which would block every future cut of that sha.
+# Either makes a real cut un-passable even though the code is gated and green. So
+# we EXCLUDE the release pipeline's check-runs and assert only the rest:
+#   1. by NAME — drop any check-run whose name starts with "release /" (the
+#      conventional caller-job name for the reusable release workflow: "release /
+#      preflight", "release / prepare", "release / build (…)", "release / sign /
+#      sign", "release / release"). This is a NAMING-CONVENTION assumption.
+#   2. by CHECK SUITE (belt-and-suspenders, covers a consumer whose caller job is
+#      NOT named "release") — when GITHUB_RUN_ID is set, also drop check-runs in
+#      the current run's check_suite. Degrades gracefully: skipped silently when
+#      GITHUB_RUN_ID is absent (local invocation) or the lookup fails.
+#
 # Env vars:
 #   BASE_SHA            commit SHA to assert green (required)
 #   GITHUB_REPOSITORY   owner/repo (provided by Actions; required)
 #   GH_TOKEN            token for `gh api` auth (required for private repos)
+#   GITHUB_RUN_ID       current release run id (optional; enables the check_suite
+#                       exclusion — the current run's own suite is dropped)
 #
-# Success criterion: the sha has at least one check-run AND every check-run is in
-# a passing terminal state (success / neutral / skipped). ANY failing, cancelled,
-# timed-out, action-required, or still-running check fails fast. ZERO check-runs
-# (absent CI) also fails — we never release a sha we can't prove was gated.
+# Success criterion: AFTER excluding the release pipeline's runs, the sha has at
+# least one (code-gate) check-run AND every one is in a passing terminal state
+# (success / neutral / skipped). ANY failing, cancelled, timed-out,
+# action-required, or still-running check fails fast. ZERO code-gate check-runs
+# (none left after exclusion) also fails — we never release a sha we can't prove
+# was gated.
 set -euo pipefail
 
 : "${BASE_SHA:?BASE_SHA is required}"
@@ -34,6 +56,21 @@ fi
 if ! command -v jq >/dev/null 2>&1; then
 	echo "::error::jq is not on PATH — needed to reduce the check-runs response (gh --slurp is piped to jq)." >&2
 	exit 1
+fi
+
+err_log="$(mktemp)"
+trap 'rm -f "${err_log}"' EXIT
+
+# Belt-and-suspenders: resolve THIS run's check_suite so we can exclude the
+# current release's own check-runs even when the caller job isn't named
+# "release". Optional + best-effort: only when GITHUB_RUN_ID is set (Actions),
+# and a lookup failure leaves it empty (the name-based exclusion still applies).
+# Empty string means "exclude nothing by suite" in the jq filter below.
+exclude_suite=""
+if [ -n "${GITHUB_RUN_ID:-}" ]; then
+	exclude_suite="$(gh api \
+		"repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+		--jq '.check_suite_id // empty' 2>>"${err_log}" || true)"
 fi
 
 # Fetch every check-run on the sha. --slurp collects all pages into one array of
@@ -52,12 +89,17 @@ fi
 # stderr into the same file (append — they run concurrently in the pipe) so a jq
 # failure (missing jq, unexpected JSON shape) surfaces its message too, not an
 # empty/misleading report.
-err_log="$(mktemp)"
-trap 'rm -f "${err_log}"' EXIT
+#
+# EXCLUSION happens FIRST (before group_by), so the release pipeline's runs never
+# enter the per-name collapse: drop names starting with "release /", and — when
+# $suite is non-empty — drop runs in the current release run's check_suite.
 if ! runs="$(gh api \
 	"repos/${GITHUB_REPOSITORY}/commits/${BASE_SHA}/check-runs" \
 	--paginate --slurp 2>>"${err_log}" \
-	| jq -r '[.[].check_runs[]]
+	| jq -r --arg suite "${exclude_suite}" '
+	      [ .[].check_runs[]
+	        | select((.name // "") | startswith("release /") | not)
+	        | select($suite == "" or ((.check_suite.id | tostring) != $suite)) ]
 	      | group_by(.name)
 	      | map(max_by(.started_at // "", .completed_at // ""))
 	      | .[] | "\(.status) \(.conclusion // "")"' 2>>"${err_log}")"; then
@@ -67,7 +109,8 @@ if ! runs="$(gh api \
 fi
 
 if [ -z "${runs}" ]; then
-	echo "::error::release base sha ${BASE_SHA} is not CI-green — no check-runs found on it." >&2
+	echo "::error::no non-release check-runs found on ${BASE_SHA} — cannot prove the code was gated." >&2
+	echo "::error::(The release pipeline's own check-runs are excluded; only the CODE gate counts.)" >&2
 	echo "::error::Releasing un-gated code is refused (epic #811). Push the release base to a branch whose CI ran and is green." >&2
 	exit 1
 fi
