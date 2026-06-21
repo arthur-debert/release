@@ -124,6 +124,21 @@ teardown() {
   [[ "$output" != *"no check-runs found"* ]]
 }
 
+@test "a jq failure (unexpected JSON shape) surfaces jq's stderr, not an empty report" {
+  # The script pipes the slurped API JSON to its OWN jq. If that jq fails (here
+  # the slurped value is a string, so `[.[].check_runs[]]` can't index it), its
+  # stderr must be captured into the same err log and surfaced — not swallowed,
+  # leaving a misleading empty "failed to query" report. Regression for the
+  # jq-stderr capture (#846 review).
+  export CHECK_RUNS_JSON='"not-an-object"'
+  run bash "$SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"failed to query check-runs"* ]]
+  # jq's own diagnostic is present (it indexes a string with check_runs)
+  [[ "$output" == *"check_runs"* ]]
+  [[ "$output" != *"no check-runs found"* ]]
+}
+
 @test "missing BASE_SHA errors" {
   unset BASE_SHA
   run bash "$SCRIPT"
