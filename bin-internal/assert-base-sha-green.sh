@@ -31,6 +31,11 @@ if ! command -v gh >/dev/null 2>&1; then
 	exit 1
 fi
 
+if ! command -v jq >/dev/null 2>&1; then
+	echo "::error::jq is not on PATH — needed to reduce the check-runs response (gh --slurp is piped to jq)." >&2
+	exit 1
+fi
+
 # Fetch every check-run on the sha. --slurp collects all pages into one array of
 # response objects (so a sha with >100 runs is fully covered) and lets jq reduce
 # across the WHOLE set at once — needed because the API returns EVERY historical
