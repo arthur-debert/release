@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Bundle a pre-compiled Tauri app UNSIGNED (post-hoc signing path, WS4).
+# Bundle a pre-compiled Tauri app UNSIGNED (the package job, WS4).
 #
-# Runs after build-tauri.sh's compile phase (`tauri build --no-bundle`).
+# Runs after build-tauri.sh compiles (`tauri build --no-bundle`).
 # `tauri bundle --no-sign` packages the already-built binary without
 # signing — that's what keeps the bundle unsigned so the reusable
 # sign-notarize-mac workflow can codesign + notarize it later. Re-running

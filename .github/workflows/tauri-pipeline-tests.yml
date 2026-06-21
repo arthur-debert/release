@@ -1,0 +1,51 @@
+name: tauri pipeline tests
+
+# Unit BATS suite for the decomposed Tauri pipeline shell logic (#811/#815/#817):
+# build-tauri.sh compile-only entry, bundle-tauri.sh unsigned bundling + mac
+# .app packaging, reseal-mac-dmg.sh hdiutil reseal, unpack-unsigned-app.sh +
+# enumerate-macho.sh signing helpers, stage/restore-tauri-compile.sh cross-job
+# artifact, assert-tauri-bundle-binary.sh integrity guard, and
+# stage-release-assets.sh sign-agnostic asset selection. Hermetic — stubs
+# npx / hdiutil on PATH.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin-internal/build-tauri.sh"
+      - "bin-internal/bundle-tauri.sh"
+      - "bin-internal/reseal-mac-dmg.sh"
+      - "bin-internal/unpack-unsigned-app.sh"
+      - "bin-internal/enumerate-macho.sh"
+      - "bin-internal/stage-tauri-compile.sh"
+      - "bin-internal/restore-tauri-compile.sh"
+      - "bin-internal/assert-tauri-bundle-binary.sh"
+      - "bin-internal/stage-release-assets.sh"
+      - "tests/tauri-pipeline/**"
+      - ".github/workflows/tauri-pipeline-tests.yml"
+  pull_request:
+    paths:
+      - "bin-internal/build-tauri.sh"
+      - "bin-internal/bundle-tauri.sh"
+      - "bin-internal/reseal-mac-dmg.sh"
+      - "bin-internal/unpack-unsigned-app.sh"
+      - "bin-internal/enumerate-macho.sh"
+      - "bin-internal/stage-tauri-compile.sh"
+      - "bin-internal/restore-tauri-compile.sh"
+      - "bin-internal/assert-tauri-bundle-binary.sh"
+      - "bin-internal/stage-release-assets.sh"
+      - "tests/tauri-pipeline/**"
+      - ".github/workflows/tauri-pipeline-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/tauri-pipeline/

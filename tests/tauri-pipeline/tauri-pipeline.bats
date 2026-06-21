@@ -1,18 +1,21 @@
 #!/usr/bin/env bats
 
-# Unit suite for the WS3+WS4 post-hoc signing shell logic (#815):
-#   - build-tauri.sh   BUILD_PHASE dispatch (compile vs all)
+# Unit suite for the decomposed Tauri pipeline shell logic (#811/#815/#817):
+#   - build-tauri.sh   compile-only entry (`tauri build --no-bundle`)
 #   - bundle-tauri.sh  unsigned bundle + mac .app packaging (no collision
 #                      with tauri's own .app.tar.gz updater bundle; forces
 #                      `app` into the mac targets)
 #   - reseal-mac-dmg.sh  volname derivation + hdiutil invocation (stubbed)
 #   - unpack-unsigned-app.sh  one-app extraction + zero/multi errors
 #   - enumerate-macho.sh  nested signable Mach-O enumeration (inner-first)
-#   - stage-release-assets.sh  sign-mode-agnostic release asset selection (WS5)
+#   - stage-release-assets.sh  sign-agnostic release asset selection (WS5)
+#   - tauri-app.yml    pipeline wiring invariants (no sign-mode; one
+#                      decomposed path; sign is optional)
 #
 # Hermetic: stubs `npx` / `hdiutil` on PATH; `tar` / `find` / `file` are real.
 
 BIN="${BATS_TEST_DIRNAME}/../../bin-internal"
+WORKFLOW="${BATS_TEST_DIRNAME}/../../.github/workflows/tauri-app.yml"
 
 setup() {
   TMP="$(mktemp -d)"
@@ -49,24 +52,27 @@ make_macho() {
   printf '\xcf\xfa\xed\xfe\x07\x00\x00\x01\x03\x00\x00\x00\x02\x00\x00\x00' > "$1"
 }
 
-# --- build-tauri.sh -------------------------------------------------------
+# --- build-tauri.sh (compile-only) ----------------------------------------
+# The build job only ever COMPILES — the fused compile+bundle+sign `tauri
+# build` (old inline sign-mode) was removed. build-tauri.sh always runs
+# `tauri build --no-bundle`; bundling is a separate job (bundle-tauri.sh).
 
-@test "build-tauri compile phase runs tauri build --no-bundle" {
-  run env BUILD_PHASE=compile bash "$BIN/build-tauri.sh"
+@test "build-tauri runs tauri build --no-bundle (compile only)" {
+  run bash "$BIN/build-tauri.sh"
   [ "$status" -eq 0 ]
   grep -q 'tauri build --no-bundle' "$NPX_LOG"
+  # never bundles in the build job
   ! grep -q 'tauri bundle' "$NPX_LOG"
 }
 
-@test "build-tauri default (all) runs full tauri build" {
+@test "build-tauri never produces a bundle (no fused inline path)" {
+  # Even with BUNDLES set (a stale caller env), the build job compiles only —
+  # the script ignores BUNDLES and never fuses bundling/signing in.
   run env BUNDLES=dmg bash "$BIN/build-tauri.sh"
   [ "$status" -eq 0 ]
-  grep -q 'tauri build --bundles dmg' "$NPX_LOG"
-}
-
-@test "build-tauri rejects an unknown phase" {
-  run env BUILD_PHASE=bogus bash "$BIN/build-tauri.sh"
-  [ "$status" -ne 0 ]
+  grep -q 'tauri build --no-bundle' "$NPX_LOG"
+  ! grep -q 'tauri bundle' "$NPX_LOG"
+  ! grep -q -- '--bundles' "$NPX_LOG"
 }
 
 # --- bundle-tauri.sh ------------------------------------------------------
@@ -379,9 +385,9 @@ sign_mac_decides() {
 
 # --- stage-release-assets.sh (WS5 #816) -----------------------------------
 # Flattens per-platform bundle subdirs into the release asset dir,
-# sign-mode-agnostically: post-hoc ships the SIGNED mac dmg (drops the unsigned
-# bundle-mac + its reseal payload); inline ships bundle-mac; both ship
-# linux/win. `find`/`cp` are real, no stubs.
+# sign-agnostically: SIGNED=true ships the SIGNED mac dmg (drops the unsigned
+# bundle-mac + its reseal payload); SIGNED=false ships the unsigned bundle-mac;
+# both ship linux/win. `find`/`cp` are real, no stubs.
 
 # Build a downloads/ tree with one subdir per artifact. Also clears out/ so a
 # prior test's staged assets can't leak into this one (test independence).
@@ -397,9 +403,9 @@ stage_fixture() {
   echo msi            > downloads/bundle-windows/App_1.0.0.msi
 }
 
-@test "stage-release-assets post-hoc ships the SIGNED mac dmg + linux/win, not the unsigned mac" {
+@test "stage-release-assets signed ships the SIGNED mac dmg + linux/win, not the unsigned mac" {
   stage_fixture
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -eq 0 ]
   # the shipped dmg is the SIGNED one
@@ -412,20 +418,20 @@ stage_fixture() {
   [ -e out/App_1.0.0.msi ]
 }
 
-@test "stage-release-assets inline ships bundle-mac (inline-signed) + linux/win, skips -signed" {
+@test "stage-release-assets unsigned ships bundle-mac + linux/win, skips -signed" {
   stage_fixture
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -eq 0 ]
-  # inline ships the in-build-signed mac dmg (the bundle-mac one)
+  # the unsigned path ships the unsigned mac dmg (the bundle-mac one)
   [ "$(cat out/App_1.0.0.dmg)" = "unsigned-dmg" ]
   [ -e out/App_1.0.0_amd64.deb ]
   [ -e out/App_1.0.0.msi ]
 }
 
-@test "stage-release-assets post-hoc never emits two dmgs with the same name (collision)" {
+@test "stage-release-assets signed never emits two dmgs with the same name (collision)" {
   stage_fixture
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -eq 0 ]
   # exactly one App_1.0.0.dmg in the asset dir
@@ -436,7 +442,7 @@ stage_fixture() {
   rm -rf downloads out; mkdir -p downloads/bundle-linux downloads/bundle-windows
   echo deb > downloads/bundle-linux/App.deb
   echo msi > downloads/bundle-windows/App.msi
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=false \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=false \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -eq 0 ]
   [ -e out/App.deb ]
@@ -445,38 +451,38 @@ stage_fixture() {
 
 @test "stage-release-assets fails when nothing was staged" {
   rm -rf downloads out; mkdir -p downloads
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
 }
 
-@test "stage-release-assets post-hoc HARD-FAILS when the signed mac bundle is missing" {
+@test "stage-release-assets signed HARD-FAILS when the signed mac bundle is missing" {
   # Only the unsigned bundle-mac present (sign job produced nothing) + linux —
   # must refuse rather than silently ship a mac-less release.
   rm -rf downloads out
   mkdir -p downloads/bundle-mac downloads/bundle-linux
   echo unsigned-dmg > downloads/bundle-mac/App.dmg
   echo deb          > downloads/bundle-linux/App.deb
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'bundle-mac-signed'
 }
 
-@test "stage-release-assets post-hoc HARD-FAILS when the signed mac bundle is empty" {
+@test "stage-release-assets signed HARD-FAILS when the signed mac bundle is empty" {
   rm -rf downloads out
   mkdir -p downloads/bundle-mac-signed downloads/bundle-linux
   echo deb > downloads/bundle-linux/App.deb   # signed dir exists but is EMPTY
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
 }
 
-@test "stage-release-assets inline HARD-FAILS when the mac bundle is missing" {
+@test "stage-release-assets unsigned HARD-FAILS when the mac bundle is missing" {
   rm -rf downloads out
   mkdir -p downloads/bundle-linux
   echo deb > downloads/bundle-linux/App.deb
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'bundle-mac'
@@ -485,7 +491,7 @@ stage_fixture() {
 @test "stage-release-assets clears stale assets in the output dir (idempotent)" {
   stage_fixture
   mkdir -p out; echo stale > out/STALE_LEFTOVER.dmg
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=post-hoc BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=true BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -eq 0 ]
   # the stale asset from a prior run must not survive into the release
@@ -493,20 +499,21 @@ stage_fixture() {
   [ "$(cat out/App_1.0.0.dmg)" = "signed-dmg" ]
 }
 
-@test "stage-release-assets fails fast on an unknown SIGN_MODE (typo guard)" {
-  # A `posthoc` typo must NOT fall through to inline and ship the unsigned mac.
+@test "stage-release-assets fails fast on a non-bool SIGNED (typo guard)" {
+  # A `yes` typo must NOT fall through to the unsigned path and ship the
+  # unsigned mac when the signed one was the one to ship.
   stage_fixture
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=posthoc BUILD_MAC=true \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=yes BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
-  echo "$output" | grep -q 'unknown SIGN_MODE'
+  echo "$output" | grep -q 'unknown SIGNED'
   # nothing was staged
   [ ! -e out/App_1.0.0.dmg ]
 }
 
 @test "stage-release-assets fails fast on a non-bool BUILD_MAC" {
   stage_fixture
-  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGN_MODE=inline BUILD_MAC=yes \
+  run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=yes \
     bash "$BIN/stage-release-assets.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'unknown BUILD_MAC'
@@ -914,4 +921,50 @@ EOF
 
 @test "assert-bundle-binary does not invoke mapfile/readarray (bash 3.2 runner)" {
   ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/assert-tauri-bundle-binary.sh"
+}
+
+# --- tauri-app.yml pipeline wiring (one decomposed path) -------------------
+# Static assertions on the reusable workflow: the two-mode wiring is gone and
+# the single decomposed path is in place — build compiles only, package always
+# runs, sign is gated on `should-sign`, and the unsigned path can skip sign.
+# (Grep-level checks; a full workflow eval needs a live dispatch.)
+
+@test "tauri-app.yml has NO sign-mode input (mode removed)" {
+  # no `sign-mode:` input key, and no `inputs.sign-mode` reference anywhere.
+  ! grep -Eq '^[[:space:]]*sign-mode:' "$WORKFLOW"
+  ! grep -q 'inputs.sign-mode' "$WORKFLOW"
+}
+
+@test "tauri-app.yml defines should-sign once as a preflight output" {
+  # the single switch: a preflight job output named should-sign.
+  grep -Eq '^[[:space:]]*should-sign:[[:space:]]*\$\{\{ steps.should-sign' "$WORKFLOW"
+}
+
+@test "tauri-app.yml package job has no mode gate (always runs)" {
+  # The package job must not carry a job-level `if:` (it always runs). Extract
+  # the package job block — from the `  package:` line up to (not including) the
+  # next top-level job key (2-space indent + name + colon) — and assert it has
+  # no `if:` whose indent is the job-property level (4 spaces).
+  block=$(sed -n '/^  package:$/,/^  [a-z][a-z-]*:$/p' "$WORKFLOW")
+  echo "$block"
+  # sanity: we actually captured the package job
+  echo "$block" | grep -q 'bundle-tauri.sh'
+  # no job-level if: (4-space-indented `if:`) in the package job
+  ! echo "$block" | grep -Eq '^    if:'
+}
+
+@test "tauri-app.yml sign job is gated on should-sign (optional signing)" {
+  grep -q "needs.preflight.outputs.should-sign == 'true'" "$WORKFLOW"
+}
+
+@test "tauri-app.yml release accepts a SKIPPED sign (unsigned path still releases)" {
+  # the explicit result gate lets the unsigned path (sign skipped) release.
+  grep -q "needs.sign.result == 'skipped'" "$WORKFLOW"
+  # and package must SUCCEED (it always runs now — not skippable)
+  grep -q "needs.package.result == 'success'" "$WORKFLOW"
+}
+
+@test "tauri-app.yml release stages assets sign-agnostically via SIGNED" {
+  # the release job passes the should-sign value as SIGNED to the stager.
+  grep -Eq '^[[:space:]]*SIGNED:[[:space:]]*\$\{\{ needs.preflight.outputs.should-sign' "$WORKFLOW"
 }
