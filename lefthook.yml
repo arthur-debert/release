@@ -168,11 +168,14 @@ pre-commit:
           [ -f "$f" ] || continue
           # Strip `#` comments, then join `\`-continued lines into one logical
           # line so multi-line `gh api` invocations are inspected as a unit
-          # (awk, not sed, for identical BSD/GNU behavior). A logical line is
+          # (awk, not sed, for identical BSD/GNU behavior). The join inserts a
+          # SPACE separator (`printf "%s "`) so a token split across a
+          # continuation (`gh \`<newline>`api`) does NOT merge into `ghapi` and
+          # slip past the `gh[[:space:]].*api` matcher. A logical line is
           # flagged when it has `gh`, `api`, `--slurp`, AND (`--jq` or
           # `--template`) — the unsupported combination.
           bad=$(sed 's/#.*//' "$f" \
-            | awk '{ if (sub(/\\$/,"")) { printf "%s", $0 } else { print } }' \
+            | awk '{ if (sub(/\\$/,"")) { printf "%s ", $0 } else { print } }' \
             | grep -nE 'gh[[:space:]].*api.*--slurp' \
             | grep -E -- '--jq|--template') || true
           if [ -n "$bad" ]; then
