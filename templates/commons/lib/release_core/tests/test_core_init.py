@@ -793,7 +793,7 @@ def test_full_force_adds_managed_paths_under_a_consumer_gitignore(tmp_path, monk
     ephemeral (never tracked), so the force-add applies only to real-file managed
     copies — the bootstrap quartet and workflow copies."""
     src = _full_source_tree(tmp_path / "src")
-    # Give the synthetic source a bootstrap real-file dest (trio member).
+    # Give the synthetic source a bootstrap real-file dest (quartet member).
     boot = os.path.join(src, "templates", "commons", "bin", "install-release-core")
     with open(boot, "w") as fh:
         fh.write("#!/usr/bin/env bash\necho install-release-core\n")
@@ -1091,7 +1091,7 @@ def _ws5_source_tree(root) -> str:
 
 @_needs_yq
 @_needs_git
-def test_full_init_writes_bootstrap_trio_as_real_executable_files(tmp_path, monkeypatch, capsys):
+def test_full_init_writes_bootstrap_quartet_as_real_executable_files(tmp_path, monkeypatch, capsys):
     src = _ws5_source_tree(tmp_path / "src")
     repo = _setup_full_repo(tmp_path, monkeypatch, src)
 

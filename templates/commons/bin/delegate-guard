@@ -22,6 +22,7 @@ Contract (Claude Code PreToolUse, matcher: Edit|Write|NotebookEdit):
 
 Allow/deny matrix (Edit/Write/NotebookEdit only):
   * subagent (agent_id present)          → ALLOW (subagents do the impl)
+  * main loop, missing/empty file_path   → ALLOW (malformed event, fail open)
   * main loop, target under ~/.claude/   → ALLOW (coordinator curates its own
                                             memory/config surface)
   * main loop, sentinel armed            → ALLOW, consume the sentinel (one-shot)
@@ -125,6 +126,12 @@ def main():
 
     tool_input = data.get("tool_input")
     file_path = tool_input.get("file_path", "") if isinstance(tool_input, dict) else ""
+
+    # Fail-OPEN on a missing/empty file_path: a real Edit/Write/NotebookEdit
+    # always carries an absolute file_path, so its absence is a malformed event,
+    # which the guard's contract says must allow (never hard-block), not deny.
+    if not file_path:
+        allow()
 
     # The coordinator's own ~/.claude/ memory/config surface stays editable.
     if under_claude_home(file_path):

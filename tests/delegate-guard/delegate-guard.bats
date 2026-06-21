@@ -123,12 +123,12 @@ PY
     [ -z "$output" ]
 }
 
-@test "missing tool_input still denies in a real repo (but never crashes)" {
-    # No file_path → under_claude_home is False → falls through to the git/
-    # sentinel path; in a real repo with no sentinel that is a deny, but the
-    # guard must not crash on the missing field.
+@test "missing tool_input fails open (allowed, never crashes)" {
+    # No file_path → a real Edit/Write/NotebookEdit always carries an absolute
+    # file_path, so its absence is a malformed event; the guard's contract says
+    # a malformed event must ALLOW (fail open), never hard-block — and never crash.
     printf '%s' '{"tool_name":"Edit","cwd":"'"$REPO"'"}' > "$BATS_TEST_TMPDIR/ev.json"
     run bash -c "'$GUARD' < '$BATS_TEST_TMPDIR/ev.json'"
     [ "$status" -eq 0 ]
-    [[ "$output" == *'"permissionDecision": "deny"'* ]]
+    [ -z "$output" ]
 }
