@@ -34,9 +34,16 @@ on:
 
 permissions:
   contents: read
+  actions: read # so the github.token fallback can reach the Actions artifacts API
 
 jobs:
   linux-bundle-smoke:
+    # Skip on PRs from forks: they can't access secrets.RELEASE_TOKEN, and
+    # github.token can't read the cross-repo consumer artifact — the job would
+    # fail at clone/download instead of gating anything. Same-repo PRs + pushes
+    # (which have RELEASE_TOKEN) run it. Fork PRs touching these files get
+    # re-validated by a maintainer push / once merged.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     env:
       # RELEASE_TOKEN pulls the consumer (cross-repo) artifact; falls back to the

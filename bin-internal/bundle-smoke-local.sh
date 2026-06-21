@@ -22,10 +22,13 @@ set -euo pipefail
 CONSUMER_REPO="${CONSUMER_REPO:-phos-editor/app}"
 FORMATS="${FORMATS:-deb appimage}"
 RELEASE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
-
+# Check tools BEFORE using them — under `set -e` a missing `gh` would otherwise
+# die with a generic "command not found" instead of these helpful messages.
 command -v docker >/dev/null 2>&1 || { echo "::error::docker not found — needed for the local linux smoke test"; exit 1; }
-[ -n "${GH_TOKEN}" ] || { echo "::error::no GH_TOKEN and \`gh auth token\` empty — needed to pull the consumer artifact"; exit 1; }
+command -v gh >/dev/null 2>&1 || { echo "::error::gh CLI not found — needed to pull the consumer artifact (and for the token)"; exit 1; }
+
+GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}"
+[ -n "${GH_TOKEN}" ] || { echo "::error::no GH_TOKEN and \`gh auth token\` empty — run \`gh auth login\` or pass GH_TOKEN"; exit 1; }
 
 echo "Cloning ${CONSUMER_REPO} (shallow) for the project tree…"
 clone="$(mktemp -d)"
@@ -53,9 +56,9 @@ docker run --rm \
     apt-get update -qq >/tmp/apt.log 2>&1
     # Bootstrap deps the GH ubuntu runner already ships but a bare container
     # lacks: `file` (appimagetool needs file(1)); `sudo` (the install-deps script
-    # calls `sudo apt-get`, and the runner has passwordless sudo); curl/git/
-    # ca-certs (node/cargo/gh).
-    apt-get install -y -qq ca-certificates curl git file sudo gh >>/tmp/apt.log 2>&1 \
+    # calls `sudo apt-get`, and the runner has passwordless sudo); `jq` (the
+    # bundle scripts read tauri.conf with it); curl/git/ca-certs (node/cargo/gh).
+    apt-get install -y -qq ca-certificates curl git file sudo jq gh >>/tmp/apt.log 2>&1 \
       || { echo "bootstrap apt install failed"; tail -20 /tmp/apt.log; exit 1; }
     # The actual package-job linux deps under test:
     bash /release/bin-internal/install-tauri-linux-deps-package.sh

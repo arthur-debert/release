@@ -76,7 +76,9 @@ echo "=== bundle smoke: ${PLATFORM} formats=[${FORMATS}] in ${CHECKOUT_DIR}/${pr
 # 1. Resolve the per-format booleans the package job uses (also validates FORMATS
 #    against the platform's known set, fail-loud).
 echo ">>> resolve-tauri-bundles.sh"
-BUNDLES="${FORMATS}" TAURI_DIR="${proj}" PLATFORM="${PLATFORM}" \
+# env -u GITHUB_OUTPUT: we only want resolve's validation side effect here, not
+# its per-format booleans written into the job's real $GITHUB_OUTPUT.
+env -u GITHUB_OUTPUT BUNDLES="${FORMATS}" TAURI_DIR="${proj}" PLATFORM="${PLATFORM}" \
   bash "${HERE}/resolve-tauri-bundles.sh" >/dev/null
 
 # 2. Bundle each requested format with the SAME script the package job calls.
@@ -85,9 +87,14 @@ for fmt in ${FORMATS}; do
   BUNDLES="${fmt}" TAURI_DIR="${proj}" bash "${HERE}/bundle-tauri.sh"
 done
 
-# 3. Collect the distributables (the package job's collector).
+# 3. Collect the distributables (the package job's collector). It emits `dir=…`
+#    to $GITHUB_OUTPUT when that's set (it IS, under CI) and ONLY falls back to
+#    stdout when it's unset — so clear it for this sub-call (`env -u`) to read the
+#    dir off stdout regardless of environment. (Without this the capture is empty
+#    under CI but works locally — the exact local-vs-CI gap this harness exists
+#    to close.)
 echo ">>> collect-tauri-bundles.sh"
-collected=$(TAURI_DIR="${proj}" PLATFORM="${PLATFORM}" \
+collected=$(env -u GITHUB_OUTPUT TAURI_DIR="${proj}" PLATFORM="${PLATFORM}" \
   bash "${HERE}/collect-tauri-bundles.sh" | sed -n 's/^dir=//p' | tail -n1)
 [ -n "${collected}" ] && [ -d "${collected}" ] || {
   echo "::error::collect-tauri-bundles.sh produced no output dir"; exit 1; }
@@ -97,8 +104,37 @@ collected=$(TAURI_DIR="${proj}" PLATFORM="${PLATFORM}" \
 echo ">>> assert-tauri-bundle-binary.sh"
 TAURI_DIR="${proj}" PLATFORM="${PLATFORM}" bash "${HERE}/assert-tauri-bundle-binary.sh"
 
-# 5. Per-format: a non-trivial bundle of the right kind exists in the collected
-#    dir. THIS is what would have failed the slim-deps PR — appimage absent.
+# Expected distributable-name token(s): tauri names bundle files after the app's
+# productName / mainBinaryName (e.g. Phos_0.0.1_amd64.deb). Collect the declared
+# identities (productName, mainBinaryName, cargo package name) so the per-format
+# name check accepts any of them (casing/identity differs across consumers) —
+# same identity set as assert-tauri-bundle-binary.sh, applied to the FILENAME.
+conf="${proj}/src-tauri/tauri.conf.json"
+cargo_toml="${proj}/src-tauri/Cargo.toml"
+name_tokens=()
+[ -f "${conf}" ] && {
+  v=$(jq -r '.productName // empty' "${conf}");    [ -n "${v}" ] && name_tokens+=("${v}")
+  v=$(jq -r '.mainBinaryName // empty' "${conf}"); [ -n "${v}" ] && name_tokens+=("${v}")
+}
+[ -f "${cargo_toml}" ] && {
+  v=$(awk 'BEGIN{q="[\042\047]"} /^[[:space:]]*\[/{h=$0;sub(/#.*/,"",h);gsub(/[[:space:]]/,"",h);p=(h=="[package]");next} p&&!d&&$0~("^[[:space:]]*name[[:space:]]*=[[:space:]]*"q){l=$0;sub(/^[^=]*=[[:space:]]*/,"",l);sub(/[[:space:]]*#.*$/,"",l);gsub(q,"",l);sub(/[[:space:]]*$/,"",l);print l;d=1}' "${cargo_toml}")
+  [ -n "${v}" ] && name_tokens+=("${v}")
+}
+
+# True if basename $1 contains any expected name token (empty set → skip, the
+# #817 binary guard already covers identity).
+name_ok() {
+  local base; base="$(basename "$1")" t
+  [ "${#name_tokens[@]}" -eq 0 ] && return 0
+  for t in "${name_tokens[@]}"; do
+    case "${base}" in *"${t}"*) return 0 ;; esac
+  done
+  return 1
+}
+
+# 5. Per-format: a non-trivial, correctly-NAMED bundle of the right kind exists
+#    in the collected dir. THIS is what would have failed the slim-deps PR —
+#    appimage absent.
 fail=0
 for fmt in ${FORMATS}; do
   glob="$(bundle_glob "${fmt}")"
@@ -110,13 +146,20 @@ for fmt in ${FORMATS}; do
   for f in "${collected}"/${glob}; do
     [ -e "${f}" ] || continue
     sz=$(filesize "${f}")
-    if [ "${sz}" -ge "${MIN_BYTES}" ]; then match="${f}"; break; fi
-    echo "::warning::${fmt}: ${f} is only ${sz} bytes (< ${MIN_BYTES}) — too small to be a real bundle"
+    if [ "${sz}" -lt "${MIN_BYTES}" ]; then
+      echo "::warning::${fmt}: ${f} is only ${sz} bytes (< ${MIN_BYTES}) — too small to be a real bundle"
+      continue
+    fi
+    if ! name_ok "${f}"; then
+      echo "::warning::${fmt}: $(basename "${f}") does not contain any expected app name { ${name_tokens[*]} }"
+      continue
+    fi
+    match="${f}"; break
   done
   if [ -n "${match}" ]; then
     echo "OK ${fmt}: $(basename "${match}") ($(filesize "${match}") bytes)"
   else
-    echo "::error::${fmt}: no '${glob}' bundle >= ${MIN_BYTES} bytes in ${collected}"
+    echo "::error::${fmt}: no '${glob}' bundle >= ${MIN_BYTES} bytes named like { ${name_tokens[*]} } in ${collected}"
     fail=1
   fi
 done
