@@ -115,7 +115,7 @@ drifts. (Not "one line," but minimal and stable.)
 
 **Bootstrap quartet** — The four real tracked files a consumer needs before
 `release-core` exists: `.claude/settings.json`, `bin/install-release-core`,
-`bin/setup-dev-env.sh`, `bin/pr-loop-guard`.
+`bin/pr-loop-guard`, `bin/delegate-guard`.
 
 **Distributed skill** — Exactly **one** skill is pushed to every consumer:
 `gh-pr-review-loop`. Four others (`lex-primer`, `lex-multirepo`,

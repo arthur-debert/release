@@ -163,7 +163,7 @@ on every run (ADR-0001):
    Two classes mirror as **real tracked copies** instead of symlinks:
    `.github/workflows/*` (GitHub won't dereference a symlink) and the
    **bootstrap quartet** — `.claude/settings.json`, `bin/install-release-core`,
-   `bin/setup-dev-env.sh`, `bin/pr-loop-guard` (WS5, #526): the SessionStart
+   `bin/pr-loop-guard`, `bin/delegate-guard` (WS5, #526): the SessionStart
    chain must be readable/executable on a FRESH CLONE, before the ephemeral
    `.release/` exists — a symlink into it dangles there and the boot could not
    start itself. Real copies are auto-refreshed by init (atomic rename, never

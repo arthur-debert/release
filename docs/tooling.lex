@@ -192,7 +192,7 @@ release-core, the gate, distribution, and workflows
       files (real copies; GitHub reads them from the tree).
     - The bootstrap quartet, as REAL tracked files (WS5, #526):
       `.claude/settings.json`, `bin/install-release-core`,
-      `bin/setup-dev-env.sh`, `bin/pr-loop-guard` — the boot chain can't
+      `bin/pr-loop-guard`, `bin/delegate-guard` — the boot chain can't
       depend on what it boots.
     - Optionally `.release-sync.yaml` — the one per-repo knob (component
       override).
