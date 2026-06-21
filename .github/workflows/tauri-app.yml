@@ -549,13 +549,26 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         run: bash .release/bin-internal/setup-cargo-git-auth.sh
 
-      # COMPILE ONLY — no bundle, no sign, no APPLE_* env. Bundling runs on a
-      # separate runner in the `package` job so the cross-job artifact is the
-      # ~tens-of-MB binary + built frontendDist, not the multi-GB target/ tree
-      # (epic #811 WS6a / the WS0 spike GO verdict). The frontend is built here
-      # (tauri's beforeBuildCommand runs during compile) and carried over,
-      # because `tauri bundle` does NOT re-run it.
-      - name: Compile (no bundle)
+      # FRONTEND build — the consumer's tauri `beforeBuildCommand` (JS/WASM),
+      # run EXPLICITLY as its own step so its (uncacheable) time is attributed
+      # in the run UI separately from the rust compile (#835). The Cache WASM
+      # step above runs first, so a cache hit still lets wasm-pack short-circuit
+      # inside beforeBuildCommand. No-op for a consumer with no beforeBuildCommand.
+      - name: Build frontend
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/build-frontend-tauri.sh
+
+      # RUST COMPILE ONLY — no bundle, no sign, no APPLE_* env, and
+      # beforeBuildCommand DISABLED so the frontend isn't re-run (the prior step
+      # built it). This is the sccache/rust-cache'd half; isolating it makes the
+      # cached compile's time legible in the UI. Bundling runs on a separate
+      # runner in the `package` job so the cross-job artifact is the ~tens-of-MB
+      # binary + built frontendDist, not the multi-GB target/ tree (epic #811
+      # WS6a / the WS0 spike GO verdict). The frontendDist carries over to the
+      # package job because `tauri bundle` does NOT re-run the frontend.
+      - name: Compile (rust)
         shell: bash
         env:
           TAURI_DIR: ${{ inputs.tauri-dir }}
@@ -653,13 +666,69 @@ jobs:
           TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/bin-internal/restore-tauri-compile.sh
 
-      - name: Bundle (unsigned)
+      # Resolve the effective per-format target list (from matrix.t.bundles, else
+      # tauri.conf .bundle.targets, expanding "all") and emit per-format booleans
+      # so each format below is its own gated, named step → per-format timing in
+      # the run UI (#835). Centralizes the mac app-forcing rule (always bundle
+      # `app` so the post-hoc signer has a reseal payload).
+      - name: Resolve bundle targets
+        id: targets
         shell: bash
         env:
           BUNDLES: ${{ matrix.t.bundles }}
           TAURI_DIR: ${{ inputs.tauri-dir }}
           PLATFORM: ${{ matrix.t.platform }}
+        run: bash .release/bin-internal/resolve-tauri-bundles.sh
+
+      # --- per-format bundle steps (each unsigned, each its own UI timing) ----
+      # Linux: deb / appimage / rpm bundled separately (rpm is the long pole —
+      # making its cost self-evident is the whole point of #835). Each gated on
+      # the resolved output.
+      - name: Bundle .deb
+        if: matrix.t.platform == 'linux' && steps.targets.outputs.deb == 'true'
+        shell: bash
+        env:
+          BUNDLES: deb
+          TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/bin-internal/bundle-tauri.sh
+
+      - name: Bundle .appimage
+        if: matrix.t.platform == 'linux' && steps.targets.outputs.appimage == 'true'
+        shell: bash
+        env:
+          BUNDLES: appimage
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/bundle-tauri.sh
+
+      - name: Bundle .rpm
+        if: matrix.t.platform == 'linux' && steps.targets.outputs.rpm == 'true'
+        shell: bash
+        env:
+          BUNDLES: rpm
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/bundle-tauri.sh
+
+      # macOS: .app + .dmg stay COUPLED in one step — `tauri bundle --bundles
+      # dmg` builds the .app internally; they aren't cleanly separable, and mac
+      # is not the long pole. `app` is always resolved true on mac (reseal
+      # payload guarantee), so `app,dmg` is requested whenever dmg is asked for,
+      # and `app` alone when a consumer asked only for app.
+      - name: Bundle macOS (.app + .dmg)
+        if: matrix.t.platform == 'mac' && (steps.targets.outputs.app == 'true' || steps.targets.outputs.dmg == 'true')
+        shell: bash
+        env:
+          BUNDLES: ${{ steps.targets.outputs.dmg == 'true' && 'app,dmg' || 'app' }}
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/bundle-tauri.sh
+
+      # Package the bundled .app into <name>.unsigned-app.tar.gz (artifact upload
+      # doesn't preserve .app symlinks/exec-bits; the signer reseals from this).
+      - name: Package macOS .app reseal payload
+        if: matrix.t.platform == 'mac'
+        shell: bash
+        env:
+          TAURI_DIR: ${{ inputs.tauri-dir }}
+        run: bash .release/bin-internal/package-mac-app.sh
 
       - name: Collect bundles
         id: bundles
