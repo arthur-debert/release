@@ -124,7 +124,8 @@ name_tokens=()
 # True if basename $1 contains any expected name token (empty set → skip, the
 # #817 binary guard already covers identity).
 name_ok() {
-  local base; base="$(basename "$1")" t
+  local t base
+  base="$(basename "$1")"
   [ "${#name_tokens[@]}" -eq 0 ] && return 0
   for t in "${name_tokens[@]}"; do
     case "${base}" in *"${t}"*) return 0 ;; esac
