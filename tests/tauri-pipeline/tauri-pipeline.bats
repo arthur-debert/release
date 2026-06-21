@@ -1214,11 +1214,13 @@ EOF
   # Hard NEGATIVE assertions (`run` + `[ "$status" -ne 0 ]`): a bare `! grep` is
   # a NEGATED command that bats' per-test `set -e` does NOT abort on unless it is
   # the final statement, so a non-final `! grep` match would pass silently.
+  # grep -F (literal): package names contain `.` (e.g. libwebkit2gtk-4.1-dev),
+  # which in a regex is a wildcard and would false-match.
   for absent in \
     libwebkit2gtk-4.1-dev \
     libsoup-3.0-dev \
     libayatana-appindicator3-dev; do
-    run grep -q -- "$absent" <<<"$code"
+    run grep -qF -- "$absent" <<<"$code"
     [ "$status" -ne 0 ]   # compile-only `-dev` header "$absent" must be absent
   done
   # `\b` is a GNU-grep extension (fails open on BSD/mac grep), so match the
@@ -1233,6 +1235,7 @@ EOF
   # grep the package args ($code), NOT the whole file — the header comment names
   # several of these packages, so a whole-file grep would pass off the prose even
   # if the actual install line dropped the dep.
+  # grep -F (literal): names contain `.` (libgstreamer1.0-0) — a regex wildcard.
   for pkg in \
     libgtk-3-dev \
     librsvg2-dev \
@@ -1242,7 +1245,7 @@ EOF
     libayatana-appindicator3-1 \
     librsvg2-common \
     patchelf; do
-    run grep -q -- "$pkg" <<<"$code"
+    run grep -qF -- "$pkg" <<<"$code"
     [ "$status" -eq 0 ]   # required bundle dep "$pkg" present
   done
 }

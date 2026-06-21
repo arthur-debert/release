@@ -653,11 +653,12 @@ jobs:
           TAURI_DIR: ${{ inputs.tauri-dir }}
         run: bash .release/bin-internal/install-js-deps.sh
 
-      # Linux bundling (.deb / .AppImage) shells out to packaging tools
-      # (patchelf) + the RUNTIME GUI libs linuxdeploy copies into the AppImage.
       # This job runs `tauri bundle` on a pre-built binary — it does NOT compile,
-      # so it uses the SLIM dep set (no `-dev` headers, no `mold`), unlike the
-      # build job's full compile set (#836).
+      # so it uses the SLIM dep set: it drops the COMPILE toolchain (the
+      # webkit/soup/appindicator `-dev` headers + `mold`) but KEEPS the two
+      # minimal `.pc`-provider `-dev` packages (libgtk-3-dev, librsvg2-dev) that
+      # AppImage bundling's linuxdeploy-plugin-gtk requires via pkg-config, plus
+      # the runtime GUI `.so`s linuxdeploy copies into the image (#836).
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
         run: bash .release/bin-internal/install-tauri-linux-deps-package.sh
