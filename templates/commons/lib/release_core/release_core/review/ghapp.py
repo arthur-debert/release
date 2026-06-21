@@ -31,7 +31,10 @@ from .. import gh
 #: feeds it to ``register``. The host/port is arbitrary (nothing listens).
 DEFAULT_REDIRECT_URL = "http://localhost:8765/callback"
 
-#: Owners a freshly minted app must be installed on (done in the GitHub web UI).
+#: EXAMPLE owners to install a freshly minted app on (done in the GitHub web UI).
+#: An app only needs installing where the bot will actually post reviews — your
+#: own account plus any orgs whose repos you review. These are the owners for
+#: THIS ecosystem (context-specific example data), not a universal requirement.
 INSTALL_OWNERS = ("arthur-debert", "lex-fmt", "phos-editor")
 
 

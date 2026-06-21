@@ -72,8 +72,13 @@ def run_and_post(
     (``release-core review app manifest`` / ``register``). If no app metadata is
     found for ``agent`` this raises a clear :class:`RuntimeError` telling the user
     to register first, rather than silently falling back to posting as the user.
+
+    The app-registration precheck is SKIPPED under ``dry_run=True``: a dry run
+    posts nothing (and mints no token), so it stays useful for previewing the
+    generated review before the app is set up. The check still fires on the real
+    post path (``dry_run=False, as_app=True``).
     """
-    if as_app and ghapp.load_app(agent) is None:
+    if as_app and not dry_run and ghapp.load_app(agent) is None:
         raise RuntimeError(
             f"No GitHub App is registered for the {agent!r} review backend, so it "
             f"cannot post as itself. Run `release-core review app manifest {agent}` "

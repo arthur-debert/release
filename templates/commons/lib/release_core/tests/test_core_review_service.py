@@ -156,6 +156,34 @@ def test_run_and_post_raises_when_app_missing(monkeypatch):
         service.run_and_post("codex", 42)
 
 
+def test_run_and_post_app_check_skipped_on_dry_run(monkeypatch):
+    # as_app=True + dry_run=True posts nothing (and mints no token), so the
+    # app-registration precheck is skipped — dry-run stays useful for previewing
+    # generation before the app is registered.
+    ctx = _ctx()
+
+    def _load_app(agent):  # pragma: no cover - must not be reached
+        raise AssertionError("load_app must not be consulted on a dry run")
+
+    monkeypatch.setattr(service.ghapp, "load_app", _load_app)
+    monkeypatch.setattr(service, "resolve_pr", lambda pr, repo=None: ctx)
+    monkeypatch.setattr(
+        service,
+        "generate_review",
+        lambda *a, **k: {"summary": {"status": "COMMENT", "overall_feedback": "x"}, "comments": []},
+    )
+    seen = {}
+    monkeypatch.setattr(
+        service.post,
+        "post_review",
+        lambda review, c, **kwargs: seen.update(kwargs) or {"dry": True},
+    )
+    result = service.run_and_post("codex", 42, dry_run=True)
+    assert seen["as_app"] is True
+    assert seen["dry_run"] is True
+    assert result["post"] == {"dry": True}
+
+
 def test_run_and_post_app_check_skipped_when_not_as_app(monkeypatch):
     # as_app=False posts as the user — no app required.
     ctx = _ctx()

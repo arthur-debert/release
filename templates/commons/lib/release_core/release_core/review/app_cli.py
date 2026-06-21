@@ -25,9 +25,11 @@ from . import ghapp
 def _print_post_create_reminders(agent: str) -> None:
     owners = ", ".join(ghapp.INSTALL_OWNERS)
     print(
-        "\nAfter the app is created, in the GitHub web UI you must:\n"
+        "\nAfter the app is created, in the GitHub web UI:\n"
         "  - upload an avatar for the app (its visible identity), and\n"
-        f"  - Install the app on each owner: {owners}.",
+        "  - install the app on each owner where the bot will post reviews —\n"
+        "    your account and any orgs whose repos you'll review\n"
+        f"    (e.g. {owners}).",
     )
 
 
