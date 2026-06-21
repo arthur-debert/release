@@ -4,7 +4,8 @@
 # The package job does NOT compile — it runs `tauri bundle` on a pre-built
 # binary downloaded as an artifact from the build job. So it needs only the
 # packaging/runtime deps, never the compile toolchain:
-#   - no `-dev` headers (libwebkit2gtk-4.1-DEV, libgtk-3-DEV, …): those are for
+#   - no `-dev` headers (e.g. libwebkit2gtk-4.1-dev, libgtk-3-dev — the dev
+#     packages, note the lowercase Debian `-dev` suffix): those are for
 #     compiling/linking the Rust app, which already happened in build.
 #   - no `mold` linker: nothing links in this job.
 #

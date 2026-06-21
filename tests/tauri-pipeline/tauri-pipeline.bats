@@ -1174,9 +1174,19 @@ EOF
 @test "slim package dep script omits the compile-only deps (no -dev, no mold) (#836)" {
   slim="${BIN}/install-tauri-linux-deps-package.sh"
   [ -x "$slim" ]
-  # never the compile toolchain
-  ! grep -Eq '\-dev\b' "$slim"
-  ! grep -Eq '(^|[[:space:]])mold($|[[:space:]\\])' "$slim"
+  # Check the actual package args, not comments — the header legitimately spells
+  # out `-dev`/`mold` to explain why they're absent. Strip `#` comment lines.
+  code=$(grep -v '^[[:space:]]*#' "$slim")
+  # Hard assertions: a bare `! grep` is a NEGATED command, which `set -e`
+  # (bats runs each test under it) does NOT abort on unless it's the test's
+  # final statement — so a non-final `! grep` that matched would pass silently.
+  # `run` + an explicit positive status check aborts on a match wherever it sits.
+  # `\b` is also a GNU-grep extension (fails open on BSD/mac grep), so match the
+  # end-of-token boundary explicitly: whitespace, line-continuation, or EOL.
+  run grep -Eq -- '-dev([[:space:]]|\\|$)' <<<"$code"
+  [ "$status" -ne 0 ]   # no `-dev` package present
+  run grep -Eq -- '(^|[[:space:]])mold([[:space:]]|\\|$)' <<<"$code"
+  [ "$status" -ne 0 ]   # no `mold` package present
   # the packaging/runtime deps it DOES need
   grep -q 'patchelf' "$slim"
   grep -q 'libwebkit2gtk-4.1-0' "$slim"
