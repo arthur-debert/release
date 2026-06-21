@@ -1,0 +1,1 @@
+- Distribute stage 1: never ship the signer reseal payload as a release asset; assert the mac deliverable is exactly one dmg (#837)

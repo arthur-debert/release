@@ -96,8 +96,16 @@ for dir in "${DOWNLOAD_DIR}"/bundle-*/; do
     esac
   fi
 
-  # Copy this artifact's files (flat) into the asset dir.
+  # Copy this artifact's files (flat) into the asset dir, EXCLUDING the
+  # `*.unsigned-app.tar.gz` reseal payload on every path. That tarball is
+  # purely the signer's input (the post-hoc unsigned .app, consumed by
+  # sign-notarize-mac); it is never a deliverable. The signed path already
+  # drops it by skipping bundle-mac wholesale, but the unsigned path ships
+  # bundle-mac directly, so the exclusion must live here to catch it.
   while IFS= read -r f; do
+    case "$(basename "${f}")" in
+      *.unsigned-app.tar.gz) echo "skip $(basename "${f}") (signer reseal payload; never a deliverable)"; continue ;;
+    esac
     cp "${f}" "${ASSETS_DIR}/"
     shipped=$((shipped + 1))
   done < <(find "${dir}" -type f)
@@ -106,6 +114,23 @@ done
 if [ "${shipped}" -eq 0 ]; then
   echo "::error::no release assets staged from ${DOWNLOAD_DIR} (signed=${SIGNED}, build-mac=${BUILD_MAC})"
   exit 1
+fi
+
+# Mac deliverable invariant: when mac is built, the staged set must contain
+# EXACTLY ONE `.dmg` (the one signed + notarized dmg the maintainer wants) and
+# ZERO `.unsigned-app.tar.gz` reseal payloads. Fail loud rather than publish a
+# release with no dmg, two colliding dmgs, or the signer's internal payload.
+if [ "${BUILD_MAC}" = "true" ]; then
+  dmg_count=$(find "${ASSETS_DIR}" -maxdepth 1 -type f -name '*.dmg' | wc -l | tr -d ' ')
+  reseal_count=$(find "${ASSETS_DIR}" -maxdepth 1 -type f -name '*.unsigned-app.tar.gz' | wc -l | tr -d ' ')
+  if [ "${dmg_count}" -ne 1 ]; then
+    echo "::error::mac deliverable invariant: expected exactly one .dmg in the release assets, found ${dmg_count}"
+    exit 1
+  fi
+  if [ "${reseal_count}" -ne 0 ]; then
+    echo "::error::mac deliverable invariant: a *.unsigned-app.tar.gz reseal payload reached the release assets (found ${reseal_count}) — it is never a deliverable"
+    exit 1
+  fi
 fi
 
 echo "staged ${shipped} asset(s):"
