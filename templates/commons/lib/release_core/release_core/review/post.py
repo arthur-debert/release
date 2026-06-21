@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 
 from .. import gh
+from . import ghapp, ghauth
 from .diff import PRContext
 
 # Map the review summary.status enum → GitHub review `event`.
@@ -222,28 +223,53 @@ def post_review(
     agent_name: str,
     event: str | None = None,
     dry_run: bool = False,
+    as_app: bool = False,
 ) -> dict:
     """Build the grouped-review payload and (unless ``dry_run``) POST it.
 
     With ``dry_run=True``: prints the payload as pretty JSON and returns it,
-    WITHOUT calling ``gh`` — safe to run anywhere.
+    WITHOUT calling ``gh`` — safe to run anywhere. When ``as_app`` is also set,
+    dry-run mints NO token (no network) and just notes that the review would be
+    authored by ``<slug>[bot]``.
+
+    With ``as_app=True`` (and not dry-run): authenticates AS the agent's GitHub
+    App installation — mints a 1-hour installation token via
+    :mod:`release_core.review.ghauth` and passes it to ``gh.rest(..., token=…)``
+    so GitHub attributes the review to ``<app-slug>[bot]`` instead of the user's
+    own ``gh`` login. With ``as_app=False`` (default) behaves exactly as before:
+    posts as the user via the normal ``gh`` auth.
 
     Otherwise POSTs via
     ``gh.rest("/repos/{repo}/pulls/{n}/reviews", method="POST", body=payload)``
     (``rest`` serializes the dict ``body`` to JSON and pipes it to
     ``gh api --input -``) and returns the parsed API response. Raises
-    ``RuntimeError`` on a ``gh`` failure with an actionable message.
+    ``RuntimeError`` on a ``gh`` / auth failure with an actionable message.
     """
     payload = build_review_payload(review, ctx, agent_name=agent_name, event=event)
 
     if dry_run:
         print(json.dumps(payload, indent=2))
+        if as_app:
+            # No token minted on dry-run (no network); just say who would author it.
+            slug = (ghapp.load_app(agent_name) or {}).get("slug", agent_name)
+            print(f"(would post as {slug}[bot])")
         return payload
 
     repo = _resolve_repo(ctx)
+
+    token: str | None = None
+    if as_app:
+        try:
+            token = ghauth.installation_token(agent_name, repo)
+        except ghauth.ReviewAuthError as exc:
+            raise RuntimeError(
+                f"Could not authenticate as the {agent_name!r} GitHub App to post "
+                f"to {repo}#{ctx.number}: {exc}"
+            ) from exc
+
     path = f"/repos/{repo}/pulls/{ctx.number}/reviews"
     try:
-        response = gh.rest(path, method="POST", body=payload)
+        response = gh.rest(path, method="POST", body=payload, token=token)
     except gh.GhError as exc:
         raise RuntimeError(f"Failed to post review to {repo}#{ctx.number}: {exc}") from exc
     return response if isinstance(response, dict) else {"response": response}

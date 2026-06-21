@@ -26,7 +26,7 @@ class _Recorder:
         self.stderr = stderr
         self.calls = []
 
-    def __call__(self, cmd, *, input=None, check=False):  # noqa: A002 — mirrors proc.run
+    def __call__(self, cmd, *, input=None, env=None, check=False):  # noqa: A002 — mirrors proc.run
         self.calls.append((cmd, input))
         return subprocess.CompletedProcess(
             cmd, self.returncode, stdout=self.stdout, stderr=self.stderr
@@ -120,6 +120,45 @@ def test_rest_plain_get_still_works(gh_on_path, monkeypatch):
     cmd, stdin = rec.calls[0]
     assert cmd == ["gh", "api", "repos/o/r"]
     assert stdin is None
+
+
+# ─── rest(token=...) — GitHub App installation auth ──────────────────────────
+
+
+class _EnvRecorder:
+    """Like _Recorder but also captures the ``env`` kwarg proc.run is called with."""
+
+    def __init__(self, stdout="", returncode=0, stderr=""):
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+        self.calls = []
+
+    def __call__(self, cmd, *, input=None, env=None, check=False):  # noqa: A002
+        self.calls.append((cmd, input, env))
+        return subprocess.CompletedProcess(
+            cmd, self.returncode, stdout=self.stdout, stderr=self.stderr
+        )
+
+
+def test_rest_token_sets_gh_token_env(gh_on_path, monkeypatch):
+    """rest(token=...) runs the gh subprocess with GH_TOKEN=<token> in its env
+    (and GITHUB_TOKEN cleared) so the call authenticates as that token."""
+    rec = _EnvRecorder(stdout='{"id": 1}')
+    monkeypatch.setattr(gh.proc, "run", rec)
+    gh.rest("repos/o/r/pulls/1/reviews", method="POST", body={"x": 1}, token="ghs_x")
+    cmd, stdin, env = rec.calls[0]
+    assert cmd == ["gh", "api", "-X", "POST", "--input", "-", "repos/o/r/pulls/1/reviews"]
+    assert env == {"GH_TOKEN": "ghs_x", "GITHUB_TOKEN": ""}
+
+
+def test_rest_without_token_passes_no_env_override(gh_on_path, monkeypatch):
+    """Default (token=None): proc.run gets env=None — the user's normal auth."""
+    rec = _EnvRecorder(stdout='{"id": 1}')
+    monkeypatch.setattr(gh.proc, "run", rec)
+    gh.rest("repos/o/r")
+    _cmd, _stdin, env = rec.calls[0]
+    assert env is None
 
 
 # ─── porcelain wrappers (Phase 1 chokepoint consolidation) ───────────────────

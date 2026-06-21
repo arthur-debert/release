@@ -10,6 +10,10 @@ phase keeps "generate" and "publish" as two explicit steps.
 
 The default ``--event`` is ``COMMENT`` because Phase 2.1 posts as the user's own
 account and GitHub 422s an APPROVE / REQUEST_CHANGES on your own PR.
+
+``--as-app`` switches the auth: instead of the user's ``gh`` login, the review
+is posted AS the agent's GitHub App installation (``<slug>[bot]``) by minting a
+short-lived installation token. The default stays user-auth.
 """
 
 from __future__ import annotations
@@ -55,6 +59,14 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="GitHub review event (default: COMMENT — safe for self-review).",
     )
     parser.add_argument(
+        "--as-app",
+        action="store_true",
+        help=(
+            "Post AS the agent's GitHub App installation (authored by "
+            "<slug>[bot]) instead of the user's gh login. Default: post as the user."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the GitHub payload that would be posted; do not call gh.",
@@ -95,6 +107,7 @@ def main(argv: list[str]) -> int:
             agent_name=args.agent,
             event=args.event,
             dry_run=args.dry_run,
+            as_app=args.as_app,
         )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)

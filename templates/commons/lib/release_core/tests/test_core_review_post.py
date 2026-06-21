@@ -193,7 +193,7 @@ def test_post_review_dry_run_does_not_call_gh(monkeypatch, capsys):
 def test_post_review_posts_once_with_right_args(monkeypatch):
     captured = {}
 
-    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False):
+    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False, token=None):
         captured["calls"] = captured.get("calls", 0) + 1
         captured["path"] = path
         captured["method"] = method
@@ -218,7 +218,7 @@ def test_post_review_posts_once_with_right_args(monkeypatch):
 def test_post_review_default_event_is_comment_self_review_safety(monkeypatch):
     captured = {}
 
-    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False):
+    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False, token=None):
         captured["body"] = body
         return {"id": 1}
 
@@ -237,7 +237,7 @@ def test_post_review_resolves_repo_when_ctx_repo_none(monkeypatch):
     def _fake_repo_view(*, json_fields=None, jq=None, **_k):
         return "inferred/repo"
 
-    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False):
+    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False, token=None):
         captured["path"] = path
         return {"id": 1}
 
@@ -254,7 +254,7 @@ def test_post_review_posts_to_canonical_slug_in_ctx(monkeypatch):
     307 on POST."""
     captured = {}
 
-    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False):
+    def _fake_rest(path, *, method=None, fields=None, body=None, paginate=False, token=None):
         captured["path"] = path
         return {"id": 1}
 

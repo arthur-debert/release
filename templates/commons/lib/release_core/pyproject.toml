@@ -18,6 +18,15 @@ requires-python = ">=3.11"
 #   click — the CLI framework backing the `release-core <group> <command>` tree.
 dependencies = ["click>=8,<9"]
 
+# Optional extras — NOT installed by default (the boot resolver installs the base
+# package only). `review-app` carries PyJWT (+ its crypto backend) for posting a
+# code review AS a GitHub App installation (`release-core review post --as-app`).
+# Most consumers never post as a bot, so it stays opt-in: install with
+# `pip install "release-core[review-app]"` (or, ad hoc, `pip install
+# "pyjwt[crypto]"`). ghauth imports jwt lazily and raises a clear hint if absent.
+[project.optional-dependencies]
+review-app = ["pyjwt[crypto]>=2.8"]
+
 # Console-scripts. The CLI cutover (#468, epic #461) retired the flat
 # maintainer-only command names — every maintainer/fleet verb is now reachable
 # ONLY through the hierarchical `release-core <group> <command>` tree (the map is
