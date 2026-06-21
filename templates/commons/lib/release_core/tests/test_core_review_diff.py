@@ -208,3 +208,27 @@ def test_resolve_pr_unresolvable_alias_raises(monkeypatch, fake_pr_view):
 
     with pytest.raises(ReviewError, match="canonical owner/name"):
         resolve_pr(365, repo="arthur-debert/does-not-exist", workdir="/work")
+
+
+def test_resolve_pr_diff_failure_raises_review_error(monkeypatch, fake_pr_view):
+    """A failing final `git diff` raises ReviewError, not a raw ProcError.
+
+    The final diff calls run with check=True, so a nonzero exit raises
+    proc.ProcError; resolve_pr wraps it as ReviewError so the facade prints an
+    actionable message rather than a stack trace.
+    """
+    from release_core import proc
+
+    fake = _FakeGit(present={"headsha123456", "origin/main"})
+    real_call = fake.__call__
+
+    def _call(cmd, **kwargs):
+        sub = cmd[3:]
+        if sub[:1] == ["diff"]:
+            raise proc.ProcError(cmd, 128, "fatal: bad revision")
+        return real_call(cmd, **kwargs)
+
+    monkeypatch.setattr(diffmod.proc, "run", _call)
+
+    with pytest.raises(ReviewError, match="failed to compute diff for PR #365"):
+        resolve_pr(365, workdir="/work")

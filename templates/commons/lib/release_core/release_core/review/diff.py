@@ -185,8 +185,13 @@ def resolve_pr(
         # base tip directly so we still produce a usable review.
         base_sha = base_point
 
-    diff = _git(workdir, ["diff", f"{base_sha}...{head_point}"]).stdout
-    names = _git(workdir, ["diff", "--name-only", f"{base_sha}...{head_point}"]).stdout
+    try:
+        diff = _git(workdir, ["diff", f"{base_sha}...{head_point}"]).stdout
+        names = _git(workdir, ["diff", "--name-only", f"{base_sha}...{head_point}"]).stdout
+    except proc.ProcError as exc:
+        raise ReviewError(
+            f"failed to compute diff for PR #{pr} ({base_sha}...{head_point}): {exc}"
+        ) from exc
     changed_files = [line for line in names.splitlines() if line.strip()]
 
     return PRContext(

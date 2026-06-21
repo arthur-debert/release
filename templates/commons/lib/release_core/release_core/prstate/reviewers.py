@@ -241,11 +241,22 @@ class _LocalReviewAdapter(ReviewerAdapter):
     Detection is head-strict like Copilot: a non-dismissed review by `matches`
     on the current head reads as done; otherwise NOT_REQUESTED (there is no
     requested edge for a local reviewer, so `requested_logins` is never
-    consulted). The bot login is matched on a stable substring (`codex` / `agy`)
-    so the user-specific app-name slug (e.g. `adr-`) is never hardcoded.
+    consulted). The bot login is matched on BOTH the GitHub App `[bot]` suffix
+    AND a stable slug fragment (`codex-review` / `agy-review`) — so a future
+    prefix (`adr-codex-review[bot]`) still matches, but a bare human login that
+    merely contains `codex` / `agy` (e.g. `codexdev`, `agytron`) does NOT, which
+    would otherwise misread as a bot review and falsely report DONE. The
+    user-specific app-name prefix (e.g. `adr-`) is never hardcoded.
     """
 
     requestable = True
+    # The stable bot-login slug fragment this reviewer matches (set by each
+    # subclass). `matches` requires the `[bot]` suffix AND this fragment.
+    bot_slug_fragment: str = ""
+
+    def matches(self, login: str) -> bool:
+        low = login.lower()
+        return "[bot]" in low and self.bot_slug_fragment in low
 
     def request(self, pr: int) -> bool:
         """Generate the review locally and POST it now (synchronous).
@@ -295,24 +306,20 @@ class CodexAdapter(_LocalReviewAdapter):
 
     name = "codex"
     instruction_files = (".github/codex-review-instructions.md",)
-
-    def matches(self, login: str) -> bool:
-        return "codex" in login.lower()
+    bot_slug_fragment = "codex-review"
 
 
 class AgyAdapter(_LocalReviewAdapter):
     """Agy — a LOCAL review backend posted as the `adr-agy-review[bot]` identity.
 
-    Matches on the `agy` substring (NOT `gemini`: the bot login is
-    `adr-agy-review`, and `gemini` belongs to the separate auto-triggering
-    GeminiAdapter). See :class:`_LocalReviewAdapter` for the request/cancel/
-    detect contract."""
+    Matches on the `agy-review` slug fragment + `[bot]` suffix (NOT `gemini`:
+    the bot login is `adr-agy-review`, and `gemini` belongs to the separate
+    auto-triggering GeminiAdapter). See :class:`_LocalReviewAdapter` for the
+    request/cancel/detect contract."""
 
     name = "agy"
     instruction_files = (".github/agy-review-instructions.md",)
-
-    def matches(self, login: str) -> bool:
-        return "agy" in login.lower()
+    bot_slug_fragment = "agy-review"
 
 
 # The adapter CATALOG: every reviewer the engine knows how to read/request. This

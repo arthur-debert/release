@@ -285,17 +285,32 @@ def test_coderabbit_request_and_cancel_go_through_gh_pr_edit(monkeypatch):
 
 
 def test_codex_and_agy_match_their_bot_logins():
-    # Substring, lowercase — matches the `adr-*-review[bot]` logins WITHOUT
+    # Requires the `[bot]` suffix AND the stable `*-review` slug fragment —
+    # matches the `adr-*-review[bot]` logins (and any future prefix) WITHOUT
     # hardcoding the user-specific `adr-` slug.
     assert CODEX.matches("adr-codex-review[bot]") is True
     assert CODEX.matches("adr-agy-review[bot]") is False
     assert AGY.matches("adr-agy-review[bot]") is True
     assert AGY.matches("adr-codex-review[bot]") is False
-    # agy keys off `agy`, NOT `gemini` (the bot login is `adr-agy-review`).
+    # agy keys off `agy-review`, NOT `gemini` (the bot login is `adr-agy-review`).
     assert AGY.matches("gemini-code-assist[bot]") is False
     # Neither matches Copilot.
     assert CODEX.matches("copilot[bot]") is False
     assert AGY.matches("copilot[bot]") is False
+
+
+def test_codex_and_agy_do_not_match_human_logins():
+    # A human login that merely CONTAINS the substring (no `[bot]` suffix, no
+    # `*-review` fragment) must NOT misread as the bot — that would falsely
+    # report a DONE review.
+    assert CODEX.matches("codexdev") is False
+    assert CODEX.matches("codex-fan") is False
+    assert CODEX.matches("codex") is False
+    assert AGY.matches("agytron") is False
+    assert AGY.matches("agy") is False
+    # `[bot]` alone isn't enough — the slug fragment must also be present.
+    assert CODEX.matches("codexbot[bot]") is False
+    assert AGY.matches("agy-helper[bot]") is False
 
 
 def test_codex_detect_done_on_head():

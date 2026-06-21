@@ -21,9 +21,16 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 from pathlib import Path
 
 from .. import gh
+
+#: A safe agent stem: lowercase letters, digits, hyphen, underscore only. The
+#: agent name is interpolated into secrets-dir filenames (`<agent>.json` /
+#: `<agent>.pem`), so anything that could escape the dir (`.`, `/`, `..`) is
+#: rejected — `_safe_agent` is applied wherever `agent` becomes a path.
+_SAFE_AGENT_RE = re.compile(r"^[a-z0-9_-]+$")
 
 #: Default redirect target baked into the manifest. No server runs here: after
 #: GitHub creates the app it redirects the browser to this URL with a ``?code=``
@@ -133,13 +140,25 @@ def write_manifest_form(
     return out_path
 
 
+def _safe_agent(agent: str) -> str:
+    """Validate ``agent`` is a safe filename stem, returning it unchanged.
+
+    The agent name is interpolated into filenames under the secrets dir, so a
+    value like ``../evil`` or ``a/b`` could write outside it. Allow only
+    ``[a-z0-9_-]+``; reject anything else (including ``.``, ``/``, ``..``).
+    """
+    if not _SAFE_AGENT_RE.match(agent):
+        raise ValueError(f"invalid agent name {agent!r} — use only letters, digits, '-', '_'")
+    return agent
+
+
 def _metadata_path(agent: str, config: Path | None = None) -> Path:
-    return (config or app_config_dir()) / f"{agent}.json"
+    return (config or app_config_dir()) / f"{_safe_agent(agent)}.json"
 
 
 def app_pem_path(agent: str, config: Path | None = None) -> Path:
     """Path to ``agent``'s saved private key (may not exist yet)."""
-    return (config or app_config_dir()) / f"{agent}.pem"
+    return (config or app_config_dir()) / f"{_safe_agent(agent)}.pem"
 
 
 def register_from_code(agent: str, code: str) -> dict:
@@ -151,6 +170,7 @@ def register_from_code(agent: str, code: str) -> dict:
     ``<config>/<agent>.json`` (0600), and returns the saved metadata. The pem
     body is never included in the returned dict (only its path).
     """
+    agent = _safe_agent(agent)
     resp = gh.rest(f"/app-manifests/{code}/conversions", method="POST")
     if not isinstance(resp, dict):
         raise RuntimeError(

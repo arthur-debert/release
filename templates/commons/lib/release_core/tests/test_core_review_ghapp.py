@@ -194,3 +194,29 @@ def test_nothing_written_under_real_home(config_home, monkeypatch, tmp_path):
     assert not (real_home / ".config").exists()
     written = list((config_home / "release-review" / "apps").iterdir())
     assert {p.name for p in written} >= {"codex.pem", "codex.json", "codex-manifest.html"}
+
+
+@pytest.mark.parametrize("bad", ["../evil", "a/b", "..", "foo.bar", "Codex", "a b"])
+def test_path_helpers_reject_unsafe_agent(config_home, bad):
+    """`agent` is interpolated into secrets-dir filenames, so a name that could
+    escape the dir (or carries a `.`/`/`/uppercase) is rejected with ValueError."""
+    with pytest.raises(ValueError, match="invalid agent name"):
+        ghapp._metadata_path(bad)
+    with pytest.raises(ValueError, match="invalid agent name"):
+        ghapp.app_pem_path(bad)
+
+
+def test_register_from_code_rejects_unsafe_agent(config_home, monkeypatch):
+    """register_from_code validates the agent BEFORE any path/REST work."""
+    monkeypatch.setattr(gh, "rest", lambda *a, **k: _fake_conversion(), raising=True)
+    with pytest.raises(ValueError, match="invalid agent name"):
+        ghapp.register_from_code("../evil", "CODE")
+    with pytest.raises(ValueError, match="invalid agent name"):
+        ghapp.register_from_code("a/b", "CODE")
+
+
+@pytest.mark.parametrize("good", ["codex", "agy", "adr-codex-review", "x_y", "ab-12"])
+def test_path_helpers_accept_safe_agent(config_home, good):
+    """Normal stems ([a-z0-9_-]) still resolve to a path under the secrets dir."""
+    assert ghapp._metadata_path(good).name == f"{good}.json"
+    assert ghapp.app_pem_path(good).name == f"{good}.pem"
