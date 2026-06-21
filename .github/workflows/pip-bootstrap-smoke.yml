@@ -338,14 +338,14 @@ jobs:
           git clone -q "$full" "$fresh"
           cd "$fresh"
           test ! -e .release || { echo "ERROR: fresh clone has a .release/ (must be ephemeral)" >&2; exit 1; }
-          for f in .claude/settings.json bin/install-release-core bin/pr-loop-guard; do
+          for f in .claude/settings.json bin/install-release-core bin/pr-loop-guard bin/delegate-guard; do
             if [ -L "$f" ]; then
               echo "ERROR: $f is a symlink on a fresh clone — the boot cannot start itself" >&2
               exit 1
             fi
             test -f "$f" || { echo "ERROR: $f missing on a fresh clone" >&2; exit 1; }
           done
-          for f in bin/install-release-core bin/pr-loop-guard; do
+          for f in bin/install-release-core bin/pr-loop-guard bin/delegate-guard; do
             test -x "$f" || { echo "ERROR: $f not executable on a fresh clone" >&2; exit 1; }
           done
           python -c "import json; json.load(open('.claude/settings.json'))" \

@@ -412,6 +412,7 @@ BOOTSTRAP_REAL_FILES: frozenset[str] = frozenset(
         ".claude/settings.json",
         "bin/install-release-core",
         "bin/pr-loop-guard",
+        "bin/delegate-guard",
     }
 )
 
