@@ -47,6 +47,8 @@ esac
 FORMATS="${FORMATS:-${default_formats}}"
 FORMATS="${FORMATS//,/ }"
 
+command -v jq >/dev/null 2>&1 || { echo "::error::jq not found on PATH (needed to read tauri.conf for the name assertions)"; exit 1; }
+
 [ -d "${CHECKOUT_DIR}" ] || { echo "::error::CHECKOUT_DIR not found: ${CHECKOUT_DIR}"; exit 1; }
 
 # Portable file size in bytes (GNU stat -c vs BSD/mac stat -f).

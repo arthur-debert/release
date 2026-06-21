@@ -78,8 +78,10 @@ docker run --rm \
     pnpm install --frozen-lockfile --ignore-scripts >/tmp/pnpm.log 2>&1 \
       || pnpm install --ignore-scripts >/tmp/pnpm.log 2>&1 \
       || { echo "pnpm install failed"; tail -20 /tmp/pnpm.log; exit 1; }
-    # Run the smoke test.
-    CHECKOUT_DIR=/app PLATFORM=linux FORMATS="'"${FORMATS}"'" \
+    # Run the smoke test. FORMATS is already in the container env (-e FORMATS=…),
+    # so read it from there — never interpolate the host value into this -c
+    # string (that would be sensitive to quotes/newlines / injection).
+    CHECKOUT_DIR=/app PLATFORM=linux \
       bash /release/bin-internal/bundle-smoke.sh
   ' || rc=$?
 

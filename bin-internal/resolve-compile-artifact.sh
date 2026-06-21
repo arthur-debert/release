@@ -37,6 +37,7 @@ artifact="compile-${PLATFORM}"
 
 [ -d "${CHECKOUT_DIR}" ] || { echo "::error::CHECKOUT_DIR not found: ${CHECKOUT_DIR}"; exit 1; }
 command -v gh >/dev/null 2>&1 || { echo "::error::gh CLI not found on PATH"; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "::error::jq not found on PATH (needed to select the newest artifact)"; exit 1; }
 
 echo "Resolving latest non-expired '${artifact}' artifact from ${CONSUMER_REPO}…" >&2
 
