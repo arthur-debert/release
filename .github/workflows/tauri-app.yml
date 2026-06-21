@@ -654,11 +654,13 @@ jobs:
         run: bash .release/bin-internal/install-js-deps.sh
 
       # Linux bundling (.deb / .AppImage) shells out to packaging tools
-      # (patchelf, librsvg) the same system-deps install provides; harmless
-      # no-op on the inputs the bundler doesn't use.
+      # (patchelf) + the RUNTIME GUI libs linuxdeploy copies into the AppImage.
+      # This job runs `tauri bundle` on a pre-built binary — it does NOT compile,
+      # so it uses the SLIM dep set (no `-dev` headers, no `mold`), unlike the
+      # build job's full compile set (#836).
       - name: Install Linux Tauri deps
         if: matrix.t.platform == 'linux'
-        run: bash .release/bin-internal/install-tauri-linux-deps.sh
+        run: bash .release/bin-internal/install-tauri-linux-deps-package.sh
 
       - name: Download compile artifact
         uses: actions/download-artifact@v7

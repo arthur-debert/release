@@ -130,8 +130,12 @@ EOF
   run env BUNDLES=dmg bash "$BIN/build-tauri.sh"
   [ "$status" -eq 0 ]
   grep -q 'tauri build --no-bundle' "$NPX_LOG"
-  ! grep -q 'tauri bundle' "$NPX_LOG"
-  ! grep -q -- '--bundles' "$NPX_LOG"
+  # `run` + status, not a bare `! grep`: a non-final negated command doesn't
+  # abort under bats' per-test `set -e`, so a match would pass silently.
+  run grep -q 'tauri bundle' "$NPX_LOG"
+  [ "$status" -ne 0 ]
+  run grep -q -- '--bundles' "$NPX_LOG"
+  [ "$status" -ne 0 ]
 }
 
 # --- resolve-tauri-bundles.sh (per-format target resolution) --------------
@@ -394,28 +398,37 @@ EOF
 
   run env APP_PATH="$app" bash "$BIN/enumerate-macho.sh"
   [ "$status" -eq 0 ]
+  # Capture into a dedicated var: the negative checks below use `run grep`, which
+  # clobbers $output, so positive/ordering checks must read $enum, not $output.
+  enum="$output"
   # top-level extras
-  echo "$output" | grep -q 'Contents/MacOS/gen_fixtures$'
-  echo "$output" | grep -q 'Contents/MacOS/Phos$'
-  echo "$output" | grep -q 'Contents/Frameworks/libfoo.dylib$'
+  grep -q 'Contents/MacOS/gen_fixtures$' <<<"$enum"
+  grep -q 'Contents/MacOS/Phos$' <<<"$enum"
+  grep -q 'Contents/Frameworks/libfoo.dylib$' <<<"$enum"
   # nested code bundle ROOTS are signed
-  echo "$output" | grep -q 'Frameworks/Helper.app$'
-  echo "$output" | grep -q 'Frameworks/Bar.framework$'
+  grep -q 'Frameworks/Helper.app$' <<<"$enum"
+  grep -q 'Frameworks/Bar.framework$' <<<"$enum"
   # RECURSION (the fix): the helper's EXTRA Mach-O is enumerated too
-  echo "$output" | grep -q 'Helper.app/Contents/MacOS/helper_tool$'
-  echo "$output" | grep -q 'Helper.app/Contents/MacOS/Helper$'
-  echo "$output" | grep -q 'Helper.app/Contents/Frameworks/libhelp.dylib$'
-  # FRAMEWORK stays opaque: its internals are NOT listed (only the root)
-  ! echo "$output" | grep -q 'Bar.framework/Versions/A/Bar$'
-  ! echo "$output" | grep -q 'Bar.framework/Versions/A/Libraries/libbar.dylib$'
+  grep -q 'Helper.app/Contents/MacOS/helper_tool$' <<<"$enum"
+  grep -q 'Helper.app/Contents/MacOS/Helper$' <<<"$enum"
+  grep -q 'Helper.app/Contents/Frameworks/libhelp.dylib$' <<<"$enum"
+  # FRAMEWORK stays opaque: its internals are NOT listed (only the root).
+  # `run` + status, not a bare `! grep`: a non-final negated command doesn't
+  # abort under bats' per-test `set -e`, so a match would pass silently.
+  run grep -q 'Bar.framework/Versions/A/Bar$' <<<"$enum"
+  [ "$status" -ne 0 ]
+  run grep -q 'Bar.framework/Versions/A/Libraries/libbar.dylib$' <<<"$enum"
+  [ "$status" -ne 0 ]
   # inner-out ordering: the helper's inner code precedes the Helper.app root
-  inner_line=$(echo "$output" | grep -n 'Helper.app/Contents/MacOS/helper_tool$' | cut -d: -f1)
-  root_line=$(echo "$output" | grep -n 'Frameworks/Helper.app$' | cut -d: -f1)
+  inner_line=$(grep -n 'Helper.app/Contents/MacOS/helper_tool$' <<<"$enum" | cut -d: -f1)
+  root_line=$(grep -n 'Frameworks/Helper.app$' <<<"$enum" | cut -d: -f1)
   [ "$inner_line" -lt "$root_line" ]
   # the top .app is EXCLUDED (caller appends it last)
-  ! echo "$output" | grep -qx "$app"
+  run grep -qx "$app" <<<"$enum"
+  [ "$status" -ne 0 ]
   # the non-Mach-O resource is skipped
-  ! echo "$output" | grep -q 'Info.plist$'
+  run grep -q 'Info.plist$' <<<"$enum"
+  [ "$status" -ne 0 ]
 }
 
 @test "enumerate-macho emits only the main executable for an .app with no nested code" {
@@ -883,8 +896,13 @@ compile_fixture() {
 }
 
 @test "stage/restore scripts do not invoke mapfile/readarray (bash 3.2 runner)" {
-  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/stage-tauri-compile.sh"
-  ! grep -Eq '^[[:space:]]*(mapfile|readarray)\b' "$BIN/restore-tauri-compile.sh"
+  # `run` + status, not a bare `! grep` (a non-final negated command doesn't
+  # abort under bats' per-test `set -e`); `\b` is a GNU-grep extension, so the
+  # word boundary is whitespace-or-EOL.
+  run grep -Eq '^[[:space:]]*(mapfile|readarray)([[:space:]]|$)' "$BIN/stage-tauri-compile.sh"
+  [ "$status" -ne 0 ]
+  run grep -Eq '^[[:space:]]*(mapfile|readarray)([[:space:]]|$)' "$BIN/restore-tauri-compile.sh"
+  [ "$status" -ne 0 ]
 }
 
 # --- assert-tauri-bundle-binary.sh (integrity guard, #817) -----------------
@@ -1114,8 +1132,12 @@ EOF
 
 @test "tauri-app.yml has NO sign-mode input (mode removed)" {
   # no `sign-mode:` input key, and no `inputs.sign-mode` reference anywhere.
-  ! grep -Eq '^[[:space:]]*sign-mode:' "$WORKFLOW"
-  ! grep -q 'inputs.sign-mode' "$WORKFLOW"
+  # `run` + status, not a bare `! grep`: a non-final negated command doesn't
+  # abort under bats' per-test `set -e`, so a match would pass silently.
+  run grep -Eq '^[[:space:]]*sign-mode:' "$WORKFLOW"
+  [ "$status" -ne 0 ]
+  run grep -q 'inputs.sign-mode' "$WORKFLOW"
+  [ "$status" -ne 0 ]
 }
 
 @test "tauri-app.yml defines should-sign once as a preflight output" {
@@ -1155,6 +1177,57 @@ EOF
   grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*Bundle Windows' "$WORKFLOW"
   # the old fused single step name is gone
   ! grep -q 'Bundle (unsigned)' "$WORKFLOW"
+}
+
+@test "tauri-app.yml package job uses the SLIM linux dep script; build uses the full one (#836)" {
+  # The package job bundles a pre-built binary (no compile), so it must install
+  # only runtime/packaging deps via install-tauri-linux-deps-package.sh — never
+  # the full compile set. The build job compiles, so it keeps the full script.
+  pkg=$(sed -n '/^  package:$/,/^  [a-z][a-z-]*:$/p' "$WORKFLOW")
+  build=$(sed -n '/^  build:$/,/^  [a-z][a-z-]*:$/p' "$WORKFLOW")
+  # Negative checks use `run` + `[ "$status" -ne 0 ]`, not a bare `! grep`: a
+  # non-final negated command does not abort under bats' per-test `set -e`, so a
+  # match would pass silently. (`install-tauri-linux-deps.sh` is NOT a substring
+  # of `…-package.sh`, so the escaped-dot pattern can't false-match the slim one.)
+  # package -> slim script only
+  echo "$pkg" | grep -q 'install-tauri-linux-deps-package.sh'
+  run grep -Eq 'install-tauri-linux-deps\.sh' <<<"$pkg"
+  [ "$status" -ne 0 ]   # package never installs the full compile script
+  # build -> full compile script, not the slim one
+  echo "$build" | grep -q 'install-tauri-linux-deps.sh'
+  run grep -q 'install-tauri-linux-deps-package.sh' <<<"$build"
+  [ "$status" -ne 0 ]   # build never installs the slim script
+}
+
+@test "slim package dep script omits the compile-only deps (no -dev, no mold) (#836)" {
+  slim="${BIN}/install-tauri-linux-deps-package.sh"
+  [ -x "$slim" ]
+  # Check the actual package args, not comments — the header legitimately spells
+  # out `-dev`/`mold` to explain why they're absent. Strip `#` comment lines.
+  code=$(grep -v '^[[:space:]]*#' "$slim")
+  # Hard assertions: a bare `! grep` is a NEGATED command, which `set -e`
+  # (bats runs each test under it) does NOT abort on unless it's the test's
+  # final statement — so a non-final `! grep` that matched would pass silently.
+  # `run` + an explicit positive status check aborts on a match wherever it sits.
+  # `\b` is also a GNU-grep extension (fails open on BSD/mac grep), so match the
+  # end-of-token boundary explicitly: whitespace, line-continuation, or EOL.
+  run grep -Eq -- '-dev([[:space:]]|\\|$)' <<<"$code"
+  [ "$status" -ne 0 ]   # no `-dev` package present
+  run grep -Eq -- '(^|[[:space:]])mold([[:space:]]|\\|$)' <<<"$code"
+  [ "$status" -ne 0 ]   # no `mold` package present
+  # the packaging/runtime deps it DOES need. Each is a hard presence assertion
+  # (`run grep …; [ "$status" -eq 0 ]`) so a future edit can't silently drop one.
+  for pkg in \
+    patchelf \
+    libwebkit2gtk-4.1-0 \
+    libgtk-3-0 \
+    libgstreamer1.0-0 \
+    libgstreamer-plugins-base1.0-0 \
+    librsvg2-2 \
+    libayatana-appindicator3-1; do
+    run grep -q -- "$pkg" "$slim"
+    [ "$status" -eq 0 ]   # required runtime/packaging dep "$pkg" present
+  done
 }
 
 @test "tauri-app.yml sign job is gated on should-sign (optional signing)" {

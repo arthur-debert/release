@@ -1,0 +1,1 @@
+- Slim the tauri package job to runtime/packaging deps only (no -dev headers, no mold) since it bundles a pre-built binary
