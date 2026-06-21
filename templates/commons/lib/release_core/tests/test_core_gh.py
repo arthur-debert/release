@@ -172,6 +172,32 @@ def test_repo_view_check_true_raises(gh_on_path, monkeypatch):
         gh.repo_view(json_fields=["nameWithOwner"], q=".nameWithOwner")
 
 
+# repo_canonical ---------------------------------------------------------------
+
+
+def test_repo_canonical_resolves_alias_to_canonical(gh_on_path, monkeypatch):
+    rec = _Recorder(stdout="phos-editor/core\n")
+    monkeypatch.setattr(gh.proc, "run", rec)
+    # An aliased/renamed slug resolves to the repo's canonical nameWithOwner.
+    assert gh.repo_canonical("arthur-debert/phos-core") == "phos-editor/core"
+    assert _argv(rec) == [
+        "gh",
+        "repo",
+        "view",
+        "arthur-debert/phos-core",
+        "--json",
+        "nameWithOwner",
+        "--jq",
+        ".nameWithOwner",
+    ]
+
+
+def test_repo_canonical_propagates_gh_error(gh_on_path, monkeypatch):
+    monkeypatch.setattr(gh.proc, "run", _Recorder(returncode=1, stderr="not found"))
+    with pytest.raises(GhError):
+        gh.repo_canonical("arthur-debert/does-not-exist")
+
+
 # repo_list --------------------------------------------------------------------
 
 

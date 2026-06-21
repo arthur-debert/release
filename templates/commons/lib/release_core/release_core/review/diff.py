@@ -119,6 +119,21 @@ def resolve_pr(
             f"pass a checkout) and re-run."
         )
 
+    # Normalize any explicit repo slug to its canonical owner/name. An aliased
+    # slug (e.g. a transferred/renamed repo) 307-redirects on GET but NOT on
+    # POST, so posting a review to it hard-fails with HTTP 307. Normalizing here
+    # — at the boundary where the external slug enters — keeps ALL downstream
+    # consumers (generation AND posting) on the canonical slug. When repo is
+    # None, gh infers it from the checkout, which is already canonical.
+    if repo is not None:
+        try:
+            repo = gh.repo_canonical(repo)
+        except gh.GhError as exc:
+            raise ReviewError(
+                f"Could not resolve repo {repo!r} to its canonical owner/name via "
+                f"`gh repo view`: {exc}"
+            ) from exc
+
     meta = _pr_meta(pr, repo)
     base_ref = meta.get("baseRefName") or "main"
     head_sha = meta.get("headRefOid") or ""

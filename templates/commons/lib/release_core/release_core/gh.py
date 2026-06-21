@@ -471,6 +471,28 @@ def repo_view(
     return _gh_raw(args)
 
 
+def repo_canonical(slug: str) -> str:
+    """Resolve a (possibly aliased/renamed) ``OWNER/NAME`` slug to its canonical
+    ``owner/name``.
+
+    GitHub keeps a 307 redirect from an old/aliased slug to the repo's current
+    canonical slug. ``gh api`` follows that redirect for GET (so review
+    *generation* works against an alias) but NOT for POST — so a write to an
+    aliased slug hard-fails with ``HTTP 307``. Normalizing the slug up front,
+    at the boundary where an external slug enters, keeps every write path on the
+    canonical owner/name.
+
+    Runs ``gh repo view <slug> --json nameWithOwner -q .nameWithOwner`` and
+    returns the stripped result. Propagates :class:`GhError` if the slug can't
+    be resolved.
+    """
+    return repo_view(
+        repo=slug,
+        json_fields=["nameWithOwner"],
+        jq=".nameWithOwner",
+    ).strip()
+
+
 def repo_list(
     owner: str,
     *,

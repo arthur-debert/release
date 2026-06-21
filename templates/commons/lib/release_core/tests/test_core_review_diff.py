@@ -143,3 +143,49 @@ def test_resolve_pr_default_workdir_is_cwd(monkeypatch, fake_pr_view, tmp_path):
     monkeypatch.setattr(diffmod.proc, "run", _FakeGit(present={"headsha123456", "origin/main"}))
     ctx = resolve_pr(365)
     assert ctx.workdir == str(tmp_path)
+
+
+def test_resolve_pr_normalizes_alias_repo_to_canonical(monkeypatch, fake_pr_view):
+    """An aliased --repo slug is normalized to its canonical owner/name so every
+    downstream consumer (generation AND posting) uses the canonical slug — the
+    write API 307s on an alias for POST."""
+    seen = {}
+
+    def _canonical(slug):
+        seen["slug"] = slug
+        return "phos-editor/core"
+
+    monkeypatch.setattr(gh, "repo_canonical", _canonical)
+    monkeypatch.setattr(diffmod.proc, "run", _FakeGit(present={"headsha123456", "origin/main"}))
+
+    ctx = resolve_pr(365, repo="arthur-debert/phos-core", workdir="/work")
+
+    assert seen["slug"] == "arthur-debert/phos-core"
+    assert ctx.repo == "phos-editor/core"
+
+
+def test_resolve_pr_none_repo_leaves_inference_to_gh(monkeypatch, fake_pr_view):
+    """repo=None is left as-is (gh infers from the checkout, already canonical) —
+    repo_canonical is never consulted."""
+
+    def _boom(_slug):
+        raise AssertionError("repo_canonical must not be called when repo is None")
+
+    monkeypatch.setattr(gh, "repo_canonical", _boom)
+    monkeypatch.setattr(diffmod.proc, "run", _FakeGit(present={"headsha123456", "origin/main"}))
+
+    ctx = resolve_pr(365, workdir="/work")
+    assert ctx.repo is None
+
+
+def test_resolve_pr_unresolvable_alias_raises(monkeypatch, fake_pr_view):
+    """A --repo slug that can't be resolved to canonical raises ReviewError."""
+
+    def _boom(_slug):
+        raise gh.GhError("repo not found")
+
+    monkeypatch.setattr(gh, "repo_canonical", _boom)
+    monkeypatch.setattr(diffmod.proc, "run", _FakeGit(present={"headsha123456", "origin/main"}))
+
+    with pytest.raises(ReviewError, match="canonical owner/name"):
+        resolve_pr(365, repo="arthur-debert/does-not-exist", workdir="/work")
