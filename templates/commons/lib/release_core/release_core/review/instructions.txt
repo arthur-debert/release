@@ -59,3 +59,8 @@ How to Measure
     by highest to lowest priority. For each, include a brief but clear description of
     where and what the issue is about, and the correct way to address it as a
     suggestion. Output a ranked list of findings, ordered highest to lowest priority.
+
+    Base your review solely on the provided diff and on reading the changed files.
+    Do NOT run build, test, or shell commands, and do NOT start background tasks —
+    this is a one-shot review, not an agentic session. Respond with ONLY the
+    requested JSON and nothing else.

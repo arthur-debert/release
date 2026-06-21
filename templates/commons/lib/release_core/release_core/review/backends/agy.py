@@ -6,9 +6,14 @@ prompt is written to a temp file and agy is pointed at it; agy has no native
 schema enforcement, so the prompt is built upstream with ``schema_inline=True``
 (the expected JSON shape is described in-prose inside it).
 
-The phos script shelled out with ``shell=True`` and a single command string;
-here the invocation is a plain argv list (the shared ``proc`` helper never uses
-a shell), so no quoting is needed.
+``MODEL_ALIASES`` maps the legacy review aliases to agy's verbatim model names
+(``agy models``). The default ``pro`` MUST resolve to a capable, non-agentic
+model: agy silently resolves a bare ``pro`` to Gemini 3.5 Flash, which in
+``--print`` mode goes agentic (runs shell/build commands instead of reviewing
+the diff) and never returns JSON — so ``pro`` is pinned to ``Gemini 3.1 Pro
+(High)`` here. Spaces/parens in the resolved name are safe: the invocation is a
+plain argv list (the shared ``proc`` helper never uses a shell), so no quoting
+is needed.
 """
 
 from __future__ import annotations
@@ -19,6 +24,17 @@ import tempfile
 from ... import proc
 from ..schema import extract_json
 from .base import Backend
+
+MODEL_ALIASES = {
+    "pro": "Gemini 3.1 Pro (High)",
+    "flash": "Gemini 3.5 Flash (High)",
+    "flash_lite": "Gemini 3.5 Flash (Low)",
+}
+
+
+def resolve_model(model: str) -> str:
+    """Map a legacy review alias to its agy model name (pass-through otherwise)."""
+    return MODEL_ALIASES.get(model, model)
 
 
 def _print_instruction(prompt_path: str) -> str:
@@ -33,7 +49,7 @@ class AgyBackend(Backend):
     binary = "agy"
 
     def __init__(self, model: str = "pro") -> None:
-        self.model = model
+        self.model = resolve_model(model)
 
     def _argv(self, prompt_path: str) -> list[str]:
         return [

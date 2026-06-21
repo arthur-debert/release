@@ -140,6 +140,23 @@ def test_codex_model_aliases():
     assert CodexBackend("gpt-5.5").model == "gpt-5.5"
 
 
+def test_agy_model_aliases():
+    # The default `pro` must NOT resolve to a bare "pro" (which agy silently maps
+    # to an agentic Gemini 3.5 Flash that never returns JSON) — it pins to Pro.
+    assert AgyBackend("pro").model == "Gemini 3.1 Pro (High)"
+    assert AgyBackend("flash").model == "Gemini 3.5 Flash (High)"
+    assert AgyBackend("flash_lite").model == "Gemini 3.5 Flash (Low)"
+    # An explicit verbatim model name passes through unchanged.
+    assert AgyBackend("Claude Opus 4.6 (Thinking)").model == "Claude Opus 4.6 (Thinking)"
+    assert AgyBackend("Gemini 3.1 Pro (High)").model == "Gemini 3.1 Pro (High)"
+
+
+def test_agy_default_model_resolves_in_argv():
+    # The resolved model lands in a single `--model=<resolved>` argv element.
+    cmd = AgyBackend().build_command("prompt body", REVIEW_SCHEMA)
+    assert "--model=Gemini 3.1 Pro (High)" in cmd["argv"]
+
+
 # --- registry -----------------------------------------------------------------
 
 
