@@ -41,6 +41,14 @@ def test_override_can_reorder_or_add_within_the_catalog():
     assert resolve_required_names(["coderabbit", "copilot"]) == ("coderabbit", "copilot")
 
 
+def test_local_backends_are_requestable_and_can_be_required():
+    # codex / agy are requestable local backends, so they are valid in the
+    # required set (they post a real review the gate can read as done).
+    assert resolve_required_names(["codex"]) == ("codex",)
+    assert resolve_required_names(["copilot", "agy"]) == ("copilot", "agy")
+    assert resolve_required_names(["codex", "agy"]) == ("codex", "agy")
+
+
 def test_unknown_reviewer_name_fails_loud():
     with pytest.raises(RequiredReviewersConfigError, match="gpt5"):
         resolve_required_names(["copilot", "gpt5"])

@@ -29,6 +29,8 @@ def test_live_addressing_real_payload(context):
         "copilot": "done_comments",
         "coderabbit": "not_requested",
         "gemini": "done_comments",
+        "codex": "not_requested",
+        "agy": "not_requested",
     }
     assert status.open_threads == 2
     assert status.cycles == 1

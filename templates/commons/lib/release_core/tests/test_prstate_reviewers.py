@@ -7,10 +7,13 @@ resolved-thread filter, and Gemini's weak (reaction/comment) signals.
 
 from __future__ import annotations
 
+import pytest
 from release_core.prstate.model import ReviewLifecycle
 from release_core.prstate.reviewers import (
     REGISTRY,
+    AgyAdapter,
     CodeRabbitAdapter,
+    CodexAdapter,
     CopilotAdapter,
     GeminiAdapter,
     required_reviewers,
@@ -19,16 +22,29 @@ from release_core.prstate.reviewers import (
 COPILOT = CopilotAdapter()
 CODERABBIT = CodeRabbitAdapter()
 GEMINI = GeminiAdapter()
+CODEX = CodexAdapter()
+AGY = AgyAdapter()
 
 
-def test_registry_catalogs_copilot_coderabbit_and_gemini():
-    # The registry is the CATALOG; which entries gate is the config knob.
-    assert [r.name for r in REGISTRY] == ["copilot", "coderabbit", "gemini"]
+def test_registry_catalogs_all_adapters():
+    # The registry is the CATALOG; which entries gate is the config knob. The
+    # local backends (codex / agy) join the GitHub-App reviewers under one
+    # interface.
+    assert [r.name for r in REGISTRY] == [
+        "copilot",
+        "coderabbit",
+        "gemini",
+        "codex",
+        "agy",
+    ]
     # `requestable` marks eligibility to be a required gate (a real request
-    # edge + the #614 attach-verification), NOT the current required set.
+    # edge + the #614 attach-verification, or — for the local backends — a
+    # synchronous run-and-post), NOT the current required set.
     assert COPILOT.requestable is True
     assert CODERABBIT.requestable is True
     assert GEMINI.requestable is False
+    assert CODEX.requestable is True
+    assert AGY.requestable is True
 
 
 def test_default_required_set_is_copilot_only():
@@ -137,6 +153,8 @@ def test_by_name_resolves_registry_adapters():
     assert by_name("copilot") is not None and by_name("copilot").name == "copilot"
     assert by_name("GEMINI") is not None and by_name("GEMINI").name == "gemini"
     assert by_name("coderabbit") is not None and by_name("coderabbit").name == "coderabbit"
+    assert by_name("codex") is not None and by_name("codex").name == "codex"
+    assert by_name("agy") is not None and by_name("agy").name == "agy"
     assert by_name("nosuchbot") is None
 
 
@@ -187,6 +205,8 @@ def test_adapters_declare_their_instruction_files():
     assert COPILOT.instruction_files == (".github/copilot-instructions.md",)
     assert CODERABBIT.instruction_files == (".coderabbit.yaml",)
     assert GEMINI.instruction_files == (".gemini/styleguide.md",)
+    assert CODEX.instruction_files == (".github/codex-review-instructions.md",)
+    assert AGY.instruction_files == (".github/agy-review-instructions.md",)
 
 
 # --- CodeRabbit adapter (release#622) ---------------------------------------
@@ -259,3 +279,131 @@ def test_coderabbit_request_and_cancel_go_through_gh_pr_edit(monkeypatch):
     assert CODERABBIT.request(55) is True
     assert CODERABBIT.cancel(55) is True
     assert calls == [(55, "coderabbitai[bot]", False), (55, "coderabbitai[bot]", True)]
+
+
+# --- local review backends: codex / agy (Phase 3) ---------------------------
+
+
+def test_codex_and_agy_match_their_bot_logins():
+    # Substring, lowercase — matches the `adr-*-review[bot]` logins WITHOUT
+    # hardcoding the user-specific `adr-` slug.
+    assert CODEX.matches("adr-codex-review[bot]") is True
+    assert CODEX.matches("adr-agy-review[bot]") is False
+    assert AGY.matches("adr-agy-review[bot]") is True
+    assert AGY.matches("adr-codex-review[bot]") is False
+    # agy keys off `agy`, NOT `gemini` (the bot login is `adr-agy-review`).
+    assert AGY.matches("gemini-code-assist[bot]") is False
+    # Neither matches Copilot.
+    assert CODEX.matches("copilot[bot]") is False
+    assert AGY.matches("copilot[bot]") is False
+
+
+def test_codex_detect_done_on_head():
+    # A review by the codex bot on the current head reads as done (head-strict).
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="h",
+        is_draft=True,
+        reviews=[Review(1, "adr-codex-review[bot]", "COMMENTED", "h", "")],
+    )
+    assert CODEX.detect(ctx) in (
+        ReviewLifecycle.DONE_CLEAN,
+        ReviewLifecycle.DONE_COMMENTS,
+    )
+
+
+def test_codex_detect_not_requested_when_empty():
+    # No review by the local reviewer → NOT_REQUESTED (no requested edge exists
+    # for a local backend, so requested_logins is never consulted).
+    from release_core.prstate.model import PullContext
+
+    ctx = PullContext(number=1, head_sha="h", is_draft=True)
+    assert CODEX.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
+    assert AGY.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
+
+
+def test_codex_detect_stale_review_is_not_done():
+    # Head-strict: a review against an earlier head does not count as done.
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "adr-codex-review[bot]", "COMMENTED", "old", "")],
+    )
+    assert CODEX.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
+
+
+def test_dismissed_codex_review_does_not_count_done():
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="h",
+        is_draft=True,
+        reviews=[Review(1, "adr-codex-review[bot]", "DISMISSED", "h", "")],
+    )
+    assert CODEX.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
+
+
+def test_codex_request_runs_and_posts(monkeypatch):
+    # request() delegates to review.service.run_and_post(name, pr, as_app=True),
+    # synchronously running + posting the local review.
+    from release_core.review import service
+
+    calls: list[tuple] = []
+
+    def _fake_run_and_post(agent, pr, **kwargs):
+        calls.append((agent, pr, kwargs))
+        return {"review": {}, "post": {}, "ctx_repo": "o/r", "pr": pr}
+
+    monkeypatch.setattr(service, "run_and_post", _fake_run_and_post)
+    assert CODEX.request(7) is True
+    assert calls == [("codex", 7, {"as_app": True})]
+
+
+def test_agy_request_runs_and_posts(monkeypatch):
+    from release_core.review import service
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        service,
+        "run_and_post",
+        lambda agent, pr, **kwargs: calls.append((agent, pr, kwargs)) or {},
+    )
+    assert AGY.request(9) is True
+    assert calls == [("agy", 9, {"as_app": True})]
+
+
+def test_local_request_propagates_backend_unavailable(monkeypatch):
+    # A missing agent CLI / unregistered app must fail LOUD, never be swallowed.
+    from release_core.review import service
+    from release_core.review.backends.base import BackendUnavailable
+
+    def _boom(agent, pr, **kwargs):
+        raise BackendUnavailable("codex CLI not on PATH")
+
+    monkeypatch.setattr(service, "run_and_post", _boom)
+    with pytest.raises(BackendUnavailable, match="not on PATH"):
+        CODEX.request(7)
+
+
+def test_local_request_propagates_app_missing_error(monkeypatch):
+    from release_core.review import service
+
+    def _boom(agent, pr, **kwargs):
+        raise RuntimeError("No GitHub App is registered for the 'codex' review backend")
+
+    monkeypatch.setattr(service, "run_and_post", _boom)
+    with pytest.raises(RuntimeError, match="No GitHub App is registered"):
+        CODEX.request(7)
+
+
+def test_local_cancel_is_a_noop():
+    # A posted review can't be withdrawn — cancel returns False, like a
+    # no-mechanism backend.
+    assert CODEX.cancel(7) is False
+    assert AGY.cancel(9) is False

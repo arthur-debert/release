@@ -1,0 +1,1 @@
+- Unify local agents with copilot: codex/agy as pr-review reviewer adapters
