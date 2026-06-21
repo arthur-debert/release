@@ -41,16 +41,38 @@ command -v gh >/dev/null 2>&1 || { echo "::error::gh CLI not found on PATH"; exi
 echo "Resolving latest non-expired '${artifact}' artifact from ${CONSUMER_REPO}…" >&2
 
 # Newest non-expired artifact of this name + the run that produced it. The
-# artifacts API already carries expiry + the source run id, so we don't scan runs.
-run_id=$(gh api "repos/${CONSUMER_REPO}/actions/artifacts?per_page=100" \
-  --jq "[.artifacts[] | select(.name==\"${artifact}\" and .expired==false)] | sort_by(.created_at) | reverse | .[0].workflow_run.id // empty")
+# artifacts API carries expiry + the source run id, so we don't scan runs.
+# --paginate + --slurp walks EVERY page (a busy consumer can have >100 artifacts,
+# so a single page could miss the newest one) and slurps them into one array of
+# page responses; the jq flattens .artifacts across pages, then picks the latest
+# non-expired match and emits "<run_id> <head_sha>".
+# (--slurp can't combine with --jq, so pipe the slurped pages to jq.)
+read -r run_id head_sha < <(gh api --paginate --slurp \
+  "repos/${CONSUMER_REPO}/actions/artifacts?per_page=100" \
+  | jq -r "[.[].artifacts[] | select(.name==\"${artifact}\" and .expired==false)] | sort_by(.created_at) | reverse | .[0] | \"\(.workflow_run.id // \"\") \(.workflow_run.head_sha // \"\")\"")
 
 if [ -z "${run_id}" ]; then
   echo "::error::no non-expired '${artifact}' artifact found in ${CONSUMER_REPO} (artifacts retain ~7d; have a recent release/build run produced one?). #841: on-demand fixture — re-run after the consumer builds." >&2
   exit 3
 fi
 
-echo "Found '${artifact}' in ${CONSUMER_REPO} run ${run_id}; downloading…" >&2
+echo "Found '${artifact}' in ${CONSUMER_REPO} run ${run_id} (head ${head_sha:-unknown}); downloading…" >&2
+
+# Pin the consumer checkout to the artifact's commit when it's a git clone, so
+# the SOURCE tree (tauri.conf, frontendDist layout) matches the PRE-BUILT binary.
+# Without this, a consumer default-branch advance would mismatch source vs binary
+# and fail the bundle for reasons unrelated to the dep-set regression we gate.
+# Best-effort: only when CHECKOUT_DIR is a git repo and the sha is fetchable
+# (a shallow clone may lack it — then we warn and proceed on the current tree).
+if [ -n "${head_sha}" ] && git -C "${CHECKOUT_DIR}" rev-parse --git-dir >/dev/null 2>&1; then
+  if git -C "${CHECKOUT_DIR}" cat-file -e "${head_sha}^{commit}" 2>/dev/null \
+     || git -C "${CHECKOUT_DIR}" fetch --depth 1 origin "${head_sha}" 2>/dev/null; then
+    git -C "${CHECKOUT_DIR}" checkout -q "${head_sha}" \
+      && echo "Pinned ${CONSUMER_REPO} checkout to artifact commit ${head_sha}." >&2
+  else
+    echo "::warning::could not fetch artifact commit ${head_sha} in ${CHECKOUT_DIR} (shallow clone?); proceeding on the current checkout — source may not match the pre-built binary." >&2
+  fi
+fi
 
 dl="$(mktemp -d)"
 trap 'rm -rf "${dl}"' EXIT
