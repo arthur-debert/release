@@ -329,7 +329,7 @@ jobs:
           echo "ok: default full release-core init is idempotent (no-op second run)"
           # WS5 (release#526), trimmed WS8 (#765) — the fresh-clone boot proof: a
           # NEW clone of the consumer must be able to START the SessionStart chain
-          # before any .release/ exists. The bootstrap trio are tracked REAL files
+          # before any .release/ exists. The four bootstrap real files are tracked
           # (never symlinks into the ephemeral temp dir), executable, and the
           # hooks config is readable JSON. (setup-dev-env.sh was removed in WS8 —
           # SessionStart calls bin/install-release-core directly.)

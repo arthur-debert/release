@@ -123,7 +123,7 @@ PY
     [ -z "$output" ]
 }
 
-@test "missing tool_input fails open for the deny path but never crashes" {
+@test "missing tool_input still denies in a real repo (but never crashes)" {
     # No file_path → under_claude_home is False → falls through to the git/
     # sentinel path; in a real repo with no sentinel that is a deny, but the
     # guard must not crash on the missing field.
