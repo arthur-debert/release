@@ -102,6 +102,13 @@ for dir in "${DOWNLOAD_DIR}"/bundle-*/; do
   # sign-notarize-mac); it is never a deliverable. The signed path already
   # drops it by skipping bundle-mac wholesale, but the unsigned path ships
   # bundle-mac directly, so the exclusion must live here to catch it.
+  #
+  # ONLY `*.unsigned-app.tar.gz` is excluded — NOT `*.app.tar.gz`. The latter
+  # (+ its `.sig`) is tauri's UPDATER bundle: a legitimate auto-update
+  # deliverable that MUST ship when a consumer enables tauri-updater. This is
+  # a generic reusable workflow, so blanket-excluding `*.app.tar.gz` would
+  # silently break updater consumers (phos configures no updater, so it
+  # produces none today — but the exclusion stays scoped regardless).
   while IFS= read -r f; do
     case "$(basename "${f}")" in
       *.unsigned-app.tar.gz) echo "skip $(basename "${f}") (signer reseal payload; never a deliverable)"; continue ;;

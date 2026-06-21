@@ -718,11 +718,15 @@ stage_fixture() {
 # --- distribute stage 1: clean mac deliverable (#837) ----------------------
 # The release assets must never carry the signer's `*.unsigned-app.tar.gz`
 # reseal payload (it's the signer's input, never a deliverable), and — when
-# mac is built — must contain exactly one dmg.
+# mac is built — must contain exactly one dmg. The tauri-updater bundle
+# (`*.app.tar.gz` + `.sig`) IS a legitimate deliverable and must still ship.
 
-@test "stage-release-assets UNSIGNED excludes the *.unsigned-app.tar.gz reseal payload" {
+@test "stage-release-assets UNSIGNED excludes the *.unsigned-app.tar.gz reseal payload, keeps the updater bundle" {
   # The unsigned path ships bundle-mac directly, which contains the dmg, the
-  # updater bundle AND the reseal payload — only the dmg is a deliverable.
+  # tauri-updater bundle (*.app.tar.gz) AND the signer reseal payload
+  # (*.unsigned-app.tar.gz). The reseal payload is the signer's input — never a
+  # deliverable — so it must be dropped; the dmg + updater bundle ARE
+  # deliverables and must ship.
   stage_fixture
   run env DOWNLOAD_DIR=downloads ASSETS_DIR=out SIGNED=false BUILD_MAC=true \
     bash "$BIN/stage-release-assets.sh"
@@ -730,6 +734,8 @@ stage_fixture() {
   # the reseal payload was present in bundle-mac but must NOT be staged
   [ ! -e out/App.unsigned-app.tar.gz ]
   [ -z "$(find out -name '*.unsigned-app.tar.gz' -print -quit)" ]
+  # the tauri-updater bundle IS a deliverable — it must still ship (NOT excluded)
+  [ "$(cat out/App.app.tar.gz)" = "updater" ]
   # the deliverable dmg still ships
   [ "$(cat out/App_1.0.0.dmg)" = "unsigned-dmg" ]
 }
