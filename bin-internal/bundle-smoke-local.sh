@@ -60,6 +60,11 @@ docker run --rm \
     # bundle scripts read tauri.conf with it); curl/git/ca-certs (node/cargo/gh).
     apt-get install -y -qq ca-certificates curl git file sudo jq gh >>/tmp/apt.log 2>&1 \
       || { echo "bootstrap apt install failed"; tail -20 /tmp/apt.log; exit 1; }
+    # The bind-mounted /app clone is owned by the host UID, not the container
+    # user, so newer git aborts resolve-compile-artifact.sh'\''s checkout with
+    # "detected dubious ownership". Trust the mounted tree (container-scoped,
+    # ephemeral) so the local run does not false-fail before bundling.
+    git config --global --add safe.directory '\''*'\''
     # The actual package-job linux deps under test:
     bash /release/bin-internal/install-tauri-linux-deps-package.sh
     # node + pnpm + cargo (runner provides via setup-node + image; here bootstrap)
