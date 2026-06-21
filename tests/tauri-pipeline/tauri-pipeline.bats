@@ -1157,6 +1157,33 @@ EOF
   ! grep -q 'Bundle (unsigned)' "$WORKFLOW"
 }
 
+@test "tauri-app.yml package job uses the SLIM linux dep script; build uses the full one (#836)" {
+  # The package job bundles a pre-built binary (no compile), so it must install
+  # only runtime/packaging deps via install-tauri-linux-deps-package.sh — never
+  # the full compile set. The build job compiles, so it keeps the full script.
+  pkg=$(sed -n '/^  package:$/,/^  [a-z][a-z-]*:$/p' "$WORKFLOW")
+  build=$(sed -n '/^  build:$/,/^  [a-z][a-z-]*:$/p' "$WORKFLOW")
+  # package -> slim script only
+  echo "$pkg" | grep -q 'install-tauri-linux-deps-package.sh'
+  ! echo "$pkg" | grep -Eq 'install-tauri-linux-deps\.sh'
+  # build -> full compile script, not the slim one
+  echo "$build" | grep -q 'install-tauri-linux-deps.sh'
+  ! echo "$build" | grep -q 'install-tauri-linux-deps-package.sh'
+}
+
+@test "slim package dep script omits the compile-only deps (no -dev, no mold) (#836)" {
+  slim="${BIN}/install-tauri-linux-deps-package.sh"
+  [ -x "$slim" ]
+  # never the compile toolchain
+  ! grep -Eq '\-dev\b' "$slim"
+  ! grep -Eq '(^|[[:space:]])mold($|[[:space:]\\])' "$slim"
+  # the packaging/runtime deps it DOES need
+  grep -q 'patchelf' "$slim"
+  grep -q 'libwebkit2gtk-4.1-0' "$slim"
+  grep -q 'libgtk-3-0' "$slim"
+  grep -q 'librsvg2-2' "$slim"
+}
+
 @test "tauri-app.yml sign job is gated on should-sign (optional signing)" {
   grep -q "needs.preflight.outputs.should-sign == 'true'" "$WORKFLOW"
 }
