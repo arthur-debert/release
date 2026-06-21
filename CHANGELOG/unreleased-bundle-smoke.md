@@ -1,1 +1,0 @@
-- Add a local+CI bundle integration smoke test that runs the real tauri bundle path against a pre-built artifact (#841)

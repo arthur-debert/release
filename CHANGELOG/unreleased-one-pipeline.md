@@ -1,1 +1,0 @@
-- Collapse Tauri sign-modes into one decomposed pipeline; signing is an optional step

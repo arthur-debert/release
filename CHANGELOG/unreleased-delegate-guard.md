@@ -1,1 +1,0 @@
-- Add a delegate-guard PreToolUse hook that keeps the main agent loop delegating implementation to subagents — it blocks main-loop Edit/Write/NotebookEdit of project files (allowing subagent edits via agent_id, ~/.claude/ edits, and a one-shot delegate-armed sentinel), mirroring pr-loop-guard and synced to consumers

@@ -1,1 +1,0 @@
-- Unify the dev cycle on always-delegate; implementer stops at PR-open, fresh shepherd per round; 6-round/all-nitpick review stop

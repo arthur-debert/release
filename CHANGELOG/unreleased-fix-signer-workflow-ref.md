@@ -1,1 +1,0 @@
-- Fix cross-repo reusable-workflow ref: tauri sign job now uses the full arthur-debert/release/...@v3 path (a local ./ ref resolved against the consumer repo, startup_failure)

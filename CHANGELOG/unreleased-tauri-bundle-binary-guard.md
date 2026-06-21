@@ -1,1 +1,0 @@
-- Fail-loud guard: package job asserts the bundled main binary matches the expected name (mainBinaryName/productName/cargo name)

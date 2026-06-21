@@ -1,1 +1,0 @@
-- Slim the tauri package job to packaging/bundling deps (drops the compile toolchain: webkit/soup/appindicator -dev headers + mold) since it bundles a pre-built binary

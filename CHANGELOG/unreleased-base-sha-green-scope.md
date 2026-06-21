@@ -1,1 +1,0 @@
-- Fix: assert-base-sha-green scopes to the code gate, excluding the release pipeline's own check-runs (and prior failed attempts) so real cuts can pass
