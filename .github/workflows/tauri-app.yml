@@ -267,7 +267,7 @@ jobs:
       BUILD_MAC: ${{ inputs.build-mac }}
       NOTARIZE: ${{ inputs.notarize }}
       APPLE_CERT_PRESENT: ${{ secrets.APPLE_CERTIFICATE != '' && 'yes' || 'no' }}
-      APPLE_ID_PRESENT: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'yes' || 'no' }}
+      SIGNING_IDENTITY_PRESENT: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'yes' || 'no' }}
       NOTARY_ID_PRESENT: ${{ secrets.APPLE_ID != '' && 'yes' || 'no' }}
       NOTARY_PASS_PRESENT: ${{ secrets.APPLE_PASSWORD != '' && 'yes' || 'no' }}
       NOTARY_TEAM_PRESENT: ${{ secrets.APPLE_TEAM_ID != '' && 'yes' || 'no' }}
@@ -280,7 +280,7 @@ jobs:
         id: should-sign
         shell: bash
         run: |
-          if [ "${BUILD_MAC}" = "true" ] && { [ "${NOTARIZE}" = "true" ] || [ "${APPLE_ID_PRESENT}" = "yes" ]; }; then
+          if [ "${BUILD_MAC}" = "true" ] && { [ "${NOTARIZE}" = "true" ] || [ "${SIGNING_IDENTITY_PRESENT}" = "yes" ]; }; then
             echo "value=true" >> "$GITHUB_OUTPUT"
           else
             echo "value=false" >> "$GITHUB_OUTPUT"
