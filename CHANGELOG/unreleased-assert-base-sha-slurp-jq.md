@@ -1,0 +1,1 @@
+- Fix: assert-base-sha-green used gh api --slurp with --jq (unsupported); pipe slurped pages to jq so real releases don't fail at prepare

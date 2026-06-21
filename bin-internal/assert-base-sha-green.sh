@@ -39,15 +39,20 @@ fi
 # tiebreak) so an earlier failed run that was re-run green doesn't false-negative.
 # Capture stderr separately so an auth/permission failure (the Checks API needs
 # `checks: read` on GITHUB_TOKEN) is surfaced, not misread as "absent CI".
+#
+# --slurp can't combine with --jq, so pipe the slurped pages to external jq. The
+# slurped shape is an array of page objects ({total_count, check_runs:[...]}), so
+# `[.[].check_runs[]]` flattens the runs across all pages. pipefail (set above)
+# makes a gh failure trip the `if !` even though gh is upstream of the pipe.
 gh_err="$(mktemp)"
 trap 'rm -f "${gh_err}"' EXIT
 if ! runs="$(gh api \
 	"repos/${GITHUB_REPOSITORY}/commits/${BASE_SHA}/check-runs" \
-	--paginate --slurp \
-	--jq '[.[].check_runs[]]
+	--paginate --slurp 2>"${gh_err}" \
+	| jq -r '[.[].check_runs[]]
 	      | group_by(.name)
 	      | map(max_by(.started_at // "", .completed_at // ""))
-	      | .[] | "\(.status) \(.conclusion // "")"' 2>"${gh_err}")"; then
+	      | .[] | "\(.status) \(.conclusion // "")"')"; then
 	echo "::error::failed to query check-runs for ${BASE_SHA} (auth/permission? the Checks API needs \`checks: read\`):" >&2
 	sed 's/^/::error::  /' "${gh_err}" >&2
 	exit 1

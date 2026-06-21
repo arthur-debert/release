@@ -4,9 +4,12 @@
 # base-sha CI-green assertion that replaced the in-prepare re-gate.
 #
 # Fully offline: a stub `gh` on PATH replays a canned check-runs response from
-# $CHECK_RUNS_JSON through the script's `--jq` filter (jq is required on the
-# runner, same as production). The stub mimics `gh api … --jq …` by piping the
-# canned JSON to jq with the requested filter.
+# $CHECK_RUNS_JSON. The stub emits ONLY the raw slurped API JSON (an array of
+# page objects) — it does NOT apply any jq filter. The script's OWN piped
+# `jq -r` is what reduces the runs, so the test exercises the real piped-jq path
+# (`gh api --slurp | jq`) rather than a stub that fakes `--jq`. This is what
+# caught the `--slurp` + `--jq` incompatibility: a stub that swallowed `--jq`
+# would pass even though real gh rejects the combination.
 
 SCRIPT="${BATS_TEST_DIRNAME}/../../bin-internal/assert-base-sha-green.sh"
 
@@ -14,22 +17,17 @@ setup() {
   TMP="$(mktemp -d)"
   cd "$TMP"
   mkdir -p bin-stub
-  # Stub `gh`: the script calls `gh api … --paginate --slurp --jq <filter>`, so
-  # jq sees an ARRAY of page-response objects. We mimic one page by slurping the
-  # canned $CHECK_RUNS_JSON object into a single-element array (`jq -s`) and
-  # applying the same filter. $GH_FAIL=1 makes the API call exit non-zero — the
-  # script surfaces that as an explicit "failed to query check-runs" error,
-  # distinct from the absent-CI (empty) path.
+  # Stub `gh`: emit the raw `--paginate --slurp` shape — an ARRAY of page-response
+  # objects ([{total_count, check_runs:[…]}]). The canned $CHECK_RUNS_JSON is a
+  # single page object, so `jq -s '.'` wraps it into that one-element array. The
+  # stub applies NO reduction; the script's own jq pipe does it (production
+  # fidelity). $GH_FAIL=1 makes the API call exit non-zero — under the script's
+  # `set -o pipefail` that trips the `if !` so the explicit "failed to query
+  # check-runs" error fires, distinct from the absent-CI (empty) path.
   cat > bin-stub/gh <<'EOF'
 #!/usr/bin/env bash
 [ "${GH_FAIL:-0}" = "1" ] && exit 1
-filter='.'
-prev=""
-for arg in "$@"; do
-  [ "$prev" = "--jq" ] && filter="$arg"
-  prev="$arg"
-done
-printf '%s' "${CHECK_RUNS_JSON:-}" | jq -s -r "$filter"
+printf '%s' "${CHECK_RUNS_JSON:-}" | jq -s '.'
 EOF
   chmod +x bin-stub/gh
   export PATH="$PWD/bin-stub:$PATH"
