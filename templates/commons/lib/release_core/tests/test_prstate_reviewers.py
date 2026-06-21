@@ -393,28 +393,39 @@ def test_agy_request_runs_and_posts(monkeypatch):
     assert calls == [("agy", 9, {"as_app": True})]
 
 
-def test_local_request_propagates_backend_unavailable(monkeypatch):
-    # A missing agent CLI / unregistered app must fail LOUD, never be swallowed.
+def test_local_request_normalizes_backend_unavailable_to_gherror(monkeypatch):
+    # A missing agent CLI must fail LOUD, never be swallowed — but normalized to
+    # ghapi.GhError, the one error type the `pr review request` CLI handles
+    # (otherwise --reviewer codex|agy crashes with an unhandled traceback). The
+    # message carries the original cause.
+    from release_core.prstate import ghapi
     from release_core.review import service
     from release_core.review.backends.base import BackendUnavailable
 
     def _boom(agent, pr, **kwargs):
-        raise BackendUnavailable("codex CLI not on PATH")
+        raise BackendUnavailable("codex CLI not found")
 
     monkeypatch.setattr(service, "run_and_post", _boom)
-    with pytest.raises(BackendUnavailable, match="not on PATH"):
+    with pytest.raises(ghapi.GhError, match="codex CLI not found") as excinfo:
         CODEX.request(7)
+    # NOT the raw BackendUnavailable — the CLI only catches GhError.
+    assert not isinstance(excinfo.value, BackendUnavailable)
+    assert isinstance(excinfo.value.__cause__, BackendUnavailable)
 
 
-def test_local_request_propagates_app_missing_error(monkeypatch):
+def test_local_request_normalizes_app_missing_error_to_gherror(monkeypatch):
+    # The app-not-registered RuntimeError from run_and_post is also normalized to
+    # GhError so the CLI renders it cleanly (clean error + exit 1).
+    from release_core.prstate import ghapi
     from release_core.review import service
 
     def _boom(agent, pr, **kwargs):
         raise RuntimeError("No GitHub App is registered for the 'codex' review backend")
 
     monkeypatch.setattr(service, "run_and_post", _boom)
-    with pytest.raises(RuntimeError, match="No GitHub App is registered"):
+    with pytest.raises(ghapi.GhError, match="No GitHub App is registered") as excinfo:
         CODEX.request(7)
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
 
 
 def test_local_cancel_is_a_noop():

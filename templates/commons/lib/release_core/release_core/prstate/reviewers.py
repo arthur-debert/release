@@ -266,19 +266,35 @@ class _LocalReviewAdapter(ReviewerAdapter):
         `release_core.review.service.run_and_post(self.name, pr, as_app=True)`,
         which runs the agent over the PR diff and posts the result AS the bot.
 
-        Errors are NOT swallowed: a missing agent CLI
-        (`BackendUnavailable`) or a missing/unregistered review App (a clear
-        `RuntimeError` from `run_and_post`) propagates, so requesting a local
-        reviewer in an environment that can't run it fails LOUD rather than
-        silently no-op'ing. On success returns True.
+        Errors are NOT swallowed, but they ARE normalized: a missing agent CLI
+        (`BackendUnavailable`), a diff/review failure (`ReviewError`), an auth
+        failure (`ReviewAuthError`), or a missing/unregistered review App (a
+        clear `RuntimeError` from `run_and_post`) is re-raised as
+        `ghapi.GhError` — the prstate error type the `pr review request` CLI
+        already catches and renders as a clean message + exit 1. Without this,
+        `--reviewer codex|agy` would crash with an unhandled traceback (the CLI
+        only handles `GhError`). On success returns True.
         """
         # Imported lazily: `prstate` must not pull the `review` engine (and its
         # backend/gh machinery) at import time — only when a local review is
         # actually requested. `review` never imports `prstate`, so this one-way
-        # edge is cycle-free.
+        # edge is cycle-free. (Same reason the failure types are imported here.)
+        from release_core.review.backends.base import BackendUnavailable
+        from release_core.review.diff import ReviewError
+        from release_core.review.ghauth import ReviewAuthError
         from release_core.review.service import run_and_post
 
-        run_and_post(self.name, pr, as_app=True)
+        try:
+            run_and_post(self.name, pr, as_app=True)
+        except (BackendUnavailable, ReviewError, ReviewAuthError, RuntimeError) as exc:
+            # Re-raise the local-review failure modes as the one error type the
+            # CLI's `except ghapi.GhError` handles, so a failed local request is
+            # a clean error + nonzero exit, never an unhandled traceback. The
+            # caught set is SPECIFIC (not bare Exception); BackendUnavailable /
+            # ReviewError already subclass RuntimeError, ReviewAuthError does not
+            # (so it is listed explicitly), and the trailing RuntimeError covers
+            # the app-not-registered error raised by run_and_post itself.
+            raise ghapi.GhError(f"{self.name} review failed: {exc}") from exc
         return True
 
     def cancel(self, pr: int) -> bool:
