@@ -41,7 +41,13 @@ if [ "${#apps[@]}" -eq 0 ]; then
   exit 1
 fi
 if [ "${#apps[@]}" -gt 1 ]; then
-  names=$(printf '%s\n' "${apps[@]}" | xargs -n1 basename | paste -sd, -)
+  # Build the name list with a line-based loop so .app names containing spaces
+  # are preserved (xargs/paste would split on whitespace and garble them).
+  names=""
+  for a in "${apps[@]}"; do
+    bn=$(basename "${a}")
+    names="${names:+${names}, }${bn}"
+  done
   echo "::error::expected exactly one .app under ${macos_dir}, found ${#apps[@]}: [${names}]; the signer expects a single .app per build"
   exit 1
 fi

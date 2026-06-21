@@ -57,12 +57,15 @@ fi
 # 3. Still empty → "all".
 raw="${raw:-all}"
 
-# Expand "all" per platform.
+# Expand "all" per platform. An unknown PLATFORM is a hard error (the repo's
+# fail-loud convention, cf. assert-tauri-bundle-binary.sh) — silently resolving
+# to no formats would make every output false and the bundle steps skip, failing
+# later in collect-tauri-bundles.sh with a confusing "bundle root not found".
 case "${PLATFORM}" in
   linux)   all_targets="deb rpm appimage" ;;
   mac)     all_targets="app dmg" ;;
   windows) all_targets="nsis msi" ;;
-  *)       all_targets="" ;;
+  *)       echo "::error::unknown PLATFORM: ${PLATFORM} (expected mac | linux | windows)"; exit 1 ;;
 esac
 
 # Build the requested set (space-separated), expanding "all".

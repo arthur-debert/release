@@ -217,6 +217,13 @@ resolve_out() {
   [ "$(resolve_out nsis)" = false ]
 }
 
+@test "resolve FAILS LOUD on an unknown PLATFORM (no silent empty resolution)" {
+  export GITHUB_OUTPUT="$TMP/out.txt"; : > "$GITHUB_OUTPUT"
+  run env PLATFORM=solaris BUNDLES=all bash "$BIN/resolve-tauri-bundles.sh"
+  [ "$status" -ne 0 ]
+  echo "$output" | grep -q 'unknown PLATFORM'
+}
+
 # --- bundle-tauri.sh (single-format unsigned bundle) ----------------------
 
 @test "bundle-tauri bundles the requested single format unsigned" {
@@ -261,14 +268,18 @@ resolve_out() {
 
 @test "package-mac-app fails loud when there is MORE than one .app (signer expects exactly one)" {
   d=src-tauri/target/release/bundle/macos
-  mkdir -p "$d/A.app/Contents" "$d/B.app/Contents"
-  echo bin > "$d/A.app/Contents/exe"
+  # Use a name WITH A SPACE to assert the error list preserves it (not garbled
+  # by whitespace-splitting).
+  mkdir -p "$d/My App.app/Contents" "$d/B.app/Contents"
+  echo bin > "$d/My App.app/Contents/exe"
   echo bin > "$d/B.app/Contents/exe"
   run bash "$BIN/package-mac-app.sh"
   [ "$status" -ne 0 ]
   echo "$output" | grep -q 'expected exactly one .app'
+  # the space-containing name is reported intact (not split into "My"/"App.app")
+  echo "$output" | grep -q 'My App.app'
   # and it must NOT have produced any payload
-  [ ! -f "$d/A.unsigned-app.tar.gz" ]
+  [ ! -f "$d/My App.unsigned-app.tar.gz" ]
   [ ! -f "$d/B.unsigned-app.tar.gz" ]
 }
 

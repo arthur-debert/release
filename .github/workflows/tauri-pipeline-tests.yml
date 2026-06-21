@@ -1,19 +1,24 @@
 name: tauri pipeline tests
 
-# Unit BATS suite for the decomposed Tauri pipeline shell logic (#811/#815/#817):
-# build-tauri.sh compile-only entry, bundle-tauri.sh unsigned bundling + mac
-# .app packaging, reseal-mac-dmg.sh hdiutil reseal, unpack-unsigned-app.sh +
-# enumerate-macho.sh signing helpers, stage/restore-tauri-compile.sh cross-job
-# artifact, assert-tauri-bundle-binary.sh integrity guard, and
-# stage-release-assets.sh sign-agnostic asset selection. Hermetic — stubs
-# npx / hdiutil on PATH.
+# Unit BATS suite for the decomposed Tauri pipeline shell logic
+# (#811/#815/#817/#835): build-frontend-tauri.sh frontend half +
+# build-tauri.sh rust-compile half, resolve-tauri-bundles.sh per-format
+# resolution, bundle-tauri.sh single-format unsigned bundling, package-mac-app.sh
+# mac .app reseal payload, reseal-mac-dmg.sh hdiutil reseal,
+# unpack-unsigned-app.sh + enumerate-macho.sh signing helpers,
+# stage/restore-tauri-compile.sh cross-job artifact, assert-tauri-bundle-binary.sh
+# integrity guard, stage-release-assets.sh sign-agnostic asset selection, and
+# tauri-app.yml workflow-wiring assertions. Hermetic — stubs npx / hdiutil on PATH.
 
 on:
   push:
     branches: ["**"]
     paths:
+      - "bin-internal/build-frontend-tauri.sh"
       - "bin-internal/build-tauri.sh"
+      - "bin-internal/resolve-tauri-bundles.sh"
       - "bin-internal/bundle-tauri.sh"
+      - "bin-internal/package-mac-app.sh"
       - "bin-internal/reseal-mac-dmg.sh"
       - "bin-internal/unpack-unsigned-app.sh"
       - "bin-internal/enumerate-macho.sh"
@@ -22,11 +27,15 @@ on:
       - "bin-internal/assert-tauri-bundle-binary.sh"
       - "bin-internal/stage-release-assets.sh"
       - "tests/tauri-pipeline/**"
+      - ".github/workflows/tauri-app.yml"
       - ".github/workflows/tauri-pipeline-tests.yml"
   pull_request:
     paths:
+      - "bin-internal/build-frontend-tauri.sh"
       - "bin-internal/build-tauri.sh"
+      - "bin-internal/resolve-tauri-bundles.sh"
       - "bin-internal/bundle-tauri.sh"
+      - "bin-internal/package-mac-app.sh"
       - "bin-internal/reseal-mac-dmg.sh"
       - "bin-internal/unpack-unsigned-app.sh"
       - "bin-internal/enumerate-macho.sh"
@@ -35,6 +44,7 @@ on:
       - "bin-internal/assert-tauri-bundle-binary.sh"
       - "bin-internal/stage-release-assets.sh"
       - "tests/tauri-pipeline/**"
+      - ".github/workflows/tauri-app.yml"
       - ".github/workflows/tauri-pipeline-tests.yml"
 
 permissions:
