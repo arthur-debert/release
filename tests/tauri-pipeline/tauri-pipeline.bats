@@ -1199,34 +1199,51 @@ EOF
   [ "$status" -ne 0 ]   # build never installs the slim script
 }
 
-@test "slim package dep script omits the compile-only deps (no -dev, no mold) (#836)" {
+@test "slim package dep script omits the COMPILE-ONLY deps but keeps the GTK .pc deps linuxdeploy needs (#836)" {
   slim="${BIN}/install-tauri-linux-deps-package.sh"
   [ -x "$slim" ]
-  # Check the actual package args, not comments — the header legitimately spells
-  # out `-dev`/`mold` to explain why they're absent. Strip `#` comment lines.
+  # Check the actual package args, not comments — the header legitimately names
+  # the omitted compile-only packages to explain why they're absent. Strip `#`.
   code=$(grep -v '^[[:space:]]*#' "$slim")
-  # Hard assertions: a bare `! grep` is a NEGATED command, which `set -e`
-  # (bats runs each test under it) does NOT abort on unless it's the test's
-  # final statement — so a non-final `! grep` that matched would pass silently.
-  # `run` + an explicit positive status check aborts on a match wherever it sits.
-  # `\b` is also a GNU-grep extension (fails open on BSD/mac grep), so match the
+  # The package job slims the full COMPILE set by dropping the deps needed ONLY
+  # to compile/link: the webkit/soup/appindicator `-dev` headers + `mold`. It is
+  # NOT a blanket "no -dev" rule — AppImage bundling's linuxdeploy-plugin-gtk
+  # reads gtk/rsvg pkg-config `.pc` metadata (in the `-dev` packages) and aborts
+  # without it, so libgtk-3-dev + librsvg2-dev are REQUIRED here (release#841).
+  #
+  # Hard NEGATIVE assertions (`run` + `[ "$status" -ne 0 ]`): a bare `! grep` is
+  # a NEGATED command that bats' per-test `set -e` does NOT abort on unless it is
+  # the final statement, so a non-final `! grep` match would pass silently.
+  for absent in \
+    libwebkit2gtk-4.1-dev \
+    libsoup-3.0-dev \
+    libayatana-appindicator3-dev; do
+    run grep -q -- "$absent" <<<"$code"
+    [ "$status" -ne 0 ]   # compile-only `-dev` header "$absent" must be absent
+  done
+  # `\b` is a GNU-grep extension (fails open on BSD/mac grep), so match the
   # end-of-token boundary explicitly: whitespace, line-continuation, or EOL.
-  run grep -Eq -- '-dev([[:space:]]|\\|$)' <<<"$code"
-  [ "$status" -ne 0 ]   # no `-dev` package present
   run grep -Eq -- '(^|[[:space:]])mold([[:space:]]|\\|$)' <<<"$code"
-  [ "$status" -ne 0 ]   # no `mold` package present
-  # the packaging/runtime deps it DOES need. Each is a hard presence assertion
-  # (`run grep …; [ "$status" -eq 0 ]`) so a future edit can't silently drop one.
+  [ "$status" -ne 0 ]   # the `mold` linker (compile-only) must be absent
+
+  # Hard PRESENCE assertions so a future edit can't silently drop a dep that
+  # AppImage bundling needs. libgtk-3-dev + librsvg2-dev supply the GTK-stack
+  # `.pc` files (and pull the gtk/rsvg runtimes + glib tooling transitively); the
+  # rest are the runtime `.so`s the app links that linuxdeploy copies in.
+  # grep the package args ($code), NOT the whole file — the header comment names
+  # several of these packages, so a whole-file grep would pass off the prose even
+  # if the actual install line dropped the dep.
   for pkg in \
-    patchelf \
+    libgtk-3-dev \
+    librsvg2-dev \
     libwebkit2gtk-4.1-0 \
-    libgtk-3-0 \
     libgstreamer1.0-0 \
     libgstreamer-plugins-base1.0-0 \
-    librsvg2-2 \
-    libayatana-appindicator3-1; do
-    run grep -q -- "$pkg" "$slim"
-    [ "$status" -eq 0 ]   # required runtime/packaging dep "$pkg" present
+    libayatana-appindicator3-1 \
+    librsvg2-common \
+    patchelf; do
+    run grep -q -- "$pkg" <<<"$code"
+    [ "$status" -eq 0 ]   # required bundle dep "$pkg" present
   done
 }
 
