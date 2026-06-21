@@ -89,7 +89,7 @@ Don't improvise around it.
 | `REVIEWED` | mergeability still computing — `release-core pr wait` |
 | `VALIDATING` | CI running — `release-core pr wait` |
 | `READY` | `release-core pr wait` auto-flips draft→ready here; if you reached READY without a wait, `release-core pr ready`. Then stop |
-| `BLOCKED` | stop; surface the reason (see breakers below) |
+| `BLOCKED` | a real blocker (failing CI, conflict, behind base) — fix, push, re-read |
 
 ## Arming the guard
 
@@ -124,14 +124,17 @@ ever see the deny, that is the guard doing its job: arm and retry.
 Open as a **live** PR only when the human explicitly asks for one in this
 session.
 
-## Who runs which step (coordinated execution)
+## Who runs which step (the role split — every task)
 
-A solo agent on a simple one-PR task runs this whole loop itself. Under a
-coordinating agent (a multi-PR feature — dev-cycle §2), the loop is **split
-across roles** so no one context carries all of it: an implementer that also
-shepherds its own review rounds drags the full implementation context through
-every round (single agents have ballooned past ~700k tokens) and judges
-comments by defending remembered choices instead of reading the diff cold.
+The agent the human addresses is **always a coordinator that never
+implements** — regardless of task size (dev-cycle §intro). It delegates, and
+the loop is **split across roles** so no one context carries all of it: an
+implementer that also shepherds its own review rounds drags the full
+implementation context through every round (single agents have ballooned past
+~700k tokens) and judges comments by defending remembered choices instead of
+reading the diff cold. This split is unconditional — a single-PR task and a
+multi-PR epic use it identically; they differ only in branch/merge topology
+(one PR to `main`, vs. workstream PRs into an epic branch).
 
 - **Implementer subagent — stops at PR-open.** Implement, gate, push, open the
   draft PR with the `## Context` note (below), report back, terminate. It
@@ -312,16 +315,24 @@ head, so a push makes the prior review stale and `release-core pr status`
 advises RE-REQUEST — that next action is authoritative. There is no
 minor-vs-substantial exception; bot re-reviews are cheap.
 
-## Breakers: BLOCKED means stop
+## The stopping rule: 6 rounds, or an all-nitpick round
 
-When `release-core pr status` returns `BLOCKED` with a `breaker:` line
-(`cycle-cap`, `diff-trajectory`, `comment-set`, `repeat-finding`), the loop is
-diverging — do **not** push another fixup cycle. Stop and surface the breaker
-reason to the human. This is the first-class "stop and hand back" outcome, not
-a failure.
+Address every review comment each round, **except stop when either**:
 
-`BLOCKED` without a breaker (failing check, merge conflict) is yours to fix:
-do the fix, push, re-read.
+- **6 rounds have happened** (there is no 7th round), or
+- **the current round is all nitpicks** — docstring/wording corrections, micro
+  performance with a low run-count, cosmetic style already settled; nothing
+  that changes correctness or behaviour.
+
+When either condition is hit on an otherwise-ready PR (CI green, mergeable),
+the engine routes straight to **READY**: flip and hand to the human; do **not**
+open another round. The engine applies this itself — `release-core pr status`
+reports the `round-cap` / `all-nitpick` stopping condition on the READY status,
+so the flip just proceeds (there is no acknowledgement flag).
+
+`BLOCKED` is a real blocker only (failing check, merge conflict, behind base) —
+yours to fix: do the fix, push, re-read. The stopping rule never produces a
+BLOCKED; a real CI/merge problem still blocks on its own terms.
 
 ## At READY: the flip is automatic, then stop
 
@@ -350,13 +361,22 @@ cross-checks `mergeStateStatus` and reports `BLOCKED` (conflict/behind) or
 re-poll (`REVIEWED`, uncomputed) instead of flipping (release#675). Trust the
 engine state, never a raw `mergeable` field.
 
-**Do NOT auto-merge.** The flip ends the agent's job: post a short status and
-stop — the human does the final read and merge. Merge only on explicit
-authorization ("merge it", "go ahead and merge", "merge when green", or a
-standing auto-merge instruction for the batch). When authorized:
-`gh pr merge <PR> --squash --delete-branch`. If a pre-existing failure
-unrelated to the PR blocks the merge, surface it and ask — never `--admin`
-unprompted.
+**Do NOT auto-merge the final PR.** The flip ends the agent's job: post a short
+status and stop — the human does the final read and merge. Which PR the human
+merges depends on topology:
+
+- **Single-PR task:** the one PR targets `main`; the human merges it to `main`.
+- **Epic:** each workstream PR targets the **epic branch**, and the coordinator
+  merges those workstream PRs into the epic branch itself (its own go/no-go, no
+  user approval). The **umbrella PR** (epic branch → `main`) is the one driven
+  to READY and the **human merges** it. The user's approval gate is the umbrella
+  PR, not the individual workstreams.
+
+Merge a final/`main`-targeting PR only on explicit authorization ("merge it",
+"go ahead and merge", "merge when green", or a standing auto-merge instruction
+for the batch). When authorized: `gh pr merge <PR> --squash --delete-branch`.
+If a pre-existing failure unrelated to the PR blocks the merge, surface it and
+ask — never `--admin` unprompted.
 
 ## The final-report contract (always, even mid-flow)
 

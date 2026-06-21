@@ -17,8 +17,8 @@ from .model import PullContext, Review, ReviewComment, Thread
 # is a missed unresolved blocker), so reviewThreads IS paginated via the cursor.
 #
 # `pullRequestReview { databaseId }` ties each comment back to the review that
-# produced it — that is how the circuit breakers group findings into review
-# cycles now that the REST `/pulls/{n}/comments` fetch is gone (it surfaced only
+# produced it — that is how the stopping rule groups findings into review
+# rounds now that the REST `/pulls/{n}/comments` fetch is gone (it surfaced only
 # a subset of inline comments and missed second-bot reviews; release#515).
 #
 # `reviewRequests` lives HERE, not in `gh pr view --json reviewRequests`: the gh

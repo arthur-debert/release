@@ -9,7 +9,7 @@
 # What it does
 # ------------
 #   1. Installs gh (GitHub CLI). Cloud sessions don't ship gh by default,
-#      and the pr-review-respond skill (plus any cross-repo work) needs it.
+#      and the gh-pr-review-loop skill (plus any cross-repo work) needs it.
 #   2. Clones arthur-debert/release@main and:
 #        - copies skills/* into ~/.claude/skills/
 #        - copies env/CLAUDE.md into ~/.claude/CLAUDE.md

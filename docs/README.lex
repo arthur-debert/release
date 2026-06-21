@@ -12,9 +12,10 @@ release/ — Agent & Maintainer Docs
 
 The four narrative documents:
     dev-cycle.lex:
-        The ONE development life cycle, draft-first — a simple task (one PR) and
-        a larger feature (multiple PRs under a coordinating agent). The model
-        behind `release-core how-to` and the `gh-pr-review-loop` skill.
+        The ONE development life cycle, draft-first and always delegated — the
+        agent is a coordinator that never implements; a single-PR task and a
+        multi-PR epic differ only in branch/merge topology. The model behind
+        `release-core how-to` and the `gh-pr-review-loop` skill.
 
     tooling.lex:
         The machinery: `release-core` (the CLI an agent drives), the quality

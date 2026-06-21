@@ -1,47 +1,87 @@
-"""Circuit breakers — detect a diverging review loop and STOP before iterating.
+"""Review-round stopping rule — stop the loop instead of iterating forever.
 
-Heuristics for the review-loop circuit breakers. A *cycle* is one ITERATION
-ROUND — one head SHA that got re-reviewed — NOT one review object. This is the
-load-bearing distinction once there are multiple required reviewers
-(release#622): N required reviewers each reviewing a head would otherwise count
-as N cycles, so two normal review rounds with two reviewers would read as four
-and trip the cycle cap. A cycle is keyed by commit SHA: every required
-reviewer's findings on the same head fold into ONE cycle. Its findings are the
-review-thread comments attached to those reviews (GraphQL `reviewThreads`, the
-single source of truth for inline comments — the REST `/pulls/{n}/comments`
-fetch surfaced only a subset and is gone; release#515). All inputs derive from
-gh review history, except diff sizes, which come from git and are injected via
-`diff_sizer` — omitted in pure evaluation, in which case the diff-trajectory
-breaker is skipped rather than guessed.
+The rule is deliberately simple and mechanical (it REPLACES the older
+divergent-cycle model — there is no diff-trajectory / comment-set /
+repeat-finding / divergent-counting machinery any more):
 
-The verdict folds into the state machine as the STOP form of BLOCKED, and only
-when the loop would otherwise iterate (open threads remain). A converged PR is
-never stopped.
+    Each round, address every review comment, EXCEPT stop when either
+      • 6 rounds have already happened (there is no 7th round), or
+      • the current round is all nitpicks (docstring/wording fixes, micro perf
+        with a low run-count, cosmetic style already settled — nothing that
+        changes correctness or behaviour).
+
+A *round* is one ITERATION — one head SHA that got re-reviewed — NOT one review
+object. That distinction is load-bearing once there are several required
+reviewers (release#622): N reviewers each reviewing one head would otherwise
+read as N rounds. A round is keyed by commit SHA, so every required reviewer's
+findings on the same head fold into ONE round. Its findings are the review-thread
+comments attached to those reviews (GraphQL `reviewThreads`, the single source
+of truth for inline comments; release#515).
+
+When the rule fires on an otherwise-ready PR (CI green, merge state CLEAN), the
+state machine routes to READY and hands it to the human — it does NOT open
+another round. When the PR is not otherwise ready (failing CI, conflict), the
+real reason BLOCKS it; the stopping rule never invents a block of its own.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
 from dataclasses import dataclass
 
 from .model import PullContext
 from .reviewers import ReviewerAdapter, required_reviewers
 
-CYCLE_CAP = 3
-DIFF_GROWTH_TOLERANCE = 1.1  # allow 10% jitter before calling it "growing"
-MIN_DIFF_LINES = 50  # below this the diff is too small for "growing" to mean anything
-REPEAT_WINDOW = 3  # a location must persist this many consecutive cycles to stop
+ROUND_CAP = 6  # the 6th round is the last; there is no 7th
 
-CommentKey = tuple[str, "int | None"]
-DiffSizer = Callable[[str], "int | None"]
+# Markers that tag a finding as a nitpick — matched case-insensitively against
+# the comment body. A round whose findings are ALL nitpicks stops the loop early
+# (the agent flips to READY rather than opening another round for cosmetic-only
+# feedback). Reviewers (Copilot, CodeRabbit, …) tag low-stakes comments with
+# these markers; a plain comment with none of them is treated as substantive, so
+# the rule only ever stops EARLY when the round is unambiguously cosmetic.
+#
+# Each marker is matched on a LEFT word boundary (`\b`) so a short token like
+# `nit:` cannot fire on a substring of an unrelated word — e.g. "unit: add a
+# test" must NOT read as a nitpick. The right side is left open because several
+# markers end in punctuation (`nit:`, `(nit)`, `optional:`) that already
+# delimits them.
+_NITPICK_MARKERS = (
+    "nitpick",
+    "nit:",
+    "(nit)",
+    "minor:",
+    "minor nit",
+    "super minor",
+    "typo",
+    "wording",
+    "docstring",
+    "cosmetic",
+    "style suggestion",
+    "optional:",
+    "(optional)",
+)
+
+
+def _marker_pattern(marker: str) -> str:
+    # Anchor a left word boundary only when the marker starts with a word
+    # character (so `nit:` won't fire inside "unit:"). Markers that open with
+    # punctuation (`(nit)`, `(optional)`) are already delimited by that punctuation.
+    escaped = re.escape(marker)
+    return (r"\b" + escaped) if marker[:1].isalnum() else escaped
+
+
+_NITPICK_RE = re.compile(
+    "|".join(_marker_pattern(marker) for marker in _NITPICK_MARKERS),
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
-class Cycle:
+class Round:
     index: int  # 1-based, chronological
     commit_id: str
-    comment_keys: frozenset  # {(path, line)} of this review's findings
-    diff_size: int | None = None
+    bodies: tuple[str, ...]  # the round's finding comment bodies
 
 
 @dataclass(frozen=True)
@@ -49,29 +89,27 @@ class BreakerVerdict:
     stop: bool
     breaker: str | None
     reason: str
-    cycles: int
+    cycles: int  # raw round count (what the human sees)
 
 
-def build_cycles(
+def build_rounds(
     ctx: PullContext,
-    diff_sizer: DiffSizer | None = None,
     required: list[ReviewerAdapter] | None = None,
-) -> list[Cycle]:
-    """One Cycle per HEAD SHA reviewed by a required reviewer, chronological.
+) -> list[Round]:
+    """One Round per HEAD SHA reviewed by a required reviewer, chronological.
 
-    Cycles are iteration ROUNDS, not review objects: all required reviewers'
-    reviews on the same head fold into a single cycle, so N required reviewers
-    don't multiply the cycle count (release#622 — that double-count tripped the
-    cap on normal PRs). A cycle's findings are the UNION of those reviews'
-    thread comments (resolved or not — a resolved finding was still a finding of
-    that round), keyed by the review each comment was submitted with
-    (`ReviewComment.review_id`). Login matching is the adapter's job — never
-    re-roll an author filter here (a reviewer's review login and comment author
-    can render differently; release#455).
+    Rounds are iterations, not review objects: all required reviewers' reviews
+    on the same head fold into a single round, so N required reviewers don't
+    multiply the round count (release#622). A round's findings are the UNION of
+    those reviews' thread comments (resolved or not — a resolved finding was
+    still a finding of that round), keyed by the review each comment was
+    submitted with (`ReviewComment.review_id`). Login matching is the adapter's
+    job — never re-roll an author filter here (a reviewer's review login and
+    comment author can render differently; release#455).
 
     `required` is the gating set; defaults to the config-resolved one but the
-    engine threads its own set in so breakers count against the SAME reviewers
-    everything else gates on (keeps `evaluate` honest under an override).
+    engine threads its own set in so the stopping rule counts against the SAME
+    reviewers everything else gates on.
     """
     required = required if required is not None else required_reviewers()
     reviews = sorted(
@@ -81,146 +119,69 @@ def build_cycles(
     thread_comments = [c for t in ctx.threads for c in t.comments]
 
     # Group by head SHA, preserving first-seen (chronological) order. Each head
-    # is one cycle; its findings union every required review on that head.
+    # is one round; its findings union every required review on that head.
     review_ids_by_head: dict[str, list[int]] = {}
     for review in reviews:
         review_ids_by_head.setdefault(review.commit_id, []).append(review.review_id)
 
-    cycles: list[Cycle] = []
+    rounds: list[Round] = []
     for index, (commit_id, review_ids) in enumerate(review_ids_by_head.items(), start=1):
         id_set = set(review_ids)
-        keys = frozenset((c.path, c.line) for c in thread_comments if c.review_id in id_set)
-        size = diff_sizer(commit_id) if diff_sizer else None
-        cycles.append(Cycle(index, commit_id, keys, size))
-    return cycles
+        bodies = tuple(c.body for c in thread_comments if c.review_id in id_set)
+        rounds.append(Round(index, commit_id, bodies))
+    return rounds
 
 
-def divergent_cycle_count(cycles: list[Cycle]) -> int:
-    """How many cycles advanced the *divergence* counter — the cap's metric.
+def _is_nitpick(body: str) -> bool:
+    """True iff a comment body carries a nitpick marker (case-insensitive).
 
-    A cycle counts only if it introduced at least one finding LOCATION
-    (`(path, line)`) not seen in any earlier cycle. A round whose findings were
-    all already-seen locations — or that produced none at all (a cosmetic /
-    false-positive / fully-resolved round) — adds NO new divergence signal, so
-    it does NOT advance the counter (release#738).
-
-    This is the persistence model the `repeat-finding` breaker already keys on
-    (`REPEAT_WINDOW`): the divergence signal is NEW, accumulating finding
-    locations, not raw round count. A genuinely diverging loop keeps surfacing
-    fresh problems and still trips the cap; a converging loop whose later rounds
-    only re-touch known areas (or nitpick cosmetically) is not guillotined.
-
-    Conservative by construction: it can only ever return <= len(cycles), so it
-    never makes the cap fire EARLIER than the raw round count would have.
+    Markers match on a left word boundary, so `nit:` fires on "nit: rename"
+    but NOT on "unit: add a test".
     """
-    seen: set[CommentKey] = set()  # (path, line|None) finding locations
-    count = 0
-    for cycle in cycles:
-        new_locations = set(cycle.comment_keys) - seen
-        if new_locations:
-            count += 1
-            seen |= new_locations
-    return count
+    return _NITPICK_RE.search(body) is not None
+
+
+def is_all_nitpick_round(rnd: Round) -> bool:
+    """True iff the round has findings and EVERY finding is a nitpick.
+
+    An empty round (a clean/approving pass, no findings) is not "all nitpicks" —
+    there is nothing to address, so the normal readiness gates handle it.
+    """
+    return bool(rnd.bodies) and all(_is_nitpick(b) for b in rnd.bodies)
 
 
 def evaluate_breakers(
     ctx: PullContext,
-    diff_sizer: DiffSizer | None = None,
     required: list[ReviewerAdapter] | None = None,
 ) -> BreakerVerdict:
-    """Run the breaker stack (priority order); first to fire wins.
+    """Apply the stopping rule. First condition to hit wins.
 
-    `required` is threaded through to `build_cycles` so cycle counting uses the
+    `required` is threaded through to `build_rounds` so round counting uses the
     SAME required set the engine gates on (release#622).
 
-    The reported `cycles` is the raw round count (what the human sees), but the
-    cycle-cap fires on the DIVERGENT count — rounds that introduced a new
-    finding location — so a converging loop whose later rounds were
-    cosmetic/false-positive/fully-resolved is not capped (release#738)."""
-    cycles = build_cycles(ctx, diff_sizer, required=required)
-    n = len(cycles)
-    divergent = divergent_cycle_count(cycles)
+    Stop when 6 rounds have happened, or when the latest round is all nitpicks.
+    Either way the reported `cycles` is the raw round count (what the human
+    sees). The state machine decides what a stop means for routing (READY when
+    otherwise ready, else the real blocker).
+    """
+    rounds = build_rounds(ctx, required=required)
+    n = len(rounds)
 
-    if divergent > CYCLE_CAP:
+    if n >= ROUND_CAP:
         return BreakerVerdict(
             True,
-            "cycle-cap",
-            f"{divergent} divergent review cycles (of {n} total) exceeds the cap of {CYCLE_CAP}",
+            "round-cap",
+            f"{n} review rounds reached the cap of {ROUND_CAP} — there is no further round",
             n,
         )
 
-    for check in (_diff_trajectory, _comment_fixed_point, _repeat_finding):
-        verdict = check(cycles, n)
-        if verdict is not None:
-            return verdict
+    if rounds and is_all_nitpick_round(rounds[-1]):
+        return BreakerVerdict(
+            True,
+            "all-nitpick",
+            "the latest review round is all nitpicks (nothing that changes "
+            "correctness or behaviour) — stop rather than open another round",
+            n,
+        )
 
     return BreakerVerdict(False, None, "", n)
-
-
-def _diff_trajectory(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
-    """Diff growing two consecutive cycles signals divergence (would catch #118).
-
-    Guarded by an absolute floor so a 1 -> 2 -> 3 line PR doesn't trip it — only
-    diffs that are both growing *and* non-trivial count.
-    """
-    sized = [c for c in cycles if c.diff_size is not None]
-    if len(sized) < 3:
-        return None
-    a, b, c = sized[-3], sized[-2], sized[-1]
-    if c.diff_size < MIN_DIFF_LINES:
-        return None
-    if b.diff_size > a.diff_size * DIFF_GROWTH_TOLERANCE and (
-        c.diff_size > b.diff_size * DIFF_GROWTH_TOLERANCE
-    ):
-        return BreakerVerdict(
-            True,
-            "diff-trajectory",
-            f"diff growing across cycles: {a.diff_size} -> {b.diff_size} -> {c.diff_size}",
-            n,
-        )
-    return None
-
-
-def _comment_fixed_point(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
-    """Cycle N+1's findings are *identical* to cycle N's — a true fixed point.
-
-    Equality, not subset: a strict subset means some findings were resolved,
-    which is progress, not a stuck loop. A persisting location is the
-    repeat-finding breaker's job, not this one's.
-    """
-    if n < 2:
-        return None
-    prev, last = cycles[-2], cycles[-1]
-    if last.comment_keys and last.comment_keys == prev.comment_keys:
-        return BreakerVerdict(
-            True,
-            "comment-set",
-            "latest review's findings are identical to the previous cycle's (fixed point)",
-            n,
-        )
-    return None
-
-
-def _repeat_finding(cycles: list[Cycle], n: int) -> BreakerVerdict | None:
-    """The same (path, line) flagged across REPEAT_WINDOW consecutive cycles.
-
-    Requires the location to survive two fix attempts (3 cycles by default), not
-    one — a second attempt at a stubborn comment is normal; a third is the
-    signal that it needs redesign rather than another fix.
-    """
-    if n < REPEAT_WINDOW:
-        return None
-    window = cycles[-REPEAT_WINDOW:]
-    recurring = set.intersection(*(set(c.comment_keys) for c in window))
-    if recurring:
-        where = ", ".join(
-            f"{p}:{ln}" for p, ln in sorted(recurring, key=lambda k: (k[0], k[1] or 0))
-        )
-        return BreakerVerdict(
-            True,
-            "repeat-finding",
-            f"same location flagged in {REPEAT_WINDOW} consecutive cycles ({where}) — "
-            "redesign, not another fix",
-            n,
-        )
-    return None

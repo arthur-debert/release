@@ -47,7 +47,7 @@ import sys
 import time
 from collections.abc import Callable
 
-from .. import ghapi, gitstat
+from .. import ghapi
 from ..fetch import gather
 from ..ghapi import GhError
 from ..model import ReviewLifecycle
@@ -256,7 +256,7 @@ def _snapshot(pr: int, required: list[ReviewerAdapter] | None = None) -> TaskSta
     """
     required = required if required is not None else required_reviewers()
     ctx = gather(pr)
-    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref), required=required)
+    return evaluate(ctx, required=required)
 
 
 def _poll_with_retry(

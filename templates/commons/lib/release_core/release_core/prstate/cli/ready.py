@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import sys
 
-from .. import ghapi, gitstat
+from .. import ghapi
 from ..fetch import gather
 from ..reviewers import required_reviewers
 from ..state import TaskState, evaluate
@@ -26,7 +26,7 @@ USAGE = """\
 release-core pr ready — flip a PR draft->ready, guarded by the state engine.
 
 Usage:
-  release-core pr ready [<pr-number>] [--undo] [--ack-cycle-cap]
+  release-core pr ready [<pr-number>] [--undo]
 
 With no <pr-number>, resolves the PR for the current branch.
 
@@ -41,22 +41,17 @@ wait` performs the SAME guarded flip itself the moment the engine reaches
 READY. This verb is the explicit entry point for when you land on READY
 without a wait (and for --undo).
 
-When the cycle-cap circuit breaker has fired on an OTHERWISE-ready PR (0 open
-threads + CI green + a CLEAN merge, or a transient UNSTABLE while the rollup is
-green), the engine reports BLOCKED and routes you
-here with --ack-cycle-cap. That flag acknowledges the cap so the flip
-proceeds — but ONLY the cap is waived: every other readiness gate (open
-threads, CI, merge state) still applies, so you never drop to a raw
-`gh pr ready` that bypasses all of them. It is a no-op on a PR the cap did not
-trip.
+The review loop stops itself at READY by the stopping rule (6 rounds, or a
+latest round that is all nitpicks); on an otherwise-ready PR the engine routes
+to READY directly, so there is no acknowledgement flag to pass — the flip just
+proceeds.
 
 With --undo, flips ready->draft unconditionally (the human asked for changes;
 the agent takes its turn back).
 
 Options:
-  --undo            flip ready->draft (always allowed)
-  --ack-cycle-cap   acknowledge a fired cycle-cap and flip an otherwise-ready PR
-  -h --help         show this help
+  --undo      flip ready->draft (always allowed)
+  -h --help   show this help
 
 Exit codes:
   0   flipped (or already in the target state)
@@ -68,15 +63,12 @@ Exit codes:
 def main(argv: list[str]) -> int:
     pr_arg: str | None = None
     undo = False
-    ack_cycle_cap = False
     for arg in argv:
         if arg in ("-h", "--help"):
             print(USAGE)
             return 0
         if arg == "--undo":
             undo = True
-        elif arg == "--ack-cycle-cap":
-            ack_cycle_cap = True
         elif arg.startswith("-"):
             print(f"error: unknown option {arg}", file=sys.stderr)
             return 64
@@ -99,7 +91,7 @@ def main(argv: list[str]) -> int:
         return 1
 
     try:
-        return _undo(pr) if undo else _flip(pr, ack_cycle_cap=ack_cycle_cap)
+        return _undo(pr) if undo else _flip(pr)
     except ghapi.GhError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -120,20 +112,17 @@ def _undo(pr: int) -> int:
     return 0
 
 
-def _flip(pr: int, *, ack_cycle_cap: bool = False) -> int:
+def _flip(pr: int) -> int:
     """draft->ready, ONLY when the engine reads READY.
 
-    `ack_cycle_cap` waives ONLY a fired cycle-cap breaker (release#738): the
-    engine still enforces every other readiness gate, so the flip lands only if
-    the PR is otherwise genuinely converged. Without the flag a cap-blocked PR
-    refuses as before and the engine's status names the ack route.
+    The stopping rule routes an otherwise-ready PR to READY on its own (6 rounds
+    or an all-nitpick latest round), so the flip needs no acknowledgement flag —
+    it just reads the engine and flips when it says READY.
     """
     ctx = gather(pr)
     status = evaluate(
         ctx,
-        diff_sizer=gitstat.diff_sizer(ctx.base_ref),
         required=required_reviewers(),
-        ack_cycle_cap=ack_cycle_cap,
     )
     if status.state is not TaskState.READY:
         print(

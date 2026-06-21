@@ -43,7 +43,7 @@ The stacked-PR pattern is workable, not a bug. Name it as a stacked PR in the PR
 
 ### Addressing review comments
 
-Use the `pr-review-respond` skill (installed at `~/.claude/skills/pr-review-respond/SKILL.md`). Wait for both Gemini and Copilot's initial pass before triaging (the batch approach catches overlapping comments and avoids whipsaw fixes). Both reviewers fire at PR open under the current shared review policy, so the wait is "until both have posted reviews" — typically a few minutes for Gemini, ~7 min for Copilot.
+Use the `gh-pr-review-loop` skill — it is the single discipline for the whole PR loop (open draft, request reviews, wait, triage/resolve threads, flip to ready). Each addressing round is handled by a fresh shepherd subagent; the coordinator owns the wait and the flip (dev-cycle §1.3). The loop bounds itself: address every comment each round EXCEPT stop when 6 rounds have happened or the latest round is all nitpicks — on an otherwise-ready PR the engine then routes to READY.
 
 ### The PR state-transition the agent owns
 
@@ -63,9 +63,9 @@ Recurring traps worth knowing so background watchers and long-running commands d
 
 ## Available skills
 
-`~/.claude/skills/pr-review-respond/SKILL.md` is the standard flow for
-replying to and resolving PR review comments. Invoke it for any review-
-feedback handling.
+`~/.claude/skills/gh-pr-review-loop/SKILL.md` is the standard flow for the
+whole PR loop, including replying to and resolving review comments. Invoke it
+for any PR / review-feedback handling.
 
 `~/.claude/skills/gh-repo-setup/SKILL.md` brings a repo up to the shared
 release-loop setup (branch protection ruleset, per-stack policy files,

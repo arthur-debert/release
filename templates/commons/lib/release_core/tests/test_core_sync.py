@@ -650,13 +650,13 @@ def test_stale_managed_copy_rel_uses_forward_slashes(tmp_path):
     assert all("\\" not in p for p in out)
 
 
-# ── distributed-skill dest replacement (the lex pr-review-respond regression) ──
+# ── distributed-skill dest replacement (the hand-copied-skill regression) ──
 
 
 @pytest.mark.parametrize(
     ("dest", "is_skill"),
     [
-        (".claude/skills/pr-review-respond/SKILL.md", True),
+        (".claude/skills/gh-pr-review-loop/SKILL.md", True),
         (".claude/skills/tdd/mocking.md", True),
         (".claude/settings.json", False),
         ("bin/check", False),
@@ -668,9 +668,9 @@ def test_is_distributed_skill_dest(dest, is_skill):
 
 
 def test_compute_mirror_replaces_stale_real_skill_copy(tmp_path):
-    """A pre-existing REAL .claude/skills/<name>/SKILL.md (lex's stale hand-copy)
+    """A pre-existing REAL .claude/skills/<name>/SKILL.md (a stale hand-copy)
     is migrated→symlinked WITHOUT --migrate — never left as a conflict."""
-    dest = ".claude/skills/pr-review-respond/SKILL.md"
+    dest = ".claude/skills/gh-pr-review-loop/SKILL.md"
     real = tmp_path / dest
     real.parent.mkdir(parents=True)
     real.write_text("# stale local copy (157 lines)\n")  # a real file, not a symlink

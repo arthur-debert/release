@@ -18,7 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
-from release_core.prstate import gitstat
 from release_core.prstate.fetch import gather
 from release_core.prstate.state import TaskState, TaskStatus, evaluate
 
@@ -30,24 +29,26 @@ class Action(StrEnum):
     NOTIFY = "notify"  # ping the human to come drive (notify-only mode)
     SPAWN_FIXER = "spawn_fixer"  # spawn a fresh auto-fix agent (--auto mode)
     FLIP_READY = "flip_ready"  # gh pr ready + page the human (merge is theirs)
-    PAGE_BREAKER = "page_breaker"  # circuit breaker fired — page, never act
 
 
 def decide(status: TaskStatus, *, auto: bool) -> Action:
     """Map a PR's lifecycle state to the watcher's action. Pure.
 
-    Two gates are never automated: the merge (READY pages the human) and a
-    fired circuit breaker (always pages, never acts). Everything else either
-    waits, or — when the loop would otherwise need a human/agent — notifies in
-    pager mode or spawns a fresh fixer in --auto mode.
+    The merge is the only gate never automated: READY pages the human. Under the
+    stopping rule, BLOCKED always means a REAL, fixable blocker (failing CI,
+    merge conflict, behind base) — never a "stop everything" breaker. The
+    stopping rule (6 rounds / all-nitpick) routes an otherwise-ready PR to READY,
+    so `status.breaker` may be set on a BLOCKED status only as recorded metadata
+    (`state.evaluate` stamps it before the CI/merge gates); it is NOT a signal to
+    page. So a BLOCKED PR spawns a fresh fixer in --auto mode (or notifies in
+    pager mode), exactly like ADDRESSING.
     """
     state = status.state
     if state is TaskState.READY:
         return Action.FLIP_READY
-    if state is TaskState.BLOCKED and status.breaker:
-        return Action.PAGE_BREAKER
     if state in (TaskState.ADDRESSING, TaskState.BLOCKED):
-        # BLOCKED here is a failing check / merge conflict (no breaker).
+        # BLOCKED is a failing check / merge conflict — fixable; any `breaker`
+        # set here is leftover metadata, not a reason to halt.
         return Action.SPAWN_FIXER if auto else Action.NOTIFY
     # REVIEWS_PENDING, VALIDATING, REVIEWED, NO_PR — nothing to do but wait.
     return Action.WAIT
@@ -63,7 +64,6 @@ class Sink:
 
     def log(self, pr: int, prev: str | None, status: TaskStatus) -> None: ...
     def notify(self, pr: int, status: TaskStatus) -> None: ...
-    def page(self, pr: int, status: TaskStatus, *, reason: str) -> None: ...
     def flip_ready(self, pr: int, status: TaskStatus) -> None: ...
     def spawn_fixer(self, pr: int, status: TaskStatus) -> None: ...
     def error(self, pr: int, exc: Exception) -> None: ...
@@ -107,8 +107,6 @@ def _dispatch(pr: int, status: TaskStatus, sink: Sink, *, auto: bool) -> None:
         sink.spawn_fixer(pr, status)
     elif action is Action.FLIP_READY:
         sink.flip_ready(pr, status)
-    elif action is Action.PAGE_BREAKER:
-        sink.page(pr, status, reason=f"circuit breaker '{status.breaker}' fired")
     # Action.WAIT: the log line in poll_once is enough.
 
 
@@ -121,10 +119,11 @@ def build_fixer_prompt(pr: int) -> str:
     return (
         f"Drive PR #{pr} through its review round. This is an unattended "
         "auto-fix run.\n\n"
-        f"1. Orient: run `gh-task-status {pr}`. If it reports BLOCKED with a "
-        "`breaker:` line, STOP immediately — do not push anything; the loop is "
-        "diverging and a human must look. Leave a one-line PR comment noting the "
-        "breaker, then end.\n"
+        f"1. Orient: run `gh-task-status {pr}`. A BLOCKED status is a real, "
+        "fixable blocker (failing CI, merge conflict, behind base) — fix it; it "
+        "is NOT a stop signal. The stopping rule (6 rounds / all-nitpick) routes "
+        "an otherwise-ready PR to READY on its own, so there is no breaker to "
+        "halt on here.\n"
         "2. Read context before changing anything: the linked issue/spec and the "
         f"handoff note if present (`.release/handoff-{pr}.md` or a `## Context` "
         "block in the PR body). It records the original author's reasoning and "
@@ -134,15 +133,14 @@ def build_fixer_prompt(pr: int) -> str:
         "real issues, reply-with-rationale on out-of-scope/wrong ones, resolve "
         "each thread you act on.\n"
         "4. Do NOT merge and do NOT flip draft→ready — the human owns the merge "
-        "gate. End with a short status when the threads are handled (or a breaker "
-        "stops you)."
+        "gate. End with a short status when the threads are handled."
     )
 
 
 def _status_for(pr: int) -> TaskStatus:
-    """Live status for a PR: gather + evaluate with the git-backed diff sizer."""
+    """Live status for a PR: gather + evaluate."""
     ctx = gather(pr)
-    return evaluate(ctx, diff_sizer=gitstat.diff_sizer(ctx.base_ref))
+    return evaluate(ctx)
 
 
 def run(

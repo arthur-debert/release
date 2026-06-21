@@ -18,7 +18,7 @@ This skill is **only** for infrastructure issues that the consumer repo cannot f
 | `apply-ruleset` / `gh-repo-setup` rejects a check name that exists in the workflow | A policy file conflict that's clearly intentional per-repo customization |
 | `rust-cli` reusable workflow errors out in a way that looks like infra, not project code | A `cargo clippy` warning that needs a code fix |
 | `sweep-github-policy` produces a conflict that looks like a template bug | A pre-commit hook failure specific to the staged diff |
-| A skill (this one, `pr-review-respond`, `gh-repo-setup`) misbehaves in a way you can't fix by editing the local invocation | A skill triggering on the wrong description match (that's a description tweak, not a bug) |
+| A skill (this one, `gh-pr-review-loop`, `gh-repo-setup`) misbehaves in a way you can't fix by editing the local invocation | A skill triggering on the wrong description match (that's a description tweak, not a bug) |
 
 If you're unsure which side a problem falls on, ask the user before filing.
 
@@ -226,7 +226,7 @@ These are the standard buckets; the title prefix is what step 1's `--search` fil
 - **PAT scope is the first thing to verify if `gh api ... /issues` returns 403.** Cloud-env PATs are typically scoped to the related-repo group only; release isn't usually in that list at first. Add `arthur-debert/release` with `Issues: Read and write` to the PAT.
 - **Don't file the same issue from N consumer sessions in N minutes.** The dedupe search is best-effort — if you opened a session for phos-core and another for phos-app and hit the same infra bug in both, the second session may file before the first one's issue has propagated through GitHub search indexing (which can lag a minute or two). If you suspect that's happened, comment on whichever issue came in first and close the duplicate.
 - **`gh issue list --search` is best-effort substring matching.** It looks at title + body. If you want strict title-prefix matching, post-filter with jq, using double quotes so `$COMPONENT` actually expands: `--jq ".[] | select(.title | startswith(\"[${COMPONENT}]\"))"`.
-- **Non-infra escalation is the most common misuse.** If you're escalating a code-quality nit or a test failure specific to the PR you're working on, the right loop is the PR review thread, not this skill. The PR Body and `pr-review-respond`'s pushback patterns are where that conversation belongs.
+- **Non-infra escalation is the most common misuse.** If you're escalating a code-quality nit or a test failure specific to the PR you're working on, the right loop is the PR review thread, not this skill. The PR Body and `gh-pr-review-loop`'s triage/pushback patterns are where that conversation belongs.
 - **The body's `<...>` placeholders are real.** A filed issue with literal `<describe what you did>` text is a bug in the agent invoking the skill, not in the skill itself. Substitute meaningful text before the `jq | gh api` step.
 
 ## Related

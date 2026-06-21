@@ -11,7 +11,7 @@ the engine input comes from the recorded scenario fixtures via `context`.
 from __future__ import annotations
 
 import pytest
-from release_core.prstate import ghapi, gitstat
+from release_core.prstate import ghapi
 from release_core.prstate.cli import ready
 from release_core.prstate.model import PullContext, Review, ReviewComment, Thread
 from release_core.prstate.reviewers import by_name
@@ -19,14 +19,14 @@ from release_core.prstate.state import TaskState
 
 
 def _capped_ctx(*, threads, is_draft=True, merge_state="CLEAN"):
-    """An otherwise-ready PR with 4 DIVERGENT review cycles (cycle-cap fired).
+    """An otherwise-ready PR that has reached the 6-round cap.
 
-    Built directly (not from a recorded fixture) because the cap needs four
-    rounds each introducing a new finding location — the #738 escape shape.
+    Built directly (not from a recorded fixture) because the cap needs six
+    review rounds (one head SHA each).
     """
     reviews = [
         Review(review_id=i, author="Copilot", state="COMMENTED", commit_id=f"c{i}", body="")
-        for i in range(1, 5)
+        for i in range(1, 7)
     ]
     findings = [
         Thread(
@@ -34,15 +34,20 @@ def _capped_ctx(*, threads, is_draft=True, merge_state="CLEAN"):
             is_resolved=True,
             comments=(
                 ReviewComment(
-                    comment_id=i, path=f"f{i}.py", line=i, body="x", author="Copilot", review_id=i
+                    comment_id=i,
+                    path=f"f{i}.py",
+                    line=i,
+                    body="real fix",
+                    author="Copilot",
+                    review_id=i,
                 ),
             ),
         )
-        for i in range(1, 5)
+        for i in range(1, 7)
     ]
     return PullContext(
         number=738,
-        head_sha="c4",
+        head_sha="c6",
         is_draft=is_draft,
         base_ref="main",
         mergeable="MERGEABLE",
@@ -56,7 +61,6 @@ def _capped_ctx(*, threads, is_draft=True, merge_state="CLEAN"):
 @pytest.fixture
 def capped(monkeypatch):
     """Point `ready` at a directly-built capped context + Copilot-only required."""
-    monkeypatch.setattr(gitstat, "diff_sizer", lambda base_ref: None)
     monkeypatch.setattr(ready, "required_reviewers", lambda: [by_name("copilot")])
 
     def use(ctx):
@@ -76,8 +80,7 @@ def flips(monkeypatch):
 
 @pytest.fixture
 def engine(monkeypatch, context):
-    """Point `ready`'s gather at a recorded scenario; skip the git diff-sizer."""
-    monkeypatch.setattr(gitstat, "diff_sizer", lambda base_ref: None)
+    """Point `ready`'s gather at a recorded scenario."""
 
     def use(name: str, *, draft: bool | None = None):
         ctx = context(name)
@@ -247,60 +250,57 @@ def test_ready_next_action_names_the_command(context):
     assert "release-core pr ready" in status.next_action
 
 
-# --- --ack-cycle-cap: the cycle-cap escape (release#738) ----------------------
+# --- the stopping rule: a capped PR flips to READY with no ack flag -----------
 
 
-def test_help_documents_the_ack_flag(capsys):
+def test_no_ack_flag_in_help(capsys):
+    # The --ack-cycle-cap escape is gone; the stopping rule routes to READY.
     assert ready.main(["--help"]) == 0
     out = capsys.readouterr().out
-    assert "--ack-cycle-cap" in out
+    assert "--ack-cycle-cap" not in out
+    assert "--undo" in out
 
 
-def test_unknown_flag_still_rejected_alongside_ack(capsys):
-    assert ready.main(["--ack-cycle-cap", "--bogus"]) == 64
+def test_ack_flag_is_now_an_unknown_option(capsys):
+    assert ready.main(["--ack-cycle-cap"]) == 64
     assert "unknown option" in capsys.readouterr().err
 
 
-def test_capped_pr_refuses_without_the_ack_flag(capped, flips, capsys):
-    capped(_capped_ctx(threads=[]))  # converged but cycle-capped
-    assert ready.main(["738"]) == 1
-    assert flips == []  # no flip without the ack
-    captured = capsys.readouterr()
-    assert "refusing to flip" in captured.err
-    assert "BLOCKED" in captured.err
-    # the engine's next action points the human at the ack route
-    assert "--ack-cycle-cap" in captured.out
-
-
-def test_ack_flag_flips_an_otherwise_ready_capped_pr(capped, flips, capsys):
+def test_capped_pr_flips_to_ready_without_any_flag(capped, flips, capsys):
+    # 6 rounds reached on an otherwise-ready PR: the engine routes to READY, so
+    # a plain `pr ready` flips it — no acknowledgement step.
     capped(_capped_ctx(threads=[]))
-    assert ready.main(["738", "--ack-cycle-cap"]) == 0
+    assert ready.main(["738"]) == 0
     assert flips == [(738, False)]
     assert "draft -> ready" in capsys.readouterr().out
 
 
-def test_ack_flag_does_not_bypass_an_open_thread(capped, flips, capsys):
+def test_capped_pr_with_open_nitpick_thread_still_flips(capped, flips, capsys):
+    # An open thread that the stopping rule chose not to open a 7th round for
+    # does NOT block the flip on an otherwise-ready PR.
     open_thread = Thread(
         thread_id="PRT_open",
         is_resolved=False,
-        comments=(ReviewComment(comment_id=99, path="z.py", line=1, body="x", author="Copilot"),),
+        comments=(
+            ReviewComment(comment_id=99, path="z.py", line=1, body="nit: tidy", author="Copilot"),
+        ),
     )
     capped(_capped_ctx(threads=[open_thread]))
-    # cap acked, but an open thread still holds the PR -> refuse, no flip
-    assert ready.main(["738", "--ack-cycle-cap"]) == 1
-    assert flips == []
-    assert "refusing to flip" in capsys.readouterr().err
+    assert ready.main(["738"]) == 0
+    assert flips == [(738, False)]
 
 
-def test_ack_flag_does_not_bypass_a_merge_conflict(capped, flips, capsys):
+def test_capped_pr_with_merge_conflict_refuses(capped, flips, capsys):
+    # The stopping rule never bypasses a real blocker: a DIRTY merge state still
+    # refuses the flip.
     capped(_capped_ctx(threads=[], merge_state="DIRTY"))
-    assert ready.main(["738", "--ack-cycle-cap"]) == 1
+    assert ready.main(["738"]) == 1
     assert flips == []
     assert "refusing to flip" in capsys.readouterr().err
 
 
-def test_ack_flag_is_a_noop_on_an_already_ready_capped_pr(capped, flips, capsys):
-    capped(_capped_ctx(threads=[], is_draft=False))  # cap acked + already ready-for-review
-    assert ready.main(["738", "--ack-cycle-cap"]) == 0
+def test_capped_pr_already_ready_is_a_noop(capped, flips, capsys):
+    capped(_capped_ctx(threads=[], is_draft=False))
+    assert ready.main(["738"]) == 0
     assert flips == []
     assert "already ready-for-review" in capsys.readouterr().out

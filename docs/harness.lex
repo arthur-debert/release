@@ -104,7 +104,7 @@ The Agent Harness
 
         Self-authored:
             No `.upstream` marker. We own these; they MUST pass markdownlint.
-            Examples: `gh-pr-review-loop`, `pr-review-respond`,
+            Examples: `gh-pr-review-loop`,
             `release-fleet-ops`, `release-fleet-triage`, `release-issue-relay`,
             `lex-primer`, `lex-multirepo`, `gh-repo-setup`,
             `macos-signing-notarization`,
@@ -153,8 +153,7 @@ The Agent Harness
             The one skill the harness needs a file on disk for. Currently:
             `gh-pr-review-loop` (PR-loop driver). WS7 (release#528) dropped
             `release-issue-relay` (escalation is binary-carried via
-            `release-core how-to` + `issue file`); WS2 (release#523) dropped
-            `pr-review-respond` + the 15
+            `release-core how-to` + `issue file`); WS2 (release#523) dropped the 15
             dev-cycle skills (diagnose, tdd, review, triage, to-issues, handoff,
             qa, grill-me, grill-with-docs, improve-codebase-architecture,
             request-refactor-plan, ubiquitous-language, zoom-out, teach,
