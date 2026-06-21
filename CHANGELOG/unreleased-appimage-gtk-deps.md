@@ -1,0 +1,1 @@
+- Fix: add GTK packaging tooling (gtk/rsvg -dev for linuxdeploy pkg-config) to slim package deps so AppImage bundling works
