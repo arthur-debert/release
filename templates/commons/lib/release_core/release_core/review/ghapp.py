@@ -100,6 +100,11 @@ def write_manifest_form(
     It auto-submits on load; if that's blocked, visible fallback text plus a
     "Create the app" button let the user submit manually. Returns ``out_path``.
     """
+    # ``agent`` is interpolated into the form's ``state`` and the register
+    # command line, and callers derive the output filename from it
+    # (``<config>/{agent}-manifest.html``) — validate it before any of that so
+    # ``agent="../evil"`` fails loud rather than escaping the secrets dir.
+    agent = _safe_agent(agent)
     manifest = build_manifest(agent, app_name, redirect_url=redirect_url)
     state = f"release-review-{agent}"
     manifest_attr = html.escape(json.dumps(manifest), quote=True)
@@ -148,7 +153,9 @@ def _safe_agent(agent: str) -> str:
     ``[a-z0-9_-]+``; reject anything else (including ``.``, ``/``, ``..``).
     """
     if not _SAFE_AGENT_RE.match(agent):
-        raise ValueError(f"invalid agent name {agent!r} — use only letters, digits, '-', '_'")
+        raise ValueError(
+            f"invalid agent name {agent!r} — use only lowercase letters, digits, '-', '_'"
+        )
     return agent
 
 

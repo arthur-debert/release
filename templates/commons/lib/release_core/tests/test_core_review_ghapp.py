@@ -76,6 +76,26 @@ def test_write_manifest_form_structure(config_home, tmp_path):
     assert ".submit()" in doc
 
 
+def test_write_manifest_form_rejects_unsafe_agent(config_home, tmp_path):
+    """`agent` drives the output filename + form state, so an unsafe value is
+    rejected before any file is written."""
+    out = tmp_path / "evil-manifest.html"
+    with pytest.raises(ValueError, match="invalid agent name"):
+        ghapp.write_manifest_form(
+            "../evil",
+            "evil-review",
+            out_path=out,
+            redirect_url=ghapp.DEFAULT_REDIRECT_URL,
+        )
+    assert not out.exists()
+
+
+def test_safe_agent_error_mentions_lowercase():
+    """An uppercase stem like `Codex` gets an actionable, lowercase-explicit error."""
+    with pytest.raises(ValueError, match="lowercase"):
+        ghapp._safe_agent("Codex")
+
+
 def test_write_manifest_form_embeds_valid_json(config_home, tmp_path):
     import html as html_mod
     import re
