@@ -117,6 +117,12 @@ def build_replacements() -> dict[str, str]:
 def render(template: str, replacements: dict[str, str]) -> str:
     for key, value in replacements.items():
         template = template.replace(f"{{{{{key}}}}}", value)
+    # A placeholder that renders empty on its own line (e.g.
+    # PRIVATE_REPO_PREAMBLE for a public repo) leaves a blank line behind,
+    # producing two consecutive blank lines that `brew style` rejects
+    # (Layout/EmptyLines). Homebrew forbids consecutive blank lines anywhere,
+    # so collapsing any run of 2+ blank lines to one is always safe.
+    template = re.sub(r"\n{3,}", "\n\n", template)
     return template
 
 

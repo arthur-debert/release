@@ -1,0 +1,1 @@
+- Fix `brew style` Layout/EmptyLines failure in generated Homebrew formulae (empty PRIVATE_REPO_PREAMBLE left a double blank line before `class`)
