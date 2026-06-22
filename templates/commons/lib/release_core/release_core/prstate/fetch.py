@@ -147,6 +147,93 @@ def attach_state(pr: int) -> tuple[list[str], list[tuple[int, str]]]:
     return logins, reviews
 
 
+# The skip-decision read (release#852). A `pr review request` on the bare path
+# runs frequently and only needs to know who is already DONE — which the
+# rerun-aware `detect` decides from the head SHA, the submitted reviews (with the
+# commit each was made against), the pending review-request logins, and the
+# per-reviewer rerun policy. It does NOT need the review THREADS, issue-comment,
+# or reaction pagination the full `gather` pulls (those only refine DONE_CLEAN vs
+# DONE_COMMENTS — both already DONE — or feed the non-requestable Gemini adapter,
+# which is never in the required/skip set). One light GraphQL call replaces the
+# threads-cursor walk + three paginated REST fetches. `reviews(last: 100)` is
+# deliberately the recent tail: the skip decision only cares whether a reviewer
+# has a counting review on this PR, and a reviewer's own latest review is always
+# in the tail unless 100+ reviews have landed.
+_REVIEWS_QUERY = """
+query($owner: String!, $name: String!, $pr: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $pr) {
+      headRefOid
+      reviewRequests(first: 100) {
+        nodes {
+          requestedReviewer {
+            ... on User { login }
+            ... on Bot { login }
+            ... on Team { slug }
+          }
+        }
+      }
+      reviews(last: 100) {
+        nodes {
+          databaseId
+          state
+          commit { oid }
+          author { login }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def gather_reviews(pr: int) -> PullContext:
+    """A LIGHT context sufficient for `detect()` — head SHA + reviews + pending
+    review requests + the rerun policy, nothing else.
+
+    The read side of the bare `pr review request` skip decision (release#852):
+    `detect()` reads only `reviews_on_head()`/`reviews_any_head()` (head SHA +
+    reviews), `requested_logins`, and `reviewer_rerun`. This fetches exactly
+    those in one GraphQL call, dropping the threads-cursor walk and the
+    reactions/issue-comments REST pagination that the full `gather` runs. The
+    returned context has empty `threads`/`reactions`/`issue_comments`, so the
+    DONE_CLEAN vs DONE_COMMENTS refinement collapses to DONE_CLEAN — irrelevant
+    to the skip decision (both are DONE) — and the Gemini adapter (which is not
+    requestable, never in the required/skip set) is the only adapter that would
+    read the omitted fields. The full `gather` is unchanged for every other path.
+    """
+    from .reviewers import reviewer_rerun
+
+    owner, name = ghapi.repo_slug()
+    data = ghapi.graphql(_REVIEWS_QUERY, owner=owner, name=name, pr=pr)
+    pull = data["repository"]["pullRequest"]
+    requested = _requested_logins(
+        [
+            rr["requestedReviewer"]
+            for rr in pull["reviewRequests"]["nodes"]
+            if rr.get("requestedReviewer")
+        ]
+    )
+    reviews = [
+        Review(
+            review_id=n["databaseId"],
+            author=(n.get("author") or {}).get("login", ""),
+            state=n.get("state", ""),
+            commit_id=(n.get("commit") or {}).get("oid", ""),
+            body="",
+        )
+        for n in pull["reviews"]["nodes"]
+    ]
+    return PullContext(
+        number=pr,
+        head_sha=pull["headRefOid"],
+        is_draft=False,
+        reviews=reviews,
+        requested_logins=requested,
+        reviewer_rerun=reviewer_rerun(),
+    )
+
+
 def gather(pr: int) -> PullContext:
     """Fetch every raw input the engine needs for `pr`, live, via `gh`."""
     # Resolved from config (cached) at the build edge — the per-reviewer rerun

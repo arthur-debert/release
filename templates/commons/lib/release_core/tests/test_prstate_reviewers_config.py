@@ -73,6 +73,41 @@ def test_list_shorthand_rejects_non_string_entries():
         reviewers_config._parse_override_value(["copilot", 3])
 
 
+def test_list_shorthand_rejects_duplicates():
+    # A repeated reviewer in the list shorthand is always a typo, not two gates —
+    # it must fail loud, not silently dedup (release#852).
+    with pytest.raises(RequiredReviewersConfigError, match="duplicate"):
+        reviewers_config._parse_override_value(["copilot", "copilot"])
+
+
+# --- reviewer-name key normalization (release#852) --------------------------
+
+
+def test_map_keys_are_canonicalized_to_adapter_names():
+    # A `Copilot` key must key the rerun map by the canonical adapter name
+    # (`copilot`, lowercase) — the same name the adapters read off the context
+    # (`ctx.reviewer_rerun.get(adapter.name, ...)`). Without this, a `rerun: true`
+    # keyed `Copilot` is never applied and head-strict silently degrades to
+    # review-once.
+    parsed = reviewers_config._parse_override_value({"Copilot": {"rerun": True}})
+    assert parsed == {"copilot": True}
+    assert resolve_required_names(parsed) == ("copilot",)
+    assert reviewer_rerun(parsed)["copilot"] is True
+
+
+def test_list_shorthand_keys_are_canonicalized():
+    parsed = reviewers_config._parse_override_value(["Copilot", "CodeRabbit"])
+    assert parsed == {"copilot": False, "coderabbit": False}
+
+
+def test_map_keys_colliding_after_canonicalization_fail_loud():
+    # `Copilot` + `copilot` are byte-distinct YAML keys (so YAML's own
+    # duplicate-key rejection misses them) but canonicalize to one adapter — a
+    # typo, never two gates. It must fail loud, not silently clobber.
+    with pytest.raises(RequiredReviewersConfigError, match="duplicate"):
+        reviewers_config._parse_override_value({"Copilot": {}, "copilot": {}})
+
+
 # --- validation (loud) ------------------------------------------------------
 
 

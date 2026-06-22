@@ -135,13 +135,21 @@ def _parse_override_value(value: object) -> dict[str, bool]:
         required reviewers, each value an options dict (only `rerun: bool`).
       * a LIST `[copilot, codex]` — ergonomic shorthand: all required, rerun=False.
 
-    Wrong-typed values / unknown options fail LOUD."""
+    Wrong-typed values / unknown options fail LOUD. Reviewer-name keys are
+    normalized to their canonical adapter name (lowercase) so the resulting map
+    is keyed the SAME way the adapters read it (`ctx.reviewer_rerun.get(adapter
+    .name, ...)`); a `Copilot` key therefore APPLIES its rerun flag instead of
+    silently degrading to review-once (release#852). Two differently-cased keys
+    that canonicalize to the same adapter (`Copilot` + `copilot`) collide → a
+    loud duplicate error, the same as a repeated list entry."""
     if isinstance(value, list):
         if not all(isinstance(x, str) for x in value):
             raise RequiredReviewersConfigError(
                 f"{OVERRIDE_FILE} `{OVERRIDE_KEY}` list shorthand must be a list of reviewer names"
             )
-        return {name: False for name in value}
+        canon = [_canonical_name(name) for name in value]
+        _reject_duplicate_names(canon)
+        return {name: False for name in canon}
 
     if isinstance(value, dict):
         out: dict[str, bool] = {}
@@ -150,13 +158,51 @@ def _parse_override_value(value: object) -> dict[str, bool]:
                 raise RequiredReviewersConfigError(
                     f"{OVERRIDE_FILE} `{OVERRIDE_KEY}` keys must be reviewer names"
                 )
-            out[name] = _parse_options(name, opts)
+            key = _canonical_name(name)
+            # The duplicate guard catches differently-cased keys that collide to
+            # one adapter (e.g. `Copilot` + `copilot`) — YAML allows that, but it
+            # is always a typo, never two distinct gates. (`_reject_duplicate_names`
+            # reports the full collision set; here we fail on first overwrite so
+            # the per-reviewer options are never silently clobbered.)
+            if key in out:
+                _reject_duplicate_names([*out, key])
+            out[key] = _parse_options(name, opts)
         return out
 
     raise RequiredReviewersConfigError(
         f"{OVERRIDE_FILE} `{OVERRIDE_KEY}` must be a map of reviewer -> "
         "{{rerun: bool}} (or a list of reviewer names for rerun=false)"
     )
+
+
+def _canonical_name(name: str) -> str:
+    """The canonical adapter name for `name` (the `--reviewer` selector / map key).
+
+    Resolves through the SAME registry lookup the required-set validation uses
+    (`by_name`, which lowercases), so a key keys the rerun map by `adapter.name`
+    (lowercase) — exactly what the adapters read off the context. An unknown
+    name has no adapter to canonicalize to; it is passed through lowercased so
+    `_validate` raises the precise unknown-reviewer error (with the known set)
+    rather than this seam swallowing it."""
+    adapter = by_name(name)
+    return adapter.name if adapter is not None else name.lower()
+
+
+def _reject_duplicate_names(names: list[str]) -> None:
+    """Fail LOUD on any reviewer name that appears more than once (post-canon).
+
+    Both config shapes run this on canonicalized names: the list shorthand can
+    repeat a name outright (`[copilot, copilot]`), and the map can collide two
+    differently-cased keys onto one adapter (`Copilot` + `copilot`). YAML's own
+    duplicate-key rejection only covers byte-identical map keys, so the collision
+    case slips past it — this is the one check that catches both."""
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise RequiredReviewersConfigError(
+            f"duplicate required reviewer(s) {duplicates} in {OVERRIDE_FILE} "
+            f"`{OVERRIDE_KEY}` — list each reviewer once "
+            "(names are matched case-insensitively, so `Copilot` and `copilot` collide)"
+        )
 
 
 def _parse_options(name: str, opts: object) -> bool:

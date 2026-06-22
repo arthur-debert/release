@@ -28,7 +28,7 @@ import time
 from collections.abc import Callable
 
 from .. import ghapi
-from ..fetch import attach_state, gather
+from ..fetch import attach_state, gather, gather_reviews
 from ..model import PullContext, ReviewLifecycle
 from ..reviewers import REGISTRY, ReviewerAdapter, by_name, required_reviewers
 
@@ -245,8 +245,13 @@ def _skip_done(pr: int, adapters: list[ReviewerAdapter]) -> list[ReviewerAdapter
     once — no needless re-run); a never-reviewed or push-staled (rerun=True)
     reviewer is kept and gets requested. Announces each skip so the no-op is
     visible. A gh failure here is fatal to the request (we can't tell who is
-    done) — raised as GhError, handled by the caller."""
-    ctx = gather(pr)
+    done) — raised as GhError, handled by the caller.
+
+    Uses the LIGHT `gather_reviews` (release#852), not the full `gather`: the
+    skip decision only needs the head SHA + reviews + requested logins + the
+    rerun policy that `detect()` reads, so this frequently-run path drops the
+    threads-cursor walk and the reactions/issue-comment REST pagination."""
+    ctx = gather_reviews(pr)
     keep: list[ReviewerAdapter] = []
     for adapter in adapters:
         if adapter.detect(ctx) in _DONE_LIFECYCLES:

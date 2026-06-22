@@ -56,11 +56,20 @@ def fakes(monkeypatch):
     monkeypatch.setattr(
         review, "by_name", lambda name: next((a for a in registry if a.name == name.lower()), None)
     )
-    # The bare-request path now skips already-DONE reviewers, so it builds a
-    # context via gather() to run each adapter's detect. Mock gather offline —
-    # the FakeAdapters' detect keys off `.done` (set per-test), ignoring ctx.
+    # The bare-request path skips already-DONE reviewers, building a LIGHT
+    # context via gather_reviews() (release#852) to run each adapter's detect.
+    # Mock that offline — the FakeAdapters' detect keys off `.done` (set
+    # per-test), ignoring ctx. The heavy gather() is wired to BLOW UP so any test
+    # that accidentally drags it onto the skip path fails loudly.
     monkeypatch.setattr(
-        review, "gather", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
+        review, "gather_reviews", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
+    )
+    monkeypatch.setattr(
+        review,
+        "gather",
+        lambda pr: pytest.fail(
+            "bare-request skip path must use the light gather_reviews, not gather"
+        ),
     )
     return alpha, beta, gamma
 
@@ -202,6 +211,23 @@ def test_bare_request_skips_a_reviewer_already_done(fakes, attach_ok, capsys):
     assert "alpha: already reviewed #7 (review-once) — skip" in out
 
 
+def test_bare_request_skip_path_uses_light_fetch_not_heavy_gather(monkeypatch, fakes, attach_ok):
+    # release#852: the frequently-run skip decision builds its context via the
+    # LIGHT gather_reviews (head sha + reviews + requested + rerun) — NOT the
+    # full gather (threads-cursor walk + reactions/issue-comment pagination).
+    # The fixture wires gather() to pytest.fail, so reaching it would blow up;
+    # here we additionally assert gather_reviews IS the fetch that runs.
+    alpha, beta, _ = fakes
+    calls: list[int] = []
+    monkeypatch.setattr(
+        review,
+        "gather_reviews",
+        lambda pr: calls.append(pr) or PullContext(number=pr, head_sha="h", is_draft=True),
+    )
+    assert review.request_main(["7"]) == 0
+    assert calls == [7]  # the light fetch ran exactly once for the skip decision
+
+
 def test_bare_request_when_all_done_requests_nothing(fakes, capsys):
     alpha, beta, _ = fakes
     alpha.done = True
@@ -239,10 +265,11 @@ def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
         "attach_state",
         lambda pr: (["Copilot", "coderabbitai[bot]"], []),
     )
-    # The bare path skips done reviewers; a context with NO reviews means copilot
-    # is not-yet-done, so it IS requested (the behaviour this test asserts).
+    # The bare path skips done reviewers via the light gather_reviews; a context
+    # with NO reviews means copilot is not-yet-done, so it IS requested (the
+    # behaviour this test asserts).
     monkeypatch.setattr(
-        review, "gather", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
+        review, "gather_reviews", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
     )
     calls: list[tuple] = []
     monkeypatch.setattr(
