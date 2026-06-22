@@ -110,7 +110,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-nvim@v3
+      - uses: arthur-debert/release/.github/actions/prepare-release-nvim@canary/d7962c83a6a7
         id: prep
         with:
           version: ${{ inputs.version }}

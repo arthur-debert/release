@@ -443,7 +443,7 @@ jobs:
           shared-key: tauri-core
 
       - name: Enable sccache (GCS, shared across branches)
-        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        uses: arthur-debert/release/.github/actions/setup-sccache@canary/d7962c83a6a7
         with:
           gcs-key: ${{ secrets.sccache_gcs_key }}
 
@@ -564,7 +564,7 @@ jobs:
         # block #417/#419 had to copy into every reusable workflow (release#416).
         # Node + Python are set up by the steps above; the composite installs the
         # lint/format toolset the hardened gate needs.
-        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        uses: arthur-debert/release/.github/actions/arm-gate@canary/d7962c83a6a7
 
       - name: Run project checks
         # `shell: bash` is required: `check-command` may be an arbitrary
@@ -694,7 +694,7 @@ jobs:
           shared-key: tauri-core
 
       - name: Enable sccache (GCS, shared across branches)
-        uses: arthur-debert/release/.github/actions/setup-sccache@v3
+        uses: arthur-debert/release/.github/actions/setup-sccache@canary/d7962c83a6a7
         with:
           gcs-key: ${{ secrets.sccache_gcs_key }}
 

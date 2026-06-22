@@ -146,7 +146,7 @@ jobs:
 
       - name: Prepare release (npm)
         id: prep
-        uses: arthur-debert/release/.github/actions/prepare-release-npm@v3
+        uses: arthur-debert/release/.github/actions/prepare-release-npm@canary/d7962c83a6a7
         with:
           version: ${{ inputs.version }}
           changelog-path: ${{ inputs.changelog-path }}
