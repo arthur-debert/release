@@ -152,6 +152,17 @@ def test_parse_review_output_names_the_timeout_when_marker_present():
     assert "faster model" in msg or "smaller diff" in msg
 
 
+def test_parse_review_output_names_the_calling_backend_in_timeout_hint():
+    # parse_review_output is SHARED by every backend, so the timeout hint must
+    # blame the backend passed in — not a hardcoded name.
+    truncated = '{"summary": {"status": "COMM\nError: timed out waiting for response'
+    with pytest.raises(BackendError) as exc:
+        parse_review_output(truncated, backend_name="codex")
+    msg = str(exc.value)
+    assert "codex timed out" in msg
+    assert "agy" not in msg
+
+
 def test_parse_review_output_timeout_marker_is_case_insensitive():
     with pytest.raises(BackendError) as exc:
         parse_review_output("{trunc\nTIMED OUT WAITING FOR RESPONSE")
@@ -252,7 +263,10 @@ def test_run_names_timeout_on_truncated_output_with_marker(monkeypatch, backend)
     monkeypatch.setattr(_backend_module(backend).proc, "run", lambda *a, **k: _completed(truncated))
     with pytest.raises(BackendError) as exc:
         backend.run("prompt", REVIEW_SCHEMA)
-    assert "timed out" in str(exc.value).lower()
+    msg = str(exc.value)
+    assert "timed out" in msg.lower()
+    # The hint names the RIGHT backend (codex's run() must not say "agy").
+    assert f"{backend.name} timed out" in msg
 
 
 @pytest.mark.parametrize("backend", [CodexBackend(), AgyBackend()])

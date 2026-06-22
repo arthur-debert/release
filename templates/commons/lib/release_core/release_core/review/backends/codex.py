@@ -73,7 +73,7 @@ class CodexBackend(Backend):
                 schema_path = schema_file.name
 
             result = proc.run(self._argv(schema_path), input=prompt, cwd=cwd)
-            return parse_review_output(result.stdout)
+            return parse_review_output(result.stdout, backend_name=self.name)
         finally:
             if schema_path and os.path.exists(schema_path):
                 os.remove(schema_path)

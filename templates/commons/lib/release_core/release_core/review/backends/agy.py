@@ -83,7 +83,7 @@ class AgyBackend(Backend):
                 prompt_path = prompt_file.name
 
             result = proc.run(self._argv(prompt_path), cwd=cwd)
-            return parse_review_output(result.stdout)
+            return parse_review_output(result.stdout, backend_name=self.name)
         finally:
             if prompt_path and os.path.exists(prompt_path):
                 os.remove(prompt_path)

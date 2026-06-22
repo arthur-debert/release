@@ -43,7 +43,7 @@ class BackendError(RuntimeError):
     (clean error + exit 1, never a raw traceback)."""
 
 
-def parse_review_output(stdout: str) -> dict:
+def parse_review_output(stdout: str, *, backend_name: str = "the agent") -> dict:
     """Parse an agent's stdout into a review dict, or raise :class:`BackendError`.
 
     Wraps :func:`release_core.review.schema.extract_json` (which still raises a
@@ -52,6 +52,10 @@ def parse_review_output(stdout: str) -> dict:
     snippet of the raw output for debugging and, when the agent's timeout marker
     is present, says so explicitly so the user knows to use a faster model or a
     smaller diff.
+
+    ``backend_name`` names the calling backend (e.g. ``"codex"`` / ``"agy"``) so
+    the timeout hint blames the RIGHT backend — this function is shared by every
+    backend, so a hardcoded name would mislabel a different backend's timeout.
     """
     # Local import: schema is a sibling, but keeping it here avoids any chance
     # of an import-order issue and matches the lazy style used elsewhere.
@@ -63,8 +67,8 @@ def parse_review_output(stdout: str) -> dict:
         raw = stdout or ""
         if _TIMEOUT_MARKER in raw.lower():
             hint = (
-                "agy timed out before returning a complete review — try a faster "
-                "model or a smaller diff"
+                f"{backend_name} timed out before returning a complete review — "
+                "try a faster model or a smaller diff"
             )
         else:
             hint = (
