@@ -255,8 +255,12 @@ class _LocalReviewAdapter(ReviewerAdapter):
     bot_slug_fragment: str = ""
 
     def matches(self, login: str) -> bool:
+        # Require the GitHub App `[bot]` SUFFIX (not just the substring
+        # anywhere) AND the stable slug fragment. `adr-codex-review[bot]` /
+        # `adr-agy-review[bot]` end with `[bot]`, so they still match; a login
+        # that merely contains `[bot]` mid-string (e.g. `x[bot]y`) does not.
         low = login.lower()
-        return "[bot]" in low and self.bot_slug_fragment in low
+        return low.endswith("[bot]") and self.bot_slug_fragment in low
 
     def request(self, pr: int) -> bool:
         """Generate the review locally and POST it now (synchronous).

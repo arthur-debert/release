@@ -313,6 +313,16 @@ def test_codex_and_agy_do_not_match_human_logins():
     assert AGY.matches("agy-helper[bot]") is False
 
 
+def test_codex_and_agy_require_bot_as_suffix_not_substring():
+    # `[bot]` must be a SUFFIX, not appear mid-string: a login carrying the
+    # slug fragment AND `[bot]` somewhere in the middle (but not at the end)
+    # must NOT match — `endswith`, not substring containment.
+    assert CODEX.matches("adr-codex-review[bot]-staging") is False
+    assert AGY.matches("adr-agy-review[bot]y") is False
+    # The slug fragment alone, with `[bot]` mid-string, is still False.
+    assert CODEX.matches("codex-review[bot]x") is False
+
+
 def test_codex_detect_done_on_head():
     # A review by the codex bot on the current head reads as done (head-strict).
     from release_core.prstate.model import PullContext, Review

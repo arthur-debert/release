@@ -23,3 +23,16 @@ def test_register_main_error_goes_to_stderr(monkeypatch, capsys):
     assert "bad code" in captured.err
     # The error must NOT leak onto stdout.
     assert "Could not register" not in captured.out
+
+
+def test_manifest_main_invalid_agent_fails_cleanly(capsys):
+    # An invalid agent name (`../evil`) must fail cleanly via stderr + exit 1,
+    # not raise an uncaught ValueError that bubbles through wrap_verb.
+    rc = app_cli.manifest_main(["../evil", "--name", "x"])
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "error:" in captured.err
+    assert "invalid agent name" in captured.err
+    # The error must NOT leak onto stdout.
+    assert "error:" not in captured.out

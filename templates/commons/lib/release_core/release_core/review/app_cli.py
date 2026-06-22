@@ -65,17 +65,26 @@ def manifest_main(argv: list[str]) -> int:
     """Entry point for ``release-core review app manifest``."""
     args = _manifest_parser().parse_args(argv)
 
-    if args.out is not None:
-        out_path = Path(args.out)
-    else:
-        out_path = ghapp.app_config_dir() / f"{args.agent}-manifest.html"
+    try:
+        # Validate the agent BEFORE it lands in the default output filename, so
+        # an invalid value (e.g. ``../evil``) fails cleanly rather than raising
+        # an uncaught ``ValueError`` that bubbles through `wrap_verb`.
+        safe_agent = ghapp._safe_agent(args.agent)
 
-    path = ghapp.write_manifest_form(
-        args.agent,
-        args.name,
-        out_path=out_path,
-        redirect_url=args.redirect_url,
-    )
+        if args.out is not None:
+            out_path = Path(args.out)
+        else:
+            out_path = ghapp.app_config_dir() / f"{safe_agent}-manifest.html"
+
+        path = ghapp.write_manifest_form(
+            args.agent,
+            args.name,
+            out_path=out_path,
+            redirect_url=args.redirect_url,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface any failure as a clean nonzero
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     print(f"Wrote the app-manifest form to: {path}")
     print("\nNext steps:")
