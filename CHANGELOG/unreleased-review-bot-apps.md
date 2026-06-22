@@ -1,1 +1,0 @@
-- Post agent reviews as GitHub App bots (release-core review app + review post --as-app)

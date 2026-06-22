@@ -4,6 +4,15 @@
 
 ## Unreleased
 
+## 3.10.0 - 2026-06-22
+
+- Add local code-review agent backends (codex, agy) under 'release-core review run'
+- Local reviewers no longer falsely report 'request dropped'; backend timeouts/bad output fail cleanly; agy gets a 10m print timeout
+- Post agent reviews as GitHub App bots (release-core review app + review post --as-app)
+- Post agent reviews to GitHub PRs as inline reviews (release-core review post)
+- Unify local agents with copilot: codex/agy as pr-review reviewer adapters
+- Per-reviewer rerun config; review-once is the default (re-run is opt-in)
+
 ## 3.9.0 - 2026-06-21
 
 - Fix: add GTK packaging tooling (gtk/rsvg -dev for linuxdeploy pkg-config) to slim package deps so AppImage bundling works
