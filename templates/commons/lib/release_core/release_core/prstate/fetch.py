@@ -149,6 +149,13 @@ def attach_state(pr: int) -> tuple[list[str], list[tuple[int, str]]]:
 
 def gather(pr: int) -> PullContext:
     """Fetch every raw input the engine needs for `pr`, live, via `gh`."""
+    # Resolved from config (cached) at the build edge — the per-reviewer rerun
+    # policy rides on the context so adapter detection stays pure (it reads the
+    # policy off `ctx`, never the config). Imported here, not at module top, to
+    # keep the import edge one-way (reviewers -> fetch is not a cycle, but the
+    # config read is genuinely a build-site concern).
+    from .reviewers import reviewer_rerun
+
     owner, name = ghapi.repo_slug()
     base = f"repos/{owner}/{name}"
     meta = ghapi.pr_meta(pr)
@@ -162,6 +169,7 @@ def gather(pr: int) -> PullContext:
         thread_nodes=thread_nodes,
         reactions=ghapi.rest(f"{base}/issues/{pr}/reactions", paginate=True) or [],
         issue_comments=ghapi.rest(f"{base}/issues/{pr}/comments", paginate=True) or [],
+        reviewer_rerun=reviewer_rerun(),
     )
 
 
@@ -172,8 +180,14 @@ def context_from_raw(
     thread_nodes: list[dict],
     reactions: list[dict],
     issue_comments: list[dict],
+    reviewer_rerun: dict[str, bool] | None = None,
 ) -> PullContext:
-    """Pure: assemble a `PullContext` from raw gh payloads. No network."""
+    """Pure: assemble a `PullContext` from raw gh payloads. No network.
+
+    `reviewer_rerun` is the per-reviewer rerun policy (name -> bool) resolved
+    from config at the build site; it defaults to empty (every reviewer
+    review-once) so a test/fixture context that omits it gets the shipped
+    default behaviour."""
     return PullContext(
         number=meta["number"],
         head_sha=meta["headRefOid"],
@@ -187,6 +201,7 @@ def context_from_raw(
         issue_comments=issue_comments,
         requested_logins=_requested_logins(meta.get("reviewRequests") or []),
         checks=meta.get("statusCheckRollup") or [],
+        reviewer_rerun=reviewer_rerun or {},
     )
 
 

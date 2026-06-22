@@ -104,10 +104,23 @@ class PullContext:
     issue_comments: list[dict] = field(default_factory=list)  # Gemini bot comments
     requested_logins: list[str] = field(default_factory=list)
     checks: list[dict] = field(default_factory=list)  # gh statusCheckRollup entries
+    # Per-reviewer rerun policy (name -> rerun flag), resolved from config at the
+    # build site (`fetch`/the CLI). rerun=True means head-strict (re-review every
+    # push); rerun=False (the DEFAULT for any reviewer absent here) means
+    # review-once: a review on ANY commit of the PR counts as done and is never
+    # stale-after-push. The adapters read this to pick head-strict vs any-head
+    # detection — keeping the policy data here, not a code branch per reviewer.
+    reviewer_rerun: dict[str, bool] = field(default_factory=dict)
 
     def reviews_on_head(self) -> list[Review]:
         """Reviews made against the current head — stale reviews don't count."""
         return [r for r in self.reviews if r.commit_id == self.head_sha]
+
+    def reviews_any_head(self) -> list[Review]:
+        """All reviews on the PR, regardless of which commit they were made
+        against — the review-once (rerun=False) lens: a review on an earlier head
+        still counts, since the reviewer won't be asked to look again."""
+        return list(self.reviews)
 
     def open_threads(self) -> list[Thread]:
         return [t for t in self.threads if not t.is_resolved]

@@ -56,6 +56,12 @@ def fakes(monkeypatch):
     monkeypatch.setattr(
         review, "by_name", lambda name: next((a for a in registry if a.name == name.lower()), None)
     )
+    # The bare-request path now skips already-DONE reviewers, so it builds a
+    # context via gather() to run each adapter's detect. Mock gather offline —
+    # the FakeAdapters' detect keys off `.done` (set per-test), ignoring ctx.
+    monkeypatch.setattr(
+        review, "gather", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
+    )
     return alpha, beta, gamma
 
 
@@ -180,6 +186,41 @@ def test_noop_backend_reports_noop_and_succeeds(fakes, attach_ok, sleeps, capsys
     assert attach_ok == [7]  # the pre-request baseline read only — no poll
 
 
+# --- bare request skips already-done reviewers; --reviewer forces (rerun config) --
+
+
+def test_bare_request_skips_a_reviewer_already_done(fakes, attach_ok, capsys):
+    # review-once: a required reviewer that has already reviewed (detect → DONE)
+    # is NOT re-requested on the bare path — re-running it would cost a token /
+    # model run for a review it already gave.
+    alpha, beta, _ = fakes
+    alpha.done = True  # alpha already reviewed
+    assert review.request_main(["7"]) == 0
+    assert alpha.requests == []  # skipped
+    assert beta.requests == [7]  # not done → requested
+    out = capsys.readouterr().out
+    assert "alpha: already reviewed #7 (review-once) — skip" in out
+
+
+def test_bare_request_when_all_done_requests_nothing(fakes, capsys):
+    alpha, beta, _ = fakes
+    alpha.done = True
+    beta.done = True
+    assert review.request_main(["7"]) == 0
+    assert alpha.requests == [] and beta.requests == []
+    out = capsys.readouterr().out
+    assert "all required reviewers already reviewed #7 — nothing to request" in out
+
+
+def test_explicit_reviewer_forces_request_even_when_done(fakes, attach_ok, capsys):
+    # --reviewer X is the manual FORCE / re-run escape hatch: it requests X
+    # regardless of current state (does not consult detect / skip).
+    alpha, _, _ = fakes
+    alpha.done = True
+    assert review.request_main(["7", "--reviewer", "alpha"]) == 0
+    assert alpha.requests == [7]  # forced despite being done
+
+
 def test_cancel_dispatches_through_the_same_interface(fakes, capsys):
     alpha, beta, _ = fakes
     assert review.cancel_main(["9"]) == 0
@@ -197,6 +238,11 @@ def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
         review,
         "attach_state",
         lambda pr: (["Copilot", "coderabbitai[bot]"], []),
+    )
+    # The bare path skips done reviewers; a context with NO reviews means copilot
+    # is not-yet-done, so it IS requested (the behaviour this test asserts).
+    monkeypatch.setattr(
+        review, "gather", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
     )
     calls: list[tuple] = []
     monkeypatch.setattr(

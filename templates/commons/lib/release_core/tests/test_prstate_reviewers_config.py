@@ -1,10 +1,11 @@
-"""The required-reviewer SET is a config knob, not code (release#622).
+"""The required-reviewer SET + per-reviewer rerun policy is config, not code.
 
-Proves the set is data-driven: a shipped default ([copilot] — coderabbit is a
-phos-org pilot, opted in per-repo), a per-repo `.release-sync.yaml` override,
-and an unknown name that fails LOUD.
-The engine-side proof (a DIFFERENT set drives a DIFFERENT verdict) lives in
-test_prstate_state.py::test_required_set_is_data_driven_*.
+Proves the `reviewers:` config is data-driven: a shipped default
+({copilot: rerun=False} — review-once), a per-repo `.release-sync.yaml` override
+(map or list shorthand), per-reviewer `rerun` flags, the retired
+`required_reviewers:` key failing LOUD, and unknown / non-requestable names
+failing LOUD. The engine-side proof (a DIFFERENT set drives a DIFFERENT verdict)
+lives in test_prstate_state.py::test_required_set_is_data_driven_*.
 """
 
 from __future__ import annotations
@@ -12,59 +13,101 @@ from __future__ import annotations
 import pytest
 from release_core.prstate import reviewers_config
 from release_core.prstate.reviewers_config import (
-    DEFAULT_REQUIRED,
+    DEFAULT_REVIEWERS,
     RequiredReviewersConfigError,
     resolve_required_names,
+    resolve_reviewers,
+    reviewer_rerun,
 )
 
 
-def test_default_is_copilot_only():
+def test_default_is_copilot_only_review_once():
     # CodeRabbit is a phos-org pilot: the App is only installed there, so
     # requiring it by default would park every other repo at REVIEWS_PENDING.
-    assert DEFAULT_REQUIRED == ("copilot",)
+    # rerun defaults False — review once (re-run is opt-in for everyone).
+    assert DEFAULT_REVIEWERS == {"copilot": False}
+    assert resolve_reviewers(None) == {"copilot": False}
     assert resolve_required_names(None) == ("copilot",)
+    assert reviewer_rerun(None) == {"copilot": False}
 
 
 def test_empty_override_falls_back_to_default():
-    # `required_reviewers: []` is "unset", never "disable all review gating".
-    assert resolve_required_names([]) == ("copilot",)
+    # `reviewers: {}` is "unset", never "disable all review gating".
+    assert resolve_reviewers({}) == {"copilot": False}
 
 
 def test_override_swaps_the_set_with_a_one_line_change():
     # A pilot repo opts into CodeRabbit (or any other set) — only config changed.
-    assert resolve_required_names(["copilot", "coderabbit"]) == ("copilot", "coderabbit")
-    assert resolve_required_names(["coderabbit"]) == ("coderabbit",)
+    parsed = reviewers_config._parse_override_value(
+        {"copilot": {"rerun": False}, "coderabbit": {"rerun": False}}
+    )
+    assert resolve_required_names(parsed) == ("copilot", "coderabbit")
+    assert resolve_reviewers(parsed) == {"copilot": False, "coderabbit": False}
 
 
-def test_override_can_reorder_or_add_within_the_catalog():
-    # Re-ordering is config too; any name must map to a registered adapter.
-    assert resolve_required_names(["coderabbit", "copilot"]) == ("coderabbit", "copilot")
+def test_rerun_flags_are_per_reviewer():
+    parsed = reviewers_config._parse_override_value(
+        {"copilot": {"rerun": True}, "codex": {"rerun": False}}
+    )
+    assert reviewer_rerun(parsed) == {"copilot": True, "codex": False}
+
+
+def test_rerun_defaults_false_when_options_absent():
+    # `copilot:` with an empty/null options value means defaults — rerun=False.
+    parsed = reviewers_config._parse_override_value({"copilot": None, "codex": {}})
+    assert parsed == {"copilot": False, "codex": False}
+    assert reviewer_rerun(parsed) == {"copilot": False, "codex": False}
+
+
+# --- list shorthand ---------------------------------------------------------
+
+
+def test_list_shorthand_means_all_required_rerun_false():
+    parsed = reviewers_config._parse_override_value(["copilot", "codex", "agy"])
+    assert parsed == {"copilot": False, "codex": False, "agy": False}
+    assert resolve_required_names(parsed) == ("copilot", "codex", "agy")
+
+
+def test_list_shorthand_rejects_non_string_entries():
+    with pytest.raises(RequiredReviewersConfigError, match="list shorthand"):
+        reviewers_config._parse_override_value(["copilot", 3])
+
+
+# --- validation (loud) ------------------------------------------------------
 
 
 def test_local_backends_are_requestable_and_can_be_required():
     # codex / agy are requestable local backends, so they are valid in the
     # required set (they post a real review the gate can read as done).
-    assert resolve_required_names(["codex"]) == ("codex",)
-    assert resolve_required_names(["copilot", "agy"]) == ("copilot", "agy")
-    assert resolve_required_names(["codex", "agy"]) == ("codex", "agy")
+    assert resolve_required_names({"codex": False}) == ("codex",)
+    assert resolve_required_names({"copilot": False, "agy": True}) == ("copilot", "agy")
 
 
 def test_unknown_reviewer_name_fails_loud():
     with pytest.raises(RequiredReviewersConfigError, match="gpt5"):
-        resolve_required_names(["copilot", "gpt5"])
+        resolve_reviewers({"copilot": False, "gpt5": False})
 
 
 def test_non_requestable_reviewer_cannot_be_required():
     # Gemini auto-triggers and has no request mechanism, so it can never satisfy
-    # a required gate — configuring it required fails loud at parse time, not as
-    # an engine forever advising "request gemini".
+    # a required gate — configuring it required fails loud at parse time.
     with pytest.raises(RequiredReviewersConfigError, match="non-requestable"):
-        resolve_required_names(["copilot", "gemini"])
+        resolve_reviewers({"copilot": False, "gemini": False})
 
 
-def test_duplicate_reviewer_names_fail_loud():
-    with pytest.raises(RequiredReviewersConfigError, match="duplicate"):
-        resolve_required_names(["copilot", "copilot"])
+def test_unknown_per_reviewer_option_fails_loud():
+    with pytest.raises(RequiredReviewersConfigError, match="unknown option"):
+        reviewers_config._parse_override_value({"copilot": {"reroll": True}})
+
+
+def test_non_bool_rerun_fails_loud():
+    with pytest.raises(RequiredReviewersConfigError, match="must be a boolean"):
+        reviewers_config._parse_override_value({"copilot": {"rerun": "yes"}})
+
+
+def test_wrong_typed_reviewers_value_fails_loud():
+    with pytest.raises(RequiredReviewersConfigError, match="must be a map"):
+        reviewers_config._parse_override_value("copilot")
 
 
 def test_required_reviewers_maps_names_to_adapters_in_order():
@@ -84,26 +127,47 @@ def test_load_override_absent_file_is_none(tmp_path):
     assert reviewers_config.load_override(str(tmp_path)) is None
 
 
-def test_load_override_reads_the_key(tmp_path, monkeypatch):
+def test_load_override_reads_the_map(tmp_path, monkeypatch):
     (tmp_path / ".release-sync.yaml").write_text(
-        "capabilities:\n  - rust-quality\nrequired_reviewers:\n  - coderabbit\n"
+        "capabilities:\n  - rust-quality\nreviewers:\n  coderabbit:\n    rerun: true\n"
     )
     # Patch the yq-backed sync-config loader so the test is hermetic (no external
     # `yq`); load_override still runs for real over the patched seam.
     from release_core import manifest
 
     monkeypatch.setattr(
-        manifest, "load_sync_config", lambda d=None: {"required_reviewers": ["coderabbit"]}
+        manifest, "load_sync_config", lambda d=None: {"reviewers": {"coderabbit": {"rerun": True}}}
     )
-    assert reviewers_config.load_override(str(tmp_path)) == ["coderabbit"]
+    assert reviewers_config.load_override(str(tmp_path)) == {"coderabbit": True}
 
 
-def test_load_override_rejects_a_non_list(tmp_path, monkeypatch):
-    (tmp_path / ".release-sync.yaml").write_text("required_reviewers: copilot\n")
+def test_load_override_reads_the_list_shorthand(tmp_path, monkeypatch):
+    (tmp_path / ".release-sync.yaml").write_text("reviewers:\n  - copilot\n  - codex\n")
     from release_core import manifest
 
     monkeypatch.setattr(
-        manifest, "load_sync_config", lambda d=None: {"required_reviewers": "copilot"}
+        manifest, "load_sync_config", lambda d=None: {"reviewers": ["copilot", "codex"]}
     )
-    with pytest.raises(RequiredReviewersConfigError, match="must be a list"):
+    assert reviewers_config.load_override(str(tmp_path)) == {"copilot": False, "codex": False}
+
+
+def test_load_override_rejects_a_wrong_typed_value(tmp_path, monkeypatch):
+    (tmp_path / ".release-sync.yaml").write_text("reviewers: copilot\n")
+    from release_core import manifest
+
+    monkeypatch.setattr(manifest, "load_sync_config", lambda d=None: {"reviewers": "copilot"})
+    with pytest.raises(RequiredReviewersConfigError, match="must be a map"):
+        reviewers_config.load_override(str(tmp_path))
+
+
+def test_load_override_retired_required_reviewers_key_fails_loud(tmp_path, monkeypatch):
+    # NO BACKWARDS COMPAT: the old list key is gone; a stale config fails loud
+    # with a migration message pointing at the `reviewers:` map.
+    (tmp_path / ".release-sync.yaml").write_text("required_reviewers:\n  - copilot\n")
+    from release_core import manifest
+
+    monkeypatch.setattr(
+        manifest, "load_sync_config", lambda d=None: {"required_reviewers": ["copilot"]}
+    )
+    with pytest.raises(RequiredReviewersConfigError, match="replaced by the `reviewers:` map"):
         reviewers_config.load_override(str(tmp_path))

@@ -15,17 +15,23 @@ human or any bot (Copilot, Gemini, CodeRabbit, …). Bot names and mechanics liv
 in the reviewer adapter registry behind `release-core pr review`, not in this
 skill.
 
-**The required reviewer set.** The default required set is **Copilot**.
-CodeRabbit is a second requestable reviewer being piloted on the phos-org repos
-(the only place its GitHub App is installed); a pilot repo opts in via
-`required_reviewers:` in its `.release-sync.yaml`. Where a repo requires several
-reviewers they gate **in parallel** (release#622), not primary-plus-fallback: a
-PR is `REVIEWED` only when **every** required reviewer has a review on the
-**current head**; every push stales them all, so you re-request them all;
-`release-core pr ready` requires all of them. The trade-off is availability: one
-required reviewer's outage holds the PR at `REVIEWS_PENDING` until it recovers —
-accepted, not a bug. The engine names the outstanding reviewer in the next
-action, so a single-reviewer stall is visible, not silent.
+**The required reviewer set.** The default required set is **Copilot**,
+**review-once** (`rerun: false`). CodeRabbit is a second requestable reviewer
+being piloted on the phos-org repos (the only place its GitHub App is
+installed); a pilot repo opts in via the `reviewers:` map in its
+`.release-sync.yaml`. Where a repo requires several reviewers they gate **in
+parallel** (release#622), not primary-plus-fallback: a PR is `REVIEWED` only
+when **every** required reviewer has a counting review; `release-core pr ready`
+requires all of them. The trade-off is availability: one required reviewer's
+outage holds the PR at `REVIEWS_PENDING` until it recovers — accepted, not a
+bug. The engine names the outstanding reviewer in the next action, so a
+single-reviewer stall is visible, not silent.
+
+**Re-run on push is per-reviewer config, default OFF (review once).** All
+reviewers are token-billed now (local agents cost a real model run each time),
+so re-reviewing each new head is explicit opt-in via a reviewer's `rerun: true`.
+A default review-once reviewer's review counts on **any** head and is never
+stale-after-push; only a `rerun: true` reviewer is re-requested after a push.
 
 ## Reading the per-reviewer line in `pr status`
 
@@ -39,8 +45,8 @@ unfamiliar pair is not a new concept to learn:
 
 - **Reviewer names** (the adapter registry — `prstate/reviewers.py`):
   - `copilot` — requestable; the default required reviewer.
-  - `coderabbit` — requestable; the phos-org pilot (opt-in via
-    `required_reviewers:`).
+  - `coderabbit` — requestable; the phos-org pilot (opt-in via the
+    `reviewers:` map).
   - `gemini` — auto-triggering, best-effort; *not* requestable, so never a
     required gate. It appears in the line whenever it has acted, but a
     timed-out Gemini is treated as skipped rather than blocking Ready.
@@ -52,11 +58,13 @@ unfamiliar pair is not a new concept to learn:
   - `done_clean` — finished and left **no** comment threads.
   - `done_comments` — finished and left comment threads (triage them).
 
-A push stales a head-strict reviewer (Copilot, CodeRabbit) back toward
-`not_requested`/`requested`, so re-request after every push (Gemini is
-any-head and won't re-review). The done-signal for the round is still
-**zero unresolved threads**, engine-computed — never a manual read of these
-pairs.
+A push stales only a `rerun: true` reviewer back toward
+`not_requested`/`requested` (re-request that one); a default review-once
+reviewer's review counts on any head and is not re-requested. A bare
+`release-core pr review request` does this for you — it skips reviewers already
+done and re-requests only those not done. The done-signal for the round is
+still **zero unresolved threads**, engine-computed — never a manual read of
+these pairs.
 
 ## The loop
 
@@ -227,34 +235,46 @@ reviewer in the repo's required set. `--reviewer <name>` narrows to one.
 done-signal for a review round is **zero unresolved review threads** — the
 engine computes it; you never count a particular bot's comments.
 
-### Changing the required reviewer set (a config knob, not code)
+### Changing the required reviewer set + rerun policy (a config knob, not code)
 
-Which reviewers gate is **data**, not code — reviewer pricing/availability
-shifts, so swapping the set is a one-line edit, no engine change:
+Which reviewers gate, and whether each re-runs on push, is **data**, not code —
+reviewer pricing/availability shifts, so changing it is a one-line edit, no
+engine change:
 
-- **Default (shipped, all consumers):** `[copilot]`, baked into
-  `reviewers_config.DEFAULT_REQUIRED` and carried by the `release_core` wheel.
-- **Per-repo override:** add a `required_reviewers:` list to the repo's existing
-  optional `.release-sync.yaml` (the same file that carries `capabilities:` — no
-  new tracked file). Examples:
+- **Default (shipped, all consumers):** `{copilot: rerun=false}` (copilot
+  required, review-once), baked into `reviewers_config.DEFAULT_REVIEWERS` and
+  carried by the `release_core` wheel.
+- **Per-repo override:** add a `reviewers:` map to the repo's existing optional
+  `.release-sync.yaml` (the same file that carries `capabilities:` — no new
+  tracked file). The map KEYS are the required reviewers; each value is an
+  options dict whose one option is `rerun: bool` (default false = review once).
+  Examples:
 
   ```yaml
-  # the phos pilot: CodeRabbit gates alongside Copilot
-  required_reviewers:
-    - copilot
-    - coderabbit
+  # the phos pilot: CodeRabbit gates alongside Copilot, both review-once
+  reviewers:
+    copilot:   {rerun: false}
+    coderabbit: {rerun: false}
   ```
 
   ```yaml
-  # or just CodeRabbit
-  required_reviewers:
-    - coderabbit
+  # opt one reviewer into re-running on every push
+  reviewers:
+    copilot: {rerun: true}
   ```
 
-  Each name must map to a registered adapter (`copilot`, `coderabbit`, `gemini`,
-  …); an unknown name fails **loud**. An empty/absent list falls back to the
-  default. Adding a *new* reviewer backend is still an adapter in the registry;
-  flipping which existing ones gate is purely this config.
+  ```yaml
+  # list shorthand = all required, rerun=false
+  reviewers: [copilot, coderabbit]
+  ```
+
+  Each name must map to a registered **requestable** adapter (`copilot`,
+  `coderabbit`, `codex`, `agy`); an unknown or non-requestable name fails
+  **loud**. An empty/absent map falls back to the default. The retired
+  `required_reviewers:` list key fails loud with a migration message (no
+  backwards compat). Adding a *new* reviewer backend is still an adapter in the
+  registry; flipping which existing ones gate, or whether each re-runs, is purely
+  this config.
 
 The verb **verifies the attach**: GitHub can accept the request call yet
 silently drop the `review_requested` edge (service stall / quota), so after
@@ -307,13 +327,19 @@ Resolve aggressively:
 - **Genuinely contested or awaiting human input → leave open.** That's the
   signal.
 
-### Re-requesting a review
+### Re-requesting a review (per-reviewer config, default review-once)
 
-After **any** push, re-request the review (`release-core pr review request`).
-The state engine is the arbiter: a review counts only against the current
-head, so a push makes the prior review stale and `release-core pr status`
-advises RE-REQUEST — that next action is authoritative. There is no
-minor-vs-substantial exception; bot re-reviews are cheap.
+Re-run on push is a **per-reviewer** setting and defaults **OFF (review once)**
+for everyone — all reviewers are token-billed now (local agents cost a real
+model run each time), so re-reviewing each new head is explicit opt-in via a
+reviewer's `rerun: true`. After a push, run `release-core pr review request`:
+the bare verb skips any reviewer already done and re-requests only those not
+done — so a default review-once reviewer (whose review counts on any head) is
+skipped, and a `rerun: true` reviewer (staled by the push) is re-requested. The
+state engine is the arbiter — `release-core pr status` advises RE-REQUEST only
+for a staled `rerun: true` reviewer; that next action is authoritative. The
+manual escape hatch is `--reviewer <name>`, which FORCES a (re-)request of that
+reviewer regardless of state.
 
 ## The stopping rule: 6 rounds, or an all-nitpick round
 

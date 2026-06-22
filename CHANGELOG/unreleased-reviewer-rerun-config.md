@@ -1,0 +1,1 @@
+- Per-reviewer rerun config; review-once is the default (re-run is opt-in)

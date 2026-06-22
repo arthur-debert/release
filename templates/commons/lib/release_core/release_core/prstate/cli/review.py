@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from .. import ghapi
 from ..fetch import attach_state, gather
-from ..model import PullContext
+from ..model import PullContext, ReviewLifecycle
 from ..reviewers import REGISTRY, ReviewerAdapter, by_name, required_reviewers
 
 # Attach-verification poll (release#614). GitHub's review service can accept
@@ -61,9 +61,15 @@ verifying the request actually attached.
 Usage:
   release-core pr review request [<pr-number>] [--reviewer <name>]
 
-Re-requesting after a fixup push is the same command — the backend call is
-identical. Reviewers without a request mechanism (auto-triggering, best-effort
-backends) report a no-op rather than failing; no-ops are not verified.
+A bare request (no --reviewer) targets the required set but SKIPS any reviewer
+already done: re-run is per-reviewer config (`reviewers:` in .release-sync.yaml,
+`rerun:`), defaulting OFF — a review-once reviewer that has already reviewed is
+not re-requested. A rerun=true reviewer staled by a push is not done, so it IS
+re-requested. An explicit `--reviewer <name>` is a manual FORCE: it requests
+that reviewer regardless of current state (the manual re-run escape hatch).
+
+Reviewers without a request mechanism (auto-triggering, best-effort backends)
+report a no-op rather than failing; no-ops are not verified.
 
 A request only counts when GitHub actually creates the review_requested edge:
 the service can accept the call yet silently drop the attach (service stall /
@@ -203,8 +209,13 @@ def _resolve_pr(pr: int | None) -> int | None:
     return int(number) if number is not None else None
 
 
-def _setup(argv: list[str], usage: str) -> tuple[int, list[ReviewerAdapter]] | int:
-    """Common front half of every command: parse, select, resolve the PR."""
+def _setup(argv: list[str], usage: str) -> tuple[int, list[ReviewerAdapter], bool] | int:
+    """Common front half of every command: parse, select, resolve the PR.
+
+    Returns `(pr, adapters, explicit)` where `explicit` is True when a single
+    reviewer was named with `--reviewer` (the manual FORCE path) and False for
+    the bare/all-required default — `request` uses that to decide whether to
+    skip already-done reviewers."""
     parsed = _parse(argv, usage)
     if isinstance(parsed, int):
         return parsed
@@ -220,7 +231,29 @@ def _setup(argv: list[str], usage: str) -> tuple[int, list[ReviewerAdapter]] | i
     if pr is None:
         print("error: could not resolve a PR for the current branch", file=sys.stderr)
         return 1
-    return pr, adapters
+    return pr, adapters, reviewer is not None
+
+
+_DONE_LIFECYCLES = {ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS}
+
+
+def _skip_done(pr: int, adapters: list[ReviewerAdapter]) -> list[ReviewerAdapter]:
+    """The subset of `adapters` NOT already DONE on `pr` (the bare-request scope).
+
+    Builds one context and runs each adapter's rerun-aware `detect`: a
+    review-once reviewer that has reviewed reads DONE and is dropped (review
+    once — no needless re-run); a never-reviewed or push-staled (rerun=True)
+    reviewer is kept and gets requested. Announces each skip so the no-op is
+    visible. A gh failure here is fatal to the request (we can't tell who is
+    done) — raised as GhError, handled by the caller."""
+    ctx = gather(pr)
+    keep: list[ReviewerAdapter] = []
+    for adapter in adapters:
+        if adapter.detect(ctx) in _DONE_LIFECYCLES:
+            print(f"{adapter.name}: already reviewed #{pr} (review-once) — skip", flush=True)
+        else:
+            keep.append(adapter)
+    return keep
 
 
 # --- request / cancel -------------------------------------------------------
@@ -230,8 +263,21 @@ def request_main(argv: list[str]) -> int:
     front = _setup(argv, USAGE_REQUEST)
     if isinstance(front, int):
         return front
-    pr, adapters = front
+    pr, adapters, explicit = front
     try:
+        # The bare/all-required path requests ONLY reviewers not already DONE: a
+        # review-once (rerun=False) reviewer that has reviewed is skipped
+        # (re-running it would cost a token / model run for a review it already
+        # gave), while a rerun=True reviewer staled by a push is not DONE → it is
+        # re-requested. An explicit `--reviewer X` is a manual FORCE: it requests
+        # X regardless of state (the manual re-run escape hatch). Skipping needs
+        # a context to call detect() on; only build it on the bare path (the
+        # force path never reads it).
+        if not explicit:
+            adapters = _skip_done(pr, adapters)
+            if not adapters:
+                print(f"all required reviewers already reviewed #{pr} — nothing to request")
+                return 0
         # Baseline BEFORE placing: any review submitted after this snapshot
         # is fresh, so a fast bot consuming the request before the poll sees
         # the edge still verifies. Snapshotting between request and poll
@@ -297,7 +343,7 @@ def cancel_main(argv: list[str]) -> int:
     front = _setup(argv, USAGE_CANCEL)
     if isinstance(front, int):
         return front
-    pr, adapters = front
+    pr, adapters, _ = front
     return _act(pr, adapters, act=lambda a: a.cancel(pr), did="withdrew review request")
 
 
@@ -398,7 +444,7 @@ def show_main(argv: list[str]) -> int:
     front = _setup(argv, USAGE_SHOW)
     if isinstance(front, int):
         return front
-    pr, adapters = front
+    pr, adapters, _ = front
     try:
         ctx = gather(pr)
     except ghapi.GhError as exc:

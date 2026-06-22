@@ -73,9 +73,18 @@ def test_gemini_eyes_is_in_progress_copilot_requested(context):
     assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
 
 
-def test_stale_copilot_review_does_not_count_as_done(context):
+def test_stale_copilot_review_counts_as_done_when_review_once(context):
+    # DEFAULT policy is review-once (rerun=False): a review against an earlier
+    # commit still counts as done — the reviewer won't be asked to look again.
     ctx = context("copilot_stale_review")
-    # A review against an earlier commit must not read as done on this head.
+    assert COPILOT.detect(ctx) in (ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS)
+
+
+def test_stale_copilot_review_does_not_count_as_done_when_rerun(context):
+    # rerun=True (opt-in, head-strict): a review against an earlier commit is
+    # stale and must not read as done on this head.
+    ctx = context("copilot_stale_review")
+    ctx.reviewer_rerun = {"copilot": True}
     assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
 
 
@@ -95,8 +104,8 @@ def test_gemini_review_on_earlier_head_still_counts_as_done():
     assert GEMINI.detect(ctx) == ReviewLifecycle.DONE_CLEAN
 
 
-def test_copilot_review_on_earlier_head_does_NOT_count_done():
-    # Contrast: Copilot is head-strict — a review on an old head is stale.
+def test_copilot_review_on_earlier_head_counts_done_review_once():
+    # DEFAULT (review-once): an earlier-head Copilot review still counts as done.
     from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
@@ -106,7 +115,33 @@ def test_copilot_review_on_earlier_head_does_NOT_count_done():
         reviews=[Review(1, "Copilot", "COMMENTED", "old", "")],
         requested_logins=["Copilot"],
     )
+    assert COPILOT.detect(ctx) in (ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS)
+
+
+def test_copilot_review_on_earlier_head_does_NOT_count_done_when_rerun():
+    # rerun=True: Copilot is head-strict — a review on an old head is stale.
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "Copilot", "COMMENTED", "old", "")],
+        requested_logins=["Copilot"],
+        reviewer_rerun={"copilot": True},
+    )
     assert COPILOT.detect(ctx) == ReviewLifecycle.REQUESTED
+
+
+def test_copilot_never_reviewed_is_requested_or_not_requested():
+    # Never reviewed: REQUESTED when currently requested, else NOT_REQUESTED —
+    # independent of the rerun flag.
+    from release_core.prstate.model import PullContext
+
+    requested = PullContext(number=1, head_sha="h", is_draft=True, requested_logins=["Copilot"])
+    assert COPILOT.detect(requested) == ReviewLifecycle.REQUESTED
+    bare = PullContext(number=1, head_sha="h", is_draft=True)
+    assert COPILOT.detect(bare) == ReviewLifecycle.NOT_REQUESTED
 
 
 def test_dismissed_copilot_review_on_head_does_NOT_count_done():
@@ -238,8 +273,8 @@ def test_coderabbit_done_on_head_with_open_comment():
     assert len(CODERABBIT.open_threads(ctx)) == 1
 
 
-def test_coderabbit_is_head_strict_like_copilot():
-    # A review on an earlier head is stale — must NOT read as done on this head.
+def test_coderabbit_review_once_by_default_counts_earlier_head():
+    # DEFAULT review-once: an earlier-head CodeRabbit review counts as done.
     from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
@@ -248,6 +283,21 @@ def test_coderabbit_is_head_strict_like_copilot():
         is_draft=True,
         reviews=[Review(1, "coderabbitai[bot]", "COMMENTED", "old", "")],
         requested_logins=["coderabbitai[bot]"],
+    )
+    assert CODERABBIT.detect(ctx) in (ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS)
+
+
+def test_coderabbit_is_head_strict_when_rerun():
+    # rerun=True: a review on an earlier head is stale — must NOT read as done.
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "coderabbitai[bot]", "COMMENTED", "old", "")],
+        requested_logins=["coderabbitai[bot]"],
+        reviewer_rerun={"coderabbit": True},
     )
     assert CODERABBIT.detect(ctx) == ReviewLifecycle.REQUESTED
 
@@ -349,8 +399,8 @@ def test_codex_detect_not_requested_when_empty():
     assert AGY.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
 
 
-def test_codex_detect_stale_review_is_not_done():
-    # Head-strict: a review against an earlier head does not count as done.
+def test_codex_detect_stale_review_counts_done_review_once():
+    # DEFAULT review-once: an earlier-head local review still counts as done.
     from release_core.prstate.model import PullContext, Review
 
     ctx = PullContext(
@@ -358,6 +408,22 @@ def test_codex_detect_stale_review_is_not_done():
         head_sha="new",
         is_draft=True,
         reviews=[Review(1, "adr-codex-review[bot]", "COMMENTED", "old", "")],
+    )
+    assert CODEX.detect(ctx) in (ReviewLifecycle.DONE_CLEAN, ReviewLifecycle.DONE_COMMENTS)
+
+
+def test_codex_detect_stale_review_is_not_done_when_rerun():
+    # rerun=True: head-strict — a review against an earlier head is stale. A local
+    # backend has no requested edge, so a staled review reads NOT_REQUESTED (it
+    # must be re-run), never REQUESTED.
+    from release_core.prstate.model import PullContext, Review
+
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        reviews=[Review(1, "adr-codex-review[bot]", "COMMENTED", "old", "")],
+        reviewer_rerun={"codex": True},
     )
     assert CODEX.detect(ctx) == ReviewLifecycle.NOT_REQUESTED
 

@@ -121,13 +121,22 @@ The Development Life Cycle
         --undo`); only when the new changes + checks pass flip back to READY for
         re-validation.
 
-    On re-requesting a review:
+    On re-requesting a review (per-reviewer config, default review-once):
 
-        After any push, re-request the review — no exception for small
-        rounds. The state engine is the arbiter: a review counts only
-        against the current head, so any push makes the prior review stale
-        and `release-core pr status` advises RE-REQUEST. That next action
-        is authoritative; bot re-reviews are cheap, so comply and move on.
+        Re-run-on-push is a PER-REVIEWER setting and defaults OFF (review
+        once) for everyone. All reviewers are token-billed now, and local
+        agents (codex / agy) cost a real model run each time, so re-reviewing
+        each new head is explicit opt-in — not the default. The state engine
+        is the arbiter: it re-requests ONLY reviewers configured `rerun: true`
+        after a push (their earlier-head review is stale, so `release-core pr
+        status` advises RE-REQUEST). A default review-once reviewer's review
+        counts on ANY head and is NEVER stale-after-push — it is not
+        re-requested. A bare `release-core pr review request` follows this:
+        it skips a reviewer already done and re-requests only those not done
+        (review-once-done reviewers are skipped; staled rerun=true reviewers
+        are re-requested). The manual escape hatch is `--reviewer <name>`,
+        which FORCES a (re-)request of that reviewer regardless of state.
+        Trust the next action `release-core pr status` reports.
 
     On stopping the review loop (the 6/nitpick rule):
 
@@ -159,35 +168,46 @@ The Development Life Cycle
 
         When a repo requires several reviewers, they gate in parallel
         (release#622), not as a primary with a fallback. A PR is `REVIEWED`
-        only when EVERY required reviewer has a review on the CURRENT head;
-        every push stales them all (so `release-core pr review request`
-        re-requests them), and `release-core pr ready` requires all present
-        + resolved. Dual coverage trades availability — if one required
-        reviewer is down, the PR stays at `REVIEWS_PENDING` until it
+        only when EVERY required reviewer has a counting review — on ANY head
+        for a default review-once reviewer, on the CURRENT head for one
+        configured `rerun: true` (which a push stales, so `release-core pr
+        review request` re-requests it). `release-core pr ready` requires all
+        present + resolved. Dual coverage trades availability — if one
+        required reviewer is down, the PR stays at `REVIEWS_PENDING` until it
         recovers, and the engine names the outstanding reviewer so the
         stall is visible, never silent.
 
-        The required set is a CONFIG knob, not code — reviewer pricing and
-        availability shift, so changing it is a one-line edit with no engine
-        change. The shipped default `[copilot]` lives in
-        `reviewers_config.DEFAULT_REQUIRED` (carried by the `release_core`
-        wheel). A single repo overrides it with a `required_reviewers:` list
-        in its existing optional `.release-sync.yaml` (the same file that
-        carries `capabilities:` — no new tracked file):
+        The required set AND each reviewer's rerun policy are a CONFIG knob,
+        not code — reviewer pricing and availability shift, so changing them
+        is a one-line edit with no engine change. The shipped default
+        `{copilot: rerun=false}` lives in `reviewers_config.DEFAULT_REVIEWERS`
+        (carried by the `release_core` wheel). A single repo overrides it with
+        a `reviewers:` map in its existing optional `.release-sync.yaml` (the
+        same file that carries `capabilities:` — no new tracked file). The map
+        KEYS are the required reviewers; each value is an options dict whose
+        one option is `rerun: bool` (default false = review once):
 
-        Opt a pilot repo into CodeRabbit alongside Copilot:
+        Opt a pilot repo into CodeRabbit alongside Copilot, both review-once:
 
-            required_reviewers:
-              - copilot
-              - coderabbit
+            reviewers:
+              copilot:   {rerun: false}
+              coderabbit: {rerun: false}
 
         :: yaml ::
 
-        Each name must map to a registered reviewer adapter (`copilot`,
-        `coderabbit`, `gemini`, …); an unknown name fails loud, and an
-        empty/absent list falls back to the default. Adding a NEW reviewer
+        A LIST shorthand means all-required, rerun=false:
+
+            reviewers: [copilot, coderabbit]
+
+        :: yaml ::
+
+        Each name must map to a registered REQUESTABLE reviewer adapter
+        (`copilot`, `coderabbit`, `codex`, `agy`); an unknown or
+        non-requestable name fails loud, and an empty/absent map falls back to
+        the default. The retired `required_reviewers:` list key fails loud with
+        a migration message (no backwards compat). Adding a NEW reviewer
         backend is still an adapter in the registry; flipping which existing
-        ones gate is purely this config.
+        ones gate, or whether each re-runs on push, is purely this config.
 
 2. Epics (multiple PRs) — the topology
 

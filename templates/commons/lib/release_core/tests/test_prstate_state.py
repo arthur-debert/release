@@ -24,7 +24,11 @@ def test_no_pr():
     ("fixture", "expected"),
     [
         ("gemini_eyes_copilot_requested", TaskState.REVIEWS_PENDING),
-        ("copilot_stale_review", TaskState.REVIEWS_PENDING),
+        # review-once is the DEFAULT (rerun=False): the earlier-head Copilot
+        # review counts as done, so this PR is no longer REVIEWS_PENDING — it
+        # falls through to its BLOCKED merge state (mergeStateStatus=BLOCKED).
+        # The head-strict (rerun=True) re-request case is asserted separately.
+        ("copilot_stale_review", TaskState.BLOCKED),
         ("copilot_changes_requested", TaskState.ADDRESSING),
         ("reviewed_mergeable_unknown", TaskState.REVIEWED),
         ("validating_checks_pending", TaskState.VALIDATING),
@@ -301,14 +305,29 @@ def test_reviews_pending_never_requested_says_request(context):
 
 
 def test_reviews_pending_stale_after_push_says_rerequest(context):
-    # Copilot reviewed an EARLIER commit; a push has moved the head and reset the
-    # request to not_requested. The action must distinguish this from a fresh
-    # request: RE-REQUEST for the current head, and name the staleness.
-    status = evaluate(context("copilot_stale_needs_rerequest"))
+    # ONLY a rerun=True (head-strict) reviewer can be stale-after-push: Copilot
+    # reviewed an EARLIER commit and a push moved the head. With rerun opted in,
+    # the action distinguishes this from a fresh request: RE-REQUEST for the
+    # current head, and names the staleness. (Under the review-once default the
+    # earlier-head review would simply count as done — see the reviewers tests.)
+    ctx = context("copilot_stale_needs_rerequest")
+    ctx.reviewer_rerun = {"copilot": True}
+    status = evaluate(ctx)
     assert status.state is TaskState.REVIEWS_PENDING
     assert "RE-REQUEST for the current head" in status.next_action
     assert "stale after a push" in status.next_action
     assert "copilot" in status.next_action
+
+
+def test_review_once_earlier_head_is_done_never_rerequested(context):
+    # The DEFAULT (review-once): the SAME stale fixture, with no rerun opt-in, is
+    # NOT pending — the earlier-head review counts as done, so the reviewer never
+    # appears in RE-REQUEST advice. (mergeStateStatus=BLOCKED in the fixture is
+    # then the only thing holding it, proving review gating cleared.)
+    status = evaluate(context("copilot_stale_needs_rerequest"))
+    assert status.state is not TaskState.REVIEWS_PENDING
+    assert "RE-REQUEST" not in status.next_action
+    assert status.reviewers["copilot"].startswith("done")
 
 
 def test_reviews_pending_already_requested_says_wait(context):
@@ -412,9 +431,11 @@ def test_required_set_is_data_driven_three_reviewers():
     assert "falcon" in status.next_action
 
 
-def test_a_push_re_stales_both_required_reviewers():
-    # Both reviewed an EARLIER head; a push moved the head. Both are now stale →
-    # the engine asks to RE-REQUEST both for the current head.
+def test_a_push_re_stales_both_required_reviewers_when_rerun():
+    # Both reviewed an EARLIER head; a push moved the head. With BOTH opted into
+    # rerun (head-strict), both are now stale → the engine asks to RE-REQUEST
+    # both for the current head. (Under the review-once default both would count
+    # as done — see test_review_once_both_earlier_head_reaches_ready.)
     ctx = PullContext(
         number=1,
         head_sha="new",
@@ -425,12 +446,33 @@ def test_a_push_re_stales_both_required_reviewers():
             Review(2, "coderabbitai[bot]", "APPROVED", "old", ""),
         ],
         checks=_green_checks(),
+        reviewer_rerun={"copilot": True, "coderabbit": True},
     )
     status = evaluate(ctx, required=_both_required())
     assert status.state is TaskState.REVIEWS_PENDING
     assert "RE-REQUEST" in status.next_action
     assert "copilot" in status.next_action
     assert "coderabbit" in status.next_action
+
+
+def test_review_once_both_earlier_head_reaches_ready():
+    # The DEFAULT (review-once): the SAME both-reviewed-an-earlier-head context,
+    # with no rerun opt-in, reaches READY — neither earlier-head review is stale,
+    # so a push does NOT re-open the review gate (the whole point of the policy).
+    ctx = PullContext(
+        number=1,
+        head_sha="new",
+        is_draft=True,
+        mergeable="MERGEABLE",
+        merge_state="CLEAN",
+        reviews=[
+            Review(1, "Copilot", "APPROVED", "old", ""),
+            Review(2, "coderabbitai[bot]", "APPROVED", "old", ""),
+        ],
+        checks=_green_checks(),
+    )
+    status = evaluate(ctx, required=_both_required())
+    assert status.state is TaskState.READY
 
 
 # --- classify_checks ------------------------------------------------------
