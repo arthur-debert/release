@@ -133,7 +133,7 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release-python@v3
+      - uses: arthur-debert/release/.github/actions/prepare-release-python@canary/d3566e40595e
         id: prep
         with:
           version: ${{ inputs.version }}

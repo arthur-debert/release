@@ -173,7 +173,7 @@ jobs:
         # block #417/#419 had to copy into every reusable workflow (release#416).
         # Node + Python are set up by the steps above; the composite installs the
         # lint/format toolset the hardened gate needs.
-        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        uses: arthur-debert/release/.github/actions/arm-gate@canary/d3566e40595e
 
       - name: Run umbrella check
         shell: bash

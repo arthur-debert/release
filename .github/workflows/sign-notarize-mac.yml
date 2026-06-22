@@ -110,7 +110,7 @@ jobs:
 
       - name: Unpack unsigned app
         id: unpack
-        uses: arthur-debert/release/.github/actions/unpack-unsigned-app@v3
+        uses: arthur-debert/release/.github/actions/unpack-unsigned-app@canary/d3566e40595e
         with:
           artifact-dir: unsigned
 
@@ -120,7 +120,7 @@ jobs:
       #    → notary rejection (release#823 phos RC: Contents/MacOS/gen_fixtures).
       - name: Enumerate nested Mach-O
         id: macho
-        uses: arthur-debert/release/.github/actions/enumerate-macho@v3
+        uses: arthur-debert/release/.github/actions/enumerate-macho@canary/d3566e40595e
         with:
           app-path: ${{ steps.unpack.outputs.app }}
 
@@ -128,7 +128,7 @@ jobs:
       #    timestamp on every Mach-O). sign-mac signs the newline-separated
       #    paths in order, outer last — so nested code precedes the .app.
       - name: Sign .app (nested-aware)
-        uses: arthur-debert/release/.github/actions/sign-mac@v3
+        uses: arthur-debert/release/.github/actions/sign-mac@canary/d3566e40595e
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -139,14 +139,14 @@ jobs:
       # 3. Reseal the .dmg from the SIGNED .app via hdiutil (never re-bundle).
       - name: Reseal dmg
         id: reseal
-        uses: arthur-debert/release/.github/actions/reseal-mac-dmg@v3
+        uses: arthur-debert/release/.github/actions/reseal-mac-dmg@canary/d3566e40595e
         with:
           app-path: ${{ steps.unpack.outputs.app }}
           dmg-out: ${{ runner.temp }}/signed.dmg
 
       # 4. Codesign the resealed .dmg.
       - name: Sign .dmg
-        uses: arthur-debert/release/.github/actions/sign-mac@v3
+        uses: arthur-debert/release/.github/actions/sign-mac@canary/d3566e40595e
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -155,7 +155,7 @@ jobs:
       # 5. Notarize + staple the signed .dmg (skipped when notarize=false).
       - name: Notarize + staple
         if: ${{ inputs.notarize }}
-        uses: arthur-debert/release/.github/actions/notarize-mac@v3
+        uses: arthur-debert/release/.github/actions/notarize-mac@canary/d3566e40595e
         with:
           artifact-path: ${{ runner.temp }}/signed.dmg
           asc-key-base64: ${{ secrets.ASC_KEY_BASE64 }}

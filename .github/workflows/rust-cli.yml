@@ -276,7 +276,7 @@ jobs:
           submodules: ${{ inputs.submodules }}
           token: ${{ secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         with:
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
@@ -300,9 +300,9 @@ jobs:
         # release-core gate --provision verb). Node + Python are set up
         # by the steps above; the composite installs the lint/format toolset the
         # hardened gate (run by prepare-release below) needs. (release#416)
-        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        uses: arthur-debert/release/.github/actions/arm-gate@canary/d3566e40595e
 
-      - uses: arthur-debert/release/.github/actions/prepare-release@v3
+      - uses: arthur-debert/release/.github/actions/prepare-release@canary/d3566e40595e
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -355,7 +355,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         with:
           targets: ${{ matrix.target }}
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
@@ -382,7 +382,7 @@ jobs:
       - name: Sign macOS binaries
         id: sign
         if: matrix.sign
-        uses: arthur-debert/release/.github/actions/sign-mac@v3
+        uses: arthur-debert/release/.github/actions/sign-mac@canary/d3566e40595e
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -528,7 +528,7 @@ jobs:
       - name: Build .deb
         if: matrix.deb_arch != '' && inputs.apt
         id: deb
-        uses: arthur-debert/release/.github/actions/build-deb@v3
+        uses: arthur-debert/release/.github/actions/build-deb@canary/d3566e40595e
         with:
           package: ${{ inputs.bin-name }}
           target: ${{ matrix.target }}
@@ -554,11 +554,11 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         with:
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
-      - uses: arthur-debert/release/.github/actions/publish-crate@v3
+      - uses: arthur-debert/release/.github/actions/publish-crate@canary/d3566e40595e
         with:
           crates: ${{ inputs.crates }}
           token: ${{ secrets.CRATES_IO_KEY }}
@@ -591,7 +591,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         if: steps.guard.outputs.skip != 'true'
         with:
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
@@ -656,7 +656,7 @@ jobs:
           echo "urls<<EOF" >> "$GITHUB_OUTPUT"; echo "$urls" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
           echo "shas<<EOF" >> "$GITHUB_OUTPUT"; echo "$shas" >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
 
-      - uses: arthur-debert/release/.github/actions/render-brew-formula@v3
+      - uses: arthur-debert/release/.github/actions/render-brew-formula@canary/d3566e40595e
         if: steps.guard.outputs.skip != 'true'
         with:
           bin-name: ${{ inputs.bin-name }}
@@ -669,7 +669,7 @@ jobs:
           output-path: out/${{ inputs.bin-name }}.rb
           private-repo: ${{ inputs.brew-private-repo }}
 
-      - uses: arthur-debert/release/.github/actions/push-brew-tap@v3
+      - uses: arthur-debert/release/.github/actions/push-brew-tap@canary/d3566e40595e
         if: steps.guard.outputs.skip != 'true'
         with:
           tap-repo: ${{ inputs.brew-tap }}
@@ -734,7 +734,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         with:
           targets: wasm32-unknown-unknown
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}

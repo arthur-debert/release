@@ -108,7 +108,7 @@ jobs:
         # not the lefthook gate, so it needs the toolset but not the `.release/`
         # tree; and release's own repo has no detectable Kind (init would fail),
         # exactly as its ci.yml documents.
-        uses: arthur-debert/release/.github/actions/arm-gate@v3
+        uses: arthur-debert/release/.github/actions/arm-gate@canary/d3566e40595e
         with:
           install_tree: 'false'
 

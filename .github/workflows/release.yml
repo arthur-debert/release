@@ -45,7 +45,7 @@ permissions:
 
 jobs:
   release:
-    uses: arthur-debert/release/.github/workflows/gh-action.yml@main
+    uses: arthur-debert/release/.github/workflows/gh-action.yml@canary/d3566e40595e
     with:
       version: ${{ inputs.version }}
       # Multi-action repo: many composite actions under

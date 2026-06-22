@@ -86,11 +86,11 @@ jobs:
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
           token: ${{ secrets.RELEASE_TOKEN || github.token }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         with:
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
-      - uses: arthur-debert/release/.github/actions/prepare-release@v3
+      - uses: arthur-debert/release/.github/actions/prepare-release@canary/d3566e40595e
         id: prep
         with:
           version: ${{ inputs.version }}
@@ -116,11 +116,11 @@ jobs:
           ref: ${{ needs.prepare.outputs.release-sha }}
           submodules: ${{ inputs.submodules && 'recursive' || '' }}
 
-      - uses: arthur-debert/release/.github/actions/setup-rust@v3
+      - uses: arthur-debert/release/.github/actions/setup-rust@canary/d3566e40595e
         with:
           sccache-gcs-key: ${{ secrets.sccache_gcs_key }}
 
-      - uses: arthur-debert/release/.github/actions/publish-crate@v3
+      - uses: arthur-debert/release/.github/actions/publish-crate@canary/d3566e40595e
         with:
           crates: ${{ inputs.crates }}
           token: ${{ secrets.CRATES_IO_KEY }}
