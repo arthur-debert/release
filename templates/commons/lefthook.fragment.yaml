@@ -31,13 +31,28 @@ pre-commit:
       # --config / --ignore-path point at the managed copies in the ephemeral
       # .release/ build dir (WS3, release#524): the gate configs no longer mirror
       # to the consumer root, so the tool can't auto-discover them from cwd.
+      #
+      # markdownlint-cli's --ignore-path takes a SINGLE file and REPLACES its
+      # default .markdownlintignore discovery (it does NOT merge, and unlike
+      # prettier it accepts only one --ignore-path). So passing only the managed
+      # .release/.markdownlintignore silently DROPS a consumer's own root
+      # .markdownlintignore carve-outs (e.g. `docs/research/`), and
+      # `markdownlint --fix` would then rewrite files the project deliberately
+      # keeps as-is. To honor the consumer-local ignore — symmetric with how the
+      # npm-quality prettier fragment merges .prettierignore — we concatenate the
+      # consumer's .markdownlintignore (when present) onto the managed one into a
+      # temp file and pass that; otherwise we use the managed file directly.
       run: >-
-        if command -v markdownlint >/dev/null 2>&1; then
-          markdownlint --fix --config .release/.markdownlint.json --ignore-path .release/.markdownlintignore -- {staged_files};
-        else
+        if ! command -v markdownlint >/dev/null 2>&1; then
           echo "ERROR: markdownlint not installed — the gate does not skip. Re-run `release-core gate --provision`." >&2;
           exit 1;
-        fi
+        fi;
+        ign=.release/.markdownlintignore;
+        if [ -f .markdownlintignore ]; then
+          ign="$(mktemp)";
+          cat .release/.markdownlintignore .markdownlintignore > "$ign";
+        fi;
+        markdownlint --fix --config .release/.markdownlint.json --ignore-path "$ign" -- {staged_files}
       stage_fixed: true
       priority: 2
     yamllint:

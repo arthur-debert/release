@@ -1,0 +1,1 @@
+- gate: markdownlint honors consumer-local .markdownlintignore (symmetric with prettier)
