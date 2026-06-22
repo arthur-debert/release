@@ -190,6 +190,26 @@ def test_post_review_dry_run_does_not_call_gh(monkeypatch, capsys):
     assert '"event": "COMMENT"' in out
 
 
+def test_post_review_dry_run_as_app_unregistered_notes_missing_app(monkeypatch, capsys):
+    # No GitHub App registered for the agent → load_app returns None.
+    monkeypatch.setattr(post.ghapp, "load_app", lambda _a: None, raising=True)
+
+    post.post_review(_review(), _ctx(), agent_name="codex", dry_run=True, as_app=True)
+    out = capsys.readouterr().out
+    assert "no GitHub App registered" in out
+    assert "review app register" in out
+
+
+def test_post_review_dry_run_as_app_registered_uses_slug(monkeypatch, capsys):
+    # App is registered → report the real bot slug, no "missing app" note.
+    monkeypatch.setattr(post.ghapp, "load_app", lambda _a: {"slug": "codex-reviewer"}, raising=True)
+
+    post.post_review(_review(), _ctx(), agent_name="codex", dry_run=True, as_app=True)
+    out = capsys.readouterr().out
+    assert "would post as codex-reviewer[bot]" in out
+    assert "no GitHub App registered" not in out
+
+
 def test_post_review_posts_once_with_right_args(monkeypatch):
     captured = {}
 

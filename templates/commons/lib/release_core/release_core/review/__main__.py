@@ -1,7 +1,8 @@
 """Module entry: ``python -m release_core.review <agent> …`` runs the facade.
 
-This is the Phase 1.2 entry point. It is deliberately separate from the Click
-``release-core`` CLI — wiring the review into that tree is a later phase.
+A thin ``python -m`` entry point, deliberately separate from the Click
+``release-core`` CLI (which exposes the same facade as ``release-core review
+run`` via :mod:`release_core.cli.review`).
 """
 
 from __future__ import annotations

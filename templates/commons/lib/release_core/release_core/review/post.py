@@ -229,8 +229,10 @@ def post_review(
 
     With ``dry_run=True``: prints the payload as pretty JSON and returns it,
     WITHOUT calling ``gh`` — safe to run anywhere. When ``as_app`` is also set,
-    dry-run mints NO token (no network) and just notes that the review would be
-    authored by ``<slug>[bot]``.
+    dry-run mints NO token (no network) and notes who would author the review:
+    if the agent's GitHub App is registered it reports ``<slug>[bot]``; if it is
+    NOT registered it says so explicitly, since a real ``--as-app`` post would
+    fail until ``release-core review app register`` is run.
 
     With ``as_app=True`` (and not dry-run): authenticates AS the agent's GitHub
     App installation — mints a 1-hour installation token via
@@ -251,8 +253,19 @@ def post_review(
         print(json.dumps(payload, indent=2))
         if as_app:
             # No token minted on dry-run (no network); just say who would author it.
-            slug = (ghapp.load_app(agent_name) or {}).get("slug", agent_name)
-            print(f"(would post as {slug}[bot])")
+            app = ghapp.load_app(agent_name)
+            if app is None:
+                # The app isn't registered, so a real --as-app post would FAIL
+                # (no installation token can be minted). Say so explicitly rather
+                # than implying the bot post would succeed.
+                print(
+                    f"(dry-run: would post as {agent_name}[bot] — NOTE: no GitHub "
+                    f"App registered for {agent_name!r} yet; a real --as-app post "
+                    f"would require `release-core review app register` first)"
+                )
+            else:
+                slug = app.get("slug", agent_name)
+                print(f"(would post as {slug}[bot])")
         return payload
 
     repo = _resolve_repo(ctx)

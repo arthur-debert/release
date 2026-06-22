@@ -11,9 +11,10 @@ This module builds the manifest, writes a self-submitting HTML form that kicks
 off the flow, and — given the ``code`` the user copies out of the post-redirect
 address bar — converts + saves the app's id and pem locally, OUTSIDE any repo
 (under ``${XDG_CONFIG_HOME:-~/.config}/release-review/apps``, 0700). The app's
-ONLY purpose is identity; all review logic stays in our scripts. Posting AS the
-bot (JWT → installation token → API) is a separate, later task — this module
-mints the identity, nothing more.
+ONLY purpose is identity; all review logic stays in our scripts. This module
+mints the identity, nothing more — posting AS the bot (JWT → installation token
+→ API) is handled by :mod:`release_core.review.post` / ``ghauth`` when
+``review post --as-app`` runs.
 """
 
 from __future__ import annotations

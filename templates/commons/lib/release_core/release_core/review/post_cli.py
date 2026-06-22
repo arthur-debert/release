@@ -5,11 +5,13 @@ takes a review JSON (the :data:`release_core.review.schema.REVIEW_SCHEMA` shape,
 on stdin or ``--input``), resolves the PR for its head sha + diff, and posts a
 single GitHub grouped review via :mod:`release_core.review.post`.
 
-``run`` and ``post`` stay separate on purpose — Phase 3 composes them; this
-phase keeps "generate" and "publish" as two explicit steps.
+``run`` and ``post`` stay separate on purpose — two explicit steps on the CLI
+("generate" then "publish"); :func:`release_core.review.service.run_and_post`
+composes them programmatically for callers (e.g. the ``prstate`` reviewer
+adapters) that want one call.
 
-The default ``--event`` is ``COMMENT`` because Phase 2.1 posts as the user's own
-account and GitHub 422s an APPROVE / REQUEST_CHANGES on your own PR.
+The default ``--event`` is ``COMMENT`` because the user-auth path posts as the
+user's own account and GitHub 422s an APPROVE / REQUEST_CHANGES on your own PR.
 
 ``--as-app`` switches the auth: instead of the user's ``gh`` login, the review
 is posted AS the agent's GitHub App installation (``<slug>[bot]``) by minting a

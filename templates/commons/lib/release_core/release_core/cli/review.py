@@ -6,9 +6,11 @@ builds the shared prompt, and drives the chosen backend (codex / agy), emitting
 a structured JSON review; ``review post --pr N`` forwards to
 ``release_core.review.post_cli.main``, which posts a review JSON to the PR as a
 single inline grouped GitHub review. ``run`` only generates and ``post`` only
-posts — Phase 3 composes them. Like every other group module the only contract
-is: define a ``click.Group`` and export it as ``group``; ``cli_entry`` attaches
-it to the root.
+posts; they are composed programmatically by ``release_core.review.service``
+(``run_and_post``) — the path the ``prstate`` codex/agy reviewer adapters drive
+through their synchronous ``request()``. Like every other group module the only
+contract is: define a ``click.Group`` and export it as ``group``; ``cli_entry``
+attaches it to the root.
 """
 
 from __future__ import annotations
@@ -62,8 +64,9 @@ def app_group() -> None:
     ``app manifest <agent> --name <app_name>`` writes the HTML form that starts
     GitHub's app-manifest flow; ``app register <agent> --code <code>`` exchanges
     the post-redirect code for the app and saves its id + private key locally
-    (outside any repo); ``app list`` shows the configured agents. The app is
-    identity only — posting AS the bot is a separate, later task.
+    (outside any repo); ``app list`` shows the configured agents. This group sets
+    up the bot identity that ``review post --as-app`` then uses to author the
+    review AS ``<slug>[bot]`` (minting a short-lived installation token).
     """
 
 
