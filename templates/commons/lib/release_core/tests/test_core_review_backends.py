@@ -8,12 +8,18 @@ build_command descriptions.
 
 from __future__ import annotations
 
+import importlib
 import json
 
 import pytest
 from release_core.review import prompt as prompt_mod
 from release_core.review.backends import AgyBackend, CodexBackend, get_backend
-from release_core.review.backends.base import Backend, BackendUnavailable
+from release_core.review.backends.base import (
+    Backend,
+    BackendError,
+    BackendUnavailable,
+    parse_review_output,
+)
 from release_core.review.schema import REVIEW_SCHEMA, extract_json
 
 INSTRUCTIONS = "Review rigorously. Flag bugs and missing tests."
@@ -102,6 +108,56 @@ def test_extract_json_raises_on_garbage():
         extract_json("no json here at all")
 
 
+# --- parse_review_output: the backend-boundary wrapper -----------------------
+#
+# extract_json stays as-is (bare ValueError); parse_review_output wraps it so a
+# parse failure raises a CLEAN BackendError (a RuntimeError subclass that
+# `_LocalReviewAdapter.request` already normalizes to GhError — no traceback).
+
+
+def test_parse_review_output_passes_valid_json_through():
+    assert parse_review_output('{"a": 1}') == {"a": 1}
+
+
+def test_parse_review_output_raises_backenderror_not_valueerror():
+    with pytest.raises(BackendError) as exc:
+        parse_review_output("not json at all")
+    # BackendError subclasses RuntimeError (so request() catches it), and it is
+    # NOT a bare ValueError leaking from extract_json.
+    assert isinstance(exc.value, RuntimeError)
+    assert not isinstance(exc.value, ValueError)
+    # The original ValueError is preserved as the cause.
+    assert isinstance(exc.value.__cause__, ValueError)
+
+
+def test_parse_review_output_includes_a_snippet_for_debugging():
+    junk = "x" * 1000
+    with pytest.raises(BackendError) as exc:
+        parse_review_output(junk)
+    msg = str(exc.value)
+    assert "raw output" in msg
+    assert "xxx" in msg  # a slice of the raw output is echoed back
+
+
+def test_parse_review_output_names_the_timeout_when_marker_present():
+    # The live agy failure: a TRUNCATED JSON object then agy's timeout marker.
+    truncated = (
+        '{"summary": {"status": "COMMENT", "overall_fee\nError: timed out waiting for response'
+    )
+    with pytest.raises(BackendError) as exc:
+        parse_review_output(truncated)
+    msg = str(exc.value).lower()
+    assert "timed out" in msg
+    # actionable hint: a faster model or a smaller diff.
+    assert "faster model" in msg or "smaller diff" in msg
+
+
+def test_parse_review_output_timeout_marker_is_case_insensitive():
+    with pytest.raises(BackendError) as exc:
+        parse_review_output("{trunc\nTIMED OUT WAITING FOR RESPONSE")
+    assert "timed out" in str(exc.value).lower()
+
+
 # --- build_command shape ------------------------------------------------------
 
 
@@ -155,6 +211,56 @@ def test_agy_default_model_resolves_in_argv():
     # The resolved model lands in a single `--model=<resolved>` argv element.
     cmd = AgyBackend().build_command("prompt body", REVIEW_SCHEMA)
     assert "--model=Gemini 3.1 Pro (High)" in cmd["argv"]
+
+
+def test_agy_argv_carries_a_ten_minute_print_timeout():
+    # agy's `--print` timeout defaults to 5m; a large review can exceed it and
+    # return a truncated JSON + timeout marker. The argv must give 10m headroom.
+    cmd = AgyBackend().build_command("prompt body", REVIEW_SCHEMA)
+    assert "--print-timeout=600s" in cmd["argv"]
+
+
+# --- run(): a bad/truncated agent output fails cleanly, never a raw traceback --
+
+
+def _completed(stdout: str):
+    import subprocess
+
+    return subprocess.CompletedProcess(args=["x"], returncode=0, stdout=stdout, stderr="")
+
+
+def _backend_module(backend):
+    # Each backend references `proc` imported into ITS module namespace
+    # (`from ... import proc`), so monkeypatch must target that module.
+    return importlib.import_module(backend.__module__)
+
+
+@pytest.mark.parametrize("backend", [CodexBackend(), AgyBackend()])
+def test_run_raises_backenderror_on_unparseable_output(monkeypatch, backend):
+    # The backend ran but returned junk (not JSON): run() must raise the clean
+    # BackendError, NOT a bare ValueError escaping from extract_json.
+    monkeypatch.setattr(
+        _backend_module(backend).proc, "run", lambda *a, **k: _completed("this is not json")
+    )
+    with pytest.raises(BackendError):
+        backend.run("prompt", REVIEW_SCHEMA)
+
+
+@pytest.mark.parametrize("backend", [CodexBackend(), AgyBackend()])
+def test_run_names_timeout_on_truncated_output_with_marker(monkeypatch, backend):
+    truncated = '{"summary": {"status": "COMM\nError: timed out waiting for response'
+    monkeypatch.setattr(_backend_module(backend).proc, "run", lambda *a, **k: _completed(truncated))
+    with pytest.raises(BackendError) as exc:
+        backend.run("prompt", REVIEW_SCHEMA)
+    assert "timed out" in str(exc.value).lower()
+
+
+@pytest.mark.parametrize("backend", [CodexBackend(), AgyBackend()])
+def test_run_returns_parsed_review_on_good_output(monkeypatch, backend):
+    good = '{"summary": {"status": "APPROVED", "overall_feedback": "ok"}, "comments": []}'
+    monkeypatch.setattr(_backend_module(backend).proc, "run", lambda *a, **k: _completed(good))
+    parsed = backend.run("prompt", REVIEW_SCHEMA)
+    assert parsed["summary"]["status"] == "APPROVED"
 
 
 # --- registry -----------------------------------------------------------------

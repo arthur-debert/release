@@ -21,10 +21,20 @@ class FakeAdapter(ReviewerAdapter):
     """A reviewer with scriptable act/read behavior — the CLI must treat it
     identically to any registered bot."""
 
-    def __init__(self, name: str, *, required: bool = True, mechanism: bool = True):
+    def __init__(
+        self,
+        name: str,
+        *,
+        required: bool = True,
+        mechanism: bool = True,
+        has_requested_edge: bool = True,
+    ):
         self.name = name
         self.required = required
         self.mechanism = mechanism  # False = auto-triggering/no-op backend
+        # False = a LOCAL reviewer (codex/agy): request() posts synchronously,
+        # there is no review_requested edge to poll.
+        self.has_requested_edge = has_requested_edge
         self.requests: list[int] = []
         self.cancels: list[int] = []
         self.done = False
@@ -362,6 +372,81 @@ def test_help_documents_the_verified_contract(capsys):
     out = capsys.readouterr().out
     assert "verified" in out
     assert "review_requested edge" in out
+
+
+# --- local reviewers (codex/agy) are posted synchronously, never edge-verified --
+#
+# A LOCAL reviewer (`has_requested_edge == False`) runs the agent and POSTS a
+# review inside request(); a True return means it's already done. It must NOT be
+# passed into the edge-poll (`attach_state`), NOT be reported "dropped", and must
+# print a local-appropriate confirmation — the live bug was codex posting fine
+# yet the CLI printing "request dropped" + exit 1 because the edge-poll never
+# saw a review_requested edge a local reviewer never creates.
+
+
+def _no_attach(monkeypatch):
+    """Wire `attach_state` to BLOW UP — proves locals never reach the edge-poll."""
+    monkeypatch.setattr(
+        review,
+        "attach_state",
+        lambda pr: pytest.fail("local reviewers must not consult attach_state"),
+    )
+
+
+def test_local_reviewer_posts_and_exits_zero_without_edge_poll(monkeypatch, sleeps, capsys):
+    # codex-shaped local adapter: request() returns True (posted). The edge-poll
+    # must never run, exit is 0, and the output is a clean confirmation.
+    codex = FakeAdapter("codex", has_requested_edge=False)
+    monkeypatch.setattr(review, "by_name", lambda name: codex if name == "codex" else None)
+    _no_attach(monkeypatch)
+    assert review.request_main(["7", "--reviewer", "codex"]) == 0
+    assert codex.requests == [7]
+    out, err = capsys.readouterr()
+    assert "posted review: codex on #7" in out
+    assert "dropped" not in err and "dropped" not in out
+    assert "verified" not in out  # no edge-language for a local reviewer
+    assert sleeps == []  # no poll → no sleeps
+
+
+def test_local_and_remote_together_only_polls_the_remote(monkeypatch, sleeps, capsys):
+    # A mixed scope: a local reviewer (codex) posts synchronously; a remote one
+    # (alpha) goes through the edge-poll. attach_state is consulted (for the
+    # remote) but the local is never in the polled set, and both succeed.
+    codex = FakeAdapter("codex", has_requested_edge=False)
+    alpha = FakeAdapter("alpha")  # remote (has a request edge)
+    registry = [codex, alpha]
+    monkeypatch.setattr(review, "required_reviewers", lambda: registry)
+    monkeypatch.setattr(
+        review, "by_name", lambda name: next((a for a in registry if a.name == name.lower()), None)
+    )
+    monkeypatch.setattr(
+        review, "gather_reviews", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
+    )
+    # The poll sees alpha's edge on the first check; codex must NOT appear here.
+    _script_attach(monkeypatch, [(["alpha[bot]"], [])])
+    assert review.request_main(["7"]) == 0
+    out, err = capsys.readouterr()
+    assert "posted review: codex on #7" in out
+    assert "verified: alpha request attached on #7" in out
+    assert "dropped" not in err
+    assert sleeps == []
+
+
+def test_remote_that_never_attaches_still_drops_and_exits_one(monkeypatch, fakes, sleeps, capsys):
+    # The remote path is preserved exactly: a remote reviewer whose edge never
+    # appears is reported dropped with exit 1 (regression guard for the split).
+    calls = _script_attach(monkeypatch, [([], [])])
+    assert review.request_main(["7", "--reviewer", "alpha"]) == 1
+    err = capsys.readouterr().err
+    assert "alpha: request dropped by GitHub" in err
+    assert calls == [7] * (1 + review.ATTACH_VERIFY_CHECKS)
+
+
+def test_help_documents_the_local_posted_contract(capsys):
+    assert review.request_main(["--help"]) == 0
+    out = capsys.readouterr().out
+    assert "posted review" in out
+    assert "LOCAL reviewers" in out
 
 
 # --- show ---------------------------------------------------------------------

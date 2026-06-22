@@ -504,6 +504,24 @@ def test_local_request_normalizes_app_missing_error_to_gherror(monkeypatch):
     assert isinstance(excinfo.value.__cause__, RuntimeError)
 
 
+def test_local_request_normalizes_backend_parse_error_to_gherror(monkeypatch):
+    # The live agy failure: a truncated/timed-out agent output makes the backend
+    # raise BackendError (a RuntimeError subclass). request() must normalize THAT
+    # to ghapi.GhError too — never let it escape as an unhandled traceback.
+    from release_core.prstate import ghapi
+    from release_core.review import service
+    from release_core.review.backends.base import BackendError
+
+    def _boom(agent, pr, **kwargs):
+        raise BackendError("agy timed out before returning a complete review")
+
+    monkeypatch.setattr(service, "run_and_post", _boom)
+    with pytest.raises(ghapi.GhError, match="timed out") as excinfo:
+        AGY.request(9)
+    assert not isinstance(excinfo.value, BackendError)
+    assert isinstance(excinfo.value.__cause__, BackendError)
+
+
 def test_local_cancel_is_a_noop():
     # A posted review can't be withdrawn — cancel returns False, like a
     # no-mechanism backend.
