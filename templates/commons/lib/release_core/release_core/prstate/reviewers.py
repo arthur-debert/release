@@ -227,12 +227,134 @@ class GeminiAdapter(ReviewerAdapter):
         )
 
 
+class _LocalReviewAdapter(ReviewerAdapter):
+    """A LOCAL review backend (codex / agy) surfaced as a reviewer adapter.
+
+    Unlike the GitHub-App reviewers (Copilot / CodeRabbit), these reviewers do
+    not exist as an installed App that GitHub auto-triggers or that an
+    `--add-reviewer` edge addresses. The review is GENERATED locally — the agent
+    CLI runs in the PR checkout — and POSTED as the agent's own bot identity via
+    `release_core.review.service.run_and_post`. So `request` here is SYNCHRONOUS
+    (it runs the review + posts it now), and there is no `review_requested` edge
+    to place or withdraw: `cancel` is a no-op.
+
+    Detection is head-strict like Copilot: a non-dismissed review by `matches`
+    on the current head reads as done; otherwise NOT_REQUESTED (there is no
+    requested edge for a local reviewer, so `requested_logins` is never
+    consulted). The bot login is matched on BOTH the GitHub App `[bot]` suffix
+    AND a stable slug fragment (`codex-review` / `agy-review`) — so a future
+    prefix (`adr-codex-review[bot]`) still matches, but a bare human login that
+    merely contains `codex` / `agy` (e.g. `codexdev`, `agytron`) does NOT, which
+    would otherwise misread as a bot review and falsely report DONE. The
+    user-specific app-name prefix (e.g. `adr-`) is never hardcoded.
+    """
+
+    requestable = True
+    # The stable bot-login slug fragment this reviewer matches (set by each
+    # subclass). `matches` requires the `[bot]` suffix AND this fragment.
+    bot_slug_fragment: str = ""
+
+    def matches(self, login: str) -> bool:
+        # Require the GitHub App `[bot]` SUFFIX (not just the substring
+        # anywhere) AND the stable slug fragment. `adr-codex-review[bot]` /
+        # `adr-agy-review[bot]` end with `[bot]`, so they still match; a login
+        # that merely contains `[bot]` mid-string (e.g. `x[bot]y`) does not.
+        low = login.lower()
+        return low.endswith("[bot]") and self.bot_slug_fragment in low
+
+    def request(self, pr: int) -> bool:
+        """Generate the review locally and POST it now (synchronous).
+
+        These are LOCAL reviewers: they execute where the agent CLI and the
+        review App's signing key live. `request` delegates to
+        `release_core.review.service.run_and_post(self.name, pr, as_app=True)`,
+        which runs the agent over the PR diff and posts the result AS the bot.
+
+        Errors are NOT swallowed, but they ARE normalized: a missing agent CLI
+        (`BackendUnavailable`), a diff/review failure (`ReviewError`), an auth
+        failure (`ReviewAuthError`), or a missing/unregistered review App (a
+        clear `RuntimeError` from `run_and_post`) is re-raised as
+        `ghapi.GhError` — the prstate error type the `pr review request` CLI
+        already catches and renders as a clean message + exit 1. Without this,
+        `--reviewer codex|agy` would crash with an unhandled traceback (the CLI
+        only handles `GhError`). On success returns True.
+        """
+        # Imported lazily: `prstate` must not pull the `review` engine (and its
+        # backend/gh machinery) at import time — only when a local review is
+        # actually requested. `review` never imports `prstate`, so this one-way
+        # edge is cycle-free. (Same reason the failure types are imported here.)
+        from release_core.review.backends.base import BackendUnavailable
+        from release_core.review.diff import ReviewError
+        from release_core.review.ghauth import ReviewAuthError
+        from release_core.review.service import run_and_post
+
+        try:
+            run_and_post(self.name, pr, as_app=True)
+        except (BackendUnavailable, ReviewError, ReviewAuthError, RuntimeError) as exc:
+            # Re-raise the local-review failure modes as the one error type the
+            # CLI's `except ghapi.GhError` handles, so a failed local request is
+            # a clean error + nonzero exit, never an unhandled traceback. The
+            # caught set is SPECIFIC (not bare Exception); BackendUnavailable /
+            # ReviewError already subclass RuntimeError, ReviewAuthError does not
+            # (so it is listed explicitly), and the trailing RuntimeError covers
+            # the app-not-registered error raised by run_and_post itself.
+            raise ghapi.GhError(f"{self.name} review failed: {exc}") from exc
+        return True
+
+    def cancel(self, pr: int) -> bool:
+        """No-op: a posted review can't be withdrawn.
+
+        A local reviewer leaves a real, submitted review rather than a pending
+        `review_requested` edge — there is nothing to cancel. Returns False, the
+        same shape a no-mechanism backend uses.
+        """
+        return False
+
+    def detect(self, ctx: PullContext) -> ReviewLifecycle:
+        # Head-strict, DISMISSED-aware. There is no requested edge for a local
+        # reviewer, so we never check `requested_logins` — either a fresh review
+        # on head exists (done) or the reviewer hasn't run yet (NOT_REQUESTED).
+        if any(self.matches(r.author) and r.state != "DISMISSED" for r in ctx.reviews_on_head()):
+            return self._done_state(ctx)
+        return ReviewLifecycle.NOT_REQUESTED
+
+
+class CodexAdapter(_LocalReviewAdapter):
+    """Codex — a LOCAL review backend posted as the `adr-codex-review[bot]`
+    identity. See :class:`_LocalReviewAdapter` for the synchronous-request /
+    no-cancel / head-strict contract."""
+
+    name = "codex"
+    instruction_files = (".github/codex-review-instructions.md",)
+    bot_slug_fragment = "codex-review"
+
+
+class AgyAdapter(_LocalReviewAdapter):
+    """Agy — a LOCAL review backend posted as the `adr-agy-review[bot]` identity.
+
+    Matches on the `agy-review` slug fragment + `[bot]` suffix (NOT `gemini`:
+    the bot login is `adr-agy-review`, and `gemini` belongs to the separate
+    auto-triggering GeminiAdapter). See :class:`_LocalReviewAdapter` for the
+    request/cancel/detect contract."""
+
+    name = "agy"
+    instruction_files = (".github/agy-review-instructions.md",)
+    bot_slug_fragment = "agy-review"
+
+
 # The adapter CATALOG: every reviewer the engine knows how to read/request. This
 # is the registry (#558) — adding a backend is adding an adapter here. WHICH of
 # these gate Ready is NOT decided here: that is the config knob in
 # `reviewers_config` (release#622), default [copilot] (coderabbit is a
-# phos-org pilot, opted in per-repo).
-REGISTRY: list[ReviewerAdapter] = [CopilotAdapter(), CodeRabbitAdapter(), GeminiAdapter()]
+# phos-org pilot, opted in per-repo). codex / agy are LOCAL review backends
+# (generated + posted locally), unified under the same adapter interface.
+REGISTRY: list[ReviewerAdapter] = [
+    CopilotAdapter(),
+    CodeRabbitAdapter(),
+    GeminiAdapter(),
+    CodexAdapter(),
+    AgyAdapter(),
+]
 
 
 # Process-lifetime cache of the resolved required set. Resolving reads the

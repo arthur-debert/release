@@ -18,6 +18,15 @@ requires-python = ">=3.11"
 #   click — the CLI framework backing the `release-core <group> <command>` tree.
 dependencies = ["click>=8,<9"]
 
+# Optional extras — NOT installed by default (the boot resolver installs the base
+# package only). `review-app` carries PyJWT (+ its crypto backend) for posting a
+# code review AS a GitHub App installation (`release-core review post --as-app`).
+# Most consumers never post as a bot, so it stays opt-in: install with
+# `pip install "release-core[review-app]"` (or, ad hoc, `pip install
+# "pyjwt[crypto]"`). ghauth imports jwt lazily and raises a clear hint if absent.
+[project.optional-dependencies]
+review-app = ["pyjwt[crypto]>=2.8"]
+
 # Console-scripts. The CLI cutover (#468, epic #461) retired the flat
 # maintainer-only command names — every maintainer/fleet verb is now reachable
 # ONLY through the hierarchical `release-core <group> <command>` tree (the map is
@@ -66,7 +75,13 @@ expression = "VERSION"
 packages = ["release_core"]
 # Ship the config templates inside the wheel so `release-core init` is
 # self-contained (no release clone needed). Staged at build time by the hook.
-artifacts = ["release_core/_bundled_templates/**"]
+# Also force-include the bundled review instructions (.txt is non-.py package
+# data hatchling would otherwise drop) so the review facade can load it at
+# runtime via importlib.resources.
+artifacts = [
+    "release_core/_bundled_templates/**",
+    "release_core/review/instructions.txt",
+]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"

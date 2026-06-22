@@ -23,7 +23,7 @@ from __future__ import annotations
 import click
 
 from . import __version__
-from .cli import admin, ci, pr, toplevel
+from .cli import admin, ci, pr, review, toplevel
 from .cli._helpers import run_root
 
 
@@ -57,6 +57,7 @@ toplevel.attach(root)
 root.add_command(pr.group)
 root.add_command(ci.group)
 root.add_command(admin.group)
+root.add_command(review.group)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -26,7 +26,7 @@ class _Recorder:
         self.stderr = stderr
         self.calls = []
 
-    def __call__(self, cmd, *, input=None, check=False):  # noqa: A002 — mirrors proc.run
+    def __call__(self, cmd, *, input=None, env=None, check=False):  # noqa: A002 — mirrors proc.run
         self.calls.append((cmd, input))
         return subprocess.CompletedProcess(
             cmd, self.returncode, stdout=self.stdout, stderr=self.stderr
@@ -122,6 +122,45 @@ def test_rest_plain_get_still_works(gh_on_path, monkeypatch):
     assert stdin is None
 
 
+# ─── rest(token=...) — GitHub App installation auth ──────────────────────────
+
+
+class _EnvRecorder:
+    """Like _Recorder but also captures the ``env`` kwarg proc.run is called with."""
+
+    def __init__(self, stdout="", returncode=0, stderr=""):
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+        self.calls = []
+
+    def __call__(self, cmd, *, input=None, env=None, check=False):  # noqa: A002
+        self.calls.append((cmd, input, env))
+        return subprocess.CompletedProcess(
+            cmd, self.returncode, stdout=self.stdout, stderr=self.stderr
+        )
+
+
+def test_rest_token_sets_gh_token_env(gh_on_path, monkeypatch):
+    """rest(token=...) runs the gh subprocess with GH_TOKEN=<token> in its env
+    (and GITHUB_TOKEN cleared) so the call authenticates as that token."""
+    rec = _EnvRecorder(stdout='{"id": 1}')
+    monkeypatch.setattr(gh.proc, "run", rec)
+    gh.rest("repos/o/r/pulls/1/reviews", method="POST", body={"x": 1}, token="ghs_x")
+    cmd, stdin, env = rec.calls[0]
+    assert cmd == ["gh", "api", "-X", "POST", "--input", "-", "repos/o/r/pulls/1/reviews"]
+    assert env == {"GH_TOKEN": "ghs_x", "GITHUB_TOKEN": ""}
+
+
+def test_rest_without_token_passes_no_env_override(gh_on_path, monkeypatch):
+    """Default (token=None): proc.run gets env=None — the user's normal auth."""
+    rec = _EnvRecorder(stdout='{"id": 1}')
+    monkeypatch.setattr(gh.proc, "run", rec)
+    gh.rest("repos/o/r")
+    _cmd, _stdin, env = rec.calls[0]
+    assert env is None
+
+
 # ─── porcelain wrappers (Phase 1 chokepoint consolidation) ───────────────────
 #
 # Each test asserts the wrapper builds the BYTE-IDENTICAL argv its call site
@@ -170,6 +209,32 @@ def test_repo_view_check_true_raises(gh_on_path, monkeypatch):
     monkeypatch.setattr(gh.proc, "run", _Recorder(returncode=1, stderr="nope"))
     with pytest.raises(GhError):
         gh.repo_view(json_fields=["nameWithOwner"], q=".nameWithOwner")
+
+
+# repo_canonical ---------------------------------------------------------------
+
+
+def test_repo_canonical_resolves_alias_to_canonical(gh_on_path, monkeypatch):
+    rec = _Recorder(stdout="phos-editor/core\n")
+    monkeypatch.setattr(gh.proc, "run", rec)
+    # An aliased/renamed slug resolves to the repo's canonical nameWithOwner.
+    assert gh.repo_canonical("arthur-debert/phos-core") == "phos-editor/core"
+    assert _argv(rec) == [
+        "gh",
+        "repo",
+        "view",
+        "arthur-debert/phos-core",
+        "--json",
+        "nameWithOwner",
+        "--jq",
+        ".nameWithOwner",
+    ]
+
+
+def test_repo_canonical_propagates_gh_error(gh_on_path, monkeypatch):
+    monkeypatch.setattr(gh.proc, "run", _Recorder(returncode=1, stderr="not found"))
+    with pytest.raises(GhError):
+        gh.repo_canonical("arthur-debert/does-not-exist")
 
 
 # repo_list --------------------------------------------------------------------

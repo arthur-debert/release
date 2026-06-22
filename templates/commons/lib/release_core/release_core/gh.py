@@ -22,13 +22,28 @@ class GhError(RuntimeError):
     """A `gh` invocation failed, or `gh` is unavailable."""
 
 
-def _gh(args: list[str], *, input_text: str | None = None) -> str:
+def _gh(args: list[str], *, input_text: str | None = None, token: str | None = None) -> str:
     if shutil.which("gh") is None:
         raise GhError("`gh` CLI not found on PATH")
-    result = proc.run(["gh", *args], input=input_text, check=False)
+    result = proc.run(["gh", *args], input=input_text, env=_token_env(token), check=False)
     if result.returncode != 0:
         raise GhError(f"gh {' '.join(args)} failed ({result.returncode}): {result.stderr.strip()}")
     return result.stdout
+
+
+def _token_env(token: str | None) -> dict[str, str] | None:
+    """Build the env override that makes `gh` authenticate as ``token``.
+
+    Returns ``None`` (no override → `gh` uses the user's normal auth) when
+    ``token`` is None. Otherwise sets ``GH_TOKEN=<token>`` and CLEARS
+    ``GITHUB_TOKEN`` (to empty): `gh` prefers ``GH_TOKEN`` over ``GITHUB_TOKEN``,
+    but leaving a stale ``GITHUB_TOKEN`` set invites precedence surprises across
+    gh versions, so we pin the auth to exactly the token we pass. A GitHub App
+    installation token (``ghs_…``) is a normal bearer token to `gh`: it sends
+    ``Authorization: token ghs_…``, which is correct for installation tokens."""
+    if token is None:
+        return None
+    return {"GH_TOKEN": token, "GITHUB_TOKEN": ""}
 
 
 def _gh_raw(args: list[str], *, input_text: str | None = None):
@@ -46,6 +61,7 @@ def rest(
     fields: dict[str, str] | None = None,
     body: object | None = None,
     paginate: bool = False,
+    token: str | None = None,
 ) -> object:
     """Call `gh api <path>` → parsed JSON (None on empty output). Raises GhError.
 
@@ -53,6 +69,12 @@ def rest(
     — the only way to send an arbitrary nested request body (e.g. a ruleset
     payload) that the flat `-f key=value` ``fields`` form cannot express.
     ``fields`` and ``body`` are mutually exclusive.
+
+    ``token``, when given, runs the underlying `gh api` subprocess with
+    ``GH_TOKEN=<token>`` (and ``GITHUB_TOKEN`` cleared) so the call authenticates
+    as that token instead of the user's `gh` login — the seam for posting a
+    review AS a GitHub App installation (``ghs_…`` token). Default None leaves
+    every existing caller on the user's auth, unchanged.
     """
     if fields and body is not None:
         raise GhError("rest(): pass either fields= or body=, not both")
@@ -68,7 +90,7 @@ def rest(
         args += ["--input", "-"]
         input_text = json.dumps(body)
     args.append(path)
-    output = _gh(args, input_text=input_text)
+    output = _gh(args, input_text=input_text, token=token)
     if not output.strip():
         return None
     if paginate:
@@ -471,6 +493,28 @@ def repo_view(
     return _gh_raw(args)
 
 
+def repo_canonical(slug: str) -> str:
+    """Resolve a (possibly aliased/renamed) ``OWNER/NAME`` slug to its canonical
+    ``owner/name``.
+
+    GitHub keeps a 307 redirect from an old/aliased slug to the repo's current
+    canonical slug. ``gh api`` follows that redirect for GET (so review
+    *generation* works against an alias) but NOT for POST — so a write to an
+    aliased slug hard-fails with ``HTTP 307``. Normalizing the slug up front,
+    at the boundary where an external slug enters, keeps every write path on the
+    canonical owner/name.
+
+    Runs ``gh repo view <slug> --json nameWithOwner -q .nameWithOwner`` and
+    returns the stripped result. Propagates :class:`GhError` if the slug can't
+    be resolved.
+    """
+    return repo_view(
+        repo=slug,
+        json_fields=["nameWithOwner"],
+        jq=".nameWithOwner",
+    ).strip()
+
+
 def repo_list(
     owner: str,
     *,
@@ -582,6 +626,18 @@ def pr_close(pr: str, *, repo: str, delete_branch: bool = False, comment: str | 
     if comment is not None:
         args += ["--comment", comment]
     return _gh_raw(args)
+
+
+def pr_view(pr: str, *, repo: str | None = None, json_fields: list[str]) -> str:
+    """`gh pr view <pr> [--repo …] --json <fields>` → stripped stdout (the JSON).
+
+    Raises :class:`GhError` if gh fails (e.g. the PR can't be resolved). The
+    caller parses the returned JSON object."""
+    args = ["pr", "view", pr]
+    if repo is not None:
+        args += ["--repo", repo]
+    args += ["--json", ",".join(json_fields)]
+    return _gh(args).strip()
 
 
 def run_list(
