@@ -372,9 +372,18 @@ def _reviews_pending_action(
 
 
 def _has_stale_review(ctx: PullContext, adapter: ReviewerAdapter) -> bool:
-    """True iff this reviewer has a review on some commit OTHER than the current
-    head — i.e. it reviewed an earlier commit and a push has since moved the head
-    (the request reset to not_requested). DISMISSED reviews don't count."""
+    """True iff this reviewer should be RE-REQUESTED because a push staled its
+    review — i.e. it has a review on some commit OTHER than the current head.
+
+    Only a rerun=True (head-strict) reviewer can be stale-after-push: a
+    rerun=False (review-once) reviewer's earlier-head review still counts as DONE
+    (it reads done in `detect`, so it never reaches `pending` here), and it must
+    NEVER appear in the RE-REQUEST advice — re-running it would cost a token /
+    model run for a review it already gave. The rerun guard makes that explicit
+    even if a future caller passes a done reviewer in. DISMISSED reviews don't
+    count."""
+    if not adapter._rerun(ctx):
+        return False
     return any(
         adapter.matches(r.author) and r.state != "DISMISSED" and r.commit_id != ctx.head_sha
         for r in ctx.reviews

@@ -13,6 +13,7 @@ the network mocked at the ghapi boundary.
 
 from __future__ import annotations
 
+import pytest
 from release_core.prstate import fetch
 from release_core.prstate.model import ReviewLifecycle
 from release_core.prstate.reviewers import CopilotAdapter
@@ -82,3 +83,93 @@ def test_no_pending_requests_reads_not_requested(monkeypatch):
     ctx = fetch.gather(558)
     assert ctx.requested_logins == []
     assert CopilotAdapter().detect(ctx) is ReviewLifecycle.NOT_REQUESTED
+
+
+# --- the light skip-decision fetch (release#852) ----------------------------
+
+
+def _reviews_page(review_requests: list[dict], reviews: list[dict], head: str = "abc1234") -> dict:
+    return {
+        "repository": {
+            "pullRequest": {
+                "headRefOid": head,
+                "reviewRequests": {"nodes": review_requests},
+                "reviews": {"nodes": reviews},
+            }
+        }
+    }
+
+
+def test_gather_reviews_fetches_only_the_skip_decision_inputs(monkeypatch):
+    # release#852: the bare-request skip path uses a LIGHT fetch — one GraphQL
+    # call for head sha + reviews + requested reviewers + rerun policy, and NO
+    # threads-cursor walk or reactions/issue-comment REST pagination. `rest` is
+    # wired to blow up so any stray pagination fails the test.
+    monkeypatch.setattr(fetch.ghapi, "repo_slug", lambda: ("owner", "repo"))
+    monkeypatch.setattr(
+        fetch.ghapi,
+        "rest",
+        lambda *a, **k: pytest.fail("gather_reviews must not hit the REST pagination paths"),
+    )
+    monkeypatch.setattr(
+        fetch, "_threads_and_review_requests", lambda *a, **k: pytest.fail("no threads walk")
+    )
+    monkeypatch.setattr(
+        fetch.ghapi,
+        "graphql",
+        lambda query, **vars: _reviews_page(
+            [{"requestedReviewer": {"login": "Copilot"}}],
+            [
+                {
+                    "databaseId": 11,
+                    "state": "COMMENTED",
+                    "commit": {"oid": "abc1234"},
+                    "author": {"login": "Copilot"},
+                }
+            ],
+        ),
+    )
+    ctx = fetch.gather_reviews(558)
+    assert ctx.head_sha == "abc1234"
+    assert ctx.requested_logins == ["Copilot"]
+    assert [(r.review_id, r.author, r.commit_id) for r in ctx.reviews] == [
+        (11, "Copilot", "abc1234")
+    ]
+    # A counting review on the head → DONE (review-once any-head); the skip
+    # decision is correct off the light context.
+    assert CopilotAdapter().detect(ctx) in (
+        ReviewLifecycle.DONE_CLEAN,
+        ReviewLifecycle.DONE_COMMENTS,
+    )
+
+
+def test_gather_reviews_threads_the_rerun_policy(monkeypatch):
+    # The rerun policy must ride on the light context so detect() is head-strict
+    # for rerun=True reviewers. With copilot rerun=True and the only review on an
+    # OLD head, copilot is stale → reads back REQUESTED (still pending), not DONE.
+    monkeypatch.setattr(fetch.ghapi, "repo_slug", lambda: ("owner", "repo"))
+    monkeypatch.setattr(fetch.ghapi, "rest", lambda *a, **k: [])
+    from release_core.prstate import reviewers, reviewers_config
+
+    reviewers._reset_required_cache()
+    monkeypatch.setattr(reviewers_config, "load_override", lambda root=None: {"copilot": True})
+    monkeypatch.setattr(
+        fetch.ghapi,
+        "graphql",
+        lambda query, **vars: _reviews_page(
+            [{"requestedReviewer": {"login": "Copilot"}}],
+            [
+                {
+                    "databaseId": 11,
+                    "state": "COMMENTED",
+                    "commit": {"oid": "OLD-head"},
+                    "author": {"login": "Copilot"},
+                }
+            ],
+            head="new-head",
+        ),
+    )
+    ctx = fetch.gather_reviews(558)
+    reviewers._reset_required_cache()
+    assert ctx.reviewer_rerun.get("copilot") is True
+    assert CopilotAdapter().detect(ctx) is ReviewLifecycle.REQUESTED

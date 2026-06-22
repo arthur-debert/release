@@ -27,6 +27,12 @@ class ReviewerAdapter:
     # required is NOT decided here — it is the config knob in
     # `reviewers_config` (release#622); this flag only marks eligibility.
     requestable: bool = False
+    # Whether this reviewer is addressed by a GitHub `review_requested` edge (so
+    # `requested_logins` is meaningful for it). App reviewers (Copilot,
+    # CodeRabbit) do; LOCAL backends (codex / agy) are run+posted synchronously
+    # and have no requested edge — they override this False so base `detect`
+    # never reads `requested_logins` for them.
+    has_requested_edge: bool = True
     # Repo-relative path(s) of this reviewer's code-review instruction file(s).
     # Structure only: the adapter declares the location; whether content ships
     # there is a per-reviewer onboarding decision.
@@ -35,8 +41,40 @@ class ReviewerAdapter:
     def matches(self, login: str) -> bool:
         raise NotImplementedError
 
+    def _rerun(self, ctx: PullContext) -> bool:
+        """This reviewer's rerun policy for `ctx` (default False = review-once).
+
+        rerun comes from config (`reviewers_config.reviewer_rerun`), threaded
+        into the context at the build site. False is the shipped default for
+        EVERY reviewer (all reviewers are token-billed / cost a model run, so
+        re-reviewing each push is explicit opt-in)."""
+        return ctx.reviewer_rerun.get(self.name, False)
+
     def detect(self, ctx: PullContext) -> ReviewLifecycle:
-        raise NotImplementedError
+        """Where this reviewer stands — rerun-aware, shared across adapters.
+
+        The lifecycle depends on the reviewer's rerun flag:
+
+          * rerun=False (default, review-once): a non-DISMISSED review by this
+            reviewer on ANY commit of the PR reads DONE — it is NEVER stale
+            after a push. The reviewer won't be asked to look again, so an
+            earlier-head review still satisfies the gate.
+          * rerun=True (opt-in, head-strict): the review must be on the CURRENT
+            head to count DONE; a review only on an older head is stale and the
+            reviewer reads back as REQUESTED (needs re-request for the new head).
+
+        When no review counts: REQUESTED if the reviewer is currently requested
+        (only for adapters with a real requested edge — `has_requested_edge`),
+        else NOT_REQUESTED. A DISMISSED review is a retracted verdict and never
+        counts as done. Adapters differ only by `matches` / `has_requested_edge`
+        / `requestable`, NOT by this detection algorithm (Gemini, which signals
+        weakly and is not requestable, is the one exception and overrides this)."""
+        candidates = ctx.reviews_on_head() if self._rerun(ctx) else ctx.reviews_any_head()
+        if any(self.matches(r.author) and r.state != "DISMISSED" for r in candidates):
+            return self._done_state(ctx)
+        if self.has_requested_edge and any(self.matches(login) for login in ctx.requested_logins):
+            return ReviewLifecycle.REQUESTED
+        return ReviewLifecycle.NOT_REQUESTED
 
     def request(self, pr: int) -> bool:
         """Request — or re-request, same call — this reviewer on `pr`.
@@ -83,9 +121,11 @@ class ReviewerAdapter:
 class CopilotAdapter(ReviewerAdapter):
     """Copilot posts a discrete review object on the PR head SHA.
 
-    The head-SHA filter is load-bearing: a review against an earlier commit is
-    stale and must not count as done for the current head. Copilot has no
-    observable mid-review signal, so it goes REQUESTED -> DONE.
+    Copilot has a real `review_requested` edge and no observable mid-review
+    signal, so it goes REQUESTED -> DONE. Whether an earlier-head review counts
+    as done is the per-reviewer rerun policy (see base `detect`): review-once
+    (default) counts any-head; rerun=True is head-strict (an earlier-head review
+    is stale and the reviewer reads back REQUESTED for the new head).
     """
 
     name = "copilot"
@@ -106,22 +146,12 @@ class CopilotAdapter(ReviewerAdapter):
         ghapi.pr_edit_reviewer(pr, "@copilot", remove=True)
         return True
 
-    def detect(self, ctx: PullContext) -> ReviewLifecycle:
-        # A DISMISSED review (cleared by an admin or the author) is no longer a
-        # standing verdict — it must not count as done, or the PR reads REVIEWED
-        # off a review that was explicitly retracted.
-        if any(self.matches(r.author) and r.state != "DISMISSED" for r in ctx.reviews_on_head()):
-            return self._done_state(ctx)
-        if any(self.matches(login) for login in ctx.requested_logins):
-            return ReviewLifecycle.REQUESTED
-        return ReviewLifecycle.NOT_REQUESTED
-
 
 class CodeRabbitAdapter(ReviewerAdapter):
     """CodeRabbit is a requestable GitHub App that posts a discrete review on the
     PR head SHA — structurally the same model as Copilot. It is being PILOTED on
     the phos-org repos (the only place the App is installed); a pilot repo opts
-    in via `required_reviewers:` in its `.release-sync.yaml`. It is NOT in the
+    in via the `reviewers:` map in its `.release-sync.yaml`. It is NOT in the
     default required set: on a repo without the App, the request edge silently
     drops (#613-style) and a required gate would park every PR at
     REVIEWS_PENDING. Whether it gates is a config decision, not an adapter
@@ -136,12 +166,13 @@ class CodeRabbitAdapter(ReviewerAdapter):
     in exchange for always-on dual coverage and no single point of failure on
     review *quality*.
 
-    Like Copilot, CodeRabbit re-reviews each push, so it is head-strict: a
-    review against an earlier commit is stale and must not count as done for the
-    current head. The request goes through `gh pr edit --add-reviewer` (the
-    GraphQL path that resolves the App's real node id and creates a real
-    `review_requested` edge) — so the generic #614 attach-verification in
-    `pr review request` applies unchanged: a silently dropped attach fails loud.
+    Structurally identical to Copilot: a real `review_requested` edge and a
+    discrete head-SHA review. Whether an earlier-head review counts as done is
+    the per-reviewer rerun policy (base `detect`), not an adapter property. The
+    request goes through `gh pr edit --add-reviewer` (the GraphQL path that
+    resolves the App's real node id and creates a real `review_requested` edge)
+    — so the generic #614 attach-verification in `pr review request` applies
+    unchanged: a silently dropped attach fails loud.
     """
 
     name = "coderabbit"
@@ -166,14 +197,6 @@ class CodeRabbitAdapter(ReviewerAdapter):
         ghapi.pr_edit_reviewer(pr, self._REVIEWER_HANDLE, remove=True)
         return True
 
-    def detect(self, ctx: PullContext) -> ReviewLifecycle:
-        # Head-strict, DISMISSED-aware — identical lifecycle shape to Copilot.
-        if any(self.matches(r.author) and r.state != "DISMISSED" for r in ctx.reviews_on_head()):
-            return self._done_state(ctx)
-        if any(self.matches(login) for login in ctx.requested_logins):
-            return ReviewLifecycle.REQUESTED
-        return ReviewLifecycle.NOT_REQUESTED
-
 
 class GeminiAdapter(ReviewerAdapter):
     """Gemini signals weakly and is best-effort.
@@ -194,6 +217,7 @@ class GeminiAdapter(ReviewerAdapter):
 
     name = "gemini"
     requestable = False  # auto-triggers; no request edge, so never a required gate
+    has_requested_edge = False  # no requested edge; overrides detect entirely anyway
     # Declared location only — no content shipped until Gemini is onboarded
     # as a required reviewer.
     instruction_files = (".gemini/styleguide.md",)
@@ -238,10 +262,12 @@ class _LocalReviewAdapter(ReviewerAdapter):
     (it runs the review + posts it now), and there is no `review_requested` edge
     to place or withdraw: `cancel` is a no-op.
 
-    Detection is head-strict like Copilot: a non-dismissed review by `matches`
-    on the current head reads as done; otherwise NOT_REQUESTED (there is no
-    requested edge for a local reviewer, so `requested_logins` is never
-    consulted). The bot login is matched on BOTH the GitHub App `[bot]` suffix
+    Detection is the shared rerun-aware base `detect`: review-once (default)
+    counts a non-DISMISSED review by `matches` on any head as done; rerun=True
+    is head-strict. There is no requested edge for a local reviewer
+    (`has_requested_edge = False`), so `requested_logins` is never consulted —
+    either a counting review exists (done) or the reviewer hasn't run
+    (NOT_REQUESTED). The bot login is matched on BOTH the GitHub App `[bot]` suffix
     AND a stable slug fragment (`codex-review` / `agy-review`) — so a future
     prefix (`adr-codex-review[bot]`) still matches, but a bare human login that
     merely contains `codex` / `agy` (e.g. `codexdev`, `agytron`) does NOT, which
@@ -250,6 +276,9 @@ class _LocalReviewAdapter(ReviewerAdapter):
     """
 
     requestable = True
+    # No `review_requested` edge: the review is generated + posted synchronously,
+    # so base `detect` must never consult `requested_logins` for these.
+    has_requested_edge = False
     # The stable bot-login slug fragment this reviewer matches (set by each
     # subclass). `matches` requires the `[bot]` suffix AND this fragment.
     bot_slug_fragment: str = ""
@@ -310,14 +339,6 @@ class _LocalReviewAdapter(ReviewerAdapter):
         """
         return False
 
-    def detect(self, ctx: PullContext) -> ReviewLifecycle:
-        # Head-strict, DISMISSED-aware. There is no requested edge for a local
-        # reviewer, so we never check `requested_logins` — either a fresh review
-        # on head exists (done) or the reviewer hasn't run yet (NOT_REQUESTED).
-        if any(self.matches(r.author) and r.state != "DISMISSED" for r in ctx.reviews_on_head()):
-            return self._done_state(ctx)
-        return ReviewLifecycle.NOT_REQUESTED
-
 
 class CodexAdapter(_LocalReviewAdapter):
     """Codex — a LOCAL review backend posted as the `adr-codex-review[bot]`
@@ -357,15 +378,31 @@ REGISTRY: list[ReviewerAdapter] = [
 ]
 
 
-# Process-lifetime cache of the resolved required set. Resolving reads the
-# consumer's `.release-sync.yaml` via yq (a subprocess); `pr wait` calls
-# `required_reviewers()` on EVERY poll, so without this a long wait would spawn
-# a yq process each tick — needless overhead, and a transient yq/PATH blip could
-# break an otherwise-healthy wait. The config cannot change mid-command, so
-# caching for the process lifetime is safe. Held as an IMMUTABLE tuple so a
-# caller mutating the returned list can't corrupt the cache; tests reset it via
+# Process-lifetime cache of the resolved config (required adapters + the
+# per-reviewer rerun map). Resolving reads the consumer's `.release-sync.yaml`
+# via yq (a subprocess); `pr wait` calls `required_reviewers()` on EVERY poll,
+# so without this a long wait would spawn a yq process each tick — needless
+# overhead, and a transient yq/PATH blip could break an otherwise-healthy wait.
+# The config cannot change mid-command, so caching for the process lifetime is
+# safe. The adapter set is held as an IMMUTABLE tuple so a caller mutating the
+# returned list can't corrupt the cache; tests reset it via
 # `_reset_required_cache()`.
 _REQUIRED_CACHE: tuple[ReviewerAdapter, ...] | None = None
+_RERUN_CACHE: dict[str, bool] | None = None
+
+
+def _resolve_config() -> None:
+    """Resolve the required adapters + rerun map from config into the caches."""
+    global _REQUIRED_CACHE, _RERUN_CACHE
+    if _REQUIRED_CACHE is not None and _RERUN_CACHE is not None:
+        return
+    from . import reviewers_config
+
+    override = reviewers_config.load_override()
+    resolved = reviewers_config.resolve_reviewers(override)
+    names = tuple(resolved)
+    _REQUIRED_CACHE = tuple(reviewers_config.required_reviewers(names))
+    _RERUN_CACHE = dict(resolved)
 
 
 def required_reviewers() -> list[ReviewerAdapter]:
@@ -378,20 +415,27 @@ def required_reviewers() -> list[ReviewerAdapter]:
     process (see `_REQUIRED_CACHE`); each call returns a FRESH list copy, so a
     caller may mutate it freely without disturbing the cache.
     """
-    global _REQUIRED_CACHE
-    if _REQUIRED_CACHE is None:
-        from . import reviewers_config
-
-        override = reviewers_config.load_override()
-        names = reviewers_config.resolve_required_names(override)
-        _REQUIRED_CACHE = tuple(reviewers_config.required_reviewers(names))
+    _resolve_config()
+    assert _REQUIRED_CACHE is not None
     return list(_REQUIRED_CACHE)
 
 
+def reviewer_rerun() -> dict[str, bool]:
+    """The per-reviewer rerun policy (name -> bool), resolved from config (cached).
+
+    Default False for every required reviewer that doesn't opt in. Threaded into
+    the `PullContext` at the build site so adapter detection is head-strict only
+    for rerun=True reviewers and review-once (any-head) for everyone else."""
+    _resolve_config()
+    assert _RERUN_CACHE is not None
+    return dict(_RERUN_CACHE)
+
+
 def _reset_required_cache() -> None:
-    """Clear the resolved-required-set cache — for tests that vary the config."""
-    global _REQUIRED_CACHE
+    """Clear the resolved-config cache — for tests that vary the config."""
+    global _REQUIRED_CACHE, _RERUN_CACHE
     _REQUIRED_CACHE = None
+    _RERUN_CACHE = None
 
 
 def by_name(name: str) -> ReviewerAdapter | None:

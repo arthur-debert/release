@@ -56,6 +56,21 @@ def fakes(monkeypatch):
     monkeypatch.setattr(
         review, "by_name", lambda name: next((a for a in registry if a.name == name.lower()), None)
     )
+    # The bare-request path skips already-DONE reviewers, building a LIGHT
+    # context via gather_reviews() (release#852) to run each adapter's detect.
+    # Mock that offline — the FakeAdapters' detect keys off `.done` (set
+    # per-test), ignoring ctx. The heavy gather() is wired to BLOW UP so any test
+    # that accidentally drags it onto the skip path fails loudly.
+    monkeypatch.setattr(
+        review, "gather_reviews", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
+    )
+    monkeypatch.setattr(
+        review,
+        "gather",
+        lambda pr: pytest.fail(
+            "bare-request skip path must use the light gather_reviews, not gather"
+        ),
+    )
     return alpha, beta, gamma
 
 
@@ -180,6 +195,58 @@ def test_noop_backend_reports_noop_and_succeeds(fakes, attach_ok, sleeps, capsys
     assert attach_ok == [7]  # the pre-request baseline read only — no poll
 
 
+# --- bare request skips already-done reviewers; --reviewer forces (rerun config) --
+
+
+def test_bare_request_skips_a_reviewer_already_done(fakes, attach_ok, capsys):
+    # review-once: a required reviewer that has already reviewed (detect → DONE)
+    # is NOT re-requested on the bare path — re-running it would cost a token /
+    # model run for a review it already gave.
+    alpha, beta, _ = fakes
+    alpha.done = True  # alpha already reviewed
+    assert review.request_main(["7"]) == 0
+    assert alpha.requests == []  # skipped
+    assert beta.requests == [7]  # not done → requested
+    out = capsys.readouterr().out
+    assert "alpha: already reviewed #7 (review-once) — skip" in out
+
+
+def test_bare_request_skip_path_uses_light_fetch_not_heavy_gather(monkeypatch, fakes, attach_ok):
+    # release#852: the frequently-run skip decision builds its context via the
+    # LIGHT gather_reviews (head sha + reviews + requested + rerun) — NOT the
+    # full gather (threads-cursor walk + reactions/issue-comment pagination).
+    # The fixture wires gather() to pytest.fail, so reaching it would blow up;
+    # here we additionally assert gather_reviews IS the fetch that runs.
+    alpha, beta, _ = fakes
+    calls: list[int] = []
+    monkeypatch.setattr(
+        review,
+        "gather_reviews",
+        lambda pr: calls.append(pr) or PullContext(number=pr, head_sha="h", is_draft=True),
+    )
+    assert review.request_main(["7"]) == 0
+    assert calls == [7]  # the light fetch ran exactly once for the skip decision
+
+
+def test_bare_request_when_all_done_requests_nothing(fakes, capsys):
+    alpha, beta, _ = fakes
+    alpha.done = True
+    beta.done = True
+    assert review.request_main(["7"]) == 0
+    assert alpha.requests == [] and beta.requests == []
+    out = capsys.readouterr().out
+    assert "all required reviewers already reviewed #7 — nothing to request" in out
+
+
+def test_explicit_reviewer_forces_request_even_when_done(fakes, attach_ok, capsys):
+    # --reviewer X is the manual FORCE / re-run escape hatch: it requests X
+    # regardless of current state (does not consult detect / skip).
+    alpha, _, _ = fakes
+    alpha.done = True
+    assert review.request_main(["7", "--reviewer", "alpha"]) == 0
+    assert alpha.requests == [7]  # forced despite being done
+
+
 def test_cancel_dispatches_through_the_same_interface(fakes, capsys):
     alpha, beta, _ = fakes
     assert review.cancel_main(["9"]) == 0
@@ -197,6 +264,12 @@ def test_request_through_real_registry_reaches_gh_boundary(monkeypatch, capsys):
         review,
         "attach_state",
         lambda pr: (["Copilot", "coderabbitai[bot]"], []),
+    )
+    # The bare path skips done reviewers via the light gather_reviews; a context
+    # with NO reviews means copilot is not-yet-done, so it IS requested (the
+    # behaviour this test asserts).
+    monkeypatch.setattr(
+        review, "gather_reviews", lambda pr: PullContext(number=pr, head_sha="h", is_draft=True)
     )
     calls: list[tuple] = []
     monkeypatch.setattr(
