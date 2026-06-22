@@ -8,7 +8,7 @@ on a backend's concrete type.
 from __future__ import annotations
 
 from .agy import AgyBackend
-from .base import Backend, BackendUnavailable
+from .base import Backend, BackendError, BackendUnavailable
 from .codex import CodexBackend
 
 _REGISTRY: dict[str, type[Backend]] = {
@@ -16,7 +16,14 @@ _REGISTRY: dict[str, type[Backend]] = {
     "agy": AgyBackend,
 }
 
-__all__ = ["AgyBackend", "Backend", "BackendUnavailable", "CodexBackend", "get_backend"]
+__all__ = [
+    "AgyBackend",
+    "Backend",
+    "BackendError",
+    "BackendUnavailable",
+    "CodexBackend",
+    "get_backend",
+]
 
 
 def get_backend(name: str, **kwargs) -> Backend:

@@ -22,8 +22,7 @@ import os
 import tempfile
 
 from ... import proc
-from ..schema import extract_json
-from .base import Backend
+from .base import Backend, parse_review_output
 
 MODEL_ALIASES = {
     "pro": "Gemini 3.1 Pro (High)",
@@ -55,6 +54,10 @@ class AgyBackend(Backend):
         return [
             "agy",
             f"--model={self.model}",
+            # agy's `--print` timeout defaults to 5m; a large review can exceed
+            # that and return a TRUNCATED JSON + "timed out waiting for response"
+            # (the live agy failure). Give it 10m of headroom so big diffs finish.
+            "--print-timeout=600s",
             "--print",
             _print_instruction(prompt_path),
         ]
@@ -80,7 +83,7 @@ class AgyBackend(Backend):
                 prompt_path = prompt_file.name
 
             result = proc.run(self._argv(prompt_path), cwd=cwd)
-            return extract_json(result.stdout)
+            return parse_review_output(result.stdout, backend_name=self.name)
         finally:
             if prompt_path and os.path.exists(prompt_path):
                 os.remove(prompt_path)

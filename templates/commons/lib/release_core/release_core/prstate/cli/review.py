@@ -71,12 +71,19 @@ that reviewer regardless of current state (the manual re-run escape hatch).
 Reviewers without a request mechanism (auto-triggering, best-effort backends)
 report a no-op rather than failing; no-ops are not verified.
 
-A request only counts when GitHub actually creates the review_requested edge:
-the service can accept the call yet silently drop the attach (service stall /
-quota — release#614). After placing, the verb polls briefly ({ATTACH_VERIFY_CHECKS} checks over
+REMOTE reviewers (Copilot, CodeRabbit) place a GitHub review_requested edge,
+which only counts when GitHub actually creates it: the service can accept the
+call yet silently drop the attach (service stall / quota — release#614). After
+placing, the verb polls briefly ({ATTACH_VERIFY_CHECKS} checks over
 ~{_VERIFY_WINDOW_SECONDS}s) until the reviewer appears in the PR's pending review requests — or has
 already submitted a fresh review (a fast bot can consume the request before
-the poll sees it). A dropped attach fails loud with exit 1.
+the poll sees it). A dropped REMOTE attach fails loud with exit 1.
+
+LOCAL reviewers (codex, agy) run the agent and POST a review synchronously in
+the same call — there is no review_requested edge to poll. A successful local
+request is already done (its review is posted; a failure raises), so it is
+reported as `posted review: <name>` and never edge-verified or reported
+dropped.
 
 {_USAGE_COMMON}
 Exit codes:
@@ -286,22 +293,49 @@ def request_main(argv: list[str]) -> int:
         # Baseline BEFORE placing: any review submitted after this snapshot
         # is fresh, so a fast bot consuming the request before the poll sees
         # the edge still verifies. Snapshotting between request and poll
-        # instead would swallow exactly that consumed review.
-        _, baseline_reviews = attach_state(pr)
+        # instead would swallow exactly that consumed review. Only relevant to
+        # adapters that place a real `review_requested` edge — local reviewers
+        # never enter the edge-poll, so skip the snapshot when there are none.
+        baseline_reviews: list[tuple[int, str]] = []
+        if any(a.has_requested_edge for a in adapters):
+            _, baseline_reviews = attach_state(pr)
         # flush=True: under a pipe, stdout is block-buffered while stderr is
         # not — without it the placement lines appear AFTER a drop report.
-        placed: list[ReviewerAdapter] = []
+        #
+        # placed splits by request model: REMOTE reviewers (Copilot,
+        # CodeRabbit — `has_requested_edge == True`) place a GitHub
+        # `review_requested` edge whose attach can be silently dropped
+        # (release#614), so they go through `_verify_attached`. LOCAL reviewers
+        # (codex / agy — `has_requested_edge == False`) run the agent + POST a
+        # review SYNCHRONOUSLY inside `request()`: a True return means the
+        # review is already posted (a failure would have raised → GhError).
+        # There is no edge to poll, so they are NOT verified and NEVER reported
+        # dropped — the edge-poll's fresh-review match would also miss on
+        # GitHub read-after-write lag and falsely report a posted review as
+        # dropped.
+        remote_placed: list[ReviewerAdapter] = []
+        local_posted: list[ReviewerAdapter] = []
         for adapter in adapters:
             if adapter.request(pr):
-                print(f"requested review: {adapter.name} on #{pr}", flush=True)
-                placed.append(adapter)
+                if adapter.has_requested_edge:
+                    print(f"requested review: {adapter.name} on #{pr}", flush=True)
+                    remote_placed.append(adapter)
+                else:
+                    # Synchronous post already happened inside `request()`;
+                    # record it for the single `posted review: …` confirmation
+                    # below (no edge-language "requested"/"verified" lines).
+                    local_posted.append(adapter)
             else:
                 print(f"{adapter.name}: auto-triggers, no request mechanism — no-op", flush=True)
-        dropped = _verify_attached(pr, placed, baseline_ids={rid for rid, _ in baseline_reviews})
+        dropped = _verify_attached(
+            pr, remote_placed, baseline_ids={rid for rid, _ in baseline_reviews}
+        )
     except ghapi.GhError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    for adapter in placed:
+    for adapter in local_posted:
+        print(f"posted review: {adapter.name} on #{pr}", flush=True)
+    for adapter in remote_placed:
         if adapter not in dropped:
             print(f"verified: {adapter.name} request attached on #{pr}", flush=True)
     for adapter in dropped:
