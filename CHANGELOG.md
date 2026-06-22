@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 3.10.1 - 2026-06-22
+
+- Fix `brew style` Layout/EmptyLines failure in generated Homebrew formulae (empty PRIVATE_REPO_PREAMBLE left a double blank line before `class`)
+- gate: markdownlint honors consumer-local .markdownlintignore (symmetric with prettier)
+
 ## 3.10.0 - 2026-06-22
 
 - Add local code-review agent backends (codex, agy) under 'release-core review run'
