@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""PreToolUse guard: ``git commit --no-verify`` (and the ``-n`` short form) is
+NEVER an acceptable way to skip the gate in this repo — the gate is a HARD gate
+(a missing tool exits non-zero, never skips), and CI re-runs the same
+``lefthook run pre-commit --all-files`` on a clean runner, so a local bypass
+only defers the failure. This hook is the forcing function that blocks the
+bypass at the source.
+
+This mirrors `pr-loop-guard` exactly: that gates `gh pr create` on the
+review-loop discipline; this gates `git commit` on the no-bypass discipline.
+Both read a Claude Code PreToolUse Bash event and allow/deny on the same
+contract, with the same self-service one-shot escape sentinel.
+
+RELEASE-LOCAL ONLY (dogfood): this script lives in `bin/`, NOT in
+`templates/commons/bin/`, so it does NOT sync to consumers via the wheel.
+Fleet-shipping is a separate, later step.
+
+Contract (Claude Code PreToolUse, matcher: Bash):
+  stdin  = JSON with tool_name + tool_input.command (+ cwd)
+  allow  = exit 0, no stdout
+  deny   = exit 0, stdout = {"hookSpecificOutput": {permissionDecision: "deny", ...}}
+
+Design guarantees (same as pr-loop-guard):
+  * Self-service deny — the reason tells the agent how to arm manually, so the
+    guard can never deadlock a legitimate recovery-only bypass.
+  * Fail-OPEN — any malformed stdin / non-git cwd / parse error / unexpected
+    exception allows the command. A genuine ``--no-verify`` is always
+    well-formed, so failing open never masks the thing we guard.
+  * One-shot — arming is consumed on allow, so the sentinel can't silently
+    whitelist every subsequent ``--no-verify`` in the clone.
+"""
+
+import contextlib
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+SENTINEL_NAME = "no-verify-armed"
+
+# A bundled short-flag cluster that contains `n` — `-n`, `-nm`, `-an`, … — is
+# the short form of `--no-verify`. Lowercase-only matches git's actual flag
+# letters (`-n`, `-m`, `-a`, `-e`, `-v`, …); an uppercase `-N` is a different
+# flag and never `--no-verify`.
+_SHORT_NO_VERIFY = re.compile(r"-[a-z]*n[a-z]*")
+
+
+def _tokens(command):
+    """Tokenize a shell command, falling back to a naive split on unbalanced
+    quotes / heredoc bodies (best-effort — a genuine bypass is well-formed)."""
+    try:
+        return shlex.split(command, comments=False, posix=True)
+    except ValueError:
+        return command.split()
+
+
+def cd_targets(command):
+    """Leading ``cd <dir>`` targets in the command, so the guard can resolve the
+    repo the command actually operates IN — not just the hook payload's cwd.
+
+    Same rationale as pr-loop-guard: the PreToolUse payload ``cwd`` is the
+    session's working dir, which the Bash tool resets between calls. An agent
+    committing in another repo runs ``cd <repo> && git commit --no-verify``, so
+    the sentinel it armed lives in ``<repo>/.git`` — we collect every ``cd``
+    target token and check the sentinel in each candidate repo too."""
+    tokens = _tokens(command)
+    targets = []
+    for i in range(len(tokens) - 1):
+        if tokens[i] == "cd":
+            tgt = tokens[i + 1]
+            # skip option-like tokens (`cd -`, `cd --`) — not a repo path
+            if tgt and not tgt.startswith("-"):
+                targets.append(tgt)
+    return targets
+
+
+def invokes_no_verify_commit(command):
+    """True only when the command actually INVOKES ``git commit`` with a
+    no-verify flag — not when it merely mentions the phrase inside a quoted
+    string (a grep pattern, an echo, an ``-m`` message body).
+
+    Tokenize and look for ``git commit`` as two consecutive bare tokens, then
+    scan the tokens AFTER it for a no-verify flag: either the literal
+    ``--no-verify`` or a bundled short cluster containing ``n`` (``-n``, ``-nm``,
+    ``-an``). A mention like ``git commit -m "use --no-verify"`` keeps the
+    ``--no-verify`` inside the single quoted message-value token, so it never
+    appears as a bare flag token and is correctly NOT matched."""
+    tokens = _tokens(command)
+    for i in range(len(tokens) - 1):
+        if tokens[i] == "git" and tokens[i + 1] == "commit":
+            for tok in tokens[i + 2 :]:
+                if tok == "--no-verify":
+                    return True
+                if _SHORT_NO_VERIFY.fullmatch(tok):
+                    return True
+            # A `git commit` was found but carried no no-verify flag among its
+            # args — allow. (Don't keep scanning for a later `git commit`; a
+            # second one would be its own consecutive-token match anyway.)
+    return False
+
+
+def allow():
+    sys.exit(0)
+
+
+def deny(reason):
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
+    print("no-verify-guard: denied", file=sys.stderr)
+    sys.exit(0)
+
+
+def git_dir(cwd):
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "--git-dir"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    if not out:
+        return None
+    return out if os.path.isabs(out) else os.path.join(cwd, out)
+
+
+def main():
+    try:
+        data = json.load(sys.stdin)
+    except (json.JSONDecodeError, ValueError, OSError):
+        allow()  # fail-open: malformed input is never a deliberate bypass
+
+    # Defensive type checks: a genuine bypass is always well-formed, so any
+    # shape we don't recognise fails open rather than risking a crash (which
+    # would exit non-zero and violate the fail-OPEN contract).
+    if not isinstance(data, dict) or data.get("tool_name") != "Bash":
+        allow()
+
+    tool_input = data.get("tool_input")
+    command = tool_input.get("command", "") if isinstance(tool_input, dict) else ""
+    if not isinstance(command, str) or not invokes_no_verify_commit(command):
+        allow()
+
+    cwd = data.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        cwd = os.getcwd()
+
+    # Candidate repos: the payload cwd PLUS any `cd <dir>` the command changes
+    # into before `git commit` (with ~ expansion). The sentinel armed in ANY of
+    # them counts. Sequential cds fold left: each relative target resolves
+    # against the previous resolved dir, while an absolute or ~ target resets
+    # the accumulator (mirrors pr-loop-guard / release#632 + #674).
+    candidate_cwds = [os.path.normpath(cwd)]
+    acc = candidate_cwds[0]
+    for tgt in cd_targets(command):
+        expanded = os.path.expanduser(tgt)
+        if not os.path.isabs(expanded):
+            expanded = os.path.join(acc, expanded)
+        expanded = os.path.normpath(expanded)
+        candidate_cwds.append(expanded)
+        acc = expanded
+
+    # Collect each candidate's sentinel path; allow (consuming) on the first
+    # that exists. The absolute paths feed the deny reason so the agent arms the
+    # right one instead of guessing under the cwd-reset model.
+    checked = []
+    for cand in candidate_cwds:
+        gd = git_dir(cand)
+        if gd is None:
+            continue
+        sentinel = os.path.join(gd, SENTINEL_NAME)
+        if sentinel in checked:
+            continue
+        checked.append(sentinel)
+        if os.path.exists(sentinel):
+            with contextlib.suppress(OSError):
+                os.unlink(sentinel)  # one-shot: consume the arm
+            allow()
+
+    if not checked:
+        allow()  # no git repo among the candidates — the commit wouldn't run
+
+    arm_lines = "\n".join(f"    touch {p}" for p in checked)
+    deny(
+        "`git commit --no-verify` (and `-n`) is blocked: the gate is a HARD "
+        "gate and `--no-verify` is never an acceptable bypass. CI re-runs the "
+        "SAME `lefthook run pre-commit --all-files` on a clean runner, so a "
+        "local skip only defers the failure.\n\n"
+        "Instead: run `lefthook run pre-commit --all-files`, fix what it "
+        "reports on the files you authored (or gitignore genuinely "
+        "non-authored / vendored content). If the gate fails because a TOOL is "
+        "missing, that is a release bug to file upstream — not a reason to "
+        "bypass.\n\n"
+        "If you genuinely need ONE recovery-only bypass, arm a one-off "
+        "exception (a SEPARATE step, before the commit) and retry — it is "
+        "consumed on use, so it covers exactly one commit. Arm any of these "
+        "exact paths (the cwd is reset between calls, so don't rely on "
+        "`git rev-parse` in the same line):\n" + arm_lines
+    )
+
+
+if __name__ == "__main__":
+    # Last-resort fail-OPEN: any unexpected exception allows the command rather
+    # than crashing the hook. allow()/deny() raise SystemExit (not Exception),
+    # so normal control flow is never swallowed here.
+    try:
+        main()
+    except Exception:
+        allow()
