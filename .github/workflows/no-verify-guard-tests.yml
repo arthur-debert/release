@@ -1,0 +1,35 @@
+name: no-verify-guard tests
+
+# BATS suite for bin/no-verify-guard — the PreToolUse forcing function that
+# blocks `git commit --no-verify` (and `-n`), since the gate is a HARD gate and
+# `--no-verify` is never an acceptable bypass (release-local dogfood). Locks the
+# allow/deny contract: a real no-verify commit (unarmed) denies, an armed
+# sentinel allows + is consumed (one-shot), a `--no-verify` mention inside an
+# `-m` body or a grep/echo allows, a normal commit allows, and
+# malformed/non-git input fails open. No network/auth.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "bin/no-verify-guard"
+      - "tests/no-verify-guard/**"
+      - ".github/workflows/no-verify-guard-tests.yml"
+  pull_request:
+    paths:
+      - "bin/no-verify-guard"
+      - "tests/no-verify-guard/**"
+      - ".github/workflows/no-verify-guard-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  bats:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - name: Run BATS suite
+        run: bats tests/no-verify-guard/
