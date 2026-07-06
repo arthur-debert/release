@@ -373,11 +373,23 @@ jobs:
             BINS="$BINS,$EXTRA"
           fi
           IFS=',' read -ra LIST <<< "$BINS"
+          SIGN_PATHS=""
           for bin in "${LIST[@]}"; do
             bin=$(echo "$bin" | xargs)
             echo "→ building $bin for $TARGET"
             cargo build --release --target "$TARGET" -p "$bin"
+            SIGN_PATHS="${SIGN_PATHS}target/${TARGET}/release/${bin}"$'\n'
           done
+          # Export the full newline-separated path list (primary + extras) so the
+          # mac signing step can sign every binary in ONE sign-mac invocation.
+          # sign-mac creates a temporary keychain and tears it down on step exit,
+          # so a second signing step can't reuse the identity — all paths must go
+          # through a single call. See the removed "Sign extra macOS binaries".
+          {
+            echo "SIGN_PATHS<<__SIGN_PATHS_EOF__"
+            printf '%s' "$SIGN_PATHS"
+            echo "__SIGN_PATHS_EOF__"
+          } >> "$GITHUB_ENV"
 
       - name: Sign macOS binaries
         id: sign
@@ -386,26 +398,8 @@ jobs:
         with:
           cert-p12-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           cert-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          paths: |
-            ${{ format('target/{0}/release/{1}', matrix.target, inputs.bin-name) }}
-
-      - name: Sign extra macOS binaries
-        if: matrix.sign && inputs.extra-binaries != '' && steps.sign.outputs.signed == 'true'
-        shell: bash
-        env:
-          EXTRA: ${{ inputs.extra-binaries }}
-          TARGET: ${{ matrix.target }}
-          IDENTITY: ${{ steps.sign.outputs.identity }}
-        run: |
-          set -euo pipefail
-          IFS=',' read -ra LIST <<< "$EXTRA"
-          for bin in "${LIST[@]}"; do
-            bin=$(echo "$bin" | xargs)
-            path="target/$TARGET/release/$bin"
-            echo "→ signing $path"
-            codesign --force --sign "$IDENTITY" --options runtime --timestamp "$path"
-            codesign --verify --strict "$path"
-          done
+          # All binaries (bin-name + extra-binaries), one keychain, one call.
+          paths: ${{ env.SIGN_PATHS }}
 
       - name: Notarize signed binaries
         if: matrix.sign && steps.sign.outputs.signed == 'true'

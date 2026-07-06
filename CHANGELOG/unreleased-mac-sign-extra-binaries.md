@@ -1,0 +1,1 @@
+- Fix macOS signing of extra-binaries: sign all binaries in one sign-mac call so the per-invocation keychain isn't torn down before the extras are signed
