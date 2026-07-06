@@ -4,6 +4,11 @@
 
 ## Unreleased
 
+## 3.11.0 - 2026-07-06
+
+- Fix macOS signing of extra-binaries: sign all binaries in one sign-mac call so the per-invocation keychain isn't torn down before the extras are signed
+- PreToolUse guard blocks git commit --no-verify (release-local dogfood)
+
 ## 3.10.1 - 2026-06-22
 
 - Fix `brew style` Layout/EmptyLines failure in generated Homebrew formulae (empty PRIVATE_REPO_PREAMBLE left a double blank line before `class`)

@@ -1,1 +1,0 @@
-- PreToolUse guard blocks git commit --no-verify (release-local dogfood)
