@@ -82,6 +82,48 @@ def test_read_rust_multiline_members(tmp_path, monkeypatch):
     assert release_cut._read_rust_version() == "2.0.0"
 
 
+def test_read_rust_workspace_glob_members(tmp_path, monkeypatch):
+    """clapfig's post-LNT01-WS05 shape: a version-less workspace-only root with
+    a `members = ["crates/*"]` GLOB (no [workspace.package].version), the real
+    version living in a member crate. The root moved to workspace-only when the
+    former root `[package]` was split into `crates/*`, so `_read_toml_version`
+    finds nothing at the root and must fall through the glob to the member.
+    Distinct from :func:`test_read_rust_workspace_only_probes_members`, which
+    lists members EXPLICITLY — this pins the glob-expansion branch end-to-end.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nresolver = "3"\nmembers = ["crates/*"]\n')
+    (tmp_path / "crates" / "clapfig").mkdir(parents=True)
+    (tmp_path / "crates" / "clapfig" / "Cargo.toml").write_text(
+        '[package]\nname = "clapfig"\nversion = "0.5.3"\n'
+    )
+    (tmp_path / "crates" / "clapfig-derive").mkdir(parents=True)
+    (tmp_path / "crates" / "clapfig-derive" / "Cargo.toml").write_text(
+        '[package]\nname = "clapfig-derive"\nversion.workspace = true\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    assert release_cut._read_rust_version() == "0.5.3"
+
+
+def test_read_rust_workspace_package_glob_members(tmp_path, monkeypatch):
+    """rustloc's post-LNT01-WS05 shape: the crates moved from root dirs
+    (`rustloc/` + `rustloclib/`) under `crates/*`, but the root Cargo.toml
+    keeps carrying the version via `[workspace.package]`. `_read_rust_version`
+    resolves it at the root without touching a member — pins that the crate
+    RELOCATION doesn't perturb the root-version read.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nresolver = "2"\n'
+        'members = ["crates/rustloclib", "crates/rustloc"]\n'
+        '[workspace.package]\nversion = "0.19.1"\nedition = "2021"\n'
+    )
+    (tmp_path / "crates" / "rustloc").mkdir(parents=True)
+    (tmp_path / "crates" / "rustloc" / "Cargo.toml").write_text(
+        '[package]\nname = "rustloc"\nversion.workspace = true\n'
+    )
+    monkeypatch.chdir(tmp_path)
+    assert release_cut._read_rust_version() == "0.19.1"
+
+
 # --- literal-version guard --------------------------------------------
 
 
