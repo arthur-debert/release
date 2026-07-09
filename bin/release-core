@@ -9,19 +9,22 @@
 # (pyproject [project.scripts] release-core = release_core.cli_entry:main, owned
 # by PR-B) runs the SAME main(); this shim is the local-checkout entry.
 #
-# Dependency provisioning (release#497, generalized in the #498 follow-up):
-# release_core has real third-party deps — `click` today (#457), possibly more
-# tomorrow. A bare `python3` lacks them, and since #487 the boot resolver installs
-# them into an ISOLATED venv (${XDG_DATA_HOME}/release-core/venv), NOT the --user
-# site — so they're not importable by this shim's bare interpreter (pre-#487 they
-# were, which is why this used to work). So we try the import and, on ANY missing
-# third-party dep (not just click), re-exec under that venv's python (which
-# carries the deps), with PYTHONPATH pinned to the checkout lib so we still run
-# the IN-CHECKOUT code, not the wheel installed in the venv. This restores the
-# working behavior without undoing the deliberate venv isolation. If no venv
-# exists to borrow deps from, we print an actionable hint naming the missing
-# module instead of a raw traceback. A missing `release_core` itself is a real
-# bug (not a dep gap) and is left to surface.
+# Dependency provisioning (release#497/#498, venv-first since #867):
+# release_core has real third-party deps — `click` today (#457), plus LAZY
+# extras like PyJWT imported deep inside verbs (review/ghauth.py). Since #487
+# the boot resolver installs them into an ISOLATED venv
+# (${XDG_DATA_HOME}/release-core/venv), NOT the --user site — so they're not
+# importable by this shim's bare interpreter. Re-execing only on a TOP-LEVEL
+# ModuleNotFoundError missed the lazy imports (#867: a bare interpreter with
+# click but no PyJWT stayed bare and GitHub-App review requests failed), so the
+# shim now prefers the venv OUTRIGHT: whenever the venv python exists (and we
+# are not already under it / have not already re-exec'd — the one-shot
+# _RELEASE_CORE_REEXEC guard), re-exec under it BEFORE importing anything, with
+# PYTHONPATH pinned to the checkout lib so we still run the IN-CHECKOUT code,
+# not the wheel installed in the venv. With no venv to borrow deps from we run
+# in place, and a missing third-party dep degrades to an actionable hint naming
+# the module instead of a raw traceback. A missing `release_core` itself is a
+# real bug (not a dep gap) and is left to surface.
 import os
 import sys
 
@@ -85,18 +88,20 @@ def _dep_hint_and_exit(dep):
     sys.exit(1)
 
 
-def _reexec_under_venv(dep):
-    """A third-party dep (`dep`) is missing from this interpreter. Re-exec under
-    the isolated venv's python (which carries it). Never returns on the re-exec
-    path; if re-exec is impossible (no venv / already inside it / already
-    re-exec'd once) it hints and exits rather than looping."""
-    # One-shot guard: if we already re-exec'd and a dep is STILL missing, the
-    # venv genuinely lacks it — don't loop.
+def _maybe_reexec_into_venv():
+    """Venv-first interpreter selection (release#867): if the isolated venv
+    exists, ALWAYS re-exec under its python before importing anything — a
+    top-level-import probe misses LAZY deps (PyJWT inside review/ghauth.py), so
+    dep presence on the bare interpreter is no reason to stay on it. Returns
+    (runs in place) only when re-exec is impossible or pointless: already
+    re-exec'd once (the _RELEASE_CORE_REEXEC one-shot guard — no loop is
+    possible), no venv python to exec, or already running inside the venv.
+    Never returns on the re-exec path."""
     if os.environ.get("_RELEASE_CORE_REEXEC") == "1":
-        _dep_hint_and_exit(dep)
+        return  # one-shot guard: never re-exec twice
     venv_py = _release_core_venv_python()
     if not os.access(venv_py, os.X_OK):
-        _dep_hint_and_exit(dep)  # no venv to borrow deps from
+        return  # no venv to borrow deps from — run in place
     # Are we ALREADY running inside that venv? Compare sys.prefix to the venv dir
     # — NOT realpath(venv_py) vs sys.executable: a venv's bin/python is a symlink
     # to the SAME base interpreter binary, so a realpath compare is always equal
@@ -104,7 +109,7 @@ def _reexec_under_venv(dep):
     # by binary). sys.prefix is the venv dir only when running under it.
     venv_dir = os.path.dirname(os.path.dirname(venv_py))  # …/release-core/venv
     if os.path.realpath(sys.prefix) == os.path.realpath(venv_dir):
-        _dep_hint_and_exit(dep)  # inside the venv yet dep missing — don't loop
+        return  # already the venv interpreter — nothing to gain
     env = dict(os.environ)
     env["_RELEASE_CORE_REEXEC"] = "1"
     # PYTHONPATH already leads with the checkout lib (exported at module load,
@@ -113,18 +118,22 @@ def _reexec_under_venv(dep):
     os.execve(venv_py, [venv_py, os.path.realpath(__file__), *sys.argv[1:]], env)
 
 
+_maybe_reexec_into_venv()
+
 sys.path.insert(0, _LIB)
 
 try:
     from release_core.cli_entry import main  # noqa: E402 — sys.path set above
 except ModuleNotFoundError as exc:  # pragma: no cover - exercised via bats
-    # Re-exec under the venv on ANY missing third-party dep (click today, others
-    # tomorrow) — keyed off the missing module's top-level name. `release_core`
-    # itself missing is a real bug, not a dep gap, so let it surface unchanged.
+    # `release_core` itself missing is a real bug, not a dep gap, so let it
+    # surface unchanged. For a missing third-party dep: the venv-first re-exec
+    # above already fired whenever a venv was usable, so reaching here means
+    # there is nothing left to borrow from (no venv / already re-exec'd once /
+    # already inside the venv) — degrade to the actionable hint, never loop.
     _top = (exc.name or "").split(".")[0]
     if not _top or _top == "release_core":
         raise
-    _reexec_under_venv(_top)
+    _dep_hint_and_exit(_top)
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
