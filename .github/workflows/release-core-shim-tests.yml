@@ -1,11 +1,12 @@
 name: release-core shim tests
 
 # BATS regression suite for bin/release-core — the local-checkout CLI entry
-# (release#497). Locks the dependency-provisioning contract: a bare python3
-# lacking `click` re-execs under the isolated release-core venv (pinning the
-# checkout lib on PYTHONPATH), and degrades to an actionable hint when no venv
-# exists. Fully offline — the "no click" interpreter is `python3 -S` and the
-# venv is a recording bash stub.
+# (release#497). Locks the dependency-provisioning contract (venv-first since
+# release#867): whenever the isolated release-core venv exists, the shim
+# re-execs under its python BEFORE importing anything (pinning the checkout
+# lib on PYTHONPATH) — so lazy extras like PyJWT resolve too — and degrades to
+# an actionable hint when no venv exists. Fully offline — the "no click"
+# interpreter is `python3 -S` and the venv is a recording bash stub.
 
 on:
   push:

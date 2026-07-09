@@ -4,10 +4,14 @@
 # Regression suite for release#497: release_core imports `click` (a real
 # third-party dep since #457), and #487 moved click into an ISOLATED venv
 # (no longer the --user site), so a bare `python3` running this shim can't
-# import it → the CLI was dead with a ModuleNotFoundError. The shim now
-# re-execs under the isolated venv's python (which carries click), keeping
-# PYTHONPATH pinned at the checkout so it still runs the IN-CHECKOUT code; if no
-# venv exists it prints an actionable hint instead of a raw traceback.
+# import it → the CLI was dead with a ModuleNotFoundError. Since release#867
+# the shim is VENV-FIRST: whenever the isolated venv's python exists (and the
+# one-shot _RELEASE_CORE_REEXEC guard isn't set / we aren't already under it),
+# it re-execs under that python BEFORE importing anything — a top-level import
+# probe missed LAZY deps (PyJWT inside review/ghauth.py), stranding GitHub-App
+# review requests on the bare interpreter. PYTHONPATH stays pinned at the
+# checkout so the venv python still runs the IN-CHECKOUT code; with no venv it
+# runs in place and a missing dep prints an actionable hint, not a traceback.
 #
 # Hermetic + offline: the "no click" interpreter is the real python3 run with
 # `-S` (skips site-packages, so third-party click is unimportable regardless of
@@ -89,14 +93,17 @@ STUB
   [[ "$output" != *"Traceback"* ]]
 }
 
-@test "click importable here → does NOT re-exec (the fast/unchanged path)" {
+@test "867: top-level deps importable + venv present → STILL re-execs (lazy extras live in the venv)" {
   _install_venv_stub
-  # Make `import click` succeed in the first interpreter via a fake click pkg.
-  run env PYTHONPATH="$WORK/fakeclick" "${NOCLICK[@]}" "$SHIM" --version
-  # We only care that NO re-exec happened — click was already importable, so the
-  # shim never touched the venv. (cli_entry's real-click usage on the stub pkg
-  # may fail downstream; that is irrelevant to the re-exec decision.)
-  [ ! -s "$REEXEC_LOG" ]
+  # Make `import click` succeed in the first interpreter via a fake click pkg —
+  # pre-#867 the shim stayed on this bare interpreter (re-exec only fired on a
+  # TOP-LEVEL ModuleNotFoundError), so LAZY deps (PyJWT in review/ghauth.py)
+  # were missing at verb time and GitHub-App review requests failed. Venv-first
+  # means the venv, which carries ALL provisioned deps, wins whenever it exists.
+  run env PYTHONPATH="$WORK/fakeclick" "${NOCLICK[@]}" "$SHIM" pr review request 400
+  [ "$status" -eq 0 ]                       # the stub exits 0
+  grep -q "ARGV: .*bin/release-core pr review request 400" "$REEXEC_LOG"
+  grep -q "REEXEC: 1" "$REEXEC_LOG"
 }
 
 @test "loop guard: already re-exec'd + click still missing → no second re-exec" {
@@ -107,6 +114,19 @@ STUB
   # Falls through to the actionable hint.
   [ "$status" -eq 1 ]
   [[ "$output" == *"missing dependency 'click'"* ]]
+}
+
+@test "867: already INSIDE the venv → no re-exec (sys.prefix check), degrades to the hint" {
+  # A REAL venv (offline: --without-pip) whose python runs the shim directly —
+  # the workaround path from #867 (`~/.local/share/release-core/venv/bin/
+  # release-core`). sys.prefix equals the venv dir, so venv-first must NOT
+  # re-exec (that would loop forever); with -S click is missing, so the shim
+  # falls through to the actionable hint instead.
+  python3 -m venv --without-pip "$RELEASE_CORE_HOME/venv"
+  run "$RELEASE_CORE_HOME/venv/bin/python" -S "$SHIM" --help
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing dependency 'click'"* ]]
+  [[ "$output" != *"Traceback"* ]]
 }
 
 # ── release#747 — children inherit the checkout lib on PYTHONPATH ─────────────
