@@ -121,40 +121,61 @@ The Development Life Cycle
         --undo`); only when the new changes + checks pass flip back to READY for
         re-validation.
 
-    On re-requesting a review (per-reviewer config, default review-once):
+    How a review round works (round 1 exhaustive, later rounds incremental):
 
-        Re-run-on-push is a PER-REVIEWER setting and defaults OFF (review
-        once) for everyone. All reviewers are token-billed now, and local
-        agents (codex / agy) cost a real model run each time, so re-reviewing
-        each new head is explicit opt-in — not the default. The state engine
-        is the arbiter: it re-requests ONLY reviewers configured `rerun: true`
-        after a push (their earlier-head review is stale, so `release-core pr
-        status` advises RE-REQUEST). A default review-once reviewer's review
-        counts on ANY head and is NEVER stale-after-push — it is not
-        re-requested. A bare `release-core pr review request` follows this:
-        it skips a reviewer already done and re-requests only those not done
-        (review-once-done reviewers are skipped; staled rerun=true reviewers
-        are re-requested). The manual escape hatch is `--reviewer <name>`,
-        which FORCES a (re-)request of that reviewer regardless of state.
-        Trust the next action `release-core pr status` reports.
+        Round 1 is engineered to exhaust the high-severity findings: each
+        local-agent reviewer fans its review out into parallel dimension passes
+        (correctness, cross-file invariants, security/robustness, test quality)
+        whose union is mechanically deduped and posted directly — expensive
+        once, by design. Every finding arrives pre-classified on ONE 4-tier
+        severity ladder (`critical | major | minor | nit`): its comment carries
+        the human-readable Conventional Comments label AND a machine marker the
+        engine reads, so the engine routes by severity directly and no shepherd
+        re-classifies. Rounds AFTER the first are cheap and narrow: one
+        incremental pass over the fix range only (`last-reviewed-head..new-head`,
+        both SHAs the engine already knows) with dependency-neighborhood context,
+        new nits suppressed. A rebase or force-push that voids the incremental
+        premise falls back to a full re-review. The loop converges by
+        construction: high volume/value first, then progressively less.
 
-    On stopping the review loop (the 6/nitpick rule):
+    On re-requesting a review (per-reviewer config, default head-strict):
 
-        Each round, address every review comment, EXCEPT stop when EITHER:
+        Re-run-on-push is a PER-REVIEWER setting and now defaults ON
+        (head-strict, `rerun: true`) for every required reviewer. Because rounds
+        after the first review only the fix range as one cheap incremental pass,
+        the cost premise for review-once is gone: every push re-stales the
+        required reviewers and the engine re-requests them, so the commits that
+        ADDRESS a review are themselves reviewed — the exact place fresh mistakes
+        land. The state engine is the arbiter: after a push it re-requests the
+        stale reviewers (`release-core pr status` advises RE-REQUEST); a bare
+        `release-core pr review request` skips a reviewer already done on the
+        current head and re-requests the rest. The manual escape hatch is
+        `--reviewer <name>`, which FORCES a (re-)request regardless of state.
+        Review-once (`rerun: false`) remains an explicit per-reviewer opt-out for
+        reviewers whose re-runs stay expensive (full-diff app reviewers on
+        metered plans); such a reviewer's review counts on ANY head and is never
+        stale-after-push. Trust the next action `release-core pr status` reports.
 
-        - 6 rounds have happened (there is no 7th round), or
-        - the current round is all nitpicks — docstring/wording corrections,
-          micro performance with a low run-count, cosmetic style already settled;
-          nothing that changes correctness or behaviour.
+    On stopping the review loop (the round-cap / no-major+ breaker):
 
-        When either condition is hit on an otherwise-ready PR (CI green,
-        mergeable), the engine routes straight to READY: the coordinator flips
-        and hands to the human; it does NOT open another round. A real blocker
-        (failing CI, conflict) still blocks on its own terms — the stopping rule
-        never invents a block. The state engine applies this rule itself
-        (`release-core pr status` reports the `round-cap` / `all-nitpick`
-        stopping condition on the READY status); there is no acknowledgement
-        flag to pass.
+        Each round, address every finding in severity order (critical → major →
+        minor → nit), EXCEPT the loop stops when EITHER:
+
+        - the round cap is hit (default 6 — there is no 7th round), or
+        - the round surfaced NO major-or-worse finding — every finding is minor
+          or nit (worth doing, not worth holding the merge; wording, naming, or
+          style with no correctness, behavioral, or security impact).
+
+        Minor and nit findings still get their threads RESOLVED before Ready —
+        the breaker ends the machinery, it does not waive them — but they never
+        mint another round. When the breaker fires on an otherwise-ready PR (CI
+        green, mergeable), the engine routes straight to READY and suppresses all
+        re-requests, so a final nit-fix push cannot reopen the loop; the
+        coordinator flips and hands to the human. A real blocker (failing CI,
+        conflict) still blocks on its own terms — the breaker never invents a
+        block. The state engine applies the breaker itself (`release-core pr
+        status` reports the `round-cap` / `no-major` stopping condition on the
+        READY status); there is no acknowledgement flag to pass.
 
     On the required reviewer set:
 
@@ -168,11 +189,12 @@ The Development Life Cycle
 
         When a repo requires several reviewers, they gate in parallel
         (release#622), not as a primary with a fallback. A PR is `REVIEWED`
-        only when EVERY required reviewer has a counting review — on ANY head
-        for a default review-once reviewer, on the CURRENT head for one
-        configured `rerun: true` (which a push stales, so `release-core pr
-        review request` re-requests it). `release-core pr ready` requires all
-        present + resolved. Dual coverage trades availability — if one
+        only when EVERY required reviewer has a counting review — on the CURRENT
+        head for a default head-strict (`rerun: true`) reviewer (which a push
+        stales, so `release-core pr review request` re-requests it), on ANY head
+        for one explicitly opted into review-once (`rerun: false`).
+        `release-core pr ready` requires all present + resolved. Dual coverage
+        trades availability — if one
         required reviewer is down, the PR stays at `REVIEWS_PENDING` until it
         recovers, and the engine names the outstanding reviewer so the
         stall is visible, never silent.
@@ -180,22 +202,23 @@ The Development Life Cycle
         The required set AND each reviewer's rerun policy are a CONFIG knob,
         not code — reviewer pricing and availability shift, so changing them
         is a one-line edit with no engine change. The shipped default
-        `{copilot: rerun=false}` lives in `reviewers_config.DEFAULT_REVIEWERS`
+        `{copilot: rerun=true}` lives in `reviewers_config.DEFAULT_REVIEWERS`
         (carried by the `release_core` wheel). A single repo overrides it with
         a `reviewers:` map in its existing optional `.release-sync.yaml` (the
         same file that carries `capabilities:` — no new tracked file). The map
         KEYS are the required reviewers; each value is an options dict whose
-        one option is `rerun: bool` (default false = review once):
+        one option is `rerun: bool` (default true = head-strict; set false to
+        opt a reviewer back into review-once):
 
-        Opt a pilot repo into CodeRabbit alongside Copilot, both review-once:
+        Opt a pilot repo into CodeRabbit alongside Copilot, both head-strict:
 
             reviewers:
-              copilot:   {rerun: false}
-              coderabbit: {rerun: false}
+              copilot:    {rerun: true}
+              coderabbit: {rerun: true}
 
         :: yaml ::
 
-        A LIST shorthand means all-required, rerun=false:
+        A LIST shorthand means all-required, head-strict (rerun=true):
 
             reviewers: [copilot, coderabbit]
 
@@ -234,7 +257,7 @@ The Development Life Cycle
         implementer stops at PR-open, the only topology change being that its
         draft PR targets the EPIC branch (not `main`); the coordinator owns the
         wait and the flip; a fresh shepherd handles each addressing round. The
-        6/nitpick stopping rule ([#1.4]) applies to every workstream PR.
+        round-cap / no-major+ breaker ([#1.4]) applies to every workstream PR.
 
     2.3. Integration
 
@@ -302,4 +325,3 @@ The Development Life Cycle
         the versioning contract). If the project has chained dependencies — e.g.
         a CLI that a downstream desktop app bundles — the cascade runs all the
         way through: release each repo in dependency order.
-
