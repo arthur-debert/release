@@ -74,9 +74,13 @@ The base64-encoded SA JSON key lives as `SCCACHE_GCS_KEY`:
 - `setup-rust` calls it, so `rust-ci` / `rust-cli` / `rust-lib` get it for free.
 - The Tauri lanes (`tauri-ci`, `tauri-app`, `tauri-e2e`) wire the toolchain
   inline, so they call `setup-sccache` directly after their Swatinem step.
-- **Graceful degradation:** an empty `sccache_gcs_key` (fork PRs, repos that
-  haven't onboarded the secret) makes the composite a no-op — the build falls
-  back to plain Swatinem caching and never fails on a cache problem.
+- **A missing secret fails loud:** an empty `sccache_gcs_key` on a run with
+  secret access (push, same-repo PR, `pull_request_target`, dispatch) fails
+  the job with the onboarding command — an un-onboarded repo used to fall
+  back to Swatinem-only caching and read as healthy (#870). Fork-PR and
+  dependabot runs, where GitHub withholds secrets, still no-op with a
+  notice. A cache problem never fails the build: sccache treats
+  write/throttle errors as misses.
 
 ## Enabling it on a consumer
 
