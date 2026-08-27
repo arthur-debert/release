@@ -8,10 +8,12 @@ description: >
   fast. The object key already hashes the compiler version, target triple and
   flags, so one key-prefix per repo is enough and platforms never collide.
 
-  No-op when `gcs-key` is empty (fork PRs / repos that haven't onboarded the
-  secret): the build simply falls back to plain Swatinem caching. Never fails
-  the build on a cache problem — sccache treats write/throttle errors as
-  misses.
+  An empty `gcs-key` fails the job when the run has secret access (push,
+  same-repo PR, pull_request_target, dispatch): that is a repo that never
+  onboarded the fleet secret, and the old silent Swatinem-only fallback let
+  it read as healthy (#870). Runs GitHub withholds secrets from — fork PRs
+  and dependabot — still no-op with a notice. Never fails the build on a
+  cache problem — sccache treats write/throttle errors as misses.
 
 inputs:
   gcs-key:
@@ -44,10 +46,30 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Note (sccache disabled)
-      if: inputs.gcs-key == ''
+    # GitHub withholds repo secrets from fork-PR and dependabot runs, so an
+    # empty key there is the platform's doing, not a misconfiguration. Any
+    # other run with an empty key is a repo that never onboarded
+    # SCCACHE_GCS_KEY, and continuing would hide that behind Swatinem-only
+    # caching (#870).
+    - name: Fail (SCCACHE_GCS_KEY missing)
+      if: >-
+        inputs.gcs-key == '' &&
+        github.actor != 'dependabot[bot]' &&
+        (github.event_name != 'pull_request' ||
+         github.event.pull_request.head.repo.full_name == github.repository)
       shell: bash
-      run: echo "::notice title=sccache::No SCCACHE_GCS_KEY provided — sccache disabled, using Swatinem cache only."
+      run: |
+        echo "::error title=sccache::SCCACHE_GCS_KEY is empty on a run with secret access — this repo has not onboarded the fleet secret. Install it with 'release-core admin secrets install', or set it directly: doppler secrets get SCCACHE_GCS_KEY --plain --project github --config prd | gh secret set SCCACHE_GCS_KEY --repo <owner>/<repo>"
+        exit 1
+
+    - name: Note (sccache disabled — secrets withheld from this run)
+      if: >-
+        inputs.gcs-key == '' &&
+        (github.actor == 'dependabot[bot]' ||
+         (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository))
+      shell: bash
+      run: echo "::notice title=sccache::No SCCACHE_GCS_KEY (GitHub withholds secrets from fork-PR and dependabot runs) — sccache disabled, using Swatinem cache only."
 
     - name: Write GCS credentials
       if: inputs.gcs-key != ''
